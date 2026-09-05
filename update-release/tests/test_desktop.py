@@ -60,6 +60,8 @@ class DesktopReleaseTests(unittest.TestCase):
             value = self.fixture(Path(temporary))
             self.assertEqual(len(value["artifacts"]), 3)
             self.assertEqual(value["release"]["tag"], "app-v0.1.0")
+            self.assertEqual(len(value["installers"]), 1)
+            self.assertTrue(value["installers"][0]["artifact"]["path"].endswith(".dmg"))
 
     def test_malformed_records_fail_closed(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -74,6 +76,10 @@ class DesktopReleaseTests(unittest.TestCase):
                 lambda v: v["artifacts"][0]["signature"].update(value=""),
                 lambda v: v["artifacts"].append(v["artifacts"][0]),
                 lambda v: v["artifacts"].pop(),
+                lambda v: v["installers"][0]["artifact"].update(path="../installer.dmg"),
+                lambda v: v["installers"][0]["artifact"].update(sha256="bad"),
+                lambda v: v["installers"][0]["artifact"].update(size=-1),
+                lambda v: v["installers"].append(v["installers"][0]),
             ]
             for mutation in mutations:
                 invalid = copy.deepcopy(value)

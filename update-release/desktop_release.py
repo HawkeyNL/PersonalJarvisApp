@@ -88,7 +88,14 @@ def build(assets: Path, version: str, revision: str, released_at: str) -> dict:
                         "artifact": {"path": f"releases/v{version}/{platform}-{architecture}/{name}",
                                      "size": (assets / name).stat().st_size, "sha256": digest.hexdigest()},
                         "signature": {"scheme": "tauri-minisign", "value": signature_path.read_text().strip()}})
-    return validate_manifest({"schema_version": 1, "release": {
+    installer = assets / f"Jarvis_{version}_macos_arm64.dmg"
+    with installer.open("rb") as source:
+        installer_digest = hashlib.file_digest(source, "sha256").hexdigest()
+    return validate_manifest({"schema_version": 1, "installers": [{
+        "platform": "macos", "architecture": "arm64", "distribution": "home-node-installer",
+        "artifact": {"path": f"releases/v{version}/macos-arm64/{installer.name}",
+                     "size": installer.stat().st_size, "sha256": installer_digest},
+    }], "release": {
         "version": version, "tag": f"app-v{version}", "source_revision": revision,
         "product": "desktop", "client_protocol": 1, "minimum_client_protocol": 1,
         "channel": "stable", "released_at": released_at}, "artifacts": entries})
