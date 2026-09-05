@@ -19,7 +19,9 @@ def verify(final: Path, staged: Path, manifest: Path, version: str, revision: st
     for name in expected:
         path = final / name
         source = manifest.parent / name if name.startswith("latest.json") else staged / name
-        if path.is_symlink() or not path.is_file() or path.stat().st_size != source.stat().st_size or digest(path) != digest(source):
+        if (source.is_symlink() or not source.is_file() or path.is_symlink()
+                or not path.is_file() or path.stat().st_size != source.stat().st_size
+                or digest(path) != digest(source)):
             raise ValueError("redownloaded asset differs from tested bytes")
     value = validate_manifest(json.loads((final / "latest.json").read_bytes()))
     if value["release"]["version"] != version or value["release"]["source_revision"] != revision:
