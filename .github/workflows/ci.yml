@@ -30,7 +30,7 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           python3 update-release/client_release.py \
-            --version 0.1.0 --android-version-code 1 --ios-build-number 1
+            --version 0.1.0 --android-version-code 1
           python3 -m unittest discover -s update-release/tests -v
 
   desktop-frontend:

@@ -45,8 +45,9 @@ with redirects disabled, then checked for exact size, SHA-256, package id,
 `versionCode`, `versionName`, and the same signing certificate as the installed
 Jarvis app. Only then is it handed to Android's package installer. The user may
 need to grant Jarvis the per-app "install unknown apps" permission; Jarvis opens
-that system setting explicitly and never enables it automatically. iOS uses
-TestFlight and desktop uses Tauri updater signing; neither flow is reused here.
+that system setting explicitly and never enables it automatically. iOS is
+installed locally through Xcode and desktop uses Tauri updater signing; neither
+flow is reused here.
 
 ## Prerequisites
 

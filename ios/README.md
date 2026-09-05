@@ -20,17 +20,24 @@ testing the app lock. A real device must have biometrics or a device passcode
 configured. Use a Home Node certificate trusted by the device for HTTPS. Local
 `http` is intended only for LAN development; ATS is not globally disabled.
 
-## TestFlight releases
+## Local device installation
 
-Jarvis iOS uses Apple's native signing and App Store Connect/TestFlight. It has
-no Home Node self-updater. The protected release workflow imports an ephemeral
-distribution certificate and provisioning profile, archives with the requested
-marketing/build versions, uploads with an App Store Connect API key and removes
-the signing material afterward. Certificates, profiles and API credentials are
-never stored in this repository.
+Jarvis iOS is not distributed through GitHub Releases, an IPA, TestFlight, or
+the App Store. GitHub CI only builds and tests the unsigned simulator target.
+Installation on the owner's iPhone is deliberately a local Xcode operation:
 
-See [`docs/GITHUB_RELEASE_SETUP.md`](../docs/GITHUB_RELEASE_SETUP.md) for the
-protected client-release boundary and required owner-managed signing material.
+1. Open `Jarvis.xcodeproj` on the owner's Mac.
+2. Connect and trust the iPhone, then enable Developer Mode if iOS requests it.
+3. Select the `Jarvis` target and choose the owner's Apple Account/Personal
+   Team under Signing & Capabilities.
+4. Keep the reviewed bundle identifier, or use an owner-specific development
+   identifier locally if Xcode requires uniqueness; do not commit that change.
+5. Select the connected iPhone as the run destination and press Run.
+6. Complete any device-side developer trust prompt and verify pairing against
+   the runtime-configured HTTPS Home Node.
+
+Personal Team certificates, device registrations, profiles, and team IDs stay
+on the owner's Mac/Xcode account and never enter GitHub Actions.
 
 Command-line simulator validation on macOS:
 
@@ -39,13 +46,13 @@ xcodebuild -project Jarvis.xcodeproj \
   -scheme Jarvis \
   -sdk iphonesimulator \
   -destination 'platform=iOS Simulator,name=iPhone 16' \
-  CODE_SIGNING_ALLOWED=NO build
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
 
 xcodebuild -project Jarvis.xcodeproj \
   -scheme Jarvis \
   -sdk iphonesimulator \
   -destination 'platform=iOS Simulator,name=iPhone 16' \
-  CODE_SIGNING_ALLOWED=NO test
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
 ```
 
 After editing `project.yml`, regenerate the checked-in project with:

@@ -7,12 +7,14 @@ import unittest
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 WORKFLOW = REPOSITORY / ".github/workflows/release.yml"
+CI_WORKFLOW = REPOSITORY / ".github/workflows/ci.yml"
 
 
 class PrivateReleaseWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.workflow = WORKFLOW.read_text(encoding="utf-8")
+        cls.ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
     def test_release_is_manual_main_only_and_uses_a_protected_environment(self) -> None:
         self.assertIn("workflow_dispatch:", self.workflow)
@@ -46,8 +48,8 @@ class PrivateReleaseWorkflowTests(unittest.TestCase):
         ):
             self.assertIn(required, self.workflow)
 
-    def test_manifest_publication_waits_for_every_mandatory_platform(self) -> None:
-        self.assertIn("needs: [validate, desktop, android, ios]", self.workflow)
+    def test_manifest_publication_waits_for_every_distributed_platform(self) -> None:
+        self.assertIn("needs: [validate, desktop, android]", self.workflow)
         publish = self.workflow.index("publish:")
         upload_manifest = self.workflow.index('gh release upload "$RELEASE_TAG"', publish)
         publish_draft = self.workflow.index("--draft=false --latest", upload_manifest)
@@ -61,19 +63,54 @@ class PrivateReleaseWorkflowTests(unittest.TestCase):
                 self.assertRegex(action, r"@[0-9a-f]{40}$")
 
     def test_job_environment_never_exposes_release_secrets(self) -> None:
-        for job in ("validate", "desktop", "android", "ios", "publish"):
+        for job in ("validate", "desktop", "android", "publish"):
             start = self.workflow.index(f"  {job}:")
             steps = self.workflow.index("    steps:", start)
             with self.subTest(job=job):
                 self.assertNotIn("secrets.", self.workflow[start:steps])
 
-    def test_all_clients_release_from_this_repository(self) -> None:
+    def test_distributed_clients_release_from_this_repository(self) -> None:
         self.assertNotIn("PRIVATE_RELEASE_REPO", self.workflow)
         self.assertIn("  android:", self.workflow)
-        self.assertIn("  ios:", self.workflow)
         self.assertIn("assembleRelease bundleRelease", self.workflow)
-        self.assertIn("Signed iOS archive to TestFlight", self.workflow)
         self.assertIn("GH_REPO: ${{ github.repository }}", self.workflow)
+
+    def test_ios_distribution_is_deliberately_outside_release_ci(self) -> None:
+        for forbidden in (
+            "  ios:",
+            "TestFlight",
+            "App Store Connect",
+            "APPLE_DISTRIBUTION_CERTIFICATE_P12_BASE64",
+            "APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD",
+            "APPLE_APP_STORE_PROVISIONING_PROFILE_BASE64",
+            "APPLE_TEAM_ID",
+            "APP_STORE_CONNECT_API_ISSUER_ID",
+            "APP_STORE_CONNECT_API_KEY_ID",
+            "APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64",
+            "ios_build_number",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, self.workflow)
+
+    def test_ios_ci_is_unsigned_simulator_validation_only(self) -> None:
+        for required in (
+            "iOS simulator",
+            "-sdk iphonesimulator",
+            "CODE_SIGNING_ALLOWED=NO",
+            "CODE_SIGNING_REQUIRED=NO",
+            "build",
+            "test",
+        ):
+            self.assertIn(required, self.ci_workflow)
+        for forbidden in (
+            "secrets.",
+            "-exportArchive",
+            "TestFlight",
+            "App Store Connect",
+            ".ipa",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, self.ci_workflow)
 
     def test_final_draft_is_revalidated_before_publish(self) -> None:
         section = self.workflow[self.workflow.index("  publish:"):]

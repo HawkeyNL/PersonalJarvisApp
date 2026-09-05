@@ -17,7 +17,7 @@ class ClientReleaseTests(unittest.TestCase):
     def fixture(self, root):
         for name in expected_assets("0.1.0"):
             (root / name).write_bytes(b"fixture signature" if name.endswith(".sig") else b"fixture executable")
-        return build(root, "0.1.0", "a"*40, "2026-09-01T12:00:00Z", 1, 1, "c" * 64)
+        return build(root, "0.1.0", "a"*40, "2026-09-01T12:00:00Z", 1, "c" * 64)
 
     def test_checked_in_versions_and_immutable_git_lock(self):
         self.assertEqual(validate_source(ROOT, "0.1.0"), "89372c9c5b157361881b79b583c309c91c6f5646")
@@ -74,7 +74,7 @@ class ClientReleaseTests(unittest.TestCase):
     def test_complete_client_matrix_and_provenance(self):
         with tempfile.TemporaryDirectory() as temporary:
             value = self.fixture(Path(temporary))
-            self.assertEqual(len(value["artifacts"]), 5)
+            self.assertEqual(len(value["artifacts"]), 4)
             self.assertEqual(value["release"]["tag"], "app-v0.1.0")
             self.assertEqual(len(value["installers"]), 2)
             self.assertEqual(
@@ -112,13 +112,13 @@ class ClientReleaseTests(unittest.TestCase):
             self.fixture(root)
             (root / "extra").write_bytes(b"extra")
             with self.assertRaises(ValueError):
-                build(root, "0.1.0", "a"*40, "2026-09-01T12:00:00Z", 1, 1, "c" * 64)
+                build(root, "0.1.0", "a"*40, "2026-09-01T12:00:00Z", 1, "c" * 64)
             (root / "extra").unlink()
             name = next(iter(expected_assets("0.1.0")))
             (root / name).unlink()
             (root / name).symlink_to(root / "missing")
             with self.assertRaises(ValueError):
-                build(root, "0.1.0", "a"*40, "2026-09-01T12:00:00Z", 1, 1, "c" * 64)
+                build(root, "0.1.0", "a"*40, "2026-09-01T12:00:00Z", 1, "c" * 64)
 
     def test_production_configuration_has_no_default_origin(self):
         import json
@@ -126,19 +126,19 @@ class ClientReleaseTests(unittest.TestCase):
         self.assertNotIn("endpoints", configuration.get("plugins", {}).get("updater", {}))
         self.assertNotIn("home_node_origin", configuration)
 
-    def test_one_semver_and_independent_mobile_build_numbers(self):
-        self.assertEqual(validate_source(ROOT, "0.1.0", 1, 1), "89372c9c5b157361881b79b583c309c91c6f5646")
-        for android_code, ios_build in ((0, 1), (1, 0), ("01", 1), (1, "1.0")):
-            with self.subTest(android_code=android_code, ios_build=ios_build), self.assertRaises(ValueError):
-                validate_source(ROOT, "0.1.0", android_code, ios_build)
+    def test_one_semver_and_independent_android_build_number(self):
+        self.assertEqual(validate_source(ROOT, "0.1.0", 1), "89372c9c5b157361881b79b583c309c91c6f5646")
+        for android_code in (0, "01", "1.0"):
+            with self.subTest(android_code=android_code), self.assertRaises(ValueError):
+                validate_source(ROOT, "0.1.0", android_code)
 
     def test_manifest_covers_all_clients_and_progression_is_monotonic(self):
         with tempfile.TemporaryDirectory() as temporary:
             value = self.fixture(Path(temporary))
         self.assertEqual(value["release"]["product"], "clients")
-        self.assertEqual({entry["platform"] for entry in value["artifacts"]}, {"linux", "windows", "macos", "android", "ios"})
+        self.assertEqual({entry["platform"] for entry in value["artifacts"]}, {"linux", "windows", "macos", "android"})
         self.assertEqual({entry["platform"] for entry in value["installers"]}, {"macos", "android"})
-        validate_progression(value, "0.1.1", 2, 2)
-        for version, android_code, ios_build in (("0.1.0", 2, 2), ("0.1.1", 1, 2), ("0.1.1", 2, 1)):
+        validate_progression(value, "0.1.1", 2)
+        for version, android_code in (("0.1.0", 2), ("0.1.1", 1)):
             with self.subTest(version=version), self.assertRaises(ValueError):
-                validate_progression(value, version, android_code, ios_build)
+                validate_progression(value, version, android_code)

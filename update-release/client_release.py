@@ -2,7 +2,8 @@
 
 This module is deliberately credential-free. Platform jobs produce and verify
 signed artifacts; this code binds their exact bytes and public signing identities
-into one complete desktop/Android/iOS application release manifest.
+into one complete desktop/Android downloadable release manifest. The iOS
+client is source-and-CI only and is intentionally absent from release assets.
 """
 from __future__ import annotations
 
@@ -119,20 +120,16 @@ def validate_source(
     root: Path,
     version: str,
     android_version_code: str | int | None = None,
-    ios_build_number: str | int | None = None,
 ) -> str:
     if not VERSION.fullmatch(version):
         raise ValueError("version must be MAJOR.MINOR.PATCH")
     revision = _desktop_versions(root, version)
     checked_android, checked_ios = _mobile_versions(root, version)
+    _positive_integer(checked_ios, "iOS checked-in build number")
     if android_version_code is not None:
         requested = _positive_integer(android_version_code, "Android versionCode")
         if requested < checked_android:
             raise ValueError("Android versionCode must not move behind its checked-in value")
-    if ios_build_number is not None:
-        requested = _positive_integer(ios_build_number, "iOS build number")
-        if requested < checked_ios:
-            raise ValueError("iOS build number must not move behind its checked-in value")
     return revision
 
 
@@ -143,18 +140,15 @@ def _version_key(value: str) -> tuple[int, int, int]:
     return int(major), int(minor), int(patch)
 
 
-def validate_progression(previous: dict, version: str, android_version_code: int, ios_build_number: int) -> None:
+def validate_progression(previous: dict, version: str, android_version_code: int) -> None:
     previous = validate_manifest(previous)
     if previous["release"].get("product") != "clients":
         raise ValueError("previous release is not a unified client release")
     if _version_key(version) <= _version_key(previous["release"]["version"]):
         raise ValueError("application SemVer must advance")
     android = next(entry for entry in previous["artifacts"] if entry["platform"] == "android")
-    ios = next(entry for entry in previous["artifacts"] if entry["platform"] == "ios")
     if android_version_code <= android["metadata"]["version_code"]:
         raise ValueError("Android versionCode must advance")
-    if ios_build_number <= int(ios["external"]["build_number"]):
-        raise ValueError("iOS build number must advance")
 
 
 def expected_assets(version: str) -> set[str]:
@@ -196,13 +190,11 @@ def build(
     revision: str,
     released_at: str,
     android_version_code: int,
-    ios_build_number: int,
     android_signer: str,
 ) -> dict:
     if not REVISION.fullmatch(revision):
         raise ValueError("source revision must be an exact SHA")
     android_version_code = _positive_integer(android_version_code, "Android versionCode")
-    ios_build_number = _positive_integer(ios_build_number, "iOS build number")
     if not SHA256.fullmatch(android_signer):
         raise ValueError("Android signing certificate identity must be a lowercase SHA-256 digest")
     expected = expected_assets(version)
@@ -242,16 +234,6 @@ def build(
             "metadata": {"version_code": android_version_code},
         }
     )
-    entries.append(
-        {
-            "platform": "ios",
-            "architecture": "arm64",
-            "distribution": "testflight",
-            "external": {"bundle_id": "com.hawkeynl.jarvis", "build_number": str(ios_build_number)},
-            "signature": {"scheme": "apple-code-signing", "value": "app-store-connect"},
-        }
-    )
-
     dmg = assets / f"Jarvis_{version}_macos_arm64.dmg"
     aab = assets / f"Jarvis_{version}_android_universal.aab"
     return validate_manifest(
@@ -290,7 +272,6 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", required=True)
     parser.add_argument("--android-version-code")
-    parser.add_argument("--ios-build-number")
     parser.add_argument("--previous", type=Path)
     parser.add_argument("--assets", type=Path)
     parser.add_argument("--revision")
@@ -299,26 +280,24 @@ def main() -> None:
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    validate_source(root, args.version, args.android_version_code, args.ios_build_number)
+    validate_source(root, args.version, args.android_version_code)
     if args.previous:
-        if args.android_version_code is None or args.ios_build_number is None:
-            raise ValueError("previous-release validation requires mobile build identities")
+        if args.android_version_code is None:
+            raise ValueError("previous-release validation requires the Android build identity")
         validate_progression(
             json.loads(args.previous.read_bytes()),
             args.version,
             _positive_integer(args.android_version_code, "Android versionCode"),
-            _positive_integer(args.ios_build_number, "iOS build number"),
         )
     if args.assets:
-        if None in (args.android_version_code, args.ios_build_number, args.android_signer):
-            raise ValueError("complete release generation requires Android and iOS identities")
+        if None in (args.android_version_code, args.android_signer):
+            raise ValueError("complete release generation requires the Android identity")
         value = build(
             args.assets,
             args.version,
             args.revision or "",
             args.released_at or "",
             _positive_integer(args.android_version_code, "Android versionCode"),
-            _positive_integer(args.ios_build_number, "iOS build number"),
             args.android_signer or "",
         )
         if not args.output or args.output.parent.resolve() == args.assets.resolve():

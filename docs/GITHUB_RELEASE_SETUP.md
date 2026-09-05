@@ -1,8 +1,10 @@
 # Unified Jarvis client release setup
 
 Repository: `HawkeyNL/PersonalJarvisApp` (public). Releases use `app-vX.Y.Z`
-and coordinate desktop, Android, and iOS from one exact source revision. This
-document describes owner actions; it does not authorize a release.
+and coordinate distributable desktop and Android artifacts from one exact
+source revision. iOS shares the application version but is validated only by
+unsigned simulator CI and installed locally with Xcode. This document describes
+owner actions; it does not authorize a release.
 
 ## GitHub configuration
 
@@ -44,20 +46,11 @@ Environment secrets for macOS desktop signing/notarization:
 - `MACOS_NOTARY_API_KEY_ID`
 - `MACOS_NOTARY_API_PRIVATE_KEY_BASE64`
 
-Environment secrets for iOS/TestFlight:
-
-- `APPLE_DISTRIBUTION_CERTIFICATE_P12_BASE64`
-- `APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD`
-- `APPLE_APP_STORE_PROVISIONING_PROFILE_BASE64`
-- `APPLE_TEAM_ID`
-- `APP_STORE_CONNECT_API_ISSUER_ID`
-- `APP_STORE_CONNECT_API_KEY_ID`
-- `APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64`
-
 macOS release artifacts must be Developer ID signed, hardened, notarized, and
-stapled. iOS is archived and uploaded to App Store Connect/TestFlight; no IPA is
-published or mirrored. Windows artifacts receive Tauri updater signatures but
-are not currently Authenticode-signed.
+stapled. These macOS identities are unrelated to iOS. GitHub Actions does not
+sign, archive, upload, or publish iOS and needs no iOS signing secret or team
+identifier. Windows artifacts receive Tauri updater signatures but are not
+currently Authenticode-signed.
 
 For `main`, recommend required pull requests, required client CI checks, blocked
 force-pushes and branch deletion, and optional stale-review dismissal. Choose
@@ -86,36 +79,39 @@ rotation requires a migration trusted by already-installed clients.
 
 1. Merge the reviewed Core cleanup and client-monorepo changes with CI green.
 2. Configure `application-release`, the two variables, and all relevant secrets.
-3. Back up the Tauri, Android, and Apple signing identities securely.
+3. Back up the Tauri, Android, and macOS signing identities securely.
 4. Confirm desktop npm/Cargo/Tauri versions, Android `versionName`, and iOS
    `MARKETING_VERSION` are all `0.1.0`.
-5. Confirm Android `versionCode=1` and iOS build number `1` are unused and
-   greater than any prior build distributed under the same identities.
+5. Confirm Android `versionCode=1` is unused and greater than any previously
+   distributed Android build. Keep the checked-in iOS build number positive
+   and internally consistent for local Xcode development.
 6. Run:
 
    ```bash
    python3 update-release/client_release.py \
-     --version 0.1.0 --android-version-code 1 --ios-build-number 1
+     --version 0.1.0 --android-version-code 1
    python3 -m unittest discover -s update-release/tests -v
    ```
 
 7. Run the complete client CI on `main`.
-8. Manually dispatch `.github/workflows/release.yml` with `version=0.1.0`,
-   `android_version_code=1`, and `ios_build_number=1`.
+8. Manually dispatch `.github/workflows/release.yml` with `version=0.1.0` and
+   `android_version_code=1`.
 9. Approve the `application-release` Environment jobs if configured.
-10. Verify Linux, Windows, notarized macOS, signed APK/AAB, and TestFlight jobs.
+10. Verify Linux, Windows, notarized macOS, and signed APK/AAB jobs. Separately
+    confirm the ordinary iOS simulator CI job passed without signing.
 11. Verify the final job creates `app-v0.1.0` only after redownloading and
     checking the complete same-revision artifact set and signed manifest.
-12. Inspect the public release and TestFlight build. Never manually publish an
-    incomplete draft.
+12. Inspect the public release. It must contain no IPA or iOS artifact. Never
+    manually publish an incomplete draft.
 13. Configure the server-owned Home Node mirror from PersonalJarvis, perform one
     manual sync, then enable its timer.
 14. Test update capability/download with an enrolled client. A second signed
     release is required to prove an actual upgrade end to end.
 
-Production signing, notarization, TestFlight upload, and public release
+Production desktop/Android signing, macOS notarization, and public release
 publication can only be verified in the protected GitHub workflow with the real
-owner credentials; local tests deliberately cannot claim those outcomes.
+owner credentials; local tests deliberately cannot claim those outcomes. iOS
+device installation is performed locally from Xcode and is outside CI/CD.
 
 ## Updating the protocol dependency
 

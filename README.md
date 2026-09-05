@@ -31,8 +31,9 @@ GitHub Release artifacts here are public upstream transport. Desktop updates
 and the signed Android APK can be mirrored by the Home Node and delivered only
 to enrolled, authenticated clients. Desktop still verifies Tauri updater
 signatures; Android verifies hash, package identity, version code, and its
-pinned signing certificate. iOS is distributed through TestFlight/App Store
-Connect and is never served as a Home Node IPA.
+pinned signing certificate. iOS is source-and-CI only: the owner installs it
+locally from Xcode using a Personal Team or registered-device development
+signing. No IPA or iOS artifact is published or mirrored.
 
 See [release setup](docs/GITHUB_RELEASE_SETUP.md) for the protected release
 environment, required variables/secrets, and the first-release checklist.
@@ -70,7 +71,8 @@ xcodebuild -project Jarvis.xcodeproj -scheme Jarvis \
   CODE_SIGNING_ALLOWED=NO build
 ```
 
-Normal CI never receives production signing credentials. Release builds are
+Normal CI never receives production signing credentials. Its iOS job uses an
+unsigned simulator build. Distributable desktop and Android releases are
 created only by manually dispatching the protected workflow from `main`.
 
 ## Shared protocol pin

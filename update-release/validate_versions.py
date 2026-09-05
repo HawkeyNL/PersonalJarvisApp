@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the unified client product version and platform build identities."""
+"""Validate the unified client product version and release build identity."""
 import argparse
 from pathlib import Path
 import sys
@@ -12,14 +12,12 @@ def main() -> int:
     parser.add_argument("--repository", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--version", required=True)
     parser.add_argument("--android-version-code")
-    parser.add_argument("--ios-build-number")
     args = parser.parse_args()
     try:
         validate_source(
             args.repository.resolve(),
             args.version,
             args.android_version_code,
-            args.ios_build_number,
         )
     except (OSError, KeyError, TypeError, ValueError) as error:
         print(f"client release version validation failed: {error}", file=sys.stderr)
