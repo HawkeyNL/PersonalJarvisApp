@@ -42,7 +42,7 @@ def _one(root: Path, pattern: str) -> Path:
 
 
 def collect(root: Path, output: Path, platform: str, version: str) -> list[Path]:
-    from desktop_release import VERSION
+    from client_release import VERSION
     if not VERSION.fullmatch(version):
         raise ValueError("version must be plain SemVer")
     policy = POLICY[platform]

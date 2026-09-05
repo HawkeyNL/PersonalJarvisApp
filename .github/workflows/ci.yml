@@ -1,4 +1,4 @@
-name: Desktop CI
+name: Client CI
 
 on:
   push:
@@ -9,36 +9,47 @@ permissions:
   contents: read
 
 concurrency:
-  group: desktop-ci-${{ github.ref }}
+  group: client-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  release-contract:
+    name: Unified release and privacy contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check deployment privacy
+        run: |
+          python3 scripts/check-deployment-privacy.py
+          python3 scripts/test-deployment-privacy.py
+      - name: Install test signature verifier
+        run: sudo apt-get update && sudo apt-get install --yes minisign
+      - name: Test unified release tooling
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 update-release/client_release.py \
+            --version 0.1.0 --android-version-code 1 --ios-build-number 1
+          python3 -m unittest discover -s update-release/tests -v
+
   desktop-frontend:
     name: Desktop frontend
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: .
+        working-directory: desktop
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: desktop/package-lock.json
       - run: npm ci
-      - run: python3 scripts/check-deployment-privacy.py
-      - run: python3 scripts/test-deployment-privacy.py
       - run: npm run check
       - run: npm run test:unit
-      - name: Install test signature verifier
-        run: sudo apt-get update && sudo apt-get install --yes minisign
-      - name: Test release tooling
-        env:
-          PYTHONDONTWRITEBYTECODE: "1"
-        run: |
-          python3 -m unittest discover -s update-release/tests -v
 
   desktop-native:
     name: Desktop Tauri — ${{ matrix.name }}
@@ -56,7 +67,7 @@ jobs:
     timeout-minutes: 45
     defaults:
       run:
-        working-directory: .
+        working-directory: desktop
     steps:
       - uses: actions/checkout@v5
       - name: Install Ubuntu native dependencies
@@ -80,13 +91,13 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: desktop/package-lock.json
       - uses: dtolnay/rust-toolchain@1.97.1
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> target
+          workspaces: desktop/src-tauri -> target
       - run: npm ci
       - name: Format desktop native core
         if: runner.os == 'Linux'
@@ -97,3 +108,76 @@ jobs:
         run: npm run desktop:test:native
       - name: Build actual Tauri release target
         run: npm run desktop:build -- --no-bundle
+
+  android:
+    name: Android debug APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+          cache-dependency-path: |
+            android/*.gradle.kts
+            android/gradle/libs.versions.toml
+            android/gradle/wrapper/gradle-wrapper.properties
+            android/app/build.gradle.kts
+      - uses: android-actions/setup-android@v3
+      - name: Install compile SDK
+        run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
+      - name: Test, lint and build debug APK
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v6
+        with:
+          name: jarvis-android-debug-${{ github.sha }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  ios:
+    name: iOS simulator
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v5
+      - name: Record Apple toolchain
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks
+          xcrun simctl list devices available
+      - name: Build unsigned simulator app
+        run: |
+          xcodebuild \
+            -project Jarvis.xcodeproj \
+            -scheme Jarvis \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/JarvisDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+      - name: Run unsigned simulator tests
+        run: |
+          xcodebuild \
+            -project Jarvis.xcodeproj \
+            -scheme Jarvis \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -derivedDataPath "$RUNNER_TEMP/JarvisDerivedData" \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            test

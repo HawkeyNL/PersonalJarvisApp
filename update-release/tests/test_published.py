@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from desktop_release import build, expected_assets
+from client_release import build, expected_assets
 from verify_published import verify
 
 
@@ -20,7 +20,9 @@ class PublishedBytesTests(unittest.TestCase):
             (staged / name).write_bytes(b"fixture bytes")
             shutil.copyfile(staged / name, downloaded / name)
         manifest = root / "latest.json"
-        manifest.write_text(json.dumps(build(staged, "0.1.0", "a" * 40, "2026-09-01T00:00:00Z")))
+        manifest.write_text(json.dumps(build(
+            staged, "0.1.0", "a" * 40, "2026-09-01T00:00:00Z", 1, 1, "c" * 64
+        )))
         (root / "latest.json.sig").write_bytes(b"separate signature verifier checks cryptography")
         for name in ("latest.json", "latest.json.sig"):
             shutil.copyfile(root / name, downloaded / name)

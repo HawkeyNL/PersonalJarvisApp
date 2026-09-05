@@ -3,7 +3,7 @@ import hashlib
 import json
 from pathlib import Path
 import sys
-from desktop_release import expected_assets
+from client_release import expected_assets
 from manifest import validate_manifest
 
 

@@ -47,7 +47,7 @@ class PrivateReleaseWorkflowTests(unittest.TestCase):
             self.assertIn(required, self.workflow)
 
     def test_manifest_publication_waits_for_every_mandatory_platform(self) -> None:
-        self.assertIn("needs: [validate, desktop]", self.workflow)
+        self.assertIn("needs: [validate, desktop, android, ios]", self.workflow)
         publish = self.workflow.index("publish:")
         upload_manifest = self.workflow.index('gh release upload "$RELEASE_TAG"', publish)
         publish_draft = self.workflow.index("--draft=false --latest", upload_manifest)
@@ -61,16 +61,18 @@ class PrivateReleaseWorkflowTests(unittest.TestCase):
                 self.assertRegex(action, r"@[0-9a-f]{40}$")
 
     def test_job_environment_never_exposes_release_secrets(self) -> None:
-        for job in ("validate", "desktop", "publish"):
+        for job in ("validate", "desktop", "android", "ios", "publish"):
             start = self.workflow.index(f"  {job}:")
             steps = self.workflow.index("    steps:", start)
             with self.subTest(job=job):
                 self.assertNotIn("secrets.", self.workflow[start:steps])
 
-    def test_desktop_does_not_require_mobile_or_another_release_repository(self) -> None:
+    def test_all_clients_release_from_this_repository(self) -> None:
         self.assertNotIn("PRIVATE_RELEASE_REPO", self.workflow)
-        self.assertNotIn("  android:", self.workflow)
-        self.assertNotIn("  ios:", self.workflow)
+        self.assertIn("  android:", self.workflow)
+        self.assertIn("  ios:", self.workflow)
+        self.assertIn("assembleRelease bundleRelease", self.workflow)
+        self.assertIn("Signed iOS archive to TestFlight", self.workflow)
         self.assertIn("GH_REPO: ${{ github.repository }}", self.workflow)
 
     def test_final_draft_is_revalidated_before_publish(self) -> None:

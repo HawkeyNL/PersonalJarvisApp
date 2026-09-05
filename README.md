@@ -1,155 +1,85 @@
-# Jarvis desktop app
+# Jarvis client applications
 
-This repository is the canonical desktop Jarvis client. It uses one Vue 3 frontend and one
-Tauri 2 Rust core for Linux, macOS, and Windows. The production mobile clients
-remain in `HawkeyNL/PersonalJarvis`; the generated Apple files under
-`src-tauri/gen/apple/` are legacy reference material, not the mobile product.
+This repository is the canonical source for every end-user Jarvis client:
 
-The Home Node remains authoritative for identity enrollment, policy, chat, and
-device revocation. The desktop app owns only its device key, session, local
-preferences, and presentation.
+- `desktop/`: Vue 3 and Tauri 2 for Linux, Windows, and macOS;
+- `android/`: native Kotlin and Jetpack Compose;
+- `ios/`: native SwiftUI for iPhone and iPad.
 
-Core, Core Admin, the CLI, Home Node deployment, and the authoritative shared
-`crates/client-core` live in [HawkeyNL/PersonalJarvis](https://github.com/HawkeyNL/PersonalJarvis).
-This extraction is a source snapshot of Core commit
-`89372c9c5b157361881b79b583c309c91c6f5646`; the original history is not rewritten.
-The shared Rust client is an exact Git dependency at that reviewed commit,
-not a copied crate or a sibling checkout dependency.
+Tauri's generated Apple scaffolding under `desktop/src-tauri/gen/apple/` belongs
+to the desktop build system; it is not a second canonical native iOS client.
 
-App versions (`app-vX.Y.Z`) are independent of Core versions (`vX.Y.Z`). Client
-protocol compatibility, not equal product versions, controls interoperability.
-The first-run connection UI asks for the Home Node HTTPS origin at runtime;
-production builds have no default deployment address.
+Jarvis Core, the Home Node, API, authenticated update delivery, and the
+authoritative `jarvis-client-core` crate live in
+[HawkeyNL/PersonalJarvis](https://github.com/HawkeyNL/PersonalJarvis). The
+desktop crate consumes `jarvis-client-core` from one exact reviewed Core commit;
+Android and iOS retain their reviewed native protocol models until a shared
+cross-language schema exists.
 
-Desktop GitHub Release assets in this repository are public. The Home Node
-fetches and verifies them outbound, then distributes updates only to enrolled,
-authenticated clients. Public GitHub is transport, not signing authority.
-See [release setup](docs/GITHUB_RELEASE_SETUP.md) for signing and owner actions.
+The clients share one application SemVer and release tag, `app-vX.Y.Z`. Android
+also has a monotonically increasing `versionCode`; iOS has a monotonically
+increasing build number. These identities are independent of Core `vX.Y.Z`.
+Wire-protocol compatibility—not matching product versions—controls whether a
+client can use a Home Node.
+
+Every client receives its credential-free Home Node HTTPS origin at runtime.
+No production address is compiled into an app. Desktop uses the operating
+system credential store, Android uses its keystore-backed encrypted storage,
+and iOS uses Keychain for device/session secrets.
+
+GitHub Release artifacts here are public upstream transport. Desktop updates
+and the signed Android APK can be mirrored by the Home Node and delivered only
+to enrolled, authenticated clients. Desktop still verifies Tauri updater
+signatures; Android verifies hash, package identity, version code, and its
+pinned signing certificate. iOS is distributed through TestFlight/App Store
+Connect and is never served as a Home Node IPA.
+
+See [release setup](docs/GITHUB_RELEASE_SETUP.md) for the protected release
+environment, required variables/secrets, and the first-release checklist.
 
 Source visibility does not grant an open-source license or permission to reuse
 this software. Copyright © Gus Theunissen. All rights reserved.
 
-## Common commands
+## Development
 
-Run these commands from this directory:
-
-```bash
-npm ci
-npm run check
-npm run desktop:check:native
-npm run desktop:test:native
-npm run desktop:dev
-npm run desktop:build
-```
-
-`npm run check` is deterministic and does not download optional wake-word
-models. Install those explicitly with `npm run setup-wakeword` before testing
-the foreground detector. The downloaded models are ignored by Git.
-
-## Ubuntu
-
-Install Node.js 24, Rust 1.97.1, and the Tauri 2 Linux prerequisites:
-
-```bash
-sudo apt update
-sudo apt install build-essential curl file libayatana-appindicator3-dev \
-  libdbus-1-dev librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev \
-  pkg-config wget
-```
-
-The `libdbus-1-dev` package is also required by the persistent Secret Service
-credential backend. A desktop Secret Service provider (for example GNOME
-Keyring) must be running and unlocked. Jarvis fails clearly when persistent
-secure storage is unavailable; it does not silently create a new plaintext
-device key.
-
-Validate the actual desktop target, not only shared Rust:
+Desktop (from `desktop/`):
 
 ```bash
 npm ci
 npm run check
+npm run test:unit
 npm run desktop:test:native
 npm run desktop:build
-npm run desktop:dev
 ```
 
-For an acceptance pass, launch the built artifact and verify Home Node health,
-login, conversation load/send, reconnect after network interruption,
-suspend/resume, logout/login, device reset/re-enrollment, microphone denial,
-and wake-word foreground behavior when the optional models are installed.
-Linux biometric hardware is currently reported as unsupported; the app-lock
-uses trusted-device approval instead of crashing or accepting a password flag.
+The optional wake-word assets are fetched with `npm run setup-wakeword` and are
+not committed. Linux Tauri builds require Node.js 24, Rust 1.97.1, WebKitGTK
+4.1, and the dependencies installed by client CI.
 
-## macOS
+Android (from `android/`, with JDK 17 and Android SDK Platform 37.0):
 
-Install Xcode Command Line Tools, Node.js 24, and Rust, then run the common
-commands above. Validate both `npm run desktop:dev` and the bundled `.app` from
-`npm run desktop:build`. macOS credentials use Keychain. The checked-in
-`Info.plist` supplies the microphone usage description for unbundled debug
-builds; release bundles receive their plist through Tauri.
+```bash
+./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon
+```
 
-Regression checklist: device-bound login, Keychain migration, Touch ID
-cancellation, trusted-device unlock fallback, chat load/send, microphone
-denial, foreground wake word, logout, and reset/re-enrollment.
+iOS (from `ios/`, on macOS with Xcode 16):
 
-## Windows
+```bash
+xcodebuild -project Jarvis.xcodeproj -scheme Jarvis \
+  -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+  CODE_SIGNING_ALLOWED=NO build
+```
 
-Install Node.js 24, Rust MSVC, Visual Studio C++ Build Tools, and WebView2.
-Run the common commands in a Developer PowerShell or terminal. Credentials use
-Windows Credential Manager. Windows packaging must be validated on Windows;
-cross-compiling the Rust library is not an acceptance test.
+Normal CI never receives production signing credentials. Release builds are
+created only by manually dispatching the protected workflow from `main`.
 
-## Credential classification and migration
+## Shared protocol pin
 
-- Secret: Ed25519 private device key and bearer session token. These are stored
-  in Keychain, persistent Secret Service/keyutils storage, or Windows Credential
-  Manager according to the operating system.
-- Sensitive metadata: device identifier and the configured Home Node endpoint.
-  These are not authentication secrets, but should not be logged unnecessarily.
-- Ordinary metadata: UI preferences and the last selected conversation.
+To update desktop's client-core dependency:
 
-Older desktop installs may have `private_key` and `token` fields in
-`auth.json`. On first access Jarvis writes each value to the OS credential store
-and rewrites the file with only the device identifier. If that secure write
-fails, migration fails closed and leaves the legacy data untouched for manual
-recovery. A new plaintext fallback is never created.
+1. merge the compatible protocol/client-core change in PersonalJarvis;
+2. review and copy its exact 40-character commit SHA;
+3. update `desktop/src-tauri/Cargo.toml` and `desktop/src-tauri/Cargo.lock`;
+4. run the complete client CI before releasing.
 
-The private Ed25519 seed is generated and used only by Rust. Tauri commands
-return a public key or a bounded signature, never private key bytes. Login and
-all authenticated API calls are completed by Rust using the credential-store
-session; Vue receives only authentication status, device id and key presence,
-never the bearer token. Changing the configured Home Node origin clears the old
-session/device binding before the new origin is persisted.
-
-## Current capability matrix
-
-| Capability | Ubuntu | macOS | Windows |
-| --- | --- | --- | --- |
-| Desktop window features | Yes | Yes | Yes |
-| OS-backed secure persistence | Secret Service/keyutils | Keychain | Credential Manager |
-| Local biometric prompt | Unsupported in the current client | Touch ID | Windows Hello backend |
-| Explicit microphone use | WebKit permission | WebKit permission | WebView2 permission |
-| Foreground wake detector | Optional, requires models | Optional, requires models | Optional, requires models |
-| Background wake/audio | No | No | No |
-| Notifications | Not implemented | Not implemented | Not implemented |
-
-Wake word is convenience only and never substitutes for a device-signed,
-action-bound approval. Background listening, push notifications, APNs, and FCM
-belong to separate native/mobile milestones.
-
-## Troubleshooting
-
-- `webkit2gtk-4.1.pc` missing: install `libwebkit2gtk-4.1-dev` and `pkg-config`.
-- `dbus-1.pc` missing: install `libdbus-1-dev`.
-- Secure credential storage unavailable on Ubuntu: start/unlock the desktop
-  Secret Service provider, then retry. Jarvis intentionally does not fall back
-  to `auth.json`.
-- Wake detector reports model assets missing: run `npm run setup-wakeword`.
-- Home Node is unreachable: verify the per-device Home Node origin in Settings,
-  DNS/IP, and TLS. Release builds accept only credential-free HTTPS origins;
-  loopback HTTP is available solely in debug builds for explicit local testing.
-  The origin is ordinary local metadata and is reused after restart and device
-  re-enrollment; no Home Node address is embedded during the build.
-- Updates show incompatible: the active release requires a newer updater
-  protocol than this client understands. Keep using the installed app and use
-  an owner-reviewed compatible upgrade path.
+Never replace the pin with a branch, sibling path, or copied crate.
