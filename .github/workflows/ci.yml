@@ -32,6 +32,8 @@ jobs:
       - run: python3 scripts/test-deployment-privacy.py
       - run: npm run check
       - run: npm run test:unit
+      - name: Install test signature verifier
+        run: sudo apt-get update && sudo apt-get install --yes minisign
       - name: Test release tooling
         env:
           PYTHONDONTWRITEBYTECODE: "1"
