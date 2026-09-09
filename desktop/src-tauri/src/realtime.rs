@@ -196,7 +196,10 @@ async fn run(
             let mut cursor = EventCursor::default();
             let mut gate = VoiceGate::new(device);
             gate.set_enabled(voice.load(Ordering::SeqCst));
-            let speech = super::local_speech::Worker::new();
+            let speech_app = app.clone();
+            let speech = super::local_speech::Worker::new(move |status| {
+                let _ = speech_app.emit("jarvis-local-speech", status);
+            });
             loop {
                 let incoming = tokio::select! {
                     biased;

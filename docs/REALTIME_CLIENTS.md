@@ -51,7 +51,12 @@ Desktop's separate **Stop spraak** button clears the current native speech
 buffer and cancels queued playback without changing its saved enable preference,
 disconnecting realtime, or cancelling inference. Late deltas do not resume that
 utterance; a later assistant run may speak. Server-side desktop ownership release
-and visible native-engine failure reporting still require completion.
+still requires completion. Native-engine failures are displayed using fixed
+status labels only; OS error text and spoken content are never status payloads.
+The offline engine interface is cancellation-safe and tested with fake engines:
+disconnect/stop drops playback, an unavailable engine does not retry every phrase,
+and a full 32-item queue stops speech for the remainder of that run. These tests
+do not demonstrate audible OS playback or macOS/Windows runtime behavior.
 
 ## Validation and remaining acceptance
 

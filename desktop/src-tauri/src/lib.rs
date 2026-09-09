@@ -14,6 +14,7 @@ use tauri::{AppHandle, Manager};
 #[cfg(desktop)]
 mod app_updates;
 mod local_speech;
+mod local_speech_engine;
 mod realtime;
 
 /// Legacy desktop auth file. It is read only to migrate existing installs.

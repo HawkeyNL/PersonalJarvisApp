@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { nextSpeechStatus } from "../speechStatus";
 import NavIcon from "./NavIcon.vue";
 import {
   messages,
@@ -29,6 +31,10 @@ const focused = ref(false);
 const woke = ref(false);
 const chatHover = ref(false);
 const policy = computed(() => canSpeak());
+const localSpeechStatus = ref("");
+let speechUnlisten: UnlistenFn | undefined;
+let disposed = false;
+onUnmounted(() => { disposed = true; speechUnlisten?.(); });
 
 const mic = useMic((said) => send(said));
 
@@ -108,6 +114,15 @@ async function removeChat(id: string) {
 }
 
 onMounted(async () => {
+  try {
+    const cleanup = await listen<unknown>("jarvis-local-speech", event => {
+      if (disposed) return;
+      localSpeechStatus.value = nextSpeechStatus(localSpeechStatus.value, event.payload);
+    });
+    if (disposed) { cleanup(); return; }
+    speechUnlisten = cleanup;
+  } catch { /* Browser-only preview has no native speech engine. */ }
+  if (disposed) return;
   refreshRoute();
   await initChat();
   await nextTick();
@@ -193,6 +208,7 @@ onMounted(async () => {
         <div class="policy" :class="policy.allowed ? 'ok' : 'off'">
           <span class="pdot" :class="policy.allowed ? 'on' : ''"></span>
           {{ policy.allowed ? "Jarvis kan praten" : "Jarvis is stil" }} · {{ policy.reason }}
+          <span v-if="localSpeechStatus" role="status"> · {{ localSpeechStatus }}</span>
         </div>
         <form class="row" @submit.prevent="onSend">
           <button
