@@ -118,11 +118,11 @@ final class NativeSpeechOutput: NSObject, SpeechOutput, AVSpeechSynthesizerDeleg
 final class RealtimeSpeech {
     private let output: SpeechOutput
     private var device: UUID?; private var owner: UUID?; private var ownerRun: UUID?
-    private var run: UUID?; private var received = ""; private var pending = ""; private var fenced = false
+    private var run: UUID?; private var received = ""; private var pending = ""; private var fence: String?; private var lineStart = true
     var enabled = false { didSet { if !enabled { stop() } } }
     init(output: SpeechOutput) { self.output = output }
     convenience init() { self.init(output: NativeSpeechOutput()) }
-    func stop() { output.stop(); run = nil; received = ""; pending = ""; fenced = false }
+    func stop() { output.stop(); run = nil; received = ""; pending = ""; fence = nil; lineStart = true }
     func receive(_ event: RealtimeEvent) {
         if event.type == "connection.ready" { device = event.payload.device_id; stop(); return }
         if event.type == "voice.owner_changed" { owner = event.payload.device_id; ownerRun = event.payload.run_id; stop(); return }
@@ -143,15 +143,20 @@ final class RealtimeSpeech {
     }
     private func flush(complete: Bool) {
         while !pending.isEmpty {
-            if pending.hasPrefix("```"), !pending.contains("\n") {
-                if complete { pending = ""; fenced.toggle() }; return
-            }
-            if pending.hasPrefix("```"), let newline = pending.firstIndex(of: "\n") {
-                pending.removeSubrange(...newline); fenced.toggle(); continue
-            }
-            if fenced {
-                if let fence = pending.range(of: "```") { pending.removeSubrange(..<fence.lowerBound); continue }
-                if complete { pending = "" }; return
+            let lineEnd = pending.firstIndex(of: "\n").map { pending.index(after: $0) } ?? (complete ? pending.endIndex : nil)
+            let line = String(pending[..<(lineEnd ?? pending.endIndex)])
+            let trimmed = String(line.drop(while: { $0 == " " }))
+            let marker = trimmed.first.flatMap { "`~".contains($0) ? $0 : nil }
+            let count = marker.map { mark in trimmed.prefix(while: { $0 == mark }).count } ?? 0
+            let opening = lineStart && line.count - trimmed.count <= 3 && count >= 3
+            if fence != nil || opening {
+                guard let end = lineEnd else { return }
+                if let current = fence {
+                    if opening && marker == current.first && count >= current.count && trimmed.dropFirst(count).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { fence = nil }
+                } else if let marker { fence = String(repeating: String(marker), count: count) }
+                lineStart = line.hasSuffix("\n")
+                pending.removeSubrange(..<end)
+                continue
             }
             let chars = Array(pending)
             var count: Int?
@@ -161,6 +166,7 @@ final class RealtimeSpeech {
             }
             guard let count = count ?? (complete ? chars.count : nil) else { return }
             let raw = String(chars.prefix(count)); pending = String(chars.dropFirst(count))
+            lineStart = raw.hasSuffix("\n")
             let clean = raw.filter { !"`*#_~".contains($0) }.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
             if !clean.isEmpty { output.speak(clean) }
         }

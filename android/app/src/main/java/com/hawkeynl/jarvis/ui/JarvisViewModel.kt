@@ -488,12 +488,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     private fun upsertRealtime(rows: List<ConversationMessage>, canonical: ConversationMessage, optimistic: String?): List<ConversationMessage> {
-        var inserted = false
-        val result = rows.mapNotNull {
-            if (it.id != canonical.id && (optimistic == null || it.id != optimistic)) it
-            else if (inserted) null else { inserted = true; canonical }
-        }
-        return if (inserted) result else result + canonical
+        return com.hawkeynl.jarvis.chat.mergeCanonical(rows, canonical, optimistic) { it.id }
     }
 
     companion object {

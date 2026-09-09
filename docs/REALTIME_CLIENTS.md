@@ -49,6 +49,9 @@ Run `npm ci`, `npm run check`, and `npm run test:unit` from `desktop/`, and
 `cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked` from the root.
 Android: `./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon` from
 `android/` with the SDK configured by the existing CI workflow.
+The same application consumes `android/realtime-core/` for its pure event DTOs
+and speech state. Run `./gradlew :realtime-core:test --no-daemon` from `android/`
+to test that actual code on a JDK without an Android SDK or signing credentials.
 iOS: the unsigned simulator build/test commands in `.github/workflows/ci.yml`
 require a macOS/Xcode runner; no distribution signing credentials are involved.
 

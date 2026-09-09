@@ -28,15 +28,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlin.random.Random
 
-@Serializable data class RealtimeRun(val run_id: String, val request_id: String, val conversation_id: String)
-@Serializable data class RealtimeMessage(val id: String, val conversation_id: String, val role: String, val content: String, val model: String? = null, val created_at: String)
-@Serializable data class RealtimePayload(
-    val device_id: String? = null, val run_id: String? = null, val request_id: String? = null,
-    val conversation_id: String? = null, val id: String? = null, val title: String? = null,
-    val updated_at: String? = null, val run: RealtimeRun? = null, val text: String? = null,
-    val message: RealtimeMessage? = null, val reason: String? = null,
-)
-@Serializable data class RealtimeEvent(val protocol: Int, val epoch: String, val sequence: Long, val event_id: String, val type: String, val payload: RealtimePayload)
 @Serializable private data class Capability(val protocol: Int, val asynchronous_chat: Boolean)
 @Serializable private data class Submit(val request_id: String, val conversation_id: String?, val messages: List<ChatTurn>)
 private fun HomeNodeEndpoint.url(path: String): String = "$baseUrl$path"
@@ -80,18 +71,11 @@ class RealtimeService(private val sessions: SessionRepository) {
                 val started = System.nanoTime()
                 try {
                     client.webSocket(urlString = url, request = { bearerAuth(token) }) {
-                        var epoch: String? = null
-                        var sequence = -1L
+                        val cursor = RealtimeCursor()
                         for (frame in incoming) {
                             if (frame !is Frame.Text || frame.data.size > 256 * 1024) error("Invalid event frame")
                             val event = json.decodeFromString<RealtimeEvent>(frame.readText())
-                            if (event.protocol != 1 || event.sequence < 0) error("Unsupported event protocol")
-                            if (epoch != event.epoch) {
-                                if (event.type != "connection.ready") error("Missing connection identity")
-                                epoch = event.epoch; sequence = -1
-                            }
-                            if (event.sequence <= sequence) continue
-                            sequence = event.sequence
+                            if (!cursor.accept(event)) continue
                             receive(event)
                         }
                     }

@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import sys
 import tempfile
+import tomllib
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -14,20 +15,45 @@ from manifest import validate_manifest
 
 
 class ClientReleaseTests(unittest.TestCase):
+    def pinned_revision(self):
+        cargo = tomllib.loads((ROOT / "desktop/src-tauri/Cargo.toml").read_text())
+        return cargo["dependencies"]["jarvis-client-core"]["rev"]
+
+    def source_metadata(self, root):
+        # Copy only reviewed source metadata needed by validate_source. Never
+        # copy local .env, keystores, build trees or developer credential state.
+        for name in (
+            "desktop/src-tauri/Cargo.toml", "desktop/src-tauri/Cargo.lock",
+            "desktop/package.json", "desktop/package-lock.json", "desktop/src-tauri/tauri.conf.json",
+            "android/app/build.gradle.kts", "ios/Jarvis.xcodeproj/project.pbxproj",
+            "ios/project.yml", "ios/Jarvis/Info.plist",
+        ):
+            target = root / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / name, target)
+
     def fixture(self, root):
         for name in expected_assets("0.1.0"):
             (root / name).write_bytes(b"fixture signature" if name.endswith(".sig") else b"fixture executable")
         return build(root, "0.1.0", "a"*40, "2026-09-01T12:00:00Z", 1, "c" * 64)
 
     def test_checked_in_versions_and_immutable_git_lock(self):
-        self.assertEqual(validate_source(ROOT, "0.1.0"), "89372c9c5b157361881b79b583c309c91c6f5646")
+        self.assertRegex(self.pinned_revision(), r"^[0-9a-f]{40}$")
+        self.assertEqual(validate_source(ROOT, "0.1.0"), self.pinned_revision())
+
+    def test_mismatched_client_core_lock_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.source_metadata(root)
+            lock = root / "desktop/src-tauri/Cargo.lock"
+            lock.write_text(lock.read_text().replace(self.pinned_revision(), "0" * 40))
+            with self.assertRaisesRegex(ValueError, "immutable pin"):
+                validate_source(root, "0.1.0")
 
     def test_standalone_source_rejects_overrides_and_nested_path_dependencies(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            shutil.copytree(ROOT / "desktop", root / "desktop")
-            shutil.copytree(ROOT / "android", root / "android")
-            shutil.copytree(ROOT / "ios", root / "ios")
+            self.source_metadata(root)
             cargo = (root / "desktop/src-tauri/Cargo.toml").read_text()
             for override in (
                 '\n[target.\'cfg(test)\'.dependencies]\nescape = { path = "../../outside" }\n',
@@ -45,9 +71,7 @@ class ClientReleaseTests(unittest.TestCase):
     def test_ios_generated_project_and_plist_must_share_the_version_contract(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            shutil.copytree(ROOT / "desktop", root / "desktop")
-            shutil.copytree(ROOT / "android", root / "android")
-            shutil.copytree(ROOT / "ios", root / "ios")
+            self.source_metadata(root)
             project = root / "ios/project.yml"
             project.write_text(project.read_text().replace('MARKETING_VERSION: "0.1.0"', 'MARKETING_VERSION: "9.9.9"'))
             with self.assertRaisesRegex(ValueError, "project.yml"):
@@ -127,7 +151,7 @@ class ClientReleaseTests(unittest.TestCase):
         self.assertNotIn("home_node_origin", configuration)
 
     def test_one_semver_and_independent_android_build_number(self):
-        self.assertEqual(validate_source(ROOT, "0.1.0", 1), "89372c9c5b157361881b79b583c309c91c6f5646")
+        self.assertEqual(validate_source(ROOT, "0.1.0", 1), self.pinned_revision())
         for android_code in (0, "01", "1.0"):
             with self.subTest(android_code=android_code), self.assertRaises(ValueError):
                 validate_source(ROOT, "0.1.0", android_code)

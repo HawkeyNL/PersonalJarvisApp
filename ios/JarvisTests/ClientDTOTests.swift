@@ -3,6 +3,40 @@ import XCTest
 
 final class ClientDTOTests: XCTestCase {
     @MainActor
+    func testFragmentedFencesNeverSpeakEmbeddedCode() throws {
+        final class FakeSpeech: SpeechOutput {
+            var spoken: [String] = []
+            func speak(_ text: String) { spoken.append(text) }
+            func stop() {}
+        }
+        let id = "00000000-0000-0000-0000-000000000001"
+        let identity = ["run_id":id,"request_id":id,"conversation_id":id]
+        func event(_ type: String, _ payload: [String: Any]) throws -> RealtimeEvent {
+            let bytes = try JSONSerialization.data(withJSONObject: ["protocol":1,"epoch":id,"sequence":1,"event_id":id,"type":type,"payload":payload])
+            return try JSONDecoder().decode(RealtimeEvent.self, from: bytes)
+        }
+        func render(_ text: String, streaming: Bool) throws -> [String] {
+            let out = FakeSpeech(); let voice = RealtimeSpeech(output: out); voice.enabled = true
+            voice.receive(try event("connection.ready", ["device_id":id]))
+            voice.receive(try event("voice.owner_changed", ["device_id":id,"run_id":id]))
+            voice.receive(try event("assistant.started", identity))
+            if streaming { for ch in text { voice.receive(try event("assistant.delta", ["run":identity,"text":String(ch)])) } }
+            let completed = try event("assistant.completed", ["run":identity,"message":["id":id,"conversation_id":id,"role":"assistant","content":text,"created_at":"2026-01-01T00:00:00Z"]])
+            voice.receive(completed); voice.receive(completed)
+            return out.spoken
+        }
+        for text in [
+            "Before.\n   ```rust\nlet s = \"```\";\nnot speech\n   ```\nAfter.",
+            "Before.\n  ~~~~text\ncode\n~~~\nstill code\n  ~~~~\nAfter.",
+            "Before.\n```\nunterminated code",
+        ] {
+            let spoken = try render(text, streaming: true)
+            XCTAssertEqual(spoken, try render(text, streaming: false))
+            XCTAssertEqual(spoken.first, "Before.")
+            XCTAssertTrue(spoken.allSatisfy { $0 == "Before." || $0 == "After." })
+        }
+    }
+    @MainActor
     func testRealtimeVoiceOnlySpeaksOnOwnerAndDoesNotRepeatFinal() throws {
         final class FakeSpeech: SpeechOutput {
             var spoken: [String] = []
