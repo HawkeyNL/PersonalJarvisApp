@@ -13,6 +13,8 @@ use tauri::{AppHandle, Manager};
 
 #[cfg(desktop)]
 mod app_updates;
+mod local_speech;
+mod realtime;
 
 /// Legacy desktop auth file. It is read only to migrate existing installs.
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -320,6 +322,7 @@ fn authenticated_api_path(path: &str) -> bool {
     let route = path.split('?').next().unwrap_or(path);
     [
         "/v1/assistant",
+        "/v1/events/capability",
         "/v1/conversations",
         "/v1/devices",
         "/v1/auth/logout",
@@ -507,6 +510,7 @@ fn auth_status(app: AppHandle) -> Result<serde_json::Value, String> {
 /// Clear the session token (keeps the device key and id).
 #[tauri::command]
 fn auth_logout(app: AppHandle) -> Result<(), String> {
+    realtime::stop(&app);
     let auth = load_secure_auth(&app)?;
     delete_credential(TOKEN_ACCOUNT)?;
     save_metadata(&app, &auth.metadata)
@@ -517,6 +521,7 @@ fn auth_logout(app: AppHandle) -> Result<(), String> {
 /// device. Pair with a server-side `DELETE /v1/devices/{id}`.
 #[tauri::command]
 fn auth_reset(app: AppHandle) -> Result<(), String> {
+    realtime::stop(&app);
     let home_node_origin = load_metadata(&app)?.home_node_origin;
     delete_credential(KEY_ACCOUNT)?;
     delete_credential(TOKEN_ACCOUNT)?;
@@ -543,6 +548,7 @@ fn home_node_config(app: AppHandle) -> Result<HomeNodeConfig, String> {
 /// HTTPS; loopback HTTP is accepted only by debug builds for local development.
 #[tauri::command]
 fn home_node_configure(app: AppHandle, origin: String) -> Result<HomeNodeConfig, String> {
+    realtime::stop(&app);
     let origin = normalize_home_node_origin(&origin, cfg!(debug_assertions))?;
     let mut metadata = load_metadata(&app)?;
     if origin_changed(metadata.home_node_origin.as_deref(), &origin) {
@@ -664,6 +670,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_http::init())
         .setup(|app| {
+            app.manage(realtime::Runtime::default());
             #[cfg(desktop)]
             {
                 use std::sync::Mutex;
@@ -682,6 +689,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            realtime::realtime_start,
+            realtime::realtime_stop,
+            realtime::realtime_voice_enabled,
             device_info,
             auth_public_key,
             auth_sign,

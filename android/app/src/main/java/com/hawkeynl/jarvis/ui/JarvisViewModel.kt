@@ -25,6 +25,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.hawkeynl.jarvis.chat.RealtimeEvent
+import com.hawkeynl.jarvis.chat.RealtimeSpeech
 
 enum class AppTab { CHAT, CONVERSATIONS, SETTINGS }
 
@@ -40,6 +42,7 @@ sealed interface AndroidUpdateUiState {
 }
 
 data class JarvisUiState(
+    val voiceEnabled: Boolean = false,
     val selectedTab: AppTab = AppTab.CHAT,
     val endpoint: HomeNodeEndpoint? = null,
     val endpointDraft: String = "",
@@ -59,8 +62,11 @@ data class JarvisUiState(
 )
 
 class JarvisViewModel(private val container: AppContainer) : ViewModel() {
+    private val speech = RealtimeSpeech(container.localSpeech)
+    private var realtimeAvailable = false
+    private val pending = mutableMapOf<String, String>()
     private val _state = MutableStateFlow(
-        JarvisUiState(locked = container.sessions.hasSessionRecord()),
+        JarvisUiState(locked = container.sessions.hasSessionRecord(), voiceEnabled = container.voicePreferences.getBoolean("enabled", false)),
     )
     val state: StateFlow<JarvisUiState> = _state.asStateFlow()
 
@@ -84,6 +90,11 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 
     fun saveEndpoint() {
         viewModelScope.launch {
+            val parsed = HomeNodeEndpoint.parse(_state.value.endpointDraft)
+            if (parsed is EndpointValidation.Valid && parsed.endpoint != _state.value.endpoint) {
+                container.realtime.stop(); speech.stop(); container.sessions.reset()
+                _state.update { it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), conversationId = null) }
+            }
             when (val result = container.settings.save(_state.value.endpointDraft)) {
                 is EndpointValidation.Valid -> checkConnection(result.endpoint)
                 is EndpointValidation.Invalid -> _state.update { it.copy(error = result.message) }
@@ -197,6 +208,23 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     fun send(text: String) {
         val endpoint = _state.value.endpoint ?: return
         val current = _state.value
+        if (current.busy || text.isBlank() || !current.authenticated || current.locked) return
+        if (realtimeAvailable) {
+            val requestId = java.util.UUID.randomUUID().toString()
+            val optimisticId = "request:$requestId"
+            pending[requestId] = optimisticId
+            _state.update { it.copy(busy = true, messages = it.messages + ConversationMessage("user", text.trim(), at = Instant.now().toString(), id = optimisticId)) }
+            viewModelScope.launch {
+                try {
+                    val history = current.messages.map { com.hawkeynl.jarvis.network.ChatTurn(it.role, it.content) }
+                    val run = container.realtime.submit(endpoint, requestId, current.conversationId, history, text.trim())
+                    _state.update { if (current.conversationId == null && it.conversationId == null && it.messages.any { message -> message.id == optimisticId }) it.copy(conversationId = run.conversation_id) else it }
+                } catch (error: kotlinx.coroutines.CancellationException) { throw error } catch (_: Exception) {
+                    _state.update { it.copy(busy = false, error = "Verzending niet bevestigd. Verbind opnieuw om de opgeslagen geschiedenis te controleren; geen automatische hergeneratie.") }
+                }
+            }
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(busy = true, error = null) }
             val history = current.messages.map { message ->
@@ -229,6 +257,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun logout() {
+        container.realtime.stop(); speech.stop()
         val endpoint = _state.value.endpoint ?: return
         viewModelScope.launch {
             container.enrollment.logout(endpoint)
@@ -237,10 +266,12 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun lockForBackground() {
+        container.realtime.stop(); speech.stop()
         if (container.sessions.hasSessionRecord()) _state.update { it.copy(locked = true) }
     }
 
     fun resetDevice() {
+        container.realtime.stop(); speech.stop()
         viewModelScope.launch {
             container.enrollment.resetDevice(_state.value.endpoint)
             _state.update {
@@ -269,6 +300,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             else -> {
                 _state.update { it.copy(authenticated = true) }
                 loadConversations(endpoint)
+                startRealtime(endpoint)
                 checkForUpdate(endpoint)
             }
         }
@@ -343,6 +375,82 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun setVoiceEnabled(enabled: Boolean) {
+        speech.enabled = enabled
+        container.voicePreferences.edit().putBoolean("enabled", enabled).apply()
+        _state.update { it.copy(voiceEnabled = enabled) }
+    }
+
+    override fun onCleared() { container.realtime.stop(); speech.stop(); super.onCleared() }
+
+    private suspend fun startRealtime(endpoint: HomeNodeEndpoint) {
+        realtimeAvailable = container.realtime.available(endpoint)
+        if (!realtimeAvailable || _state.value.locked || !_state.value.authenticated) return
+        speech.enabled = _state.value.voiceEnabled
+        container.realtime.start(viewModelScope, endpoint) { event ->
+            if (_state.value.endpoint != endpoint || _state.value.locked || !_state.value.authenticated) return@start
+            speech.event(event)
+            if (event.type == "connection.ready") {
+                loadConversations(endpoint)
+                val selected = _state.value.conversationId
+                if (selected != null) {
+                    val snapshot = container.conversations.load(endpoint, selected)
+                    if (snapshot is ApiResult.Success) _state.update { if (it.conversationId == selected) it.copy(messages = snapshot.value.messages, busy = false) else it }
+                }
+            } else receiveRealtime(event)
+        }
+    }
+
+    private fun receiveRealtime(event: RealtimeEvent) {
+        val p = event.payload
+        when (event.type) {
+            "conversation.created", "conversation.updated" -> {
+                val id = p.id ?: return; val title = p.title ?: return; val at = p.updated_at ?: return
+                _state.update { it.copy(conversations = (it.conversations.filterNot { item -> item.id == id } + ConversationSummary(id, title, at)).sortedByDescending { item -> item.updated_at }) }
+            }
+            "conversation.deleted" -> _state.update {
+                if (it.conversationId == p.conversation_id) it.copy(conversationId = null, messages = emptyList(), conversations = it.conversations.filterNot { item -> item.id == p.conversation_id })
+                else it.copy(conversations = it.conversations.filterNot { item -> item.id == p.conversation_id })
+            }
+            "message.created" -> {
+                val message = p.message ?: return
+                val optimistic = pending[p.request_id]
+                _state.update { state ->
+                    val selected = state.conversationId ?: if (optimistic != null && state.messages.any { it.id == optimistic }) message.conversation_id else null
+                    if (selected != message.conversation_id) state else state.copy(conversationId = selected,
+                        messages = upsertRealtime(state.messages, ConversationMessage(message.role, message.content, message.model, message.created_at, message.id), optimistic))
+                }
+            }
+            "assistant.started" -> {
+                val run = p.run_id ?: return
+                _state.update { if (it.conversationId != p.conversation_id || it.messages.any { message -> message.id == "run:$run" }) it
+                    else it.copy(busy = true, messages = it.messages + ConversationMessage("assistant", "", at = "", id = "run:$run")) }
+            }
+            "assistant.delta" -> {
+                val run = p.run ?: return; val text = p.text ?: return
+                _state.update { state ->
+                    if (state.conversationId != run.conversation_id) state else {
+                        val id = "run:${run.run_id}"
+                        val rows = if (state.messages.any { it.id == id }) state.messages else state.messages + ConversationMessage("assistant", "", at = "", id = id)
+                        state.copy(busy = true, messages = rows.map {
+                            if (it.id == id && it.content.length + text.length <= 128 * 1024) it.copy(content = it.content + text) else it
+                        })
+                    }
+                }
+            }
+            "assistant.completed" -> {
+                val run = p.run ?: return; val message = p.message ?: return
+                pending.remove(run.request_id)
+                _state.update { state -> if (state.conversationId != message.conversation_id) state else state.copy(busy = false,
+                    messages = upsertRealtime(state.messages, ConversationMessage(message.role, message.content, message.model, message.created_at, message.id), "run:${run.run_id}")) }
+            }
+            "assistant.failed" -> {
+                val run = p.run ?: return; pending.remove(run.request_id)
+                _state.update { if (it.conversationId == run.conversation_id) it.copy(busy = false, error = "Antwoord onderbroken. Je bericht is opgeslagen.") else it }
+            }
+        }
+    }
+
     private suspend fun checkForUpdate(endpoint: HomeNodeEndpoint) {
         _state.update { it.copy(appUpdate = AndroidUpdateUiState.Checking) }
         when (val result = container.appUpdates.check(endpoint)) {
@@ -377,6 +485,15 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             is ApiResult.InvalidResponse -> state.copy(busy = false, error = result.message)
             is ApiResult.Success -> state
         }
+    }
+
+    private fun upsertRealtime(rows: List<ConversationMessage>, canonical: ConversationMessage, optimistic: String?): List<ConversationMessage> {
+        var inserted = false
+        val result = rows.mapNotNull {
+            if (it.id != canonical.id && (optimistic == null || it.id != optimistic)) it
+            else if (inserted) null else { inserted = true; canonical }
+        }
+        return if (inserted) result else result + canonical
     }
 
     companion object {

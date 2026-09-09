@@ -7,6 +7,9 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Local voice") {
+                    Toggle("Speak replies on this active device", isOn: $model.voiceEnabled)
+                }
                 Section("Home Node") {
                     TextField("https://jarvis.local", text: $model.endpointText)
                         .textInputAutocapitalization(.never)

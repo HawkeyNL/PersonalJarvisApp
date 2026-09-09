@@ -15,6 +15,17 @@ actor ChatService {
         return response.conversations
     }
 
+    func realtimeAvailable() async -> Bool {
+        guard let token = try? await requiredToken(), let capability: RealtimeCapability = try? await api.get("/v1/events/capability", token: token) else { return false }
+        return capability.protocol == 1 && capability.asynchronous_chat
+    }
+
+    func submit(requestId: UUID, text: String, conversationId: UUID?, history: [ConversationMessage]) async throws -> RealtimeRun {
+        let token = try await requiredToken()
+        let turns = history.suffix(19).map { ChatTurn(role: $0.isAssistant ? "assistant" : "user", content: $0.content) } + [ChatTurn(role: "user", content: text)]
+        return try await api.post("/v1/assistant/runs", body: AsyncChatRequest(request_id: requestId, conversation_id: conversationId, messages: turns), token: token)
+    }
+
     func conversation(id: UUID) async throws -> ConversationResponse {
         let token = try await requiredToken()
         return try await api.get("/v1/conversations/\(id.uuidString)", token: token)

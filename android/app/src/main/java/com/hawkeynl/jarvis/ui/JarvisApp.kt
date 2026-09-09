@@ -25,6 +25,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -301,6 +302,12 @@ private fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item { Text("Instellingen", style = MaterialTheme.typography.headlineSmall) }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Lokale spraak op actief apparaat")
+                Switch(checked = state.voiceEnabled, onCheckedChange = actions::setVoiceEnabled)
+            }
+        }
         item {
             OutlinedTextField(
                 value = state.endpointDraft,

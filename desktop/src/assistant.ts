@@ -7,7 +7,10 @@
 // thread into a new conversation. This module owns the *current* conversation's
 // messages; the tab list lives in `conversations.ts`.
 import { ref } from "vue";
-import { speak } from "./voice";
+import { canSpeak } from "./voice";
+import { invoke } from "@tauri-apps/api/core";
+import { startRealtime, type RealtimeEvent, type CanonicalMessage } from "./realtime";
+import { mergeCanonical, appendVisualDelta } from "./realtimeProjection";
 import { currentAuthStatus } from "./auth";
 import { postJsonAuth, getJsonAuth } from "./api";
 import {
@@ -25,11 +28,88 @@ export interface Msg {
   text: string;
   ts: string;
   spoken: boolean;
+  canonicalId?: string;
+  runId?: string;
+  requestId?: string;
 }
 
 export const messages = ref<Msg[]>([]);
 export const thinking = ref(false); // true while the brain is generating a reply
 let idc = 0;
+let realtimeAvailable=false;
+const pending=new Map<string,{conversation:string|null;messageId:number}>();
+let reconciling=false;
+let buffered:RealtimeEvent[]=[];
+
+function upsertCanonical(message:CanonicalMessage,requestId?:string,runId?:string) {
+  if(currentId.value!==message.conversation_id) return;
+  const row={id:idc++,role:(message.role==="assistant"?"jarvis":"user") as Role,text:message.content,ts:message.created_at.slice(11,16),spoken:false,canonicalId:message.id,runId,requestId};
+  messages.value=mergeCanonical(messages.value,row);
+}
+
+async function reconcileRealtime() {
+  if(reconciling) return;
+  reconciling=true;
+  try {
+    await loadConversations();
+    const selected=currentId.value;
+    if(selected) await reloadConversation(selected);
+    thinking.value=false;
+  } finally {
+    reconciling=false;
+    const events=buffered;buffered=[];
+    for(const event of events) receiveRealtime(event);
+  }
+}
+
+function receiveRealtime(event:RealtimeEvent) {
+  if(event.type==="connection.ready") {void reconcileRealtime().catch(()=>{});return;}
+  if(reconciling) {
+    if(buffered.length<256) buffered.push(event);
+    else {buffered=[];void invoke("realtime_stop").then(()=>invoke("realtime_start"));}
+    return;
+  }
+  switch(event.type) {
+    case "conversation.created":case "conversation.updated": {
+      const metadata=event.payload;
+      conversations.value=[metadata,...conversations.value.filter(c=>c.id!==metadata.id)].sort((a,b)=>b.updated_at.localeCompare(a.updated_at));
+      break;
+    }
+    case "conversation.deleted":
+      conversations.value=conversations.value.filter(c=>c.id!==event.payload.conversation_id);
+      if(currentId.value===event.payload.conversation_id) startNewConversation();
+      break;
+    case "message.created": {
+      const local=pending.get(event.payload.request_id);
+      if(local && local.conversation===null && currentId.value===null && messages.value.some(m=>m.id===local.messageId)) setCurrent(event.payload.message.conversation_id);
+      upsertCanonical(event.payload.message,event.payload.request_id);
+      break;
+    }
+    case "assistant.started":
+      if(currentId.value===event.payload.conversation_id) {
+        thinking.value=true;
+        if(!messages.value.some(m=>m.runId===event.payload.run_id)) messages.value.push({id:idc++,role:"jarvis",text:"",ts:stamp(),spoken:false,runId:event.payload.run_id});
+      }
+      break;
+    case "assistant.delta": {
+      if(currentId.value===event.payload.run.conversation_id) {
+        thinking.value=true;
+        if(!messages.value.some(m=>m.runId===event.payload.run.run_id)) messages.value.push({id:idc++,role:"jarvis",text:"",ts:stamp(),spoken:false,runId:event.payload.run.run_id});
+        messages.value=appendVisualDelta(messages.value,event.payload.run.run_id,event.payload.text);
+      }
+      break;
+    }
+    case "assistant.completed":
+      upsertCanonical(event.payload.message,undefined,event.payload.run.run_id);
+      pending.delete(event.payload.run.request_id);
+      if(currentId.value===event.payload.run.conversation_id) thinking.value=false;
+      break;
+    case "assistant.failed":
+      pending.delete(event.payload.run.request_id);
+      if(currentId.value===event.payload.run.conversation_id) {thinking.value=false;push("jarvis","Antwoord onderbroken. Je bericht is opgeslagen; er wordt niet automatisch opnieuw gegenereerd.");}
+      break;
+  }
+}
 
 function stamp(): string {
   const d = new Date();
@@ -70,19 +150,25 @@ async function ask(): Promise<ChatReply> {
 /** Load a conversation's history into the view and make it the current tab. */
 export async function openConversation(id: string): Promise<void> {
   setCurrent(id);
+  await reloadConversation(id);
+}
+
+async function reloadConversation(id:string):Promise<void> {
   const status = await currentAuthStatus();
   if (!status.authenticated) return;
   const res = await getJsonAuth<{
     id: string;
     title: string;
-    messages: { role: string; content: string; model: string | null; at: string }[];
+    messages: { id?:string; role: string; content: string; model: string | null; at: string }[];
   }>(`/v1/conversations/${id}`);
+  if(currentId.value!==id) return;
   messages.value = res.messages.map((m) => ({
     id: idc++,
     role: m.role === "assistant" ? "jarvis" : "user",
     text: m.content,
     ts: m.at?.slice(11) || stamp(), // "YYYY-MM-DD HH:MM" → "HH:MM"
     spoken: false,
+    canonicalId:m.id,
   }));
 }
 
@@ -102,6 +188,14 @@ export async function initChat(): Promise<void> {
     const target = exists ? saved! : (conversations.value[0]?.id ?? null);
     if (target) await openConversation(target);
     else startNewConversation();
+    try {
+      const capability=await getJsonAuth<{protocol:number;asynchronous_chat:boolean}>("/v1/events/capability");
+      realtimeAvailable=capability.protocol===1 && capability.asynchronous_chat;
+      if(realtimeAvailable) {
+        await startRealtime(receiveRealtime);
+        await invoke("realtime_voice_enabled",{enabled:canSpeak().allowed});
+      }
+    } catch {realtimeAvailable=false;}
   } catch {
     // Offline or not logged in yet — leave the chat empty; it'll load later.
   }
@@ -110,13 +204,30 @@ export async function initChat(): Promise<void> {
 /** Send a user message; Jarvis replies (and speaks if the policy allows). */
 export async function send(input: string): Promise<void> {
   const t = input.trim();
-  if (!t) return;
+  if (!t || thinking.value) return;
   push("user", t);
   thinking.value = true;
+  if(realtimeAvailable) {
+    const requestId=crypto.randomUUID();
+    const optimistic=messages.value[messages.value.length-1];
+    optimistic.requestId=requestId;
+    pending.set(requestId,{conversation:currentId.value,messageId:optimistic.id});
+    const request={request_id:requestId,conversation_id:currentId.value,messages:messages.value.slice(-MAX_TURNS).map(m=>({role:m.role==="jarvis"?"assistant":"user",content:m.text}))};
+    try {
+      const result=await postJsonAuth<{conversation_id:string;run_id:string}>("/v1/assistant/runs",request);
+      const local=pending.get(requestId);
+      if(local?.conversation===null && currentId.value===null && messages.value.some(m=>m.id===local.messageId)) setCurrent(result.conversation_id);
+      // Completion arrives by event; a lost socket is reconciled from REST.
+    } catch {
+      thinking.value=false;
+      push("jarvis","Verzending niet bevestigd. Niet automatisch opnieuw verstuurd; verbind opnieuw om de opgeslagen geschiedenis te controleren.");
+    }
+    return;
+  }
   const hadHistory = messages.value.length > 1;
   try {
     const res = await ask();
-    const spoken = speak(res.reply); // speaks only when canSpeak() allows
+    const spoken = false; // Legacy Core has no authoritative voice owner.
 
     // The server may have placed this turn in a different conversation: the very
     // first message (no tab yet) or a mid-chat topic split. Follow it.

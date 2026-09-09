@@ -16,9 +16,12 @@ class JarvisApplication : Application() {
 }
 
 class AppContainer(application: Application) {
+    val voicePreferences = application.getSharedPreferences("jarvis-local-voice", android.content.Context.MODE_PRIVATE)
+    val localSpeech = com.hawkeynl.jarvis.chat.AndroidSpeechOutput(application)
     private val secureValues = AndroidKeystoreSecureValueStore(application)
     val settings = EndpointSettingsRepository(application)
     val sessions = SessionRepository(secureValues)
+    val realtime = com.hawkeynl.jarvis.chat.RealtimeService(sessions)
     val identity = KeystoreBackedEd25519Identity(secureValues)
     val api = KtorJarvisApi()
     val enrollment = EnrollmentService(api, identity, sessions)

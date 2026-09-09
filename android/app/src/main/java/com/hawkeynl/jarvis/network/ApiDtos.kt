@@ -70,6 +70,7 @@ data class ConversationMessage(
     val content: String,
     val model: String? = null,
     val at: String,
+    val id: String? = null,
 )
 
 @Serializable

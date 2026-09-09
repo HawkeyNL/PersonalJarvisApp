@@ -69,6 +69,9 @@ actor AuthService {
     }
 
     func sessionToken() async throws -> String? { try await credentials.session()?.token }
+    // Origin changes must clear server-specific state before the new host is
+    // configured. No revocation request is sent to the replacement host.
+    func clearLocalBinding() async throws { try await credentials.reset(); try await identity.reset() }
 
     func requiresLocalUnlock() async throws -> Bool {
         let hasSession = try await credentials.session() != nil
