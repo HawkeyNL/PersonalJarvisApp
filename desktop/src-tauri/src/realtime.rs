@@ -2,7 +2,7 @@
 //! events, never credentials or websocket request headers.
 use futures_util::{SinkExt, StreamExt};
 use jarvis_client_core::{
-    realtime::{EventCursor, EventEnvelope, MAX_EVENT_BYTES},
+    realtime::{Event, EventCursor, EventEnvelope, MAX_EVENT_BYTES},
     speech::VoiceGate,
 };
 use std::{
@@ -111,8 +111,12 @@ pub(crate) fn realtime_voice_enabled(app: AppHandle, enabled: bool) {
     {
         return;
     }
-    // Restarting the native loop stops its local speech worker immediately.
-    stop(&app);
+    if let Ok(sender) = app.state::<Runtime>().speech_stop.lock() {
+        if let Some(sender) = sender.as_ref() {
+            let _ = sender.send(());
+        }
+    }
+    // Preference changes do not tear down the shared text connection.
     let _ = realtime_start(app);
 }
 
@@ -182,7 +186,6 @@ async fn run(
             return;
         };
         request.headers_mut().insert("authorization", header);
-        drop(token);
         let config = WebSocketConfig::default()
             .max_message_size(Some(MAX_EVENT_BYTES))
             .max_frame_size(Some(MAX_EVENT_BYTES));
@@ -192,9 +195,14 @@ async fn run(
         )
         .await;
         if let Ok(Ok((mut socket, _))) = connected {
+            let Ok(client) = super::native_http_client() else {
+                return;
+            };
+            let controls = super::voice_control::VoiceControl::new(client, origin, token);
             let started = tokio::time::Instant::now();
             let mut cursor = EventCursor::default();
             let mut gate = VoiceGate::new(device);
+            let mut owned_run = None;
             gate.set_enabled(voice.load(Ordering::SeqCst));
             let speech_app = app.clone();
             let speech = super::local_speech::Worker::new(move |status| {
@@ -207,7 +215,11 @@ async fn run(
                         if result.is_err() { return; }
                         // Clear the run buffer without muting the next prompt. Late
                         // deltas/completion cannot restart this stopped run.
-                        speech.action(gate.set_enabled(voice.load(Ordering::SeqCst)));
+                        let enabled = voice.load(Ordering::SeqCst);
+                        speech.action(gate.set_enabled(enabled));
+                        // Every policy change stops this run; enabling applies
+                        // to the next answer, never replays an earlier answer.
+                        if let Some(run) = owned_run { controls.release(run); }
                         continue;
                     }
                     incoming = tokio::time::timeout(Duration::from_secs(80), socket.next()) => incoming,
@@ -219,6 +231,13 @@ async fn run(
                         };
                         if !cursor.accept(&event) {
                             continue;
+                        }
+                        if let Event::VoiceOwnerChanged { device_id, run_id } = &event.event {
+                            owned_run = if *device_id == Some(device) {
+                                *run_id
+                            } else {
+                                None
+                            };
                         }
                         for action in gate.event(&event.event) {
                             speech.action(action);

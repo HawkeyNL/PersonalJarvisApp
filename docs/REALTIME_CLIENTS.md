@@ -50,8 +50,13 @@ Desktop/iOS playback reporting and device voice/rate selection remain open.
 Desktop's separate **Stop spraak** button clears the current native speech
 buffer and cancels queued playback without changing its saved enable preference,
 disconnecting realtime, or cancelling inference. Late deltas do not resume that
-utterance; a later assistant run may speak. Server-side desktop ownership release
-still requires completion. Native-engine failures are displayed using fixed
+utterance; a later assistant run may speak. Desktop stop/mute also releases the
+observed run through native authenticated HTTP. The one-pending-request queue
+uses the socket's immutable origin/session snapshot, disables redirects, and is
+cancelled on disconnect/logout/origin switch. Each release carries its run ID so
+a delayed request cannot clear a newer voice lease on the same device.
+Preference changes do not restart the text socket; enabling applies to the next
+answer, not a replay of the current answer. Native-engine failures use fixed
 status labels only; OS error text and spoken content are never status payloads.
 The offline engine interface is cancellation-safe and tested with fake engines:
 disconnect/stop drops playback, an unavailable engine does not retry every phrase,

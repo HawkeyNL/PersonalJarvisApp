@@ -16,6 +16,7 @@ mod app_updates;
 mod local_speech;
 mod local_speech_engine;
 mod realtime;
+mod voice_control;
 
 /// Legacy desktop auth file. It is read only to migrate existing installs.
 #[derive(Debug, Default, Serialize, Deserialize)]
