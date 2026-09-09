@@ -47,6 +47,16 @@ are discarded, and Core atomically checks the current owner/run before fanout.
 The report queue binds its credential snapshot to the enrolled origin and is
 cancelled on logout/origin switch; reports never contain speech text or tokens.
 Desktop/iOS playback reporting and device voice/rate selection remain open.
+Android release commands now carry a snapshot of the currently observed owned
+run ID, never an arbitrary device identity. A delayed release cannot clear a
+newer run. Android and iOS clear old voice ownership on `connection.ready`;
+reconnection requires a fresh ownership event before speech is allowed.
+Android's shared JVM regression tests exercise this directly. The corresponding
+iOS regression is present but still requires the macOS/Xcode CI runner.
+iOS native completion/cancellation callbacks now remove individual utterance
+identities from a lock-protected 32-entry registry. A late callback after stop
+cannot decrement the newer queue, and duplicate callbacks cannot free extra
+slots. The XCTest regression is added; it has not run on this Linux host.
 Desktop's separate **Stop spraak** button clears the current native speech
 buffer and cancels queued playback without changing its saved enable preference,
 disconnecting realtime, or cancelling inference. Late deltas do not resume that

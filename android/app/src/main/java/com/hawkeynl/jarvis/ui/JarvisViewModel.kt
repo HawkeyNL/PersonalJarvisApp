@@ -380,12 +380,12 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         speech.enabled = enabled
         container.voicePreferences.edit().putBoolean("enabled", enabled).apply()
         _state.update { it.copy(voiceEnabled = enabled) }
-        if (!enabled) container.realtime.releaseVoice()
+        if (!enabled) speech.ownedRun()?.let(container.realtime::releaseVoice)
     }
 
     fun stopSpeaking() {
         speech.stop()
-        container.realtime.releaseVoice()
+        speech.ownedRun()?.let(container.realtime::releaseVoice)
         _state.update { it.copy(voiceStatus = "Lokale spraak gestopt") }
         // Keep voiceEnabled unchanged for the next response. No chat request,
         // history mutation or generation cancellation is performed here.

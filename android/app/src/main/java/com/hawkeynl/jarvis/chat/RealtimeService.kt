@@ -35,7 +35,7 @@ import kotlin.random.Random
 private fun HomeNodeEndpoint.url(path: String): String = "$baseUrl$path"
 private sealed interface VoiceCommand {
     data class Report(val payload: PlaybackReport) : VoiceCommand
-    data object Release : VoiceCommand
+    data class Release(val payload: VoiceRelease) : VoiceCommand
 }
 
 // Native bearer transport; the endpoint comes only from validated runtime
@@ -61,7 +61,7 @@ class RealtimeService(private val sessions: SessionRepository) {
         // contain speech text. Reporting failure cannot fail canonical chat.
         reports?.trySend(VoiceCommand.Report(report))
     }
-    fun releaseVoice() { reports?.trySend(VoiceCommand.Release) }
+    fun releaseVoice(runId: String) { reports?.trySend(VoiceCommand.Release(VoiceRelease(runId))) }
     suspend fun available(endpoint: HomeNodeEndpoint): Boolean = try {
         val token = sessions.session().token
         if (token == null) false else {
@@ -91,12 +91,14 @@ class RealtimeService(private val sessions: SessionRepository) {
                 try {
                     val path = when (command) {
                         is VoiceCommand.Report -> "/v1/voice/playback"
-                        VoiceCommand.Release -> "/v1/voice/release"
+                        is VoiceCommand.Release -> "/v1/voice/release"
                     }
                     client.post(endpoint.url(path)) {
                         bearerAuth(token); timeout { requestTimeoutMillis = 5_000 }
-                        if (command is VoiceCommand.Report) {
-                            contentType(ContentType.Application.Json); setBody(command.payload)
+                        contentType(ContentType.Application.Json)
+                        when (command) {
+                            is VoiceCommand.Report -> setBody(command.payload)
+                            is VoiceCommand.Release -> setBody(command.payload)
                         }
                     }
                 } catch (error: CancellationException) { throw error } catch (_: Exception) {

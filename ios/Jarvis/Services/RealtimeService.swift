@@ -98,21 +98,45 @@ final class RealtimeService {
 
 @MainActor
 protocol SpeechOutput: AnyObject { func speak(_ text: String); func stop() }
+
+/// All mutable state is private and accessed under one lock. No speech text
+/// crosses this callback boundary; old callbacks remove only their own identity.
+final class SpeechQueueRegistry: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending = Set<ObjectIdentifier>()
+    func insert(_ utterance: AnyObject) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let id = ObjectIdentifier(utterance)
+        guard pending.count < 32, !pending.contains(id) else { return false }
+        pending.insert(id); return true
+    }
+    func remove(_ utterance: AnyObject) {
+        lock.lock(); defer { lock.unlock() }
+        pending.remove(ObjectIdentifier(utterance))
+    }
+    func clear() {
+        lock.lock(); defer { lock.unlock() }
+        pending.removeAll()
+    }
+}
+
 @MainActor
 final class NativeSpeechOutput: NSObject, SpeechOutput, AVSpeechSynthesizerDelegate {
     private let engine = AVSpeechSynthesizer()
-    private var queued = 0
+    nonisolated private let queued = SpeechQueueRegistry()
     override init() { super.init(); engine.delegate = self }
     func speak(_ text: String) {
-        guard queued < 32 else { stop(); return }
         let utterance = AVSpeechUtterance(string: text)
+        guard queued.insert(utterance) else { stop(); return }
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
-        queued += 1
         engine.speak(utterance)
     }
-    func stop() { engine.stopSpeaking(at: .immediate); queued = 0 }
+    func stop() { queued.clear(); engine.stopSpeaking(at: .immediate) }
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        Task { @MainActor [weak self] in self?.queued = max(0, (self?.queued ?? 0) - 1) }
+        queued.remove(utterance)
+    }
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        queued.remove(utterance)
     }
 }
 
@@ -128,7 +152,7 @@ final class RealtimeSpeech {
     convenience init() { self.init(output: NativeSpeechOutput()) }
     func stop() { output.stop(); run = nil; received = ""; pending = ""; fence = nil; lineStart = true }
     func receive(_ event: RealtimeEvent) {
-        if event.type == "connection.ready" { device = event.payload.device_id; stop(); return }
+        if event.type == "connection.ready" { device = event.payload.device_id; owner = nil; ownerRun = nil; stop(); return }
         if event.type == "voice.owner_changed" { owner = event.payload.device_id; ownerRun = event.payload.run_id; stop(); return }
         guard enabled, owner == device, device != nil else { return }
         if event.type == "assistant.started", event.payload.run_id == ownerRun {

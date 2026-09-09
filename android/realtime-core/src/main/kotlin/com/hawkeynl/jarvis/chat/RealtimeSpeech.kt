@@ -18,10 +18,11 @@ class RealtimeSpeech(private val output: SpeechOutput) {
     private var pending = ""
     private var fence: String? = null
     private var lineStart = true
+    fun ownedRun(): String? = ownerRun.takeIf { device != null && owner == device }
     fun stop() { output.stop(); run = null; received = ""; pending = ""; fence = null; lineStart = true }
     fun event(event: RealtimeEvent) {
         val p = event.payload
-        if (event.type == "connection.ready") { device = p.device_id; stop(); return }
+        if (event.type == "connection.ready") { device = p.device_id; owner = null; ownerRun = null; stop(); return }
         if (event.type == "voice.owner_changed") { owner = p.device_id; ownerRun = p.run_id; stop(); return }
         if (!enabled || device == null || owner != device) return
         if (event.type == "assistant.started" && p.run_id != null && p.run_id == ownerRun) {

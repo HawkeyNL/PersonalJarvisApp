@@ -2,6 +2,21 @@ import XCTest
 @testable import Jarvis
 
 final class ClientDTOTests: XCTestCase {
+    func testStoppedUtteranceCallbackCannotFreeANewerQueueSlot() {
+        let queue = SpeechQueueRegistry()
+        let old = NSObject()
+        XCTAssertTrue(queue.insert(old))
+        queue.clear()
+        let current = (0..<32).map { _ in NSObject() }
+        for utterance in current { XCTAssertTrue(queue.insert(utterance)) }
+        queue.remove(old)
+        XCTAssertFalse(queue.insert(NSObject()))
+        queue.remove(current[0])
+        queue.remove(current[0])
+        let next = NSObject()
+        XCTAssertTrue(queue.insert(next))
+        XCTAssertFalse(queue.insert(NSObject()))
+    }
     @MainActor
     func testFragmentedFencesNeverSpeakEmbeddedCode() throws {
         final class FakeSpeech: SpeechOutput {
@@ -66,6 +81,12 @@ final class ClientDTOTests: XCTestCase {
         voiceA.receive(events.last!)
         XCTAssertEqual(outA.spoken,["One answer.","Next sentence."])
         XCTAssertTrue(outB.spoken.isEmpty)
+        // A new connection must not reuse an old voice lease. Even a late
+        // started/delta event cannot speak until ownership is explicitly sent.
+        voiceA.receive(try event("connection.ready", ["device_id":a]))
+        voiceA.receive(try event("assistant.started", identity))
+        voiceA.receive(try event("assistant.delta", ["run":identity,"text":"Stale speech. "]))
+        XCTAssertEqual(outA.spoken,["One answer.","Next sentence."])
     }
     func testEnrollmentUsesBackendFieldNames() throws {
         let encoded = try JSONEncoder().encode(

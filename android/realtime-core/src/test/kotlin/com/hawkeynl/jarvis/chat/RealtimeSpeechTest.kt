@@ -6,6 +6,22 @@ import org.junit.Test
 
 class RealtimeSpeechTest {
     private companion object { val wireJson = Json { ignoreUnknownKeys = true } }
+    @Test fun releaseCapturesOnlyOwnRunAndReconnectForgetsOldOwnership() {
+        val speech = RealtimeSpeech(Fake())
+        fun event(type: String, payload: RealtimePayload) = RealtimeEvent(1, "epoch", 1, "event", type, payload)
+        val run = "00000000-0000-0000-0000-000000000001"
+        speech.event(event("connection.ready", RealtimePayload(device_id = "a")))
+        speech.event(event("voice.owner_changed", RealtimePayload(device_id = "b", run_id = run)))
+        assertNull(speech.ownedRun())
+        speech.event(event("voice.owner_changed", RealtimePayload(device_id = "a", run_id = run)))
+        speech.stop()
+        val release = VoiceRelease(requireNotNull(speech.ownedRun()))
+        assertEquals("{\"run_id\":\"$run\"}", wireJson.encodeToString(release))
+        speech.event(event("voice.owner_changed", RealtimePayload(device_id = "a", run_id = "new-run")))
+        assertEquals(run, release.run_id)
+        speech.event(event("connection.ready", RealtimePayload(device_id = "a")))
+        assertNull(speech.ownedRun())
+    }
     @Test fun realSpeechGateDrivesOnePlaybackLifecycleAndStopKeepsPreference() {
         val reports = mutableListOf<PlaybackReport>()
         val spoken = mutableListOf<String>()

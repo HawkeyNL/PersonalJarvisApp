@@ -10,6 +10,7 @@ import java.util.UUID
     @SerialName("failed") FAILED,
 }
 @Serializable data class PlaybackReport(val run_id: String, val state: PlaybackState)
+@Serializable data class VoiceRelease(val run_id: String)
 
 /** Correlates asynchronous OS utterance callbacks, never text or credentials.
  * emit must be nonblocking (the native transport uses a bounded trySend).
