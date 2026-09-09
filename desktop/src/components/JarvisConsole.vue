@@ -17,6 +17,7 @@ import {
   voiceEnabled,
   headset,
   setVoiceEnabled,
+  stopSpeaking,
   setHeadset,
   canSpeak,
   refreshRoute,
@@ -221,6 +222,7 @@ onMounted(async () => {
           >
             <NavIcon :name="voiceEnabled ? 'sound-on' : 'sound-off'" />
           </button>
+          <button v-if="voiceEnabled" type="button" title="Stop huidige spraak" @click="stopSpeaking">Stop spraak</button>
           <button
             type="button"
             class="ic"

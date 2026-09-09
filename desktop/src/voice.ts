@@ -78,7 +78,6 @@ function syncNativeVoice():void {
 }
 
 export function stopSpeaking(): void {
-  // Keep the visible preference and native policy consistent. Muting stops
-  // only presentation; it never cancels a shared inference or deletes text.
-  setVoiceEnabled(false);
+  // Stop this speech run, not the saved preference or shared inference.
+  void invoke("realtime_stop_speech").catch(()=>{});
 }

@@ -47,6 +47,11 @@ are discarded, and Core atomically checks the current owner/run before fanout.
 The report queue binds its credential snapshot to the enrolled origin and is
 cancelled on logout/origin switch; reports never contain speech text or tokens.
 Desktop/iOS playback reporting and device voice/rate selection remain open.
+Desktop's separate **Stop spraak** button clears the current native speech
+buffer and cancels queued playback without changing its saved enable preference,
+disconnecting realtime, or cancelling inference. Late deltas do not resume that
+utterance; a later assistant run may speak. Server-side desktop ownership release
+and visible native-engine failure reporting still require completion.
 
 ## Validation and remaining acceptance
 
