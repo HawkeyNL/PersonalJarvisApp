@@ -39,9 +39,14 @@ the unsaid suffix at completion. It never invokes an LLM or a cloud TTS API.
   leaves text chat available and does not download a model or use cloud speech.
 - Windows desktop: text/realtime supported; local speech backend not implemented.
 
-Disabling speech stops presentation only, not the shared server run. Device
-voice/rate selection UI and native playback-status reporting are not yet wired;
-the server's typed claim/release/playback contract provides their boundary.
+Disabling speech stops presentation only, not the shared server run. Android
+also has a Stop speech action that preserves the preference for future answers.
+Its OS callbacks report one started/stopped/failed lifecycle per run through a
+16-item native queue, using only the run ID and fixed status. Stale callbacks
+are discarded, and Core atomically checks the current owner/run before fanout.
+The report queue binds its credential snapshot to the enrolled origin and is
+cancelled on logout/origin switch; reports never contain speech text or tokens.
+Desktop/iOS playback reporting and device voice/rate selection remain open.
 
 ## Validation and remaining acceptance
 

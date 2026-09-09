@@ -6,6 +6,35 @@ import org.junit.Test
 
 class RealtimeSpeechTest {
     private companion object { val wireJson = Json { ignoreUnknownKeys = true } }
+    @Test fun realSpeechGateDrivesOnePlaybackLifecycleAndStopKeepsPreference() {
+        val reports = mutableListOf<PlaybackReport>()
+        val spoken = mutableListOf<String>()
+        val tracker = PlaybackTracker { reports.add(it) }
+        val output = object : SpeechOutput {
+            override fun begin(runId: String) = tracker.begin(runId)
+            override fun speak(text: String) {
+                val utterance = tracker.enqueue() ?: return
+                tracker.started(utterance); spoken.add(text); tracker.finished(utterance)
+            }
+            override fun finish(runId: String) = tracker.seal(runId)
+            override fun stop() = tracker.cancel()
+        }
+        val speech = RealtimeSpeech(output).also { it.enabled = true }
+        fun event(type: String, payload: RealtimePayload) = RealtimeEvent(1, "epoch", 1, "event", type, payload)
+        speech.event(event("connection.ready", RealtimePayload(device_id = "a")))
+        val run = RealtimeRun("one", "request", "conversation")
+        speech.event(event("voice.owner_changed", RealtimePayload(device_id = "a", run_id = run.run_id)))
+        speech.event(event("assistant.started", RealtimePayload(run_id = run.run_id)))
+        speech.event(event("assistant.delta", RealtimePayload(run = run, text = "First phrase. Next")))
+        val final = event("assistant.completed", RealtimePayload(run = run, message = RealtimeMessage("message", "conversation", "assistant", "First phrase. Next phrase.", created_at = "2026-01-01T00:00:00Z")))
+        speech.event(final); speech.event(final)
+        assertEquals(listOf("First phrase.", "Next phrase."), spoken)
+        assertEquals(listOf(PlaybackReport("one", PlaybackState.STARTED), PlaybackReport("one", PlaybackState.STOPPED)), reports)
+        speech.stop()
+        assertTrue(speech.enabled)
+        speech.event(event("assistant.delta", RealtimePayload(run = run, text = "Must not speak. ")))
+        assertEquals(2, spoken.size)
+    }
     @Test fun fragmentedFencesNeverSpeakEmbeddedCode() {
         val samples = listOf(
             "Before.\n   ```rust\nlet s = \"```\";\nnot speech\n   ```\nAfter.",

@@ -43,6 +43,7 @@ sealed interface AndroidUpdateUiState {
 
 data class JarvisUiState(
     val voiceEnabled: Boolean = false,
+    val voiceStatus: String? = null,
     val selectedTab: AppTab = AppTab.CHAT,
     val endpoint: HomeNodeEndpoint? = null,
     val endpointDraft: String = "",
@@ -379,6 +380,15 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         speech.enabled = enabled
         container.voicePreferences.edit().putBoolean("enabled", enabled).apply()
         _state.update { it.copy(voiceEnabled = enabled) }
+        if (!enabled) container.realtime.releaseVoice()
+    }
+
+    fun stopSpeaking() {
+        speech.stop()
+        container.realtime.releaseVoice()
+        _state.update { it.copy(voiceStatus = "Lokale spraak gestopt") }
+        // Keep voiceEnabled unchanged for the next response. No chat request,
+        // history mutation or generation cancellation is performed here.
     }
 
     override fun onCleared() { container.realtime.stop(); speech.stop(); super.onCleared() }
@@ -387,7 +397,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         realtimeAvailable = container.realtime.available(endpoint)
         if (!realtimeAvailable || _state.value.locked || !_state.value.authenticated) return
         speech.enabled = _state.value.voiceEnabled
-        container.realtime.start(viewModelScope, endpoint) { event ->
+        container.realtime.start(viewModelScope, endpoint, disconnected = { speech.stop() }) { event ->
             if (_state.value.endpoint != endpoint || _state.value.locked || !_state.value.authenticated) return@start
             speech.event(event)
             if (event.type == "connection.ready") {
@@ -404,6 +414,10 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     private fun receiveRealtime(event: RealtimeEvent) {
         val p = event.payload
         when (event.type) {
+            "voice.started" -> _state.update { it.copy(voiceStatus = "Actieve apparaat spreekt") }
+            "voice.stopped" -> _state.update { it.copy(voiceStatus = "Spraak gestopt") }
+            "voice.failed" -> _state.update { it.copy(voiceStatus = "Lokale spraak niet beschikbaar op actieve apparaat") }
+            "voice.owner_changed" -> _state.update { it.copy(voiceStatus = null) }
             "conversation.created", "conversation.updated" -> {
                 val id = p.id ?: return; val title = p.title ?: return; val at = p.updated_at ?: return
                 _state.update { it.copy(conversations = (it.conversations.filterNot { item -> item.id == id } + ConversationSummary(id, title, at)).sortedByDescending { item -> item.updated_at }) }

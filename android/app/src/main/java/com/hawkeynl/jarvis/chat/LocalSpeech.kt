@@ -3,29 +3,34 @@ package com.hawkeynl.jarvis.chat
 import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicBoolean
 
 class AndroidSpeechOutput(context: Context) : SpeechOutput {
-    private var ready = false
-    private val queued = AtomicInteger(0)
-    private val engine = TextToSpeech(context.applicationContext) { status -> ready = status == TextToSpeech.SUCCESS }
+    @Volatile var onPlayback: (PlaybackReport) -> Unit = {}
+    private val playback = PlaybackTracker { onPlayback(it) }
+    private val ready = AtomicBoolean(false)
+    private val engine = TextToSpeech(context.applicationContext) { status -> ready.set(status == TextToSpeech.SUCCESS) }
     init {
         engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(id: String?) = Unit
-            override fun onDone(id: String?) { queued.updateAndGet { (it - 1).coerceAtLeast(0) } }
+            override fun onStart(id: String?) { playback.started(id) }
+            override fun onDone(id: String?) { playback.finished(id) }
             @Deprecated("Required platform callback")
-            override fun onError(id: String?) { queued.updateAndGet { (it - 1).coerceAtLeast(0) } }
+            override fun onError(id: String?) { if (playback.failed(id)) engine.stop() }
         })
     }
+    override fun begin(runId: String) { playback.begin(runId) }
+    override fun finish(runId: String) { playback.seal(runId) }
     override fun speak(text: String) {
-        if (!ready) return
+        if (!ready.get()) { playback.unavailable(); return }
         // Never select a network-only voice or download voice data implicitly.
         val voice = engine.voice?.takeIf { !it.isNetworkConnectionRequired }
-            ?: engine.voices?.firstOrNull { !it.isNetworkConnectionRequired } ?: return
-        engine.setVoice(voice)
-        if (queued.incrementAndGet() > 32) { stop(); return }
-        if (engine.speak(text, TextToSpeech.QUEUE_ADD, null, java.util.UUID.randomUUID().toString()) == TextToSpeech.ERROR) queued.decrementAndGet()
+            ?: engine.voices?.firstOrNull { !it.isNetworkConnectionRequired }
+        if (voice == null || engine.setVoice(voice) == TextToSpeech.ERROR) { playback.unavailable(); engine.stop(); return }
+        val utterance = playback.enqueue() ?: run { engine.stop(); return }
+        if (engine.speak(text, TextToSpeech.QUEUE_ADD, null, utterance) == TextToSpeech.ERROR) {
+            playback.failed(utterance); engine.stop()
+        }
     }
-    override fun stop() { engine.stop(); queued.set(0) }
+    override fun stop() { playback.cancel(); engine.stop() }
     fun close() { stop(); engine.shutdown() }
 }

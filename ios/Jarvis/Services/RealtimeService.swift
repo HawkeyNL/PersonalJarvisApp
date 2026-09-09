@@ -51,6 +51,10 @@ final class RealtimeService {
                 guard let self else { return }
                 do {
                     guard let token = try await auth.sessionToken() else { return }
+                    // The auth actor may yield while the owner changes origin
+                    // or logs out. Never construct a handshake for a cancelled
+                    // connection generation after that suspension point.
+                    guard !Task.isCancelled, self.generation == current else { return }
                     var components = URLComponents(url: origin, resolvingAgainstBaseURL: false)!
                     guard components.scheme == "https" else { return }
                     components.scheme = "wss"; components.path = "/v1/events"; components.query = nil

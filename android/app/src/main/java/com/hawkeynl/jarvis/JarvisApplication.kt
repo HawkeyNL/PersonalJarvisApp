@@ -22,6 +22,7 @@ class AppContainer(application: Application) {
     val settings = EndpointSettingsRepository(application)
     val sessions = SessionRepository(secureValues)
     val realtime = com.hawkeynl.jarvis.chat.RealtimeService(sessions)
+    init { localSpeech.onPlayback = realtime::reportPlayback }
     val identity = KeystoreBackedEd25519Identity(secureValues)
     val api = KtorJarvisApi()
     val enrollment = EnrollmentService(api, identity, sessions)

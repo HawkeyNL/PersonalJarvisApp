@@ -1,6 +1,11 @@
 package com.hawkeynl.jarvis.chat
 
-interface SpeechOutput { fun speak(text: String); fun stop() }
+interface SpeechOutput {
+    fun begin(runId: String) {}
+    fun speak(text: String)
+    fun finish(runId: String) {}
+    fun stop()
+}
 
 class RealtimeSpeech(private val output: SpeechOutput) {
     var enabled = false
@@ -19,7 +24,9 @@ class RealtimeSpeech(private val output: SpeechOutput) {
         if (event.type == "connection.ready") { device = p.device_id; stop(); return }
         if (event.type == "voice.owner_changed") { owner = p.device_id; ownerRun = p.run_id; stop(); return }
         if (!enabled || device == null || owner != device) return
-        if (event.type == "assistant.started" && p.run_id == ownerRun) { stop(); run = p.run_id; return }
+        if (event.type == "assistant.started" && p.run_id != null && p.run_id == ownerRun) {
+            stop(); run = p.run_id; output.begin(p.run_id); return
+        }
         if (p.run?.run_id == null || p.run.run_id != run) return
         when (event.type) {
             "assistant.failed" -> stop()
@@ -31,7 +38,8 @@ class RealtimeSpeech(private val output: SpeechOutput) {
             "assistant.completed" -> {
                 val canonical = p.message?.content ?: return
                 if (!canonical.startsWith(received) || canonical.length > 128 * 1024) { stop(); return }
-                pending += canonical.removePrefix(received); flush(true); run = null
+                pending += canonical.removePrefix(received); flush(true)
+                output.finish(p.run.run_id); run = null
             }
         }
     }

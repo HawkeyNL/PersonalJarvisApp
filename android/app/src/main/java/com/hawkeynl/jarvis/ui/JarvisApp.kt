@@ -219,6 +219,12 @@ private fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel) {
             modifier = Modifier.padding(16.dp),
             style = MaterialTheme.typography.titleLarge,
         )
+        if (state.voiceEnabled) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(state.voiceStatus ?: "Lokale spraak ingeschakeld", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(onClick = actions::stopSpeaking) { Text("Stop spraak") }
+            }
+        }
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),

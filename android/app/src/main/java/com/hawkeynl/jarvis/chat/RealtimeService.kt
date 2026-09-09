@@ -8,6 +8,7 @@ import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.timeout
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.request.bearerAuth
@@ -22,6 +23,7 @@ import io.ktor.websocket.readText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -31,6 +33,10 @@ import kotlin.random.Random
 @Serializable private data class Capability(val protocol: Int, val asynchronous_chat: Boolean)
 @Serializable private data class Submit(val request_id: String, val conversation_id: String?, val messages: List<ChatTurn>)
 private fun HomeNodeEndpoint.url(path: String): String = "$baseUrl$path"
+private sealed interface VoiceCommand {
+    data class Report(val payload: PlaybackReport) : VoiceCommand
+    data object Release : VoiceCommand
+}
 
 // Native bearer transport; the endpoint comes only from validated runtime
 // configuration. The shared authoritative contract is jarvis-client-core.
@@ -43,7 +49,19 @@ class RealtimeService(private val sessions: SessionRepository) {
         install(WebSockets) { maxFrameSize = 256L * 1024 }
     }
     private var worker: Job? = null
-    fun stop() { worker?.cancel(); worker = null }
+    private var reporting: Job? = null
+    @Volatile private var reports: Channel<VoiceCommand>? = null
+    fun stop() {
+        worker?.cancel(); worker = null
+        reporting?.cancel(); reporting = null
+        reports?.close(); reports = null
+    }
+    fun reportPlayback(report: PlaybackReport) {
+        // OS callbacks never wait for network, accumulate unbounded work, or
+        // contain speech text. Reporting failure cannot fail canonical chat.
+        reports?.trySend(VoiceCommand.Report(report))
+    }
+    fun releaseVoice() { reports?.trySend(VoiceCommand.Release) }
     suspend fun available(endpoint: HomeNodeEndpoint): Boolean = try {
         val token = sessions.session().token
         if (token == null) false else {
@@ -60,8 +78,32 @@ class RealtimeService(private val sessions: SessionRepository) {
         }.body()
     }
 
-    fun start(scope: CoroutineScope, endpoint: HomeNodeEndpoint, receive: suspend (RealtimeEvent) -> Unit) {
+    fun start(scope: CoroutineScope, endpoint: HomeNodeEndpoint, disconnected: () -> Unit = {}, receive: suspend (RealtimeEvent) -> Unit) {
         stop()
+        val queue = Channel<VoiceCommand>(16)
+        val reportingToken = sessions.session().token
+        reports = queue
+        reporting = scope.launch {
+            // Bind this transport's credential snapshot to this origin. A
+            // future origin/session change stops the task, never retargets it.
+            val token = reportingToken ?: return@launch
+            for (command in queue) {
+                try {
+                    val path = when (command) {
+                        is VoiceCommand.Report -> "/v1/voice/playback"
+                        VoiceCommand.Release -> "/v1/voice/release"
+                    }
+                    client.post(endpoint.url(path)) {
+                        bearerAuth(token); timeout { requestTimeoutMillis = 5_000 }
+                        if (command is VoiceCommand.Report) {
+                            contentType(ContentType.Application.Json); setBody(command.payload)
+                        }
+                    }
+                } catch (error: CancellationException) { throw error } catch (_: Exception) {
+                    // Best effort, no retry storm and no response-body logging.
+                }
+            }
+        }
         worker = scope.launch {
             var retry = 0
             while (true) {
@@ -82,6 +124,7 @@ class RealtimeService(private val sessions: SessionRepository) {
                 } catch (error: CancellationException) { throw error } catch (_: Exception) {
                     // No response bodies, headers, bearer or message content in logs.
                 }
+                disconnected()
                 if ((System.nanoTime() - started) > 30_000_000_000L) retry = 0
                 retry = (retry + 1).coerceAtMost(6)
                 delay((500L shl retry).coerceAtMost(30_000) + Random.nextLong(750))
