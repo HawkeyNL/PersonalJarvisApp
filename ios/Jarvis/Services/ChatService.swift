@@ -2,33 +2,43 @@ import Foundation
 
 actor ChatService {
     private let api: JarvisAPIClient
-    private let auth: AuthService
+    private let loadToken: @Sendable () async throws -> String?
 
     init(api: JarvisAPIClient, auth: AuthService) {
         self.api = api
-        self.auth = auth
+        self.loadToken = { try await auth.sessionToken() }
+    }
+
+    // Native test seam: no token loader is exposed through the application UI.
+    init(api: JarvisAPIClient, tokenLoader: @escaping @Sendable () async throws -> String?) {
+        self.api = api
+        self.loadToken = tokenLoader
     }
 
     func conversations() async throws -> [ConversationSummary] {
+        let binding = await api.binding()
         let token = try await requiredToken()
-        let response: ConversationListResponse = try await api.get("/v1/conversations", token: token)
+        let response: ConversationListResponse = try await api.get("/v1/conversations", token: token, expectedBinding: binding)
         return response.conversations
     }
 
     func realtimeAvailable() async -> Bool {
-        guard let token = try? await requiredToken(), let capability: RealtimeCapability = try? await api.get("/v1/events/capability", token: token) else { return false }
+        let binding = await api.binding()
+        guard let token = try? await requiredToken(), let capability: RealtimeCapability = try? await api.get("/v1/events/capability", token: token, expectedBinding: binding) else { return false }
         return capability.protocol == 1 && capability.asynchronous_chat
     }
 
     func submit(requestId: UUID, text: String, conversationId: UUID?, history: [ConversationMessage]) async throws -> RealtimeRun {
+        let binding = await api.binding()
         let token = try await requiredToken()
         let turns = history.suffix(19).map { ChatTurn(role: $0.isAssistant ? "assistant" : "user", content: $0.content) } + [ChatTurn(role: "user", content: text)]
-        return try await api.post("/v1/assistant/runs", body: AsyncChatRequest(request_id: requestId, conversation_id: conversationId, messages: turns), token: token)
+        return try await api.post("/v1/assistant/runs", body: AsyncChatRequest(request_id: requestId, conversation_id: conversationId, messages: turns), token: token, expectedBinding: binding)
     }
 
     func conversation(id: UUID) async throws -> ConversationResponse {
+        let binding = await api.binding()
         let token = try await requiredToken()
-        return try await api.get("/v1/conversations/\(id.uuidString)", token: token)
+        return try await api.get("/v1/conversations/\(id.uuidString)", token: token, expectedBinding: binding)
     }
 
     func releaseVoice(run: UUID, origin: URL) async throws {
@@ -61,6 +71,7 @@ actor ChatService {
     }
 
     func send(text: String, conversationId: UUID?, history: [ConversationMessage]) async throws -> ChatResponse {
+        let binding = await api.binding()
         let token = try await requiredToken()
         let turns = history.suffix(19).map {
             ChatTurn(role: $0.isAssistant ? "assistant" : "user", content: $0.content)
@@ -68,12 +79,12 @@ actor ChatService {
         return try await api.post(
             "/v1/assistant/chat",
             body: ChatRequest(messages: turns, conversationId: conversationId),
-            token: token
+            token: token, expectedBinding: binding
         )
     }
 
     private func requiredToken() async throws -> String {
-        guard let token = try await auth.sessionToken() else { throw JarvisAPIError.unauthorized }
+        guard let token = try await loadToken() else { throw JarvisAPIError.unauthorized }
         return token
     }
 }

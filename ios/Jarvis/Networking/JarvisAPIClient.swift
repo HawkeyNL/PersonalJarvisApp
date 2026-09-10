@@ -123,6 +123,8 @@ actor JarvisAPIClient {
 
         do {
             let (data, rawResponse) = try await session.data(for: request)
+            try Task.checkCancellation()
+            if let expectedBinding, expectedBinding != bindingID { throw JarvisAPIError.invalidConfiguration }
             guard let http = rawResponse as? HTTPURLResponse else { throw JarvisAPIError.invalidResponse }
             guard (200..<300).contains(http.statusCode) else {
                 if http.statusCode == 401 { throw JarvisAPIError.unauthorized }
@@ -135,6 +137,8 @@ actor JarvisAPIClient {
             return try decoder.decode(Response.self, from: data)
         } catch let error as JarvisAPIError {
             throw error
+        } catch is CancellationError {
+            throw CancellationError()
         } catch let error as URLError where error.code == .timedOut {
             throw JarvisAPIError.timedOut
         } catch is DecodingError {

@@ -9,6 +9,35 @@ private final class NoNetworkProtocol: URLProtocol {
 }
 
 final class ClientDTOTests: XCTestCase {
+    func testEveryChatPathRefusesOriginSwitchDuringCredentialLoad() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [NoNetworkProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let origin = URL(string: "https://jarvis.example.com")!
+        let api = JarvisAPIClient(baseURL: origin, session: session)
+        let chat = ChatService(api: api, tokenLoader: {
+            // Force actor reentrancy exactly between binding capture and use.
+            await api.configure(baseURL: URL(string: "https://home.example.org")!)
+            await api.configure(baseURL: origin)
+            return "fixture-session"
+        })
+        for operation in 0..<4 {
+            do {
+                switch operation {
+                case 0: _ = try await chat.conversations()
+                case 1: _ = try await chat.conversation(id: UUID())
+                case 2: _ = try await chat.submit(requestId: UUID(), text: "Fixture", conversationId: nil, history: [])
+                default: _ = try await chat.send(text: "Fixture", conversationId: nil, history: [])
+                }
+                XCTFail("Stale credential binding must fail before HTTP dispatch")
+            } catch let error as JarvisAPIError {
+                XCTAssertEqual(error, .invalidConfiguration)
+            }
+        }
+        let capability = await chat.realtimeAvailable()
+        XCTAssertFalse(capability)
+    }
     @MainActor
     func testPlaybackRequestContainsOnlyNativeAuthAndTypedRunState() throws {
         let run = UUID()

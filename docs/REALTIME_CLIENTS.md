@@ -98,6 +98,14 @@ do not demonstrate audible OS playback or macOS/Windows runtime behavior.
 
 ## Validation and remaining acceptance
 
+iOS chat commands, conversation/history reads and realtime capability checks
+capture the native API binding before awaiting credentials. The API rejects a
+changed binding both before dispatch and after receiving a response, including
+an origin A -> B -> A transition. Cancellation remains cancellation rather than
+being translated into a network-error result. A native token-loader test seam
+forces this transition for both chat submission paths and history reads without
+using a real credential or network. The XCTest is pending macOS execution.
+
 Desktop chat presentation has a session generation separate from authorization.
 Logout/reset/origin changes clear pending IDs, selected conversation and displayed
 history. Late REST results and event callbacks from the old generation cannot
