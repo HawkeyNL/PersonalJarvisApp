@@ -3,11 +3,14 @@
 use super::local_speech_engine::{NativeEngine, TtsEngine};
 use super::speech_playback::{Playback, State};
 use jarvis_client_core::speech::SpeechAction;
+use std::collections::VecDeque;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use tokio::sync::{mpsc, watch};
+#[cfg(test)]
+use tokio::sync::mpsc;
+use tokio::sync::{watch, Notify};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -28,7 +31,8 @@ pub(super) fn spawn_failure(error: &std::io::Error) -> Status {
 }
 
 pub(crate) struct Worker {
-    queue: mpsc::Sender<(u64, String)>,
+    queue: Arc<Mutex<VecDeque<(u64, String)>>>,
+    available: Arc<Notify>,
     generation: Arc<watch::Sender<u64>>,
     task: tauri::async_runtime::JoinHandle<()>,
     report: Arc<dyn Fn(Status) + Send + Sync>,
@@ -77,12 +81,23 @@ impl Worker {
         let task_playback = playback.clone();
         let report: Arc<dyn Fn(Status) + Send + Sync> = Arc::new(report);
         let task_report = report.clone();
-        let (queue, mut receiver) = mpsc::channel::<(u64, String)>(32);
+        let queue = Arc::new(Mutex::new(VecDeque::<(u64, String)>::new()));
+        let receiver = queue.clone();
+        let available = Arc::new(Notify::new());
+        let ready = available.clone();
         let (generation, mut changed) = watch::channel(0u64);
         let generation = Arc::new(generation);
         let task = tauri::async_runtime::spawn(async move {
             let mut failed_epoch = None;
-            while let Some((epoch, text)) = receiver.recv().await {
+            loop {
+                let next = match receiver.lock() {
+                    Ok(mut queue) => queue.pop_front(),
+                    Err(_) => return,
+                };
+                let Some((epoch, text)) = next else {
+                    ready.notified().await;
+                    continue;
+                };
                 if epoch != *changed.borrow_and_update() || failed_epoch == Some(epoch) {
                     continue;
                 }
@@ -108,6 +123,7 @@ impl Worker {
         });
         Self {
             queue,
+            available,
             generation,
             task,
             report,
@@ -131,6 +147,9 @@ impl Worker {
                 self.playback.change(Playback::stop);
                 self.overflowed.store(false, Ordering::SeqCst);
                 self.generation.send_modify(|g| *g = g.wrapping_add(1));
+                if let Ok(mut queue) = self.queue.lock() {
+                    queue.clear();
+                }
                 (self.report)(Status::Idle);
             }
             SpeechAction::Speak(text) => {
@@ -143,10 +162,26 @@ impl Worker {
                     p.queued(epoch);
                     None
                 });
-                if self.queue.try_send((epoch, text)).is_err() {
+                let accepted = self
+                    .queue
+                    .lock()
+                    .map(|mut queue| {
+                        if queue.len() >= 32 {
+                            return false;
+                        }
+                        queue.push_back((epoch, text));
+                        true
+                    })
+                    .unwrap_or(false);
+                if accepted {
+                    self.available.notify_one();
+                } else {
                     self.playback.change(|p| p.failed(epoch));
                     self.overflowed.store(true, Ordering::SeqCst);
                     self.generation.send_modify(|g| *g = g.wrapping_add(1));
+                    if let Ok(mut queue) = self.queue.lock() {
+                        queue.clear();
+                    }
                     (self.report)(Status::QueueFull);
                 }
             }
@@ -332,6 +367,37 @@ mod tests {
                         .await
                         .unwrap(),
                     Some("stopped")
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn stop_immediately_frees_queue_capacity_for_next_answer() {
+        tauri::async_runtime::block_on(async {
+            let (sender, mut events) = mpsc::unbounded_channel();
+            let worker = Worker::with_engine(|_| {}, Arc::new(PendingEngine(sender)));
+            worker.action(SpeechAction::Speak("Playing old answer.".into()));
+            assert_eq!(
+                tokio::time::timeout(std::time::Duration::from_secs(2), events.recv())
+                    .await
+                    .unwrap(),
+                Some("started")
+            );
+            for _ in 0..32 {
+                worker.action(SpeechAction::Speak("Old queued phrase.".into()));
+            }
+            assert_eq!(worker.queue.lock().unwrap().len(), 32);
+            worker.action(SpeechAction::Stop);
+            assert!(worker.queue.lock().unwrap().is_empty());
+            worker.action(SpeechAction::Speak("Next answer.".into()));
+            assert!(!worker.overflowed.load(Ordering::SeqCst));
+            for expected in ["stopped", "started"] {
+                assert_eq!(
+                    tokio::time::timeout(std::time::Duration::from_secs(2), events.recv())
+                        .await
+                        .unwrap(),
+                    Some(expected)
                 );
             }
         });

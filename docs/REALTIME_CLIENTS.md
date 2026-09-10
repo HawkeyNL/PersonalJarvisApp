@@ -124,6 +124,10 @@ The offline engine interface is cancellation-safe and tested with fake engines:
 disconnect/stop drops playback, an unavailable engine does not retry every phrase,
 and a full 32-item queue stops speech for the remainder of that run. These tests
 do not demonstrate audible OS playback or macOS/Windows runtime behavior.
+Stop now clears queued text synchronously, rather than waiting for the worker to
+drain cancelled generations. A regression fills all 32 pending slots behind an
+active fake engine, stops it, and immediately starts the next answer without a
+false queue-full failure. The queue remains bounded and cancellation-safe.
 
 ## Validation and remaining acceptance
 
