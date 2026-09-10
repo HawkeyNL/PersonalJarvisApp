@@ -8,7 +8,46 @@ private final class NoNetworkProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
+private final class BoundedResponseProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let advertised = request.url!.path == "/advertised"
+        let exact = request.url!.path == "/exact"
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+                                       headerFields: advertised ? ["Content-Length": "99999"] : [:])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        if advertised { return } // Never send a body or EOF: reject from headers.
+        client?.urlProtocol(self, didLoad: Data(repeating: 65, count: 8))
+        client?.urlProtocol(self, didLoad: Data(repeating: 66, count: exact ? 8 : 9))
+        if exact { client?.urlProtocolDidFinishLoading(self) }
+        // Oversized body deliberately never finishes: waiting for EOF is wrong.
+    }
+    override func stopLoading() {}
+}
+
 final class ClientDTOTests: XCTestCase {
+    func testHTTPBodyIsBoundedBeforeEOFWithOrWithoutContentLength() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [BoundedResponseProtocol.self]
+        configuration.timeoutIntervalForRequest = 2
+        configuration.timeoutIntervalForResource = 2
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        for path in ["advertised", "oversized"] {
+            let request = URLRequest(url: URL(string: "https://jarvis.example.com/\(path)")!)
+            do {
+                _ = try await BoundedAPIResponse.read(session: session, request: request, limit: 16)
+                XCTFail("Oversized response must fail before EOF")
+            } catch let error as JarvisAPIError {
+                XCTAssertEqual(error, .responseTooLarge)
+            }
+        }
+        let request = URLRequest(url: URL(string: "https://jarvis.example.com/exact")!)
+        let (data, _) = try await BoundedAPIResponse.read(session: session, request: request, limit: 16)
+        XCTAssertEqual(data, Data(repeating: 65, count: 8) + Data(repeating: 66, count: 8))
+    }
+
     @MainActor
     func testLateChatPresentationCannotPopulateAnotherSession() async {
         var lifetime = ChatPresentationLifetime()

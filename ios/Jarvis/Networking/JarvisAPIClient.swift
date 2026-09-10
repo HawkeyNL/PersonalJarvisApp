@@ -16,6 +16,7 @@ enum JarvisAPIError: LocalizedError, Equatable {
     case unauthorized
     case rejected(status: Int, message: String?)
     case invalidResponse
+    case responseTooLarge
 
     var errorDescription: String? {
         switch self {
@@ -25,6 +26,36 @@ enum JarvisAPIError: LocalizedError, Equatable {
         case .unauthorized: "This session is no longer authorized."
         case let .rejected(status, message): message ?? "The Home Node rejected the request (HTTP \(status))."
         case .invalidResponse: "The Home Node returned an unexpected response."
+        case .responseTooLarge: "The Home Node response exceeds the safe size limit."
+        }
+    }
+}
+
+enum BoundedAPIResponse {
+    static let maximumBytes = 16 * 1024 * 1024
+
+    static func read(session: URLSession, request: URLRequest,
+                     limit: Int = maximumBytes) async throws -> (Data, URLResponse) {
+        guard limit >= 0 else { throw JarvisAPIError.responseTooLarge }
+        let (bytes, response) = try await session.bytes(for: request)
+        // AsyncBytes exposes its task: abandoning iteration alone is not our
+        // cleanup contract. Cancel on overflow, decoding-independent return,
+        // transport failure, and caller cancellation alike.
+        defer { bytes.task.cancel() }
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            guard response.expectedContentLength <= Int64(limit) else {
+                throw JarvisAPIError.responseTooLarge
+            }
+            var data = Data()
+            for try await byte in bytes {
+                try Task.checkCancellation()
+                guard data.count < limit else { throw JarvisAPIError.responseTooLarge }
+                data.append(byte)
+            }
+            return (data, response)
+        } onCancel: {
+            bytes.task.cancel()
         }
     }
 }
@@ -122,7 +153,7 @@ actor JarvisAPIClient {
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
 
         do {
-            let (data, rawResponse) = try await session.data(for: request)
+            let (data, rawResponse) = try await BoundedAPIResponse.read(session: session, request: request)
             try Task.checkCancellation()
             if let expectedBinding, expectedBinding != bindingID { throw JarvisAPIError.invalidConfiguration }
             guard let http = rawResponse as? HTTPURLResponse else { throw JarvisAPIError.invalidResponse }

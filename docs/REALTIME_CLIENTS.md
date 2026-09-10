@@ -148,7 +148,11 @@ and 16 MiB for the authenticated proxy. Oversized advertised lengths fail before
 reading; chunked bodies fail before appending a chunk beyond the limit. A mock
 HTTP test sends an oversized unfinished chunked response and verifies immediate
 rejection, plus acceptance exactly at the limit. Only fixed error text reaches
-the UI. This test does not establish equivalent iOS HTTP-body limits.
+the UI. iOS now reads `URLSession.AsyncBytes` with a 16 MiB bound, rejects oversized
+advertised lengths, and cancels the underlying data task on every exit and caller
+cancellation. Its URLProtocol regression covers unfinished oversized bodies,
+oversized headers, and exact-limit success. Those XCTest cases still require the
+macOS runner; the desktop test does not prove the iOS implementation works.
 
 Desktop native auth storage now serializes metadata/token snapshots and changes
 with one process-local lock, never held across an await. Authenticated requests
