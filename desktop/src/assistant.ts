@@ -7,7 +7,7 @@
 // thread into a new conversation. This module owns the *current* conversation's
 // messages; the tab list lives in `conversations.ts`.
 import { ref } from "vue";
-import { canSpeak } from "./voice";
+import { canSpeak, voiceRate } from "./voice";
 import { invoke } from "@tauri-apps/api/core";
 import { startRealtime, type RealtimeEvent, type CanonicalMessage } from "./realtime";
 import { mergeCanonical, appendVisualDelta } from "./realtimeProjection";
@@ -224,6 +224,7 @@ export async function initChat(): Promise<void> {
       if(realtimeAvailable) {
         await startRealtime(event=>{if(chatSession.current(epoch)) receiveRealtime(event);});
         if(!chatSession.current(epoch)) return;
+        await invoke("realtime_voice_rate",{rate:voiceRate.value});
         await invoke("realtime_voice_enabled",{enabled:canSpeak().allowed});
       }
     } catch {if(chatSession.current(epoch)) realtimeAvailable=false;}

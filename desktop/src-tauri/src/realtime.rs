@@ -26,6 +26,7 @@ pub(crate) struct Runtime {
     task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     speech_stop: Mutex<Option<tokio::sync::watch::Sender<()>>>,
     pub voice_enabled: Arc<AtomicBool>,
+    speech_rate: Arc<super::local_speech_engine::SpeechRate>,
 }
 
 #[cfg(test)]
@@ -121,6 +122,12 @@ pub(crate) fn realtime_voice_enabled(app: AppHandle, enabled: bool) {
 }
 
 #[tauri::command]
+pub(crate) fn realtime_voice_rate(app: AppHandle, rate: f64) -> Result<(), &'static str> {
+    // Local presentation only: do not restart the socket, claim voice or run a model.
+    app.state::<Runtime>().speech_rate.set(rate)
+}
+
+#[tauri::command]
 pub(crate) fn realtime_start(app: AppHandle) -> Result<(), String> {
     super::native_http_client()?; // Installs the reviewed Rustls provider.
     let runtime = app.state::<Runtime>();
@@ -210,6 +217,7 @@ async fn run(
                     let _ = speech_app.emit("jarvis-local-speech", status);
                 },
                 controls.reporter(),
+                app.state::<Runtime>().speech_rate.clone(),
             );
             loop {
                 let incoming = tokio::select! {

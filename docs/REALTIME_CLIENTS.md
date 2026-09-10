@@ -59,8 +59,13 @@ authoritative. Android and iOS settings now persist a local speech-rate multipli
 from 0.5 to 2 (default 1). Non-finite preferences use the default; out-of-range
 values are bounded. Android passes it to the offline TTS engine; iOS scales its
 native default rate within AVSpeech's supported bounds. Changes apply to later
-phrases without replaying text or changing model/voice ownership. Desktop rate
-selection and explicit installed-voice selection remain open. The Kotlin rate
+phrases without replaying text or changing model/voice ownership. Desktop now
+persists the same multiplier locally and restores it through typed native IPC.
+Rust rejects non-finite/out-of-range values and passes only a derived numeric
+words-per-minute argument to the fixed offline tool (175 WPM at 1x). It reads
+the preference before each new phrase; changing speed does not restart the
+socket, claim voice, replay text or invoke a provider. Explicit installed-voice
+selection remains open. The Kotlin rate
 policy is covered by executable JVM tests; mobile UI/engine integration still
 requires Android/iOS platform validation.
 Android release commands now carry a snapshot of the currently observed owned

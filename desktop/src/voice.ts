@@ -5,12 +5,20 @@
 // See docs/blueprint/voice/CONVERSATION_AND_OUTPUT_POLICY.md and decisions/ADR-021.
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { speechRate } from "./speechRate";
 
 export type AudioRoute = "headset" | "speaker" | "unknown";
 
 const VKEY = "jarvis.voice.enabled";
 const SKEY = "jarvis.voice.allowSpeaker";
 const HKEY = "jarvis.voice.headset";
+const RKEY = "jarvis.voice.rate";
+export const voiceRate=ref(speechRate(Number(localStorage.getItem(RKEY)??"1")));
+export function setVoiceRate(value:number):void {
+  const rate=speechRate(value);
+  voiceRate.value=rate;localStorage.setItem(RKEY,String(rate));
+  void invoke("realtime_voice_rate",{rate}).catch(()=>{});
+}
 
 // New devices stay silent until explicitly enabled.
 export const voiceEnabled = ref(localStorage.getItem(VKEY) === "true");

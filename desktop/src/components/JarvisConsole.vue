@@ -17,6 +17,8 @@ import { useMic } from "../useMic";
 import { wakePulse } from "../voicewake";
 import {
   voiceEnabled,
+  voiceRate,
+  setVoiceRate,
   headset,
   setVoiceEnabled,
   stopSpeaking,
@@ -239,6 +241,10 @@ onMounted(async () => {
             <NavIcon :name="voiceEnabled ? 'sound-on' : 'sound-off'" />
           </button>
           <button v-if="voiceEnabled" type="button" title="Stop huidige spraak" @click="stopSpeaking">Stop spraak</button>
+          <select v-if="voiceEnabled" :value="voiceRate" aria-label="Spreeksnelheid voor volgende fragmenten"
+            @change="setVoiceRate(Number(($event.target as HTMLSelectElement).value))">
+            <option v-for="rate in [0.5,0.75,1,1.25,1.5,1.75,2]" :key="rate" :value="rate">{{rate}}×</option>
+          </select>
           <button
             type="button"
             class="ic"

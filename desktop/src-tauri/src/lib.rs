@@ -695,6 +695,7 @@ pub fn run() {
             realtime::realtime_start,
             realtime::realtime_stop,
             realtime::realtime_voice_enabled,
+            realtime::realtime_voice_rate,
             realtime::realtime_stop_speech,
             device_info,
             auth_public_key,

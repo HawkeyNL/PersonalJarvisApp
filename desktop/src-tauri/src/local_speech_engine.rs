@@ -1,7 +1,31 @@
 //! Cancellation-safe offline TTS boundary. No model or network client exists here.
 use super::local_speech::Status;
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Arc,
+};
 use std::{future::Future, pin::Pin, process::Stdio};
 use tokio::io::AsyncWriteExt;
+
+pub(super) struct SpeechRate(AtomicU32);
+impl Default for SpeechRate {
+    fn default() -> Self {
+        Self(AtomicU32::new(100))
+    }
+}
+impl SpeechRate {
+    pub fn set(&self, rate: f64) -> Result<(), &'static str> {
+        if !rate.is_finite() || !(0.5..=2.0).contains(&rate) {
+            return Err("speech rate must be between 0.5 and 2");
+        }
+        self.0
+            .store((rate * 100.0).round() as u32, Ordering::Relaxed);
+        Ok(())
+    }
+    fn words_per_minute(&self) -> String {
+        (175 * self.0.load(Ordering::Relaxed) / 100).to_string()
+    }
+}
 
 pub(super) type SpeechFuture<'a> = Pin<Box<dyn Future<Output = Result<(), Status>> + Send + 'a>>;
 pub(super) trait TtsEngine: Send + Sync + 'static {
@@ -15,7 +39,7 @@ pub(super) trait TtsEngine: Send + Sync + 'static {
     ) -> SpeechFuture<'a>;
 }
 
-pub(super) struct NativeEngine;
+pub(super) struct NativeEngine(pub Arc<SpeechRate>);
 impl TtsEngine for NativeEngine {
     fn speak<'a>(
         &'a self,
@@ -31,10 +55,11 @@ impl TtsEngine for NativeEngine {
                 return Err(Status::Unavailable);
             };
             let mut command = tokio::process::Command::new(executable);
+            let rate = self.0.words_per_minute();
             if cfg!(target_os = "macos") {
-                command.args(["-f", "-"]);
+                command.args(["-r", &rate, "-f", "-"]);
             } else {
-                command.arg("--stdin");
+                command.args(["-s", &rate, "--stdin"]);
             }
             let mut child = command
                 .stdin(Stdio::piped())
@@ -57,5 +82,23 @@ impl TtsEngine for NativeEngine {
                 _ => Err(Status::Failed),
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn speech_rate_rejects_invalid_input_without_changing_previous_value() {
+        let rate = SpeechRate::default();
+        assert_eq!(rate.words_per_minute(), "175");
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.49, 2.01] {
+            assert!(rate.set(invalid).is_err());
+            assert_eq!(rate.words_per_minute(), "175");
+        }
+        rate.set(0.5).unwrap();
+        assert_eq!(rate.words_per_minute(), "87");
+        rate.set(2.0).unwrap();
+        assert_eq!(rate.words_per_minute(), "350");
     }
 }
