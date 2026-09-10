@@ -12,6 +12,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { startRealtime, type RealtimeEvent, type CanonicalMessage } from "./realtime";
 import { mergeCanonical, appendVisualDelta } from "./realtimeProjection";
 import { PendingRuns } from "./pendingRuns";
+import { chatSession } from "./chatSession";
 import { currentAuthStatus } from "./auth";
 import { postJsonAuth, getJsonAuth } from "./api";
 import {
@@ -41,6 +42,7 @@ let realtimeAvailable=false;
 const pending=new PendingRuns();
 let reconciling=false;
 let buffered:RealtimeEvent[]=[];
+chatSession.onReset(()=>{pending.clear();messages.value=[];thinking.value=false;buffered=[];reconciling=false;realtimeAvailable=false;});
 
 function upsertCanonical(message:CanonicalMessage,requestId?:string,runId?:string) {
   if(currentId.value!==message.conversation_id) return;
@@ -49,10 +51,12 @@ function upsertCanonical(message:CanonicalMessage,requestId?:string,runId?:strin
 }
 
 async function reconcileRealtime() {
+  const epoch=chatSession.capture();
   if(reconciling) return;
   reconciling=true;
   try {
     await loadConversations();
+    if(!chatSession.current(epoch)) return;
     const selected=currentId.value;
     if(selected) await reloadConversation(selected);
     // Recover by run ID or original request ID. Never POST to recover an event.
@@ -62,6 +66,7 @@ async function reconcileRealtime() {
       try {
         const path=local.runId ? `/v1/assistant/runs/${local.runId}` : `/v1/assistant/requests/${requestId}`;
         const result=await getJsonAuth<{run_id:string;request_id:string;conversation_id:string;state:string}>(path);
+        if(!chatSession.current(epoch)) return;
         if(result.request_id===requestId && (!local.runId || result.run_id===local.runId)) {
           pending.acknowledge(requestId,result.conversation_id,result.run_id);
           pending.reconcile(requestId,result.run_id,result.state);
@@ -69,9 +74,11 @@ async function reconcileRealtime() {
       } catch { /* Keep ambiguous metadata; do not automatically regenerate. */ }
     }));
   } finally {
-    reconciling=false;
-    const events=buffered;buffered=[];
-    for(const event of events) receiveRealtime(event);
+    if(chatSession.current(epoch)) {
+      reconciling=false;
+      const events=buffered;buffered=[];
+      for(const event of events) receiveRealtime(event);
+    }
   }
 }
 
@@ -149,9 +156,9 @@ interface ChatReply {
 // token cost) without bound. The system prompt is added server-side.
 const MAX_TURNS = 20;
 
-async function ask(): Promise<ChatReply> {
+async function ask(epoch:number): Promise<ChatReply> {
   const status = await currentAuthStatus();
-  if (!status.authenticated) throw new Error("niet ingelogd");
+  if (!status.authenticated || !chatSession.current(epoch)) throw new Error("niet ingelogd");
   const history = messages.value.slice(-MAX_TURNS).map((m) => ({
     role: m.role === "jarvis" ? "assistant" : "user",
     content: m.text,
@@ -169,15 +176,16 @@ export async function openConversation(id: string): Promise<void> {
 }
 
 async function reloadConversation(id:string):Promise<void> {
+  const epoch=chatSession.capture();
   const status = await currentAuthStatus();
-  if (!status.authenticated) return;
+  if (!status.authenticated || !chatSession.current(epoch)) return;
   const res = await getJsonAuth<{
     id: string;
     title: string;
     messages: { id?:string; role: string; content: string; model: string | null; at: string }[];
     assistant_running?:boolean;
   }>(`/v1/conversations/${id}`);
-  if(currentId.value!==id) return;
+  if(currentId.value!==id || !chatSession.current(epoch)) return;
   thinking.value=res.assistant_running===true;
   messages.value = res.messages.map((m) => ({
     id: idc++,
@@ -199,21 +207,26 @@ export function startNewConversation(): void {
 /** On launch, restore the tab list and reopen the last (or most recent) chat,
  *  so the conversation is right there after an app restart. */
 export async function initChat(): Promise<void> {
+  const epoch=chatSession.capture();
   try {
     await loadConversations();
+    if(!chatSession.current(epoch)) return;
     const saved = savedCurrentId();
     const exists = saved && conversations.value.some((c) => c.id === saved);
     const target = exists ? saved! : (conversations.value[0]?.id ?? null);
     if (target) await openConversation(target);
     else startNewConversation();
+    if(!chatSession.current(epoch)) return;
     try {
       const capability=await getJsonAuth<{protocol:number;asynchronous_chat:boolean}>("/v1/events/capability");
+      if(!chatSession.current(epoch)) return;
       realtimeAvailable=capability.protocol===1 && capability.asynchronous_chat;
       if(realtimeAvailable) {
-        await startRealtime(receiveRealtime);
+        await startRealtime(event=>{if(chatSession.current(epoch)) receiveRealtime(event);});
+        if(!chatSession.current(epoch)) return;
         await invoke("realtime_voice_enabled",{enabled:canSpeak().allowed});
       }
-    } catch {realtimeAvailable=false;}
+    } catch {if(chatSession.current(epoch)) realtimeAvailable=false;}
   } catch {
     // Offline or not logged in yet — leave the chat empty; it'll load later.
   }
@@ -221,6 +234,7 @@ export async function initChat(): Promise<void> {
 
 /** Send a user message; Jarvis replies (and speaks if the policy allows). */
 export async function send(input: string): Promise<void> {
+  const epoch=chatSession.capture();
   const t = input.trim();
   if (!t || thinking.value) return;
   if(realtimeAvailable && pending.full) {
@@ -237,11 +251,13 @@ export async function send(input: string): Promise<void> {
     const request={request_id:requestId,conversation_id:currentId.value,messages:messages.value.slice(-MAX_TURNS).map(m=>({role:m.role==="jarvis"?"assistant":"user",content:m.text}))};
     try {
       const result=await postJsonAuth<{conversation_id:string;run_id:string}>("/v1/assistant/runs",request);
+      if(!chatSession.current(epoch)) return;
       const local=pending.get(requestId);
       if(local?.conversation===null && currentId.value===null && messages.value.some(m=>m.id===local.messageId)) setCurrent(result.conversation_id);
       pending.acknowledge(requestId,result.conversation_id,result.run_id);
       // Completion arrives by event; a lost socket is reconciled from REST.
     } catch {
+      if(!chatSession.current(epoch)) return;
       thinking.value=false;
       push("jarvis","Verzending niet bevestigd. Niet automatisch opnieuw verstuurd; verbind opnieuw om de opgeslagen geschiedenis te controleren.");
     }
@@ -249,7 +265,8 @@ export async function send(input: string): Promise<void> {
   }
   const hadHistory = messages.value.length > 1;
   try {
-    const res = await ask();
+    const res = await ask(epoch);
+    if(!chatSession.current(epoch)) return;
     const spoken = false; // Legacy Core has no authoritative voice owner.
 
     // The server may have placed this turn in a different conversation: the very
@@ -266,6 +283,7 @@ export async function send(input: string): Promise<void> {
     // Refresh the tab list (new tab / updated title + order).
     void loadConversations();
   } catch (e) {
+    if(!chatSession.current(epoch)) return;
     const detail = e instanceof Error ? e.message : "onbekende fout";
     push(
       "jarvis",
@@ -273,6 +291,6 @@ export async function send(input: string): Promise<void> {
       false,
     );
   } finally {
-    thinking.value = false;
+    if(chatSession.current(epoch)) thinking.value = false;
   }
 }

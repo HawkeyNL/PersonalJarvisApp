@@ -5,6 +5,7 @@
 // `assistant.ts` (which imports from here — this module must not import it back,
 // to avoid a cycle).
 import { ref } from "vue";
+import { chatSession } from "./chatSession";
 import { currentAuthStatus } from "./auth";
 import { getJsonAuth, deleteAuth } from "./api";
 
@@ -18,6 +19,7 @@ export const conversations = ref<ConversationSummary[]>([]);
 export const currentId = ref<string | null>(null);
 
 const LS_CURRENT = "jarvis.conversation.current";
+chatSession.onReset(()=>{conversations.value=[];setCurrent(null);});
 
 /** Remember which conversation is open, so a restart reopens the same tab. */
 export function setCurrent(id: string | null): void {
@@ -32,20 +34,23 @@ export function savedCurrentId(): string | null {
 
 /** Refresh the tab list from the server (newest-active first). */
 export async function loadConversations(): Promise<void> {
+  const epoch=chatSession.capture();
   const status = await currentAuthStatus();
-  if (!status.authenticated) return;
+  if (!status.authenticated || !chatSession.current(epoch)) return;
   const res = await getJsonAuth<{ conversations: ConversationSummary[] }>(
     "/v1/conversations",
   );
-  conversations.value = res.conversations;
+  if(chatSession.current(epoch)) conversations.value = res.conversations;
 }
 
 /** Delete a conversation and drop it from the list. Returns the id that should
  *  become current afterward (first remaining, or null), for the caller to open. */
 export async function deleteConversation(id: string): Promise<string | null> {
+  const epoch=chatSession.capture();
   const status = await currentAuthStatus();
-  if (!status.authenticated) return currentId.value;
+  if (!status.authenticated || !chatSession.current(epoch)) return currentId.value;
   await deleteAuth(`/v1/conversations/${id}`);
+  if(!chatSession.current(epoch)) return currentId.value;
   conversations.value = conversations.value.filter((c) => c.id !== id);
   if (currentId.value === id) {
     const next = conversations.value[0]?.id ?? null;

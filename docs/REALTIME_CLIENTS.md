@@ -75,6 +75,13 @@ do not demonstrate audible OS playback or macOS/Windows runtime behavior.
 
 ## Validation and remaining acceptance
 
+Desktop chat presentation has a session generation separate from authorization.
+Logout/reset/origin changes clear pending IDs, selected conversation and displayed
+history. Late REST results and event callbacks from the old generation cannot
+repopulate the new session. Logout also stops native realtime/speech before
+waiting for best-effort remote revocation. Node tests exercise delayed completion
+across invalidation; this does not replace native credential-boundary checks.
+
 Desktop recovery retains at most 32 outstanding request correlations (IDs only,
 not prompt copies). Unknown outcomes are never silently evicted to make room
 for another paid submission. On reconnect, run IDs (or original request IDs when

@@ -4,6 +4,7 @@
 // orchestrates the HTTP flow (enroll -> challenge -> login) and reads back the
 // non-secret session state. The private key and bearer token never enter JS.
 import { invoke } from "@tauri-apps/api/core";
+import { chatSession } from "./chatSession";
 import { deleteAuth, getJsonAuth, getJsonWithHeaders, postAuth, postJson, postJsonWithHeaders } from "./api";
 import { scheduleAutomaticUpdateCheck } from "./updates";
 
@@ -95,10 +96,14 @@ export async function bootstrapFirstDevice(secret: string): Promise<void> {
  *  the next `login()` mints a fresh session. Used to recover from a stale token
  *  (e.g. the backend restarted and forgot the session) instead of looping on 401. */
 export async function clearSession(): Promise<void> {
+  chatSession.invalidate();
+  await invoke("realtime_stop").catch(()=>{});
   await invoke("auth_logout");
 }
 
 export async function logout(): Promise<void> {
+  chatSession.invalidate();
+  await invoke("realtime_stop").catch(()=>{});
   const status = await currentAuthStatus();
   if (status.authenticated) {
     // Best-effort server-side revocation; clear locally regardless.
@@ -115,6 +120,8 @@ export async function logout(): Promise<void> {
  *  and wipe the local key/id/token. Destructive — the next login() enrolls a
  *  brand-new device. Best-effort on the server call; always clears locally. */
 export async function deregisterDevice(): Promise<void> {
+  chatSession.invalidate();
+  await invoke("realtime_stop").catch(()=>{});
   const status = await currentAuthStatus();
   if (status.authenticated && status.device_id) {
     try {

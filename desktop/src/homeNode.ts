@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { chatSession } from "./chatSession";
 import { readonly, ref } from "vue";
 
 /** Ordinary, non-secret connection metadata for this enrolled device. */
@@ -39,6 +40,7 @@ export async function loadHomeNodeConfig(): Promise<HomeNodeConfig> {
 /** Validate and persist the origin before enrollment starts. Credentials are
  * rejected native-side and are never accepted as part of this metadata. */
 export async function configureHomeNode(origin: string): Promise<HomeNodeConfig> {
+  chatSession.invalidate();
   const previousOrigin = config.value.origin;
   const value = await invoke<HomeNodeConfig>("home_node_configure", { origin });
   if (previousOrigin !== value.origin) sessionStorage.removeItem("jarvis.pairing.wait");

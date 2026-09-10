@@ -17,6 +17,7 @@ export class PendingRuns {
     if(run) this.runs.set(id,{...run,conversation,runId:runId ?? run.runId});
   }
   delete(id:string):void { this.runs.delete(id); }
+  clear():void { this.runs.clear(); }
   entries():Array<[string,PendingRun]> { return [...this.runs].map(([id,run])=>[id,{...run}]); }
   reconcile(id:string,runId:string,state:unknown):boolean {
     if(this.runs.get(id)?.runId!==runId) return false;
