@@ -6,6 +6,14 @@ import android.speech.tts.UtteranceProgressListener
 import java.util.concurrent.atomic.AtomicBoolean
 
 class AndroidSpeechOutput(context: Context) : SpeechOutput {
+    @Volatile var selectedVoice: String = ""
+    fun availableVoices(): List<LocalVoice> {
+        if (!ready.get()) return emptyList()
+        return LocalVoiceCatalog.catalog(engine.voices.orEmpty().asSequence().map {
+            VoiceCandidate(it.name, "${it.locale.displayName} — ${it.name}".take(128),
+                it.isNetworkConnectionRequired, !it.features.orEmpty().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED))
+        })
+    }
     @Volatile var rate: Float = 1f
         set(value) { field = SpeechRate.normalize(value) }
     @Volatile var onPlayback: (PlaybackReport) -> Unit = {}
@@ -25,8 +33,9 @@ class AndroidSpeechOutput(context: Context) : SpeechOutput {
     override fun speak(text: String) {
         if (!ready.get()) { playback.unavailable(); return }
         // Never select a network-only voice or download voice data implicitly.
-        val voice = engine.voice?.takeIf { !it.isNetworkConnectionRequired }
-            ?: engine.voices?.firstOrNull { !it.isNetworkConnectionRequired }
+        val selected = LocalVoiceCatalog.choose(availableVoices(), selectedVoice, engine.voice?.name)
+        val voice = engine.voices?.firstOrNull { it.name == selected && !it.isNetworkConnectionRequired
+            && !it.features.orEmpty().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
         if (voice == null || engine.setVoice(voice) == TextToSpeech.ERROR) { playback.unavailable(); engine.stop(); return }
         if (engine.setSpeechRate(rate) == TextToSpeech.ERROR) { playback.unavailable(); engine.stop(); return }
         val utterance = playback.enqueue() ?: run { engine.stop(); return }

@@ -65,7 +65,15 @@ Rust rejects non-finite/out-of-range values and passes only a derived numeric
 words-per-minute argument to the fixed offline tool (175 WPM at 1x). It reads
 the preference before each new phrase; changing speed does not restart the
 socket, claim voice, replay text or invoke a provider. Explicit installed-voice
-selection remains open. The Kotlin rate
+selection remains open on desktop/iOS. Android Settings now offers local default
+or a specific installed offline voice. The catalog inspects at most 512 native
+records and exposes at most 128 safe, unique entries. Network-required voices
+and voices marked as not installed are excluded. Selection is stored only in
+device preferences and revalidated against the engine at playback time. An
+unavailable explicit selection fails without selecting a different voice or
+downloading data; the owner can deliberately return to local default. JVM tests
+cover catalog bounds, malformed metadata and missing/explicit selection. Android
+UI and native-engine behavior have not yet been compiled/validated here. The Kotlin rate
 policy is covered by executable JVM tests; mobile UI/engine integration still
 requires Android/iOS platform validation.
 Android release commands now carry a snapshot of the currently observed owned

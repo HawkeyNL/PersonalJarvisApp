@@ -302,6 +302,7 @@ private fun SettingsScreen(
     actions: JarvisViewModel,
     onInstallUpdate: () -> Unit,
 ) {
+    var voiceMenu by remember { mutableStateOf(false) }
     LazyColumn(
         modifier = Modifier.fillMaxSize().imePadding().testTag("settings"),
         contentPadding = PaddingValues(16.dp),
@@ -318,6 +319,23 @@ private fun SettingsScreen(
             Text("Spreeksnelheid: ${state.voiceRate}× (volgende fragmenten)")
             androidx.compose.material3.Slider(value = state.voiceRate, onValueChange = actions::setVoiceRate,
                 valueRange = 0.5f..2f, steps = 5)
+        }
+        item {
+            androidx.compose.foundation.layout.Box {
+                OutlinedButton(onClick = { actions.refreshLocalVoices(); voiceMenu = true }) {
+                    Text(if (state.selectedVoice.isEmpty()) "Stem: lokale standaard" else
+                        state.availableVoices.firstOrNull { it.id == state.selectedVoice }?.label ?: "Opgeslagen lokale stem")
+                }
+                androidx.compose.material3.DropdownMenu(expanded = voiceMenu, onDismissRequest = { voiceMenu = false }) {
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Lokale standaard") },
+                        onClick = { actions.selectLocalVoice(""); voiceMenu = false })
+                    for (voice in state.availableVoices) {
+                        androidx.compose.material3.DropdownMenuItem(text = { Text(voice.label) },
+                            onClick = { actions.selectLocalVoice(voice.id); voiceMenu = false })
+                    }
+                    if (state.availableVoices.isEmpty()) Text("Geen geïnstalleerde offline stemmen beschikbaar")
+                }
+            }
         }
         item {
             OutlinedTextField(

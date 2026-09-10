@@ -45,6 +45,8 @@ sealed interface AndroidUpdateUiState {
 data class JarvisUiState(
     val voiceEnabled: Boolean = false,
     val voiceRate: Float = 1f,
+    val selectedVoice: String = "",
+    val availableVoices: List<com.hawkeynl.jarvis.chat.LocalVoice> = emptyList(),
     val voiceStatus: String? = null,
     val selectedTab: AppTab = AppTab.CHAT,
     val endpoint: HomeNodeEndpoint? = null,
@@ -70,12 +72,14 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     private val pending = com.hawkeynl.jarvis.chat.PendingRuns()
     private val _state = MutableStateFlow(
         JarvisUiState(locked = container.sessions.hasSessionRecord(), voiceEnabled = container.voicePreferences.getBoolean("enabled", false),
-            voiceRate = SpeechRate.normalize(container.voicePreferences.getFloat("rate", 1f))),
+            voiceRate = SpeechRate.normalize(container.voicePreferences.getFloat("rate", 1f)),
+            selectedVoice = container.voicePreferences.getString("voice", "") ?: ""),
     )
     val state: StateFlow<JarvisUiState> = _state.asStateFlow()
 
     init {
         container.localSpeech.rate = _state.value.voiceRate
+        container.localSpeech.selectedVoice = _state.value.selectedVoice
         viewModelScope.launch {
             container.settings.endpoint.collect { endpoint ->
                 _state.update {
@@ -397,6 +401,20 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         container.localSpeech.rate = rate
         container.voicePreferences.edit().putFloat("rate", rate).apply()
         _state.update { it.copy(voiceRate = rate) }
+    }
+
+    fun refreshLocalVoices() {
+        _state.update { it.copy(availableVoices = container.localSpeech.availableVoices()) }
+    }
+    fun selectLocalVoice(id: String) {
+        val voices = container.localSpeech.availableVoices()
+        if (id.isNotEmpty() && voices.none { it.id == id }) {
+            _state.update { it.copy(voiceStatus = "Gekozen lokale stem is niet beschikbaar", availableVoices = voices) }
+            return
+        }
+        container.localSpeech.selectedVoice = id
+        container.voicePreferences.edit().putString("voice", id).apply()
+        _state.update { it.copy(selectedVoice = id, availableVoices = voices) }
     }
 
     fun stopSpeaking() {
