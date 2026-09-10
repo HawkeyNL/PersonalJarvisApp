@@ -9,6 +9,12 @@ private final class NoNetworkProtocol: URLProtocol {
 }
 
 final class ClientDTOTests: XCTestCase {
+    func testSpeechRateIsBoundedAndRejectsNonFinitePreferences() {
+        for value in [Double.nan, Double.infinity, -Double.infinity] { XCTAssertEqual(SpeechRate.normalize(value), 1) }
+        XCTAssertEqual(SpeechRate.normalize(-100), 0.5)
+        XCTAssertEqual(SpeechRate.normalize(100), 2)
+        XCTAssertEqual(SpeechRate.normalize(1.25), 1.25)
+    }
     func testEveryChatPathRefusesOriginSwitchDuringCredentialLoad() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [NoNetworkProtocol.self]

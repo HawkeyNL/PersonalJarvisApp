@@ -14,6 +14,13 @@ final class JarvisAppModel: ObservableObject {
     @Published private(set) var isSending = false
     @Published var endpointText: String
     @Published var notice: String?
+    @Published var voiceRate = SpeechRate.normalize(UserDefaults.standard.object(forKey: "jarvis.voice.rate") as? Double ?? 1) {
+        didSet {
+            let rate = SpeechRate.normalize(voiceRate)
+            speech.setRate(rate)
+            UserDefaults.standard.set(rate, forKey: "jarvis.voice.rate")
+        }
+    }
     @Published var voiceEnabled = UserDefaults.standard.bool(forKey: "jarvis.voice.enabled") {
         didSet {
             speech.enabled = voiceEnabled
@@ -55,6 +62,7 @@ final class JarvisAppModel: ObservableObject {
         self.chat = ChatService(api: api, auth: auth)
         self.biometricLock = BiometricLock()
         self.endpointText = endpointStore.endpoint?.absoluteString ?? ""
+        speech.setRate(voiceRate)
     }
 
     var isAuthenticated: Bool { enrollmentState == .authenticated }

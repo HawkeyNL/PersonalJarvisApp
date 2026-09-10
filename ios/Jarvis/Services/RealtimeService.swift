@@ -211,15 +211,20 @@ protocol SpeechOutput: AnyObject {
     func stop()
     func begin(run: UUID)
     func seal(run: UUID)
+    func setRate(_ rate: Double)
     func setPlaybackHandler(_ handler: ((SpeechPlaybackEvent) -> Void)?)
 }
 extension SpeechOutput {
     func begin(run: UUID) {}
     func seal(run: UUID) {}
+    func setRate(_ rate: Double) {}
     func setPlaybackHandler(_ handler: ((SpeechPlaybackEvent) -> Void)?) {}
 }
 
 enum SpeechPlaybackState: String, Codable, Sendable { case started, stopped, failed }
+enum SpeechRate {
+    static func normalize(_ rate: Double) -> Double { rate.isFinite ? min(2, max(0.5, rate)) : 1 }
+}
 struct SpeechPlaybackEvent: Equatable, Sendable {
     let run: UUID
     let state: SpeechPlaybackState
@@ -288,6 +293,8 @@ final class NativeSpeechOutput: NSObject, SpeechOutput, AVSpeechSynthesizerDeleg
     nonisolated private let queued = SpeechQueueRegistry()
     var onPlayback: ((SpeechPlaybackEvent) -> Void)?
     private var suppressed = true
+    private var rate = 1.0
+    func setRate(_ rate: Double) { self.rate = SpeechRate.normalize(rate) }
     override init() { super.init(); engine.delegate = self }
     func setPlaybackHandler(_ handler: ((SpeechPlaybackEvent) -> Void)?) {
         stop() // Drain old-run callbacks through the old session, never the new one.
@@ -299,7 +306,8 @@ final class NativeSpeechOutput: NSObject, SpeechOutput, AVSpeechSynthesizerDeleg
         guard queued.insert(utterance) else {
             queued.fail(); suppressed = true; engine.stopSpeaking(at: .immediate); drain(); return
         }
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        utterance.rate = min(AVSpeechUtteranceMaximumSpeechRate,
+            max(AVSpeechUtteranceMinimumSpeechRate, AVSpeechUtteranceDefaultSpeechRate * Float(rate)))
         engine.speak(utterance)
     }
     func begin(run: UUID) { queued.begin(run: run); suppressed = false; drain() }
@@ -336,6 +344,7 @@ final class RealtimeSpeech {
     var ownedRun: UUID? { device != nil && owner == device ? ownerRun : nil }
     init(output: SpeechOutput) { self.output = output }
     convenience init() { self.init(output: NativeSpeechOutput()) }
+    func setRate(_ rate: Double) { output.setRate(SpeechRate.normalize(rate)) }
     func setPlaybackHandler(_ handler: ((SpeechPlaybackEvent) -> Void)?) {
         stop(); output.setPlaybackHandler(handler)
     }

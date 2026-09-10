@@ -315,6 +315,11 @@ private fun SettingsScreen(
             }
         }
         item {
+            Text("Spreeksnelheid: ${state.voiceRate}× (volgende fragmenten)")
+            androidx.compose.material3.Slider(value = state.voiceRate, onValueChange = actions::setVoiceRate,
+                valueRange = 0.5f..2f, steps = 5)
+        }
+        item {
             OutlinedTextField(
                 value = state.endpointDraft,
                 onValueChange = actions::editEndpoint,

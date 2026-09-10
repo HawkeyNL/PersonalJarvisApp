@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import com.hawkeynl.jarvis.chat.RealtimeEvent
 import com.hawkeynl.jarvis.chat.RealtimeSpeech
+import com.hawkeynl.jarvis.chat.SpeechRate
 
 enum class AppTab { CHAT, CONVERSATIONS, SETTINGS }
 
@@ -43,6 +44,7 @@ sealed interface AndroidUpdateUiState {
 
 data class JarvisUiState(
     val voiceEnabled: Boolean = false,
+    val voiceRate: Float = 1f,
     val voiceStatus: String? = null,
     val selectedTab: AppTab = AppTab.CHAT,
     val endpoint: HomeNodeEndpoint? = null,
@@ -67,11 +69,13 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     private var realtimeAvailable = false
     private val pending = com.hawkeynl.jarvis.chat.PendingRuns()
     private val _state = MutableStateFlow(
-        JarvisUiState(locked = container.sessions.hasSessionRecord(), voiceEnabled = container.voicePreferences.getBoolean("enabled", false)),
+        JarvisUiState(locked = container.sessions.hasSessionRecord(), voiceEnabled = container.voicePreferences.getBoolean("enabled", false),
+            voiceRate = SpeechRate.normalize(container.voicePreferences.getFloat("rate", 1f))),
     )
     val state: StateFlow<JarvisUiState> = _state.asStateFlow()
 
     init {
+        container.localSpeech.rate = _state.value.voiceRate
         viewModelScope.launch {
             container.settings.endpoint.collect { endpoint ->
                 _state.update {
@@ -386,6 +390,13 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         container.voicePreferences.edit().putBoolean("enabled", enabled).apply()
         _state.update { it.copy(voiceEnabled = enabled) }
         if (!enabled) speech.ownedRun()?.let(container.realtime::releaseVoice)
+    }
+
+    fun setVoiceRate(value: Float) {
+        val rate = SpeechRate.normalize(value)
+        container.localSpeech.rate = rate
+        container.voicePreferences.edit().putFloat("rate", rate).apply()
+        _state.update { it.copy(voiceRate = rate) }
     }
 
     fun stopSpeaking() {

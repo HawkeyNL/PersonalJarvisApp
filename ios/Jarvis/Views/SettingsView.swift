@@ -9,6 +9,9 @@ struct SettingsView: View {
             Form {
                 Section("Local voice") {
                     Toggle("Speak replies on this active device", isOn: $model.voiceEnabled)
+                    Text("Speech rate: \(model.voiceRate, specifier: "%.2f")×")
+                    Slider(value: $model.voiceRate, in: 0.5...2, step: 0.25)
+                        .accessibilityLabel("Speech rate for subsequent phrases")
                     Button("Stop current speech") { model.stopSpeaking() }
                 }
                 Section("Home Node") {

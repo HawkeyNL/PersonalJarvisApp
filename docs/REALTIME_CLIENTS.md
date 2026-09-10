@@ -55,7 +55,14 @@ audible hardware output. Old-generation callbacks cannot terminate a newer run.
 Reports and release commands share a bounded 16-item native queue, fixed status
 values, a five-second request timeout and one immutable socket auth snapshot.
 Transport failure does not interrupt canonical chat; lease reconciliation remains
-authoritative. Device voice/rate selection remains open.
+authoritative. Android and iOS settings now persist a local speech-rate multiplier
+from 0.5 to 2 (default 1). Non-finite preferences use the default; out-of-range
+values are bounded. Android passes it to the offline TTS engine; iOS scales its
+native default rate within AVSpeech's supported bounds. Changes apply to later
+phrases without replaying text or changing model/voice ownership. Desktop rate
+selection and explicit installed-voice selection remain open. The Kotlin rate
+policy is covered by executable JVM tests; mobile UI/engine integration still
+requires Android/iOS platform validation.
 Android release commands now carry a snapshot of the currently observed owned
 run ID, never an arbitrary device identity. A delayed release cannot clear a
 newer run. Android and iOS clear old voice ownership on `connection.ready`;
