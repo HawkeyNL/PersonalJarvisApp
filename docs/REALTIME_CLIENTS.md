@@ -142,6 +142,14 @@ false queue-full failure. The queue remains bounded and cancellation-safe.
 
 ## Validation and remaining acceptance
 
+Desktop login and authenticated JSON responses are bounded while reading chunks,
+not only after collecting the complete response. Limits remain 16 KiB for login
+and 16 MiB for the authenticated proxy. Oversized advertised lengths fail before
+reading; chunked bodies fail before appending a chunk beyond the limit. A mock
+HTTP test sends an oversized unfinished chunked response and verifies immediate
+rejection, plus acceptance exactly at the limit. Only fixed error text reaches
+the UI. This test does not establish equivalent iOS HTTP-body limits.
+
 Desktop native auth storage now serializes metadata/token snapshots and changes
 with one process-local lock, never held across an await. Authenticated requests
 build their URL from the same snapshot as their bearer, not a second metadata

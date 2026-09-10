@@ -17,6 +17,7 @@ mod app_updates;
 mod local_speech;
 mod local_speech_engine;
 mod local_voices;
+mod native_response;
 mod realtime;
 mod speech_playback;
 mod voice_control;
@@ -449,19 +450,9 @@ async fn auth_complete_login(
     if !response.status().is_success() {
         return Err("Home Node rejected the device login".to_string());
     }
-    if response
-        .content_length()
-        .is_some_and(|length| length > 16 * 1024)
-    {
-        return Err("Home Node login response is invalid".to_string());
-    }
-    let bytes = response
-        .bytes()
+    let bytes = native_response::bounded(response, 16 * 1024)
         .await
         .map_err(|_| "Home Node login response is invalid".to_string())?;
-    if bytes.len() > 16 * 1024 {
-        return Err("Home Node login response is invalid".to_string());
-    }
     let result: LoginResponse = serde_json::from_slice(&bytes)
         .map_err(|_| "Home Node login response is invalid".to_string())?;
     if result.token.is_empty()
@@ -518,19 +509,12 @@ async fn auth_request(
         .await
         .map_err(|_| "Home Node is unreachable".to_string())?;
     let status = response.status().as_u16();
-    if response
-        .content_length()
-        .is_some_and(|length| length > 16 * 1024 * 1024)
-    {
-        return Err("Home Node response is too large".to_string());
-    }
-    let bytes = response
-        .bytes()
+    let bytes = native_response::bounded(response, 16 * 1024 * 1024)
         .await
-        .map_err(|_| "Home Node response is invalid".to_string())?;
-    if bytes.len() > 16 * 1024 * 1024 {
-        return Err("Home Node response is too large".to_string());
-    }
+        .map_err(|error| match error {
+            native_response::ReadError::TooLarge => "Home Node response is too large".to_string(),
+            native_response::ReadError::Transport => "Home Node response is invalid".to_string(),
+        })?;
     let body = if bytes.is_empty() {
         None
     } else {
