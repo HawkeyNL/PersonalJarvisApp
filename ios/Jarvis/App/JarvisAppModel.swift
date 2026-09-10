@@ -41,6 +41,12 @@ final class JarvisAppModel: ObservableObject {
     private var realtimeAvailable = false
     private var pendingRequests = PendingChatRequests()
     private var voiceReleaseTask: Task<Void, Never>?
+    private var presentation = ChatPresentationLifetime()
+    private func invalidatePresentation(clearIdentity: Bool) {
+        presentation.invalidate()
+        messages = []; conversations = []; isSending = false; realtimeAvailable = false
+        if clearIdentity { pendingRequests.clear(); currentConversationId = nil; currentConversationTitle = "New conversation" }
+    }
 
     func stopSpeaking() {
         let run = speech.ownedRun
@@ -100,6 +106,7 @@ final class JarvisAppModel: ObservableObject {
         do {
             let endpoint = try EndpointNormalizer.normalize(endpointText)
             if endpoint != endpointStore.endpoint {
+                invalidatePresentation(clearIdentity: true)
                 realtime.stop(); speech.stop(); voiceReleaseTask?.cancel(); pendingRequests.clear()
                 try await auth.clearLocalBinding()
                 messages = []; conversations = []; currentConversationId = nil
@@ -136,43 +143,55 @@ final class JarvisAppModel: ObservableObject {
     }
 
     func requestEnrollment() async {
+        let generation = presentation.id
         enrollmentState = .requesting
         do {
-            apply(awaitResult: try await auth.requestEnrollment(deviceName: UIDevice.current.name))
+            let result = try await auth.requestEnrollment(deviceName: UIDevice.current.name)
+            guard presentation.accepts(generation) else { return }
+            apply(awaitResult: result)
         }
-        catch { handle(error) }
+        catch { if presentation.accepts(generation) { handle(error) } }
     }
 
     func refreshEnrollment() async {
+        let generation = presentation.id
         enrollmentState = .authenticating
         do {
             let result = try await auth.refreshEnrollment()
+            guard presentation.accepts(generation) else { return }
             apply(awaitResult: result)
             if result == .authenticated {
                 lockState = .locked
                 await unlock()
             }
-        } catch { handle(error) }
+        } catch { if presentation.accepts(generation) { handle(error) } }
     }
 
     func restoreAuthentication() async {
+        let generation = presentation.id
         enrollmentState = .authenticating
         do {
             let result = try await auth.restore()
+            guard presentation.accepts(generation) else { return }
             apply(awaitResult: result)
             if result == .authenticated {
                 await loadConversations()
-                realtimeAvailable = await chat.realtimeAvailable()
+                guard presentation.accepts(generation) else { return }
+                let available = await chat.realtimeAvailable()
+                guard presentation.accepts(generation) else { return }
+                realtimeAvailable = available
                 if realtimeAvailable, let origin = endpointStore.endpoint, lockState == .unlocked {
                     speech.enabled = voiceEnabled
                     realtime.start(origin: origin, auth: auth, speech: speech) { [weak self] event in await self?.receiveRealtime(event) }
                 }
             }
-        } catch { handle(error) }
+        } catch { if presentation.accepts(generation) { handle(error) } }
     }
 
     func unlock() async {
+        let generation = presentation.id
         let result = await biometricLock.unlock(reason: "Unlock your Jarvis conversations")
+        guard presentation.accepts(generation) else { return }
         switch result {
         case .unlocked:
             lockState = .unlocked
@@ -198,57 +217,72 @@ final class JarvisAppModel: ObservableObject {
     }
 
     func lockWhenBackgrounded() {
+        invalidatePresentation(clearIdentity: false)
         voiceReleaseTask?.cancel()
         realtime.stop(); speech.stop()
         if isAuthenticated { lockState = .locked }
     }
 
     func logout() async {
+        invalidatePresentation(clearIdentity: true)
+        let generation = presentation.id
+        enrollmentState = .signedOut
         voiceReleaseTask?.cancel()
         pendingRequests.clear()
         realtime.stop(); speech.stop()
         do {
-            apply(awaitResult: try await auth.logout())
+            let result = try await auth.logout()
+            guard presentation.accepts(generation) else { return }
+            apply(awaitResult: result)
             messages = []
             conversations = []
-        } catch { handle(error) }
+        } catch { if presentation.accepts(generation) { handle(error) } }
     }
 
     func resetDevice() async {
+        invalidatePresentation(clearIdentity: true)
+        let generation = presentation.id
+        enrollmentState = .notStarted
         voiceReleaseTask?.cancel()
         pendingRequests.clear()
         realtime.stop(); speech.stop()
         do {
             try await auth.resetDevice()
+            guard presentation.accepts(generation) else { return }
             enrollmentState = .notStarted
             lockState = .unlocked
             messages = []
             conversations = []
             currentConversationId = nil
             notice = "This device identity was removed locally. Request enrollment to create a new one."
-        } catch { handle(error) }
+        } catch { if presentation.accepts(generation) { handle(error) } }
     }
 
     func loadConversations() async {
         guard isAuthenticated, lockState == .unlocked else { return }
+        let generation = presentation.id
         do {
-            conversations = try await chat.conversations()
+            let snapshot = try await chat.conversations()
+            guard presentation.accepts(generation) else { return }
+            conversations = snapshot
             if let id = currentConversationId ?? conversations.first?.id {
                 await openConversation(id)
             }
-        } catch { handle(error) }
+        } catch { if presentation.accepts(generation) { handle(error) } }
     }
 
     func openConversation(_ id: UUID) async {
+        guard isAuthenticated, lockState == .unlocked else { return }
+        let generation = presentation.id
         currentConversationId = id
         do {
             let conversation = try await chat.conversation(id: id)
-            guard currentConversationId == id else { return }
+            guard currentConversationId == id, presentation.accepts(generation) else { return }
             currentConversationId = conversation.id
             currentConversationTitle = conversation.title
             messages = conversation.messages
             isSending = conversation.assistantRunning == true
-        } catch { handle(error) }
+        } catch { if presentation.accepts(generation) { handle(error) } }
     }
 
     func newConversation() {
@@ -261,6 +295,7 @@ final class JarvisAppModel: ObservableObject {
     func send(_ text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, isAuthenticated, lockState == .unlocked, !isSending else { return }
+        let generation = presentation.id
         if realtimeAvailable && pendingRequests.isFull {
             notice = "Too many unconfirmed requests. Reconnect before sending more; no automatic regeneration will occur."
             return
@@ -276,20 +311,23 @@ final class JarvisAppModel: ObservableObject {
             let selected = currentConversationId
             do {
                 let run = try await chat.submit(requestId: requestId, text: trimmed, conversationId: selected, history: priorMessages)
+                guard presentation.accepts(generation) else { return }
                 if selected == nil, currentConversationId == nil, pendingRequests[requestId] != nil { currentConversationId = run.conversation_id }
             } catch {
+                guard presentation.accepts(generation) else { return }
                 isSending = false
                 notice = "Delivery was not confirmed. Reconnect to check saved history; Jarvis will not automatically generate again."
             }
             return
         }
-        defer { isSending = false }
+        defer { if presentation.accepts(generation) { isSending = false } }
         do {
             let response = try await chat.send(
                 text: trimmed,
                 conversationId: currentConversationId,
                 history: priorMessages
             )
+            guard presentation.accepts(generation) else { return }
             currentConversationId = response.conversationId
             currentConversationTitle = response.conversationTitle
             if response.newTopic && !priorMessages.isEmpty {
@@ -302,8 +340,11 @@ final class JarvisAppModel: ObservableObject {
                     at: ISO8601DateFormatter().string(from: Date())
                 ))
             }
-            conversations = try await chat.conversations()
-        } catch { handle(error) }
+            guard presentation.accepts(generation) else { return }
+            let snapshot = try await chat.conversations()
+            guard presentation.accepts(generation) else { return }
+            conversations = snapshot
+        } catch { if presentation.accepts(generation) { handle(error) } }
     }
 
     private func apply(awaitResult result: AuthServiceOutcome) {
@@ -317,6 +358,7 @@ final class JarvisAppModel: ObservableObject {
 
     private func receiveRealtime(_ event: RealtimeEvent) async {
         guard isAuthenticated, lockState == .unlocked else { return }
+        let generation = presentation.id
         speech.receive(event)
         let payload = event.payload
         switch event.type {
@@ -325,14 +367,17 @@ final class JarvisAppModel: ObservableObject {
                 let origin = endpointStore.endpoint
                 let recovered = try await chat.recover(requests: pendingRequests.requests)
                 try Task.checkCancellation()
-                guard isAuthenticated, lockState == .unlocked, endpointStore.endpoint == origin else { return }
+                guard presentation.accepts(generation), isAuthenticated, lockState == .unlocked, endpointStore.endpoint == origin else { return }
                 for (request, result) in recovered { pendingRequests.reconcile(request, result: result) }
-                conversations = try await chat.conversations()
+                let snapshot = try await chat.conversations()
+                guard presentation.accepts(generation) else { return }
+                conversations = snapshot
                 if let selected = currentConversationId {
                     let snapshot = try await chat.conversation(id: selected)
+                    guard presentation.accepts(generation) else { return }
                     if currentConversationId == selected { messages = snapshot.messages; currentConversationTitle = snapshot.title; isSending = snapshot.assistantRunning == true }
                 }
-            } catch { notice = "Realtime connected; history reconciliation will retry after reconnect." }
+            } catch { if presentation.accepts(generation) { notice = "Realtime connected; history reconciliation will retry after reconnect." } }
         case "conversation.created", "conversation.updated":
             if let id = payload.id, let title = payload.title, let at = payload.updated_at {
                 conversations.removeAll { $0.id == id }
@@ -387,6 +432,8 @@ final class JarvisAppModel: ObservableObject {
 
     private func handle(_ error: Error) {
         if (error as? JarvisAPIError) == .unauthorized {
+            invalidatePresentation(clearIdentity: true)
+            realtime.stop(); speech.stop(); voiceReleaseTask?.cancel()
             enrollmentState = .signedOut
         } else if (error as? JarvisAPIError) == .unreachable ||
                     (error as? JarvisAPIError) == .timedOut {

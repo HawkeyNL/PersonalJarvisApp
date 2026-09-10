@@ -43,6 +43,12 @@ struct RecoveredChatRun: Decodable, Sendable {
 }
 struct VoiceReleaseRequest: Encodable { let run_id: UUID }
 struct VoiceReleaseResult: Decodable {}
+// Presentation lifetime only; native authentication remains authoritative.
+struct ChatPresentationLifetime {
+    private(set) var id = UUID()
+    mutating func invalidate() { id = UUID() }
+    func accepts(_ id: UUID) -> Bool { self.id == id }
+}
 struct VoicePlaybackRequest: Encodable {
     let run_id: UUID
     let state: SpeechPlaybackState

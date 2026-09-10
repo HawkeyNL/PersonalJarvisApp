@@ -9,6 +9,24 @@ private final class NoNetworkProtocol: URLProtocol {
 }
 
 final class ClientDTOTests: XCTestCase {
+    @MainActor
+    func testLateChatPresentationCannotPopulateAnotherSession() async {
+        var lifetime = ChatPresentationLifetime()
+        let old = lifetime.id
+        var rows = ["old conversation"]
+        let late = Task { @MainActor in
+            if lifetime.accepts(old) { rows.append("late old response") }
+        }
+        lifetime.invalidate()
+        rows = ["new session"]
+        await late.value
+        XCTAssertEqual(rows, ["new session"])
+        XCTAssertFalse(lifetime.accepts(old))
+        let current = lifetime.id
+        XCTAssertTrue(lifetime.accepts(current))
+        lifetime.invalidate()
+        XCTAssertFalse(lifetime.accepts(current))
+    }
     func testLocalVoiceSelectionIsBoundedAndNeverSubstitutesMissingExplicitVoice() {
         let records = [LocalSpeechVoice(id: "local", label: "Fixture voice"),
                        LocalSpeechVoice(id: "local", label: "Duplicate"),

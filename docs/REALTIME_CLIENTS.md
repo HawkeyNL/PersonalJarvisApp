@@ -142,6 +142,15 @@ false queue-full failure. The queue remains bounded and cancellation-safe.
 
 ## Validation and remaining acceptance
 
+iOS chat presentation has a separate lifetime ID. Logout, device reset, origin
+change and background locking invalidate it and clear visible messages. Pending
+request IDs survive background locking for read-only recovery, but are cleared
+when device/session identity changes. Chat/history/recovery results and errors
+check the captured lifetime after suspension; stale results cannot repopulate a
+new session. Biometric and enrollment UI completions are similarly gated. This
+is presentation isolation, not a replacement for the native credential binding.
+The delayed-completion XCTest is added and still needs a macOS runner.
+
 iOS chat commands, conversation/history reads and realtime capability checks
 capture the native API binding before awaiting credentials. The API rejects a
 changed binding both before dispatch and after receiving a response, including
