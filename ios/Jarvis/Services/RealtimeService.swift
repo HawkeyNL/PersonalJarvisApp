@@ -119,13 +119,63 @@ final class RealtimeService {
 }
 
 @MainActor
-protocol SpeechOutput: AnyObject { func speak(_ text: String); func stop() }
+protocol SpeechOutput: AnyObject {
+    func speak(_ text: String)
+    func stop()
+    func begin(run: UUID)
+    func seal(run: UUID)
+}
+extension SpeechOutput {
+    func begin(run: UUID) {}
+    func seal(run: UUID) {}
+}
+
+enum SpeechPlaybackState: String, Codable, Sendable { case started, stopped, failed }
+struct SpeechPlaybackEvent: Equatable, Sendable {
+    let run: UUID
+    let state: SpeechPlaybackState
+}
 
 /// All mutable state is private and accessed under one lock. No speech text
 /// crosses this callback boundary; old callbacks remove only their own identity.
 final class SpeechQueueRegistry: @unchecked Sendable {
     private let lock = NSLock()
     private var pending = Set<ObjectIdentifier>()
+    private var run: UUID?
+    private var started = false
+    private var sealed = false
+    private var events: [SpeechPlaybackEvent] = []
+    private func emit(_ state: SpeechPlaybackState) {
+        guard let run else { return }
+        // Metadata only. Slow consumers cannot grow memory without bound.
+        if events.count == 16 { events.removeFirst() }
+        events.append(SpeechPlaybackEvent(run: run, state: state))
+    }
+    func begin(run: UUID) {
+        lock.lock(); defer { lock.unlock() }
+        emit(.stopped)
+        pending.removeAll(); self.run = run; started = false; sealed = false
+    }
+    func seal(run: UUID) {
+        lock.lock(); defer { lock.unlock() }
+        guard self.run == run else { return }
+        sealed = true
+        if pending.isEmpty { emit(.stopped); self.run = nil }
+    }
+    func didStart(_ utterance: AnyObject) {
+        lock.lock(); defer { lock.unlock() }
+        guard pending.contains(ObjectIdentifier(utterance)), !started else { return }
+        started = true; emit(.started)
+    }
+    func drain() -> [SpeechPlaybackEvent] {
+        lock.lock(); defer { lock.unlock() }
+        let result = events; events.removeAll(); return result
+    }
+    func fail(_ utterance: AnyObject? = nil) {
+        lock.lock(); defer { lock.unlock() }
+        if let utterance, !pending.contains(ObjectIdentifier(utterance)) { return }
+        emit(.failed); run = nil; pending.removeAll()
+    }
     func insert(_ utterance: AnyObject) -> Bool {
         lock.lock(); defer { lock.unlock() }
         let id = ObjectIdentifier(utterance)
@@ -134,11 +184,12 @@ final class SpeechQueueRegistry: @unchecked Sendable {
     }
     func remove(_ utterance: AnyObject) {
         lock.lock(); defer { lock.unlock() }
-        pending.remove(ObjectIdentifier(utterance))
+        guard pending.remove(ObjectIdentifier(utterance)) != nil else { return }
+        if sealed && pending.isEmpty { emit(.stopped); run = nil }
     }
     func clear() {
         lock.lock(); defer { lock.unlock() }
-        pending.removeAll()
+        emit(.stopped); run = nil; pending.removeAll()
     }
 }
 
@@ -146,19 +197,38 @@ final class SpeechQueueRegistry: @unchecked Sendable {
 final class NativeSpeechOutput: NSObject, SpeechOutput, AVSpeechSynthesizerDelegate {
     private let engine = AVSpeechSynthesizer()
     nonisolated private let queued = SpeechQueueRegistry()
+    var onPlayback: ((SpeechPlaybackEvent) -> Void)?
+    private var suppressed = true
     override init() { super.init(); engine.delegate = self }
     func speak(_ text: String) {
+        guard !suppressed else { return }
         let utterance = AVSpeechUtterance(string: text)
-        guard queued.insert(utterance) else { stop(); return }
+        guard queued.insert(utterance) else {
+            queued.fail(); suppressed = true; engine.stopSpeaking(at: .immediate); drain(); return
+        }
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         engine.speak(utterance)
     }
-    func stop() { queued.clear(); engine.stopSpeaking(at: .immediate) }
+    func begin(run: UUID) { queued.begin(run: run); suppressed = false; drain() }
+    func seal(run: UUID) { queued.seal(run: run); drain() }
+    func stop() { suppressed = true; queued.clear(); engine.stopSpeaking(at: .immediate); drain() }
+    private func drain() {
+        for event in queued.drain() {
+            if event.state == .failed { suppressed = true; engine.stopSpeaking(at: .immediate) }
+            onPlayback?(event)
+        }
+    }
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        queued.didStart(utterance)
+        Task { @MainActor [weak self] in self?.drain() }
+    }
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         queued.remove(utterance)
+        Task { @MainActor [weak self] in self?.drain() }
     }
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        queued.remove(utterance)
+        queued.fail(utterance)
+        Task { @MainActor [weak self] in self?.drain() }
     }
 }
 
@@ -179,7 +249,9 @@ final class RealtimeSpeech {
         if event.type == "voice.owner_changed" { owner = event.payload.device_id; ownerRun = event.payload.run_id; stop(); return }
         guard enabled, owner == device, device != nil else { return }
         if event.type == "assistant.started", event.payload.run_id == ownerRun {
-            stop(); run = event.payload.run_id; return
+            stop(); run = event.payload.run_id
+            if let run { output.begin(run: run) }
+            return
         }
         guard let identity = event.payload.run, identity.run_id == run else { return }
         if event.type == "assistant.failed" { stop(); return }
@@ -189,7 +261,8 @@ final class RealtimeSpeech {
         }
         if event.type == "assistant.completed", let canonical = event.payload.message?.content {
             guard canonical.hasPrefix(received), canonical.utf8.count <= 128 * 1024 else { stop(); return }
-            pending += String(canonical.dropFirst(received.count)); flush(complete: true); run = nil
+            pending += String(canonical.dropFirst(received.count)); flush(complete: true)
+            output.seal(run: identity.run_id); run = nil
         }
     }
     private func flush(complete: Bool) {

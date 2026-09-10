@@ -66,6 +66,13 @@ iOS native completion/cancellation callbacks now remove individual utterance
 identities from a lock-protected 32-entry registry. A late callback after stop
 cannot decrement the newer queue, and duplicate callbacks cannot free extra
 slots. The XCTest regression is added; it has not run on this Linux host.
+The iOS registry also tracks run-level started/stopped/failed metadata. It waits
+for both canonical completion and queue drainage before stopping, ignores stale
+utterance callbacks, and bounds pending telemetry to 16 entries. Native callback
+delivery drains this metadata on the main actor without carrying utterance text.
+The HTTP reporting consumer for this iOS callback is still to be connected;
+these changes alone do not send iOS playback status to Core. New XCTest cases
+cover drainage, stale cancellation and the metadata bound, but require macOS CI.
 Desktop's separate **Stop spraak** button clears the current native speech
 buffer and cancels queued playback without changing its saved enable preference,
 disconnecting realtime, or cancelling inference. Late deltas do not resume that

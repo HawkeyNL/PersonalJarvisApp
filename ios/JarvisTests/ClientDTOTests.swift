@@ -9,6 +9,45 @@ private final class NoNetworkProtocol: URLProtocol {
 }
 
 final class ClientDTOTests: XCTestCase {
+    func testSpeechRunWaitsForFinalSealAndDrainsOnlyOnce() {
+        let queue = SpeechQueueRegistry()
+        let run = UUID()
+        let first = NSObject(), second = NSObject()
+        queue.begin(run: run)
+        XCTAssertTrue(queue.insert(first))
+        queue.didStart(first)
+        queue.remove(first)
+        XCTAssertEqual(queue.drain(), [SpeechPlaybackEvent(run: run, state: .started)])
+        XCTAssertTrue(queue.insert(second))
+        queue.didStart(second)
+        queue.seal(run: run)
+        XCTAssertTrue(queue.drain().isEmpty)
+        queue.remove(second)
+        XCTAssertEqual(queue.drain(), [SpeechPlaybackEvent(run: run, state: .stopped)])
+        queue.remove(second); queue.seal(run: run); queue.clear()
+        XCTAssertTrue(queue.drain().isEmpty)
+    }
+    func testCancelledOldUtteranceCannotFailNewRun() {
+        let queue = SpeechQueueRegistry()
+        let oldRun = UUID(), newRun = UUID()
+        let old = NSObject(), current = NSObject()
+        queue.begin(run: oldRun); XCTAssertTrue(queue.insert(old))
+        queue.clear()
+        XCTAssertEqual(queue.drain(), [SpeechPlaybackEvent(run: oldRun, state: .stopped)])
+        queue.begin(run: newRun); XCTAssertTrue(queue.insert(current))
+        queue.fail(old); queue.didStart(old); queue.remove(old); queue.seal(run: oldRun)
+        XCTAssertTrue(queue.drain().isEmpty)
+        queue.didStart(current); queue.fail(current); queue.remove(current)
+        XCTAssertEqual(queue.drain(), [SpeechPlaybackEvent(run: newRun, state: .started), SpeechPlaybackEvent(run: newRun, state: .failed)])
+        queue.seal(run: newRun)
+        XCTAssertTrue(queue.drain().isEmpty)
+    }
+    func testSpeechMetadataQueueIsBounded() {
+        let queue = SpeechQueueRegistry()
+        for _ in 0..<100 { queue.begin(run: UUID()); queue.clear() }
+        XCTAssertEqual(queue.drain().count, 16)
+        XCTAssertTrue(queue.drain().isEmpty)
+    }
     func testRecoveryCannotDispatchUsingAnOldOriginBinding() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [NoNetworkProtocol.self]
