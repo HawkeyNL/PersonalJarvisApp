@@ -156,6 +156,12 @@ history. Late REST results and event callbacks from the old generation cannot
 repopulate the new session. Logout also stops native realtime/speech before
 waiting for best-effort remote revocation. Node tests exercise delayed completion
 across invalidation; this does not replace native credential-boundary checks.
+Repeated ready events during a REST recovery are coalesced into one subsequent
+recovery round, never discarded and never run in parallel in the same session.
+Buffered events from the old connection are discarded at the next ready event;
+the latest snapshot and new connection events remain authoritative. A session
+reset prevents the old recovery round from flushing into a new session. Node
+tests cover rapid reconnects, recovery failures and reset during recovery.
 
 Desktop recovery retains at most 32 outstanding request correlations (IDs only,
 not prompt copies). Unknown outcomes are never silently evicted to make room

@@ -8,6 +8,7 @@
 // messages; the tab list lives in `conversations.ts`.
 import { ref } from "vue";
 import { canSpeak, voiceRate, restoreVoiceChoice } from "./voice";
+import { ReconcileLoop } from "./reconcileLoop";
 import { invoke } from "@tauri-apps/api/core";
 import { startRealtime, type RealtimeEvent, type CanonicalMessage } from "./realtime";
 import { mergeCanonical, appendVisualDelta } from "./realtimeProjection";
@@ -40,9 +41,9 @@ export const thinking = ref(false); // true while the brain is generating a repl
 let idc = 0;
 let realtimeAvailable=false;
 const pending=new PendingRuns();
-let reconciling=false;
+const reconciliation=new ReconcileLoop();
 let buffered:RealtimeEvent[]=[];
-chatSession.onReset(()=>{pending.clear();messages.value=[];thinking.value=false;buffered=[];reconciling=false;realtimeAvailable=false;});
+chatSession.onReset(()=>{pending.clear();messages.value=[];thinking.value=false;buffered=[];reconciliation.reset();realtimeAvailable=false;});
 
 function upsertCanonical(message:CanonicalMessage,requestId?:string,runId?:string) {
   if(currentId.value!==message.conversation_id) return;
@@ -52,9 +53,7 @@ function upsertCanonical(message:CanonicalMessage,requestId?:string,runId?:strin
 
 async function reconcileRealtime() {
   const epoch=chatSession.capture();
-  if(reconciling) return;
-  reconciling=true;
-  try {
+  return reconciliation.request(async()=>{
     await loadConversations();
     if(!chatSession.current(epoch)) return;
     const selected=currentId.value;
@@ -73,18 +72,21 @@ async function reconcileRealtime() {
         }
       } catch { /* Keep ambiguous metadata; do not automatically regenerate. */ }
     }));
-  } finally {
+  },()=>{
     if(chatSession.current(epoch)) {
-      reconciling=false;
       const events=buffered;buffered=[];
       for(const event of events) receiveRealtime(event);
     }
-  }
+  });
 }
 
 function receiveRealtime(event:RealtimeEvent) {
-  if(event.type==="connection.ready") {void reconcileRealtime().catch(()=>{});return;}
-  if(reconciling) {
+  if(event.type==="connection.ready") {
+    // Old socket buffers must not overwrite the new authoritative snapshot.
+    buffered=[];
+    void reconcileRealtime().catch(()=>{});return;
+  }
+  if(reconciliation.busy) {
     if(buffered.length<256) buffered.push(event);
     else {buffered=[];void invoke("realtime_stop").then(()=>invoke("realtime_start"));}
     return;
