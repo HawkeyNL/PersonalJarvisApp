@@ -111,6 +111,13 @@ Android: `./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon` from
 The same application consumes `android/realtime-core/` for its pure event DTOs
 and speech state. Run `./gradlew :realtime-core:test --no-daemon` from `android/`
 to test that actual code on a JDK without an Android SDK or signing credentials.
+iOS also exposes Stop speaking in its chat menu and settings. It preserves the
+enabled preference, stops local audio immediately, and releases only its observed
+owned run through native authenticated HTTP. Release is bound to the original
+origin and configuration generation; logout/background/reset/origin change
+cancels pending work. No text or device identity is supplied in that request.
+XCTest coverage is added but has not been executed without Xcode.
+
 iOS: the unsigned simulator build/test commands in `.github/workflows/ci.yml`
 require a macOS/Xcode runner; no distribution signing credentials are involved.
 

@@ -31,6 +31,13 @@ actor ChatService {
         return try await api.get("/v1/conversations/\(id.uuidString)", token: token)
     }
 
+    func releaseVoice(run: UUID, origin: URL) async throws {
+        let binding = try await api.binding(for: origin)
+        let token = try await requiredToken()
+        let _: VoiceReleaseResult = try await api.post("/v1/voice/release",
+            body: VoiceReleaseRequest(run_id: run), token: token, expectedBinding: binding)
+    }
+
     func recover(requests: [UUID]) async throws -> [(UUID, RecoveredChatRun)] {
         // Capture endpoint generation BEFORE loading credentials. API refuses
         // dispatch if configure() ran in between, including origin A -> B -> A.

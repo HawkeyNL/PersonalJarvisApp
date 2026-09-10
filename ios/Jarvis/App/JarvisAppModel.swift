@@ -15,12 +15,29 @@ final class JarvisAppModel: ObservableObject {
     @Published var endpointText: String
     @Published var notice: String?
     @Published var voiceEnabled = UserDefaults.standard.bool(forKey: "jarvis.voice.enabled") {
-        didSet { speech.enabled = voiceEnabled; UserDefaults.standard.set(voiceEnabled, forKey: "jarvis.voice.enabled") }
+        didSet {
+            speech.enabled = voiceEnabled
+            UserDefaults.standard.set(voiceEnabled, forKey: "jarvis.voice.enabled")
+            if !voiceEnabled { stopSpeaking() }
+        }
     }
     private let realtime = RealtimeService()
     private let speech = RealtimeSpeech()
     private var realtimeAvailable = false
     private var pendingRequests = PendingChatRequests()
+    private var voiceReleaseTask: Task<Void, Never>?
+
+    func stopSpeaking() {
+        let run = speech.ownedRun
+        speech.stop()
+        voiceReleaseTask?.cancel()
+        guard let run, let origin = endpointStore.endpoint, isAuthenticated, lockState == .unlocked else { return }
+        voiceReleaseTask = Task { [weak self] in
+            guard let self else { return }
+            do { try await chat.releaseVoice(run: run, origin: origin) }
+            catch { /* Local stop already succeeded; stale/offline leases expire. */ }
+        }
+    }
 
     private let endpointStore: EndpointStore
     private let api: JarvisAPIClient
@@ -66,7 +83,7 @@ final class JarvisAppModel: ObservableObject {
         do {
             let endpoint = try EndpointNormalizer.normalize(endpointText)
             if endpoint != endpointStore.endpoint {
-                realtime.stop(); speech.stop(); pendingRequests.clear()
+                realtime.stop(); speech.stop(); voiceReleaseTask?.cancel(); pendingRequests.clear()
                 try await auth.clearLocalBinding()
                 messages = []; conversations = []; currentConversationId = nil
             }
@@ -164,11 +181,13 @@ final class JarvisAppModel: ObservableObject {
     }
 
     func lockWhenBackgrounded() {
+        voiceReleaseTask?.cancel()
         realtime.stop(); speech.stop()
         if isAuthenticated { lockState = .locked }
     }
 
     func logout() async {
+        voiceReleaseTask?.cancel()
         pendingRequests.clear()
         realtime.stop(); speech.stop()
         do {
@@ -179,6 +198,7 @@ final class JarvisAppModel: ObservableObject {
     }
 
     func resetDevice() async {
+        voiceReleaseTask?.cancel()
         pendingRequests.clear()
         realtime.stop(); speech.stop()
         do {

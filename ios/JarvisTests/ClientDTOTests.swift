@@ -25,6 +25,13 @@ final class ClientDTOTests: XCTestCase {
         } catch let error as JarvisAPIError {
             XCTAssertEqual(error, .invalidConfiguration)
         }
+        do {
+            let _: VoiceReleaseResult = try await api.post("/v1/voice/release",
+                body: VoiceReleaseRequest(run_id: UUID()), token: "fixture-session", expectedBinding: binding)
+            XCTFail("Old binding must also refuse voice mutation")
+        } catch let error as JarvisAPIError {
+            XCTAssertEqual(error, .invalidConfiguration)
+        }
     }
     func testOnlyMatchingTerminalRecoveryClearsPendingRequest() {
         var pending = PendingChatRequests()
@@ -136,6 +143,15 @@ final class ClientDTOTests: XCTestCase {
         voiceA.receive(events.last!)
         XCTAssertEqual(outA.spoken,["One answer.","Next sentence."])
         XCTAssertTrue(outB.spoken.isEmpty)
+        XCTAssertEqual(voiceA.ownedRun, UUID(uuidString: run))
+        XCTAssertNil(voiceB.ownedRun)
+        voiceA.stop()
+        XCTAssertTrue(voiceA.enabled)
+        voiceA.receive(try event("assistant.delta", ["run":identity,"text":"Late speech. "]))
+        XCTAssertEqual(outA.spoken,["One answer.","Next sentence."])
+        let release = try JSONSerialization.jsonObject(with: JSONEncoder().encode(VoiceReleaseRequest(run_id: UUID(uuidString: run)!))) as? [String: String]
+        XCTAssertEqual(release?.count, 1)
+        XCTAssertEqual(release?["run_id"].flatMap(UUID.init(uuidString:)), UUID(uuidString: run))
         // A new connection must not reuse an old voice lease. Even a late
         // started/delta event cannot speak until ownership is explicitly sent.
         voiceA.receive(try event("connection.ready", ["device_id":a]))

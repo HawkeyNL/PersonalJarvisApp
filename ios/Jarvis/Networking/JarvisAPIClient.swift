@@ -55,6 +55,10 @@ actor JarvisAPIClient {
 
     func configure(baseURL: URL) { bindingID = UUID(); self.baseURL = baseURL }
     func binding() -> UUID { bindingID }
+    func binding(for origin: URL) throws -> UUID {
+        guard baseURL == origin else { throw JarvisAPIError.invalidConfiguration }
+        return bindingID
+    }
 
     func checkReadiness() async throws {
         _ = try await request(path: "/readyz", method: "GET", response: EmptyOrJSON.self)
@@ -74,9 +78,10 @@ actor JarvisAPIClient {
         _ path: String,
         body: Body,
         token: String? = nil,
+        expectedBinding: UUID? = nil,
         response: Response.Type = Response.self
     ) async throws -> Response {
-        try await request(path: path, method: "POST", body: body, token: token, response: response)
+        try await request(path: path, method: "POST", body: body, token: token, expectedBinding: expectedBinding, response: response)
     }
 
     func post<Response: Decodable>(

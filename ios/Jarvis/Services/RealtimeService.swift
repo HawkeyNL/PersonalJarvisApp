@@ -41,6 +41,8 @@ struct PendingChatRequests {
 struct RecoveredChatRun: Decodable, Sendable {
     let request_id: UUID; let run_id: UUID; let conversation_id: UUID; let state: String
 }
+struct VoiceReleaseRequest: Encodable { let run_id: UUID }
+struct VoiceReleaseResult: Decodable {}
 
 private final class NoRedirect: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -168,6 +170,7 @@ final class RealtimeSpeech {
     private var device: UUID?; private var owner: UUID?; private var ownerRun: UUID?
     private var run: UUID?; private var received = ""; private var pending = ""; private var fence: String?; private var lineStart = true
     var enabled = false { didSet { if !enabled { stop() } } }
+    var ownedRun: UUID? { device != nil && owner == device ? ownerRun : nil }
     init(output: SpeechOutput) { self.output = output }
     convenience init() { self.init(output: NativeSpeechOutput()) }
     func stop() { output.stop(); run = nil; received = ""; pending = ""; fence = nil; lineStart = true }

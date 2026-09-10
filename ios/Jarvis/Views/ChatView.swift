@@ -18,6 +18,9 @@ struct ChatView: View {
                 if model.isAuthenticated {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
+                            if model.voiceEnabled {
+                                Button("Stop speaking", systemImage: "stop.circle") { model.stopSpeaking() }
+                            }
                             Button("New conversation", systemImage: "square.and.pencil") { model.newConversation() }
                             ForEach(model.conversations) { item in
                                 Button(item.title) { Task { await model.openConversation(item.id) } }

@@ -9,6 +9,7 @@ struct SettingsView: View {
             Form {
                 Section("Local voice") {
                     Toggle("Speak replies on this active device", isOn: $model.voiceEnabled)
+                    Button("Stop current speech") { model.stopSpeaking() }
                 }
                 Section("Home Node") {
                     TextField("https://jarvis.local", text: $model.endpointText)
