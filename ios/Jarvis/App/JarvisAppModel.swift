@@ -20,7 +20,7 @@ final class JarvisAppModel: ObservableObject {
     private let realtime = RealtimeService()
     private let speech = RealtimeSpeech()
     private var realtimeAvailable = false
-    private var pendingRequests: [UUID: String] = [:]
+    private var pendingRequests = PendingChatRequests()
 
     private let endpointStore: EndpointStore
     private let api: JarvisAPIClient
@@ -66,7 +66,7 @@ final class JarvisAppModel: ObservableObject {
         do {
             let endpoint = try EndpointNormalizer.normalize(endpointText)
             if endpoint != endpointStore.endpoint {
-                realtime.stop(); speech.stop()
+                realtime.stop(); speech.stop(); pendingRequests.clear()
                 try await auth.clearLocalBinding()
                 messages = []; conversations = []; currentConversationId = nil
             }
@@ -169,6 +169,7 @@ final class JarvisAppModel: ObservableObject {
     }
 
     func logout() async {
+        pendingRequests.clear()
         realtime.stop(); speech.stop()
         do {
             apply(awaitResult: try await auth.logout())
@@ -178,6 +179,7 @@ final class JarvisAppModel: ObservableObject {
     }
 
     func resetDevice() async {
+        pendingRequests.clear()
         realtime.stop(); speech.stop()
         do {
             try await auth.resetDevice()
@@ -222,13 +224,18 @@ final class JarvisAppModel: ObservableObject {
     func send(_ text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, isAuthenticated, lockState == .unlocked, !isSending else { return }
+        if realtimeAvailable && pendingRequests.isFull {
+            notice = "Too many unconfirmed requests. Reconnect before sending more; no automatic regeneration will occur."
+            return
+        }
         let priorMessages = messages
         let now = ISO8601DateFormatter().string(from: Date())
         messages.append(ConversationMessage(role: "user", content: trimmed, model: nil, at: now))
         isSending = true
         if realtimeAvailable {
             let requestId = UUID()
-            pendingRequests[requestId] = messages.last?.id
+            guard let optimisticID = messages.last?.id,
+                  pendingRequests.insert(requestId, optimisticID: optimisticID) else { isSending = false; return }
             let selected = currentConversationId
             do {
                 let run = try await chat.submit(requestId: requestId, text: trimmed, conversationId: selected, history: priorMessages)
@@ -278,6 +285,11 @@ final class JarvisAppModel: ObservableObject {
         switch event.type {
         case "connection.ready":
             do {
+                let origin = endpointStore.endpoint
+                let recovered = try await chat.recover(requests: pendingRequests.requests)
+                try Task.checkCancellation()
+                guard isAuthenticated, lockState == .unlocked, endpointStore.endpoint == origin else { return }
+                for (request, result) in recovered { pendingRequests.reconcile(request, result: result) }
                 conversations = try await chat.conversations()
                 if let selected = currentConversationId {
                     let snapshot = try await chat.conversation(id: selected)

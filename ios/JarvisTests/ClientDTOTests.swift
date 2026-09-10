@@ -1,7 +1,56 @@
 import XCTest
 @testable import Jarvis
 
+private final class NoNetworkProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost)) }
+    override func stopLoading() {}
+}
+
 final class ClientDTOTests: XCTestCase {
+    func testRecoveryCannotDispatchUsingAnOldOriginBinding() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [NoNetworkProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let origin = URL(string: "https://jarvis.example.com")!
+        let api = JarvisAPIClient(baseURL: origin, session: session)
+        let binding = await api.binding()
+        await api.configure(baseURL: URL(string: "https://home.example.org")!)
+        await api.configure(baseURL: origin)
+        do {
+            let _: RecoveredChatRun = try await api.get("/v1/assistant/requests/00000000-0000-0000-0000-000000000001", token: "fixture-session", expectedBinding: binding)
+            XCTFail("Old binding must be refused")
+        } catch let error as JarvisAPIError {
+            XCTAssertEqual(error, .invalidConfiguration)
+        }
+    }
+    func testOnlyMatchingTerminalRecoveryClearsPendingRequest() {
+        var pending = PendingChatRequests()
+        let request = UUID()
+        XCTAssertTrue(pending.insert(request, optimisticID: "row"))
+        pending.reconcile(request, result: RecoveredChatRun(request_id: UUID(), run_id: UUID(), conversation_id: UUID(), state: "completed"))
+        pending.reconcile(request, result: RecoveredChatRun(request_id: request, run_id: UUID(), conversation_id: UUID(), state: "running"))
+        XCTAssertEqual(pending[request], "row")
+        pending.reconcile(request, result: RecoveredChatRun(request_id: request, run_id: UUID(), conversation_id: UUID(), state: "interrupted"))
+        XCTAssertNil(pending[request])
+    }
+    func testPendingRequestsAreBoundedAndClearedAcrossSessions() {
+        var pending = PendingChatRequests()
+        let first = UUID()
+        XCTAssertTrue(pending.insert(first, optimisticID: "first"))
+        for _ in 0..<31 { XCTAssertTrue(pending.insert(UUID(), optimisticID: "fixture")) }
+        XCTAssertTrue(pending.isFull)
+        XCTAssertFalse(pending.insert(UUID(), optimisticID: "overflow"))
+        XCTAssertFalse(pending.insert(first, optimisticID: "replacement"))
+        XCTAssertEqual(pending[first], "first")
+        pending.removeValue(forKey: first)
+        XCTAssertFalse(pending.isFull)
+        XCTAssertNil(pending[first])
+        pending.clear()
+        XCTAssertFalse(pending.isFull)
+    }
     func testConversationRecoveryPreservesActiveGenerationAndAcceptsLegacyShape() throws {
         let legacy = Data(#"{"id":"00000000-0000-0000-0000-000000000001","title":"Fixture","messages":[]}"#.utf8)
         XCTAssertNil(try JSONDecoder().decode(ConversationResponse.self, from: legacy).assistantRunning)

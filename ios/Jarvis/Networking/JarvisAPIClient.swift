@@ -1,5 +1,14 @@
 import Foundation
 
+private final class RejectAPIRedirects: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
 enum JarvisAPIError: LocalizedError, Equatable {
     case invalidConfiguration
     case unreachable
@@ -22,6 +31,7 @@ enum JarvisAPIError: LocalizedError, Equatable {
 
 actor JarvisAPIClient {
     private var baseURL: URL?
+    private var bindingID = UUID()
     private let session: URLSession
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -39,11 +49,12 @@ actor JarvisAPIClient {
             configuration.httpShouldSetCookies = false
             configuration.timeoutIntervalForRequest = 15
             configuration.timeoutIntervalForResource = 30
-            self.session = URLSession(configuration: configuration)
+            self.session = URLSession(configuration: configuration, delegate: RejectAPIRedirects(), delegateQueue: nil)
         }
     }
 
-    func configure(baseURL: URL) { self.baseURL = baseURL }
+    func configure(baseURL: URL) { bindingID = UUID(); self.baseURL = baseURL }
+    func binding() -> UUID { bindingID }
 
     func checkReadiness() async throws {
         _ = try await request(path: "/readyz", method: "GET", response: EmptyOrJSON.self)
@@ -53,9 +64,10 @@ actor JarvisAPIClient {
         _ path: String,
         token: String? = nil,
         headers: [String: String] = [:],
+        expectedBinding: UUID? = nil,
         response: Response.Type = Response.self
     ) async throws -> Response {
-        try await request(path: path, method: "GET", token: token, headers: headers, response: response)
+        try await request(path: path, method: "GET", token: token, headers: headers, expectedBinding: expectedBinding, response: response)
     }
 
     func post<Body: Encodable, Response: Decodable>(
@@ -85,8 +97,11 @@ actor JarvisAPIClient {
         body: (any Encodable)? = nil,
         token: String? = nil,
         headers: [String: String] = [:],
+        expectedBinding: UUID? = nil,
         response: Response.Type
     ) async throws -> Response {
+        try Task.checkCancellation()
+        if let expectedBinding, expectedBinding != bindingID { throw JarvisAPIError.invalidConfiguration }
         guard let baseURL else { throw JarvisAPIError.invalidConfiguration }
         guard let url = URL(string: path, relativeTo: baseURL)?.absoluteURL else {
             throw JarvisAPIError.invalidConfiguration

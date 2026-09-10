@@ -96,6 +96,14 @@ entry; unavailable/unknown results never trigger another POST. Logout, device
 reset and origin changes clear local correlations. Native HTTP integration still
 requires Android SDK/runner validation; JVM tests do not establish that coverage.
 
+iOS also bounds request correlations to 32 and performs read-only recovery by
+original request ID. Matching terminal states clear entries; recovery never
+resubmits prompts. Its configuration generation is captured before loading the
+native token. Dispatch checks that binding and cancellation; production HTTP
+rejects redirects. Origin changes (including A -> B -> A) invalidate the binding.
+Logout/reset/origin changes clear pending state. Network-disabled XCTest
+regressions are added but still require execution on a macOS/Xcode runner.
+
 Run `npm ci`, `npm run check`, and `npm run test:unit` from `desktop/`, and
 `cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked` from the root.
 Android: `./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon` from

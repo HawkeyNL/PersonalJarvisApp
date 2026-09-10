@@ -22,6 +22,26 @@ struct RealtimeEvent: Decodable {
 struct RealtimeCapability: Decodable { let `protocol`: Int; let asynchronous_chat: Bool }
 struct AsyncChatRequest: Encodable { let request_id: UUID; let conversation_id: UUID?; let messages: [ChatTurn] }
 
+/// ID-only correlation state; uncertainty is never evicted to permit more work.
+struct PendingChatRequests {
+    private var entries: [UUID: String] = [:]
+    var isFull: Bool { entries.count >= 32 }
+    var requests: [UUID] { Array(entries.keys) }
+    subscript(id: UUID) -> String? { entries[id] }
+    mutating func insert(_ id: UUID, optimisticID: String) -> Bool {
+        guard !isFull, entries[id] == nil else { return false }
+        entries[id] = optimisticID; return true
+    }
+    mutating func removeValue(forKey id: UUID) { entries.removeValue(forKey: id) }
+    mutating func clear() { entries.removeAll() }
+    mutating func reconcile(_ request: UUID, result: RecoveredChatRun) {
+        if request == result.request_id && ["completed", "failed", "interrupted"].contains(result.state) { entries.removeValue(forKey: request) }
+    }
+}
+struct RecoveredChatRun: Decodable, Sendable {
+    let request_id: UUID; let run_id: UUID; let conversation_id: UUID; let state: String
+}
+
 private final class NoRedirect: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {

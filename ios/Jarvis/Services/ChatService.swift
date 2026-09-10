@@ -31,6 +31,28 @@ actor ChatService {
         return try await api.get("/v1/conversations/\(id.uuidString)", token: token)
     }
 
+    func recover(requests: [UUID]) async throws -> [(UUID, RecoveredChatRun)] {
+        // Capture endpoint generation BEFORE loading credentials. API refuses
+        // dispatch if configure() ran in between, including origin A -> B -> A.
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        let api = self.api
+        return try await withThrowingTaskGroup(of: (UUID, RecoveredChatRun)?.self) { group in
+            for request in requests.prefix(32) {
+                group.addTask {
+                    do {
+                        let run: RecoveredChatRun = try await api.get("/v1/assistant/requests/\(request.uuidString)", token: token, expectedBinding: binding)
+                        return (request, run)
+                    } catch is CancellationError { throw CancellationError() }
+                    catch { return nil }
+                }
+            }
+            var results: [(UUID, RecoveredChatRun)] = []
+            for try await result in group { if let result { results.append(result) } }
+            return results
+        }
+    }
+
     func send(text: String, conversationId: UUID?, history: [ConversationMessage]) async throws -> ChatResponse {
         let token = try await requiredToken()
         let turns = history.suffix(19).map {
