@@ -15,6 +15,7 @@ use tauri::{AppHandle, Manager};
 mod app_updates;
 mod local_speech;
 mod local_speech_engine;
+mod local_voices;
 mod realtime;
 mod speech_playback;
 mod voice_control;
@@ -696,6 +697,8 @@ pub fn run() {
             realtime::realtime_stop,
             realtime::realtime_voice_enabled,
             realtime::realtime_voice_rate,
+            realtime::realtime_voice_catalog,
+            realtime::realtime_voice_select,
             realtime::realtime_stop_speech,
             device_info,
             auth_public_key,

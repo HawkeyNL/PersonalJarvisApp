@@ -27,6 +27,7 @@ pub(crate) struct Runtime {
     speech_stop: Mutex<Option<tokio::sync::watch::Sender<()>>>,
     pub voice_enabled: Arc<AtomicBool>,
     speech_rate: Arc<super::local_speech_engine::SpeechRate>,
+    speech_voice: Arc<super::local_voices::Selection>,
 }
 
 #[cfg(test)]
@@ -128,6 +129,24 @@ pub(crate) fn realtime_voice_rate(app: AppHandle, rate: f64) -> Result<(), &'sta
 }
 
 #[tauri::command]
+pub(crate) async fn realtime_voice_catalog() -> Result<Vec<super::local_voices::Voice>, &'static str>
+{
+    super::local_voices::discover().await
+}
+#[tauri::command]
+pub(crate) async fn realtime_voice_select(app: AppHandle, id: String) -> Result<(), &'static str> {
+    if !id.is_empty()
+        && !super::local_voices::discover()
+            .await?
+            .iter()
+            .any(|v| v.id == id)
+    {
+        return Err("selected local voice is unavailable");
+    }
+    app.state::<Runtime>().speech_voice.set(id)
+}
+
+#[tauri::command]
 pub(crate) fn realtime_start(app: AppHandle) -> Result<(), String> {
     super::native_http_client()?; // Installs the reviewed Rustls provider.
     let runtime = app.state::<Runtime>();
@@ -218,6 +237,7 @@ async fn run(
                 },
                 controls.reporter(),
                 app.state::<Runtime>().speech_rate.clone(),
+                app.state::<Runtime>().speech_voice.clone(),
             );
             loop {
                 let incoming = tokio::select! {

@@ -59,8 +59,9 @@ impl Worker {
         report: impl Fn(Status) + Send + Sync + 'static,
         playback: impl Fn(uuid::Uuid, State) + Send + Sync + 'static,
         rate: Arc<super::local_speech_engine::SpeechRate>,
+        voice: Arc<super::local_voices::Selection>,
     ) -> Self {
-        Self::with_reports(report, Arc::new(NativeEngine(rate)), playback)
+        Self::with_reports(report, Arc::new(NativeEngine(rate, voice)), playback)
     }
     #[cfg(test)]
     fn with_engine(

@@ -39,7 +39,7 @@ pub(super) trait TtsEngine: Send + Sync + 'static {
     ) -> SpeechFuture<'a>;
 }
 
-pub(super) struct NativeEngine(pub Arc<SpeechRate>);
+pub(super) struct NativeEngine(pub Arc<SpeechRate>, pub Arc<super::local_voices::Selection>);
 impl TtsEngine for NativeEngine {
     fn speak<'a>(
         &'a self,
@@ -55,6 +55,16 @@ impl TtsEngine for NativeEngine {
                 return Err(Status::Unavailable);
             };
             let mut command = tokio::process::Command::new(executable);
+            let selected = self.1.get().map_err(|_| Status::Failed)?;
+            if !selected.is_empty() {
+                let catalog = super::local_voices::discover()
+                    .await
+                    .map_err(|_| Status::Unavailable)?;
+                if !catalog.iter().any(|voice| voice.id == selected) {
+                    return Err(Status::Unavailable);
+                }
+                command.args(["-v", &selected]);
+            }
             let rate = self.0.words_per_minute();
             if cfg!(target_os = "macos") {
                 command.args(["-r", &rate, "-f", "-"]);

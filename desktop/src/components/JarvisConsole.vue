@@ -19,6 +19,11 @@ import {
   voiceEnabled,
   voiceRate,
   setVoiceRate,
+  voiceChoice,
+  localVoices,
+  voiceChoiceError,
+  refreshLocalVoices,
+  setVoiceChoice,
   headset,
   setVoiceEnabled,
   stopSpeaking,
@@ -245,6 +250,14 @@ onMounted(async () => {
             @change="setVoiceRate(Number(($event.target as HTMLSelectElement).value))">
             <option v-for="rate in [0.5,0.75,1,1.25,1.5,1.75,2]" :key="rate" :value="rate">{{rate}}×</option>
           </select>
+          <button v-if="voiceEnabled" type="button" @click="refreshLocalVoices">Stemmen</button>
+          <select v-if="voiceEnabled" :value="voiceChoice" aria-label="Lokale stem"
+            @change="setVoiceChoice(($event.target as HTMLSelectElement).value)">
+            <option value="">Systeemstandaard</option>
+            <option v-if="voiceChoice && !localVoices.some(v=>v.id===voiceChoice)" :value="voiceChoice">Opgeslagen stem</option>
+            <option v-for="voice in localVoices" :key="voice.id" :value="voice.id">{{voice.label}}</option>
+          </select>
+          <span v-if="voiceChoiceError" role="status">{{voiceChoiceError}}</span>
           <button
             type="button"
             class="ic"

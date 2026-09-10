@@ -65,7 +65,18 @@ Rust rejects non-finite/out-of-range values and passes only a derived numeric
 words-per-minute argument to the fixed offline tool (175 WPM at 1x). It reads
 the preference before each new phrase; changing speed does not restart the
 socket, claim voice, replay text or invoke a provider. Explicit installed-voice
-selection remains open on desktop. iOS Settings now selects an available
+selection is now available on Linux desktop through fixed `/usr/bin/espeak-ng
+--voices` discovery. It accepts only catalogued language IDs, never file paths,
+and revalidates explicit choices before playback. Discovery is limited to one
+process, three seconds, 64 KiB output and 128 entries. Errors are fixed text;
+stderr and arbitrary backend errors are not exposed. The local selection is
+persisted separately from voice enablement; a missing selection disables speech
+until the owner chooses an available option. macOS still uses its system default
+voice; Windows has no local backend yet. Parser/security tests pass, but this
+Linux development host lacks espeak-ng, so actual catalog/audio execution remains
+unverified. The catalog follows the upstream
+[eSpeak language listing](https://github.com/espeak-ng/espeak-ng/blob/master/docs/languages.md).
+iOS Settings now selects an available
 AVSpeech system voice, stores its identifier locally and revalidates availability
 for each utterance. Personal Voice is excluded; no authorization prompt for it
 is requested. Missing explicit choices fail rather than silently substitute.
