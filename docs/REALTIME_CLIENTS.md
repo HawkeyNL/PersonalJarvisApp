@@ -88,6 +88,13 @@ Android and iOS also restore their busy/sending state from `assistant_running`
 when opening or reconciling a conversation. Their DTO tests cover both older
 responses without this field and active-generation responses. Those app-level
 Android/iOS tests require the SDK/Xcode CI runners and have not run on this host.
+Android's pending request registry is bounded to 32 ID-only correlations and
+tested by the SDK-independent JVM suite. Reconnect queries the device-bound
+request-status endpoint using a single origin/token snapshot, at most 32 GETs
+with five-second request deadlines. Only matching terminal statuses clear an
+entry; unavailable/unknown results never trigger another POST. Logout, device
+reset and origin changes clear local correlations. Native HTTP integration still
+requires Android SDK/runner validation; JVM tests do not establish that coverage.
 
 Run `npm ci`, `npm run check`, and `npm run test:unit` from `desktop/`, and
 `cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked` from the root.

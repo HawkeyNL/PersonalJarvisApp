@@ -65,7 +65,7 @@ data class JarvisUiState(
 class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     private val speech = RealtimeSpeech(container.localSpeech)
     private var realtimeAvailable = false
-    private val pending = mutableMapOf<String, String>()
+    private val pending = com.hawkeynl.jarvis.chat.PendingRuns()
     private val _state = MutableStateFlow(
         JarvisUiState(locked = container.sessions.hasSessionRecord(), voiceEnabled = container.voicePreferences.getBoolean("enabled", false)),
     )
@@ -93,7 +93,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             val parsed = HomeNodeEndpoint.parse(_state.value.endpointDraft)
             if (parsed is EndpointValidation.Valid && parsed.endpoint != _state.value.endpoint) {
-                container.realtime.stop(); speech.stop(); container.sessions.reset()
+                container.realtime.stop(); speech.stop(); pending.clear(); container.sessions.reset()
                 _state.update { it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), conversationId = null) }
             }
             when (val result = container.settings.save(_state.value.endpointDraft)) {
@@ -213,7 +213,10 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         if (realtimeAvailable) {
             val requestId = java.util.UUID.randomUUID().toString()
             val optimisticId = "request:$requestId"
-            pending[requestId] = optimisticId
+            if (!pending.add(requestId, optimisticId)) {
+                _state.update { it.copy(error = "Te veel onbevestigde verzoeken. Herstel eerst de verbinding; niets wordt opnieuw verstuurd.") }
+                return
+            }
             _state.update { it.copy(busy = true, messages = it.messages + ConversationMessage("user", text.trim(), at = Instant.now().toString(), id = optimisticId)) }
             viewModelScope.launch {
                 try {
@@ -258,6 +261,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun logout() {
+        pending.clear()
         container.realtime.stop(); speech.stop()
         val endpoint = _state.value.endpoint ?: return
         viewModelScope.launch {
@@ -272,6 +276,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun resetDevice() {
+        pending.clear()
         container.realtime.stop(); speech.stop()
         viewModelScope.launch {
             container.enrollment.resetDevice(_state.value.endpoint)
@@ -401,6 +406,9 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             if (_state.value.endpoint != endpoint || _state.value.locked || !_state.value.authenticated) return@start
             speech.event(event)
             if (event.type == "connection.ready") {
+                val recovered = container.realtime.recover(endpoint, pending.requests())
+                if (_state.value.endpoint != endpoint || _state.value.locked || !_state.value.authenticated) return@start
+                for ((request, run) in recovered) pending.reconcile(request, run)
                 loadConversations(endpoint)
                 val selected = _state.value.conversationId
                 if (selected != null) {

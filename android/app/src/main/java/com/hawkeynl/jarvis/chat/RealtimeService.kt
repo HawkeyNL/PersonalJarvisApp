@@ -23,6 +23,7 @@ import io.ktor.websocket.readText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -62,6 +63,23 @@ class RealtimeService(private val sessions: SessionRepository) {
         reports?.trySend(VoiceCommand.Report(report))
     }
     fun releaseVoice(runId: String) { reports?.trySend(VoiceCommand.Release(VoiceRelease(runId))) }
+    suspend fun recover(endpoint: HomeNodeEndpoint, requests: List<String>): List<Pair<String, RecoveredRun>> {
+        val token = sessions.session().token ?: return emptyList()
+        // One immutable origin/session binding for this bounded batch. Never POST.
+        return kotlinx.coroutines.coroutineScope {
+            requests.take(32).map { request ->
+                async {
+                    try {
+                        val id = java.util.UUID.fromString(request).toString()
+                        val result = client.get(endpoint.url("/v1/assistant/requests/$id")) {
+                            bearerAuth(token); timeout { requestTimeoutMillis = 5_000 }
+                        }.body<RecoveredRun>()
+                        request to result
+                    } catch (error: CancellationException) { throw error } catch (_: Exception) { null }
+                }
+            }.mapNotNull { it.await() }
+        }
+    }
     suspend fun available(endpoint: HomeNodeEndpoint): Boolean = try {
         val token = sessions.session().token
         if (token == null) false else {
