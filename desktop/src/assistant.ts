@@ -11,6 +11,7 @@ import { canSpeak } from "./voice";
 import { invoke } from "@tauri-apps/api/core";
 import { startRealtime, type RealtimeEvent, type CanonicalMessage } from "./realtime";
 import { mergeCanonical, appendVisualDelta } from "./realtimeProjection";
+import { PendingRuns } from "./pendingRuns";
 import { currentAuthStatus } from "./auth";
 import { postJsonAuth, getJsonAuth } from "./api";
 import {
@@ -37,7 +38,7 @@ export const messages = ref<Msg[]>([]);
 export const thinking = ref(false); // true while the brain is generating a reply
 let idc = 0;
 let realtimeAvailable=false;
-const pending=new Map<string,{conversation:string|null;messageId:number}>();
+const pending=new PendingRuns();
 let reconciling=false;
 let buffered:RealtimeEvent[]=[];
 
@@ -54,7 +55,19 @@ async function reconcileRealtime() {
     await loadConversations();
     const selected=currentId.value;
     if(selected) await reloadConversation(selected);
-    thinking.value=false;
+    // Recover by run ID or original request ID. Never POST to recover an event.
+    // At most 32 bounded requests, concurrently so one offline timeout does
+    // not multiply into minutes of blocked event reconciliation.
+    await Promise.all(pending.entries().map(async ([requestId,local])=>{
+      try {
+        const path=local.runId ? `/v1/assistant/runs/${local.runId}` : `/v1/assistant/requests/${requestId}`;
+        const result=await getJsonAuth<{run_id:string;request_id:string;conversation_id:string;state:string}>(path);
+        if(result.request_id===requestId && (!local.runId || result.run_id===local.runId)) {
+          pending.acknowledge(requestId,result.conversation_id,result.run_id);
+          pending.reconcile(requestId,result.run_id,result.state);
+        }
+      } catch { /* Keep ambiguous metadata; do not automatically regenerate. */ }
+    }));
   } finally {
     reconciling=false;
     const events=buffered;buffered=[];
@@ -83,9 +96,11 @@ function receiveRealtime(event:RealtimeEvent) {
       const local=pending.get(event.payload.request_id);
       if(local && local.conversation===null && currentId.value===null && messages.value.some(m=>m.id===local.messageId)) setCurrent(event.payload.message.conversation_id);
       upsertCanonical(event.payload.message,event.payload.request_id);
+      pending.acknowledge(event.payload.request_id,event.payload.message.conversation_id);
       break;
     }
     case "assistant.started":
+      pending.acknowledge(event.payload.request_id,event.payload.conversation_id,event.payload.run_id);
       if(currentId.value===event.payload.conversation_id) {
         thinking.value=true;
         if(!messages.value.some(m=>m.runId===event.payload.run_id)) messages.value.push({id:idc++,role:"jarvis",text:"",ts:stamp(),spoken:false,runId:event.payload.run_id});
@@ -160,8 +175,10 @@ async function reloadConversation(id:string):Promise<void> {
     id: string;
     title: string;
     messages: { id?:string; role: string; content: string; model: string | null; at: string }[];
+    assistant_running?:boolean;
   }>(`/v1/conversations/${id}`);
   if(currentId.value!==id) return;
+  thinking.value=res.assistant_running===true;
   messages.value = res.messages.map((m) => ({
     id: idc++,
     role: m.role === "assistant" ? "jarvis" : "user",
@@ -176,6 +193,7 @@ async function reloadConversation(id:string):Promise<void> {
 export function startNewConversation(): void {
   setCurrent(null);
   messages.value = [];
+  thinking.value = false;
 }
 
 /** On launch, restore the tab list and reopen the last (or most recent) chat,
@@ -205,6 +223,10 @@ export async function initChat(): Promise<void> {
 export async function send(input: string): Promise<void> {
   const t = input.trim();
   if (!t || thinking.value) return;
+  if(realtimeAvailable && pending.full) {
+    push("jarvis","Te veel onbevestigde verzoeken. Herstel eerst de verbinding; er wordt niets opnieuw verstuurd.");
+    return;
+  }
   push("user", t);
   thinking.value = true;
   if(realtimeAvailable) {
@@ -217,6 +239,7 @@ export async function send(input: string): Promise<void> {
       const result=await postJsonAuth<{conversation_id:string;run_id:string}>("/v1/assistant/runs",request);
       const local=pending.get(requestId);
       if(local?.conversation===null && currentId.value===null && messages.value.some(m=>m.id===local.messageId)) setCurrent(result.conversation_id);
+      pending.acknowledge(requestId,result.conversation_id,result.run_id);
       // Completion arrives by event; a lost socket is reconciled from REST.
     } catch {
       thinking.value=false;

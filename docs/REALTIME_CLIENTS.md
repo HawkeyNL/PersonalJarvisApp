@@ -75,6 +75,16 @@ do not demonstrate audible OS playback or macOS/Windows runtime behavior.
 
 ## Validation and remaining acceptance
 
+Desktop recovery retains at most 32 outstanding request correlations (IDs only,
+not prompt copies). Unknown outcomes are never silently evicted to make room
+for another paid submission. On reconnect, run IDs (or original request IDs when
+the submission acknowledgement was lost) are queried through read-only HTTP;
+terminal results clear correlations, while unknown failures do
+not trigger regeneration. Late submit acknowledgements cannot resurrect a
+completed correlation. Conversation REST `assistant_running` restores busy state
+even when generation originated on a different device. Older Core responses
+without that additive field remain readable.
+
 Run `npm ci`, `npm run check`, and `npm run test:unit` from `desktop/`, and
 `cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked` from the root.
 Android: `./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon` from
