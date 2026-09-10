@@ -142,6 +142,15 @@ false queue-full failure. The queue remains bounded and cancellation-safe.
 
 ## Validation and remaining acceptance
 
+Desktop native auth storage now serializes metadata/token snapshots and changes
+with one process-local lock, never held across an await. Authenticated requests
+build their URL from the same snapshot as their bearer, not a second metadata
+read. Login captures the origin plus a monotonically checked storage generation;
+logout/reset/configuration and successful login invalidate older results before
+they can store a bearer. Native tests cover stale login generations, origin
+round trips, generation exhaustion and snapshot URL/path validation. This does
+not substitute for OS-keychain or full desktop-session integration acceptance.
+
 iOS chat presentation has a separate lifetime ID. Logout, device reset, origin
 change and background locking invalidate it and clear visible messages. Pending
 request IDs survive background locking for read-only recovery, but are cleared

@@ -8,6 +8,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
@@ -19,6 +20,31 @@ mod local_voices;
 mod realtime;
 mod speech_playback;
 mod voice_control;
+
+// Serialize metadata/token transitions. Never hold this guard across an await.
+static AUTH_STORAGE: Mutex<u64> = Mutex::new(0);
+fn auth_storage() -> Result<std::sync::MutexGuard<'static, u64>, String> {
+    AUTH_STORAGE
+        .lock()
+        .map_err(|_| "native auth storage unavailable".to_string())
+}
+fn advance_auth_epoch(epoch: &mut u64) -> Result<(), String> {
+    *epoch = epoch
+        .checked_add(1)
+        .ok_or("native auth generation exhausted")?;
+    Ok(())
+}
+fn validate_login_binding(
+    current: u64,
+    expected: u64,
+    origin: Option<&str>,
+    expected_origin: &str,
+) -> Result<(), String> {
+    if current != expected || origin != Some(expected_origin) {
+        return Err("device login session changed".into());
+    }
+    Ok(())
+}
 
 /// Legacy desktop auth file. It is read only to migrate existing installs.
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -140,6 +166,10 @@ struct SecureAuth {
 /// rewritten after every present secret is safely in the OS credential store,
 /// so a partial migration can never discard the device identity.
 fn load_secure_auth(app: &AppHandle) -> Result<SecureAuth, String> {
+    let _guard = auth_storage()?;
+    load_secure_auth_unlocked(app)
+}
+fn load_secure_auth_unlocked(app: &AppHandle) -> Result<SecureAuth, String> {
     let legacy = load_legacy_store(app)?;
     let home_node_origin = validated_stored_origin(&legacy);
     let metadata = AuthMetadata {
@@ -176,6 +206,7 @@ fn load_private_key(app: &AppHandle) -> Result<Option<String>, String> {
 }
 
 fn save_private_key(app: &AppHandle, key_hex: &str) -> Result<(), String> {
+    let _guard = auth_storage()?;
     save_credential(KEY_ACCOUNT, key_hex)?;
     save_metadata(app, &load_metadata(app)?)
 }
@@ -288,10 +319,19 @@ fn auth_sign_pairing_approval(
 }
 
 /// Persist the device id and session token after a successful login.
-fn save_auth(app: &AppHandle, device_id: String, token: &str) -> Result<(), String> {
-    load_secure_auth(app)?;
-    save_credential(TOKEN_ACCOUNT, token)?;
+fn save_auth(
+    app: &AppHandle,
+    device_id: String,
+    token: &str,
+    origin: &str,
+    epoch: u64,
+) -> Result<(), String> {
+    let mut guard = auth_storage()?;
     let current = load_metadata(app)?;
+    validate_login_binding(*guard, epoch, current.home_node_origin.as_deref(), origin)?;
+    advance_auth_epoch(&mut guard)?;
+    load_secure_auth_unlocked(app)?;
+    save_credential(TOKEN_ACCOUNT, token)?;
     let metadata = AuthMetadata {
         device_id: Some(device_id),
         home_node_origin: current.home_node_origin,
@@ -347,13 +387,11 @@ fn authenticated_api_path(path: &str) -> bool {
     })
 }
 
-fn api_url(app: &AppHandle, path: &str) -> Result<String, String> {
+fn api_url(origin: Option<&str>, path: &str) -> Result<String, String> {
     if !authenticated_api_path(path) {
         return Err("authenticated API path is invalid".to_string());
     }
-    let origin = load_metadata(app)?
-        .home_node_origin
-        .ok_or_else(|| "Home Node is not configured".to_string())?;
+    let origin = origin.ok_or_else(|| "Home Node is not configured".to_string())?;
     Ok(format!("{origin}{path}"))
 }
 
@@ -391,9 +429,13 @@ async fn auth_complete_login(
     if signature.len() != 128 || !signature.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err("login signature is invalid".to_string());
     }
-    let origin = load_metadata(&app)?
-        .home_node_origin
-        .ok_or_else(|| "Home Node is not configured".to_string())?;
+    let (origin, epoch) = {
+        let guard = auth_storage()?;
+        let origin = load_metadata(&app)?
+            .home_node_origin
+            .ok_or_else(|| "Home Node is not configured".to_string())?;
+        (origin, *guard)
+    };
     let response = native_http_client()?
         .post(format!("{origin}/v1/auth/login"))
         .json(&serde_json::json!({
@@ -428,7 +470,7 @@ async fn auth_complete_login(
     {
         return Err("Home Node login response is invalid".to_string());
     }
-    save_auth(&app, device_id, &result.token)
+    save_auth(&app, device_id, &result.token, &origin, epoch)
 }
 
 #[derive(Serialize)]
@@ -462,7 +504,10 @@ async fn auth_request(
         return Err("authenticated API body is invalid".to_string());
     }
     let mut request = native_http_client()?
-        .request(method.clone(), api_url(&app, &path)?)
+        .request(
+            method.clone(),
+            api_url(auth.metadata.home_node_origin.as_deref(), &path)?,
+        )
         .bearer_auth(token)
         .header(reqwest::header::ACCEPT, "application/json");
     if method == reqwest::Method::POST {
@@ -515,7 +560,9 @@ fn auth_status(app: AppHandle) -> Result<serde_json::Value, String> {
 #[tauri::command]
 fn auth_logout(app: AppHandle) -> Result<(), String> {
     realtime::stop(&app);
-    let auth = load_secure_auth(&app)?;
+    let mut guard = auth_storage()?;
+    advance_auth_epoch(&mut guard)?;
+    let auth = load_secure_auth_unlocked(&app)?;
     delete_credential(TOKEN_ACCOUNT)?;
     save_metadata(&app, &auth.metadata)
 }
@@ -526,6 +573,8 @@ fn auth_logout(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn auth_reset(app: AppHandle) -> Result<(), String> {
     realtime::stop(&app);
+    let mut guard = auth_storage()?;
+    advance_auth_epoch(&mut guard)?;
     let home_node_origin = load_metadata(&app)?.home_node_origin;
     delete_credential(KEY_ACCOUNT)?;
     delete_credential(TOKEN_ACCOUNT)?;
@@ -554,6 +603,8 @@ fn home_node_config(app: AppHandle) -> Result<HomeNodeConfig, String> {
 fn home_node_configure(app: AppHandle, origin: String) -> Result<HomeNodeConfig, String> {
     realtime::stop(&app);
     let origin = normalize_home_node_origin(&origin, cfg!(debug_assertions))?;
+    let mut guard = auth_storage()?;
+    advance_auth_epoch(&mut guard)?;
     let mut metadata = load_metadata(&app)?;
     if origin_changed(metadata.home_node_origin.as_deref(), &origin) {
         // A bearer is scoped to the Home Node that minted it. Clear both the
@@ -727,6 +778,31 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn late_login_cannot_cross_logout_or_origin_round_trip() {
+        let origin = "https://jarvis.example.com";
+        let mut epoch = 7;
+        assert!(super::validate_login_binding(epoch, 7, Some(origin), origin).is_ok());
+        super::advance_auth_epoch(&mut epoch).unwrap();
+        super::advance_auth_epoch(&mut epoch).unwrap();
+        assert!(super::validate_login_binding(epoch, 7, Some(origin), origin).is_err());
+        assert!(
+            super::validate_login_binding(7, 7, Some("https://home.example.org"), origin).is_err()
+        );
+        let mut exhausted = u64::MAX;
+        assert!(super::advance_auth_epoch(&mut exhausted).is_err());
+        assert_eq!(exhausted, u64::MAX);
+    }
+    #[test]
+    fn authenticated_url_uses_snapshot_origin_and_rejects_absolute_paths() {
+        let origin = Some("https://jarvis.example.com");
+        assert_eq!(
+            super::api_url(origin, "/v1/conversations").unwrap(),
+            "https://jarvis.example.com/v1/conversations"
+        );
+        assert!(super::api_url(origin, "https://home.example.org/v1/conversations").is_err());
+        assert!(super::api_url(None, "/v1/conversations").is_err());
+    }
     use super::*;
 
     #[test]
