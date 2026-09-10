@@ -65,7 +65,16 @@ Rust rejects non-finite/out-of-range values and passes only a derived numeric
 words-per-minute argument to the fixed offline tool (175 WPM at 1x). It reads
 the preference before each new phrase; changing speed does not restart the
 socket, claim voice, replay text or invoke a provider. Explicit installed-voice
-selection remains open on desktop/iOS. Android Settings now offers local default
+selection remains open on desktop. iOS Settings now selects an available
+AVSpeech system voice, stores its identifier locally and revalidates availability
+for each utterance. Personal Voice is excluded; no authorization prompt for it
+is requested. Missing explicit choices fail rather than silently substitute.
+The catalog bounds input to 512 entries and output to 128 unique safe entries.
+[Apple's speechVoices API](https://developer.apple.com/documentation/avfaudio/avspeechsynthesisvoice/speechvoices())
+reports availability, not an Android-style network-required flag. Jarvis adds no
+cloud TTS or voice-download request; airplane-mode verification on a real iPhone
+remains required. Catalog/selection XCTest cases are added but not run on Linux.
+Android Settings now offers local default
 or a specific installed offline voice. The catalog inspects at most 512 native
 records and exposes at most 128 safe, unique entries. Network-required voices
 and voices marked as not installed are excluded. Selection is stored only in

@@ -212,18 +212,42 @@ protocol SpeechOutput: AnyObject {
     func begin(run: UUID)
     func seal(run: UUID)
     func setRate(_ rate: Double)
+    func voices() -> [LocalSpeechVoice]
+    func setVoice(_ id: String)
     func setPlaybackHandler(_ handler: ((SpeechPlaybackEvent) -> Void)?)
 }
 extension SpeechOutput {
     func begin(run: UUID) {}
     func seal(run: UUID) {}
     func setRate(_ rate: Double) {}
+    func voices() -> [LocalSpeechVoice] { [] }
+    func setVoice(_ id: String) {}
     func setPlaybackHandler(_ handler: ((SpeechPlaybackEvent) -> Void)?) {}
 }
 
 enum SpeechPlaybackState: String, Codable, Sendable { case started, stopped, failed }
 enum SpeechRate {
     static func normalize(_ rate: Double) -> Double { rate.isFinite ? min(2, max(0.5, rate)) : 1 }
+}
+struct LocalSpeechVoice: Identifiable, Equatable {
+    let id: String
+    let label: String
+    static func catalog<S: Sequence>(_ records: S) -> [Self] where S.Element == Self {
+        func safe(_ text: String) -> Bool {
+            !text.isEmpty && text.utf8.count <= 256 && !text.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+        }
+        var seen = Set<String>()
+        var result: [Self] = []
+        for record in records.prefix(512) where safe(record.id) && safe(record.label) {
+            if seen.insert(record.id).inserted { result.append(record) }
+            if result.count == 128 { break }
+        }
+        return result.sorted { $0.label < $1.label }
+    }
+    static func selected(in voices: [Self], id: String, defaultID: String?) -> String? {
+        if !id.isEmpty { return voices.first { $0.id == id }?.id }
+        return voices.first { $0.id == defaultID }?.id ?? voices.first?.id
+    }
 }
 struct SpeechPlaybackEvent: Equatable, Sendable {
     let run: UUID
@@ -294,6 +318,13 @@ final class NativeSpeechOutput: NSObject, SpeechOutput, AVSpeechSynthesizerDeleg
     var onPlayback: ((SpeechPlaybackEvent) -> Void)?
     private var suppressed = true
     private var rate = 1.0
+    private var selectedVoice = ""
+    func setVoice(_ id: String) { selectedVoice = id }
+    func voices() -> [LocalSpeechVoice] {
+        LocalSpeechVoice.catalog(AVSpeechSynthesisVoice.speechVoices().prefix(512)
+            .filter { !$0.voiceTraits.contains(.isPersonalVoice) }
+            .map { LocalSpeechVoice(id: $0.identifier, label: "\($0.name) — \($0.language)") })
+    }
     func setRate(_ rate: Double) { self.rate = SpeechRate.normalize(rate) }
     override init() { super.init(); engine.delegate = self }
     func setPlaybackHandler(_ handler: ((SpeechPlaybackEvent) -> Void)?) {
@@ -302,7 +333,14 @@ final class NativeSpeechOutput: NSObject, SpeechOutput, AVSpeechSynthesizerDeleg
     }
     func speak(_ text: String) {
         guard !suppressed else { return }
+        let available = voices()
+        let defaultID = AVSpeechSynthesisVoice(language: AVSpeechSynthesisVoice.currentLanguageCode())?.identifier
+        guard let id = LocalSpeechVoice.selected(in: available, id: selectedVoice, defaultID: defaultID),
+              let voice = AVSpeechSynthesisVoice(identifier: id) else {
+            queued.fail(); suppressed = true; engine.stopSpeaking(at: .immediate); drain(); return
+        }
         let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = voice
         guard queued.insert(utterance) else {
             queued.fail(); suppressed = true; engine.stopSpeaking(at: .immediate); drain(); return
         }
@@ -345,6 +383,8 @@ final class RealtimeSpeech {
     init(output: SpeechOutput) { self.output = output }
     convenience init() { self.init(output: NativeSpeechOutput()) }
     func setRate(_ rate: Double) { output.setRate(SpeechRate.normalize(rate)) }
+    func voices() -> [LocalSpeechVoice] { output.voices() }
+    func setVoice(_ id: String) { output.setVoice(id) }
     func setPlaybackHandler(_ handler: ((SpeechPlaybackEvent) -> Void)?) {
         stop(); output.setPlaybackHandler(handler)
     }

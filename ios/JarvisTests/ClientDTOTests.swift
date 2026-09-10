@@ -9,6 +9,19 @@ private final class NoNetworkProtocol: URLProtocol {
 }
 
 final class ClientDTOTests: XCTestCase {
+    func testLocalVoiceSelectionIsBoundedAndNeverSubstitutesMissingExplicitVoice() {
+        let records = [LocalSpeechVoice(id: "local", label: "Fixture voice"),
+                       LocalSpeechVoice(id: "local", label: "Duplicate"),
+                       LocalSpeechVoice(id: "bad\n", label: "Invalid"),
+                       LocalSpeechVoice(id: "long", label: String(repeating: "x", count: 257))]
+        let voices = LocalSpeechVoice.catalog(records)
+        XCTAssertEqual(voices, [records[0]])
+        XCTAssertEqual(LocalSpeechVoice.selected(in: voices, id: "local", defaultID: nil), "local")
+        XCTAssertNil(LocalSpeechVoice.selected(in: voices, id: "removed", defaultID: "local"))
+        XCTAssertEqual(LocalSpeechVoice.selected(in: voices, id: "", defaultID: "removed"), "local")
+        XCTAssertNil(LocalSpeechVoice.selected(in: [], id: "", defaultID: nil))
+        XCTAssertEqual(LocalSpeechVoice.catalog((0..<1000).lazy.map { LocalSpeechVoice(id: "v\($0)", label: "Voice \($0)") }).count, 128)
+    }
     func testSpeechRateIsBoundedAndRejectsNonFinitePreferences() {
         for value in [Double.nan, Double.infinity, -Double.infinity] { XCTAssertEqual(SpeechRate.normalize(value), 1) }
         XCTAssertEqual(SpeechRate.normalize(-100), 0.5)

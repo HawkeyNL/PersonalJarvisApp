@@ -14,6 +14,14 @@ final class JarvisAppModel: ObservableObject {
     @Published private(set) var isSending = false
     @Published var endpointText: String
     @Published var notice: String?
+    @Published private(set) var availableVoices: [LocalSpeechVoice] = []
+    @Published var selectedVoice = UserDefaults.standard.string(forKey: "jarvis.voice.identifier") ?? "" {
+        didSet {
+            speech.setVoice(selectedVoice)
+            UserDefaults.standard.set(selectedVoice, forKey: "jarvis.voice.identifier")
+        }
+    }
+    func refreshLocalVoices() { availableVoices = speech.voices() }
     @Published var voiceRate = SpeechRate.normalize(UserDefaults.standard.object(forKey: "jarvis.voice.rate") as? Double ?? 1) {
         didSet {
             let rate = SpeechRate.normalize(voiceRate)
@@ -63,6 +71,7 @@ final class JarvisAppModel: ObservableObject {
         self.biometricLock = BiometricLock()
         self.endpointText = endpointStore.endpoint?.absoluteString ?? ""
         speech.setRate(voiceRate)
+        speech.setVoice(selectedVoice)
     }
 
     var isAuthenticated: Bool { enrollmentState == .authenticated }
