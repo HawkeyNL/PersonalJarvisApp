@@ -55,7 +55,7 @@ audible hardware output. Old-generation callbacks cannot terminate a newer run.
 Reports and release commands share a bounded 16-item native queue, fixed status
 values, a five-second request timeout and one immutable socket auth snapshot.
 Transport failure does not interrupt canonical chat; lease reconciliation remains
-authoritative. iOS playback reporting and device voice/rate selection remain open.
+authoritative. Device voice/rate selection remains open.
 Android release commands now carry a snapshot of the currently observed owned
 run ID, never an arbitrary device identity. A delayed release cannot clear a
 newer run. Android and iOS clear old voice ownership on `connection.ready`;
@@ -70,9 +70,16 @@ The iOS registry also tracks run-level started/stopped/failed metadata. It waits
 for both canonical completion and queue drainage before stopping, ignores stale
 utterance callbacks, and bounds pending telemetry to 16 entries. Native callback
 delivery drains this metadata on the main actor without carrying utterance text.
-The HTTP reporting consumer for this iOS callback is still to be connected;
-these changes alone do not send iOS playback status to Core. New XCTest cases
-cover drainage, stale cancellation and the metadata bound, but require macOS CI.
+The iOS HTTP consumer captures the socket's immutable origin/token pair and posts
+only typed run IDs and playback states to `/v1/voice/playback`. It queues at most
+16 pending reports plus one active request, with five-second timeouts. Redirects
+are refused and response bodies are cancelled at headers. Disconnect/logout
+cancels queued/in-flight reports and speech; reconnect replaces the reporter.
+Old speech callbacks are drained before replacing the handler. No token or
+utterance text enters callback metadata or SwiftUI state. XCTest covers request
+shape, invalid origins, drainage, stale cancellation and the metadata bound.
+These Swift changes still require macOS compilation/tests and live-device audio
+validation; neither was run on the Linux development host.
 Desktop's separate **Stop spraak** button clears the current native speech
 buffer and cancels queued playback without changing its saved enable preference,
 disconnecting realtime, or cancelling inference. Late deltas do not resume that

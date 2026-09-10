@@ -9,6 +9,21 @@ private final class NoNetworkProtocol: URLProtocol {
 }
 
 final class ClientDTOTests: XCTestCase {
+    @MainActor
+    func testPlaybackRequestContainsOnlyNativeAuthAndTypedRunState() throws {
+        let run = UUID()
+        let event = SpeechPlaybackEvent(run: run, state: .started)
+        let request = try XCTUnwrap(VoicePlaybackReporter.request(origin: URL(string: "https://jarvis.example.com")!, token: "fixture-session", event: event))
+        XCTAssertEqual(request.url?.absoluteString, "https://jarvis.example.com/v1/voice/playback")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.timeoutInterval, 5)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer fixture-session")
+        let body = try JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: String]
+        XCTAssertEqual(body, ["run_id":run.uuidString,"state":"started"])
+        for invalid in ["http://jarvis.example.com", "https://user:password@jarvis.example.com", "https://jarvis.example.com/wrong", "https://jarvis.example.com?token=fixture", "https://jarvis.example.com#fragment"] {
+            XCTAssertNil(VoicePlaybackReporter.request(origin: URL(string: invalid)!, token: "fixture-session", event: event))
+        }
+    }
     func testSpeechRunWaitsForFinalSealAndDrainsOnlyOnce() {
         let queue = SpeechQueueRegistry()
         let run = UUID()

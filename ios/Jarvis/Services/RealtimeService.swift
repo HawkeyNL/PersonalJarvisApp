@@ -43,6 +43,79 @@ struct RecoveredChatRun: Decodable, Sendable {
 }
 struct VoiceReleaseRequest: Encodable { let run_id: UUID }
 struct VoiceReleaseResult: Decodable {}
+struct VoicePlaybackRequest: Encodable {
+    let run_id: UUID
+    let state: SpeechPlaybackState
+}
+
+// Reports need no response body. Cancel at headers, including error responses,
+// so an untrusted endpoint cannot fill memory with a telemetry response body.
+private final class PlaybackResponseDelegate: NSObject, URLSessionDataDelegate {
+    let completed: @Sendable () -> Void
+    init(completed: @escaping @Sendable () -> Void) { self.completed = completed }
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
+                    didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        completionHandler(.cancel)
+    }
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        completed() // Never forward transport errors, headers or body text.
+    }
+}
+
+@MainActor
+final class VoicePlaybackReporter {
+    private let origin: URL
+    private let token: String
+    private var session: URLSession?
+    private var active: URLSessionDataTask?
+    private var pending: [SpeechPlaybackEvent] = []
+    private var stopped = false
+    init(origin: URL, token: String) {
+        self.origin = origin; self.token = token
+        let config = URLSessionConfiguration.ephemeral
+        config.httpCookieStorage = nil; config.httpShouldSetCookies = false
+        config.urlCredentialStorage = nil; config.urlCache = nil
+        config.timeoutIntervalForRequest = 5; config.timeoutIntervalForResource = 5
+        let delegate = PlaybackResponseDelegate { [weak self] in
+            Task { @MainActor [weak self] in self?.completed() }
+        }
+        session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+    }
+    static func request(origin: URL, token: String, event: SpeechPlaybackEvent) -> URLRequest? {
+        guard let c = URLComponents(url: origin, resolvingAgainstBaseURL: false),
+              c.scheme == "https", c.host != nil, c.user == nil, c.password == nil,
+              c.query == nil, c.fragment == nil, c.path.isEmpty || c.path == "/" else { return nil }
+        var request = URLRequest(url: origin.appendingPathComponent("v1/voice/playback"))
+        request.httpMethod = "POST"; request.timeoutInterval = 5
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONEncoder().encode(VoicePlaybackRequest(run_id: event.run, state: event.state))
+        return request
+    }
+    func enqueue(_ event: SpeechPlaybackEvent) {
+        guard !stopped, pending.count < 16 else { return }
+        pending.append(event); pump()
+    }
+    func stop() {
+        stopped = true; pending.removeAll(); active?.cancel(); active = nil
+        session?.invalidateAndCancel(); session = nil
+    }
+    private func pump() {
+        guard !stopped, active == nil, !pending.isEmpty else { return }
+        let event = pending.removeFirst()
+        guard let request = Self.request(origin: origin, token: token, event: event) else { stop(); return }
+        active = session?.dataTask(with: request); active?.resume()
+    }
+    private func completed() {
+        guard !stopped else { return }
+        active = nil; pump()
+    }
+}
 
 private final class NoRedirect: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -56,6 +129,8 @@ final class RealtimeService {
     private var worker: Task<Void, Never>?
     private var socket: URLSessionWebSocketTask?
     private var generation = UUID()
+    private var playbackReporter: VoicePlaybackReporter?
+    private weak var speech: RealtimeSpeech?
     private let session: URLSession
     init() {
         let config = URLSessionConfiguration.ephemeral
@@ -63,9 +138,14 @@ final class RealtimeService {
         config.timeoutIntervalForRequest = 20
         session = URLSession(configuration: config, delegate: NoRedirect(), delegateQueue: nil)
     }
-    func stop() { generation = UUID(); worker?.cancel(); worker = nil; socket?.cancel(with: .goingAway, reason: nil); socket = nil }
-    func start(origin: URL, auth: AuthService, receive: @escaping @MainActor (RealtimeEvent) async -> Void) {
+    func stop() {
+        generation = UUID(); playbackReporter?.stop(); playbackReporter = nil
+        speech?.setPlaybackHandler(nil); speech = nil
+        worker?.cancel(); worker = nil; socket?.cancel(with: .goingAway, reason: nil); socket = nil
+    }
+    func start(origin: URL, auth: AuthService, speech: RealtimeSpeech, receive: @escaping @MainActor (RealtimeEvent) async -> Void) {
         stop()
+        self.speech = speech
         let current = generation
         worker = Task { [weak self] in
             var retry = 0
@@ -77,6 +157,13 @@ final class RealtimeService {
                     // or logs out. Never construct a handshake for a cancelled
                     // connection generation after that suspension point.
                     guard !Task.isCancelled, self.generation == current else { return }
+                    let reports = VoicePlaybackReporter(origin: origin, token: token)
+                    self.playbackReporter = reports
+                    speech.setPlaybackHandler { event in reports.enqueue(event) }
+                    defer {
+                        reports.stop()
+                        if self.generation == current { speech.setPlaybackHandler(nil); self.playbackReporter = nil }
+                    }
                     var components = URLComponents(url: origin, resolvingAgainstBaseURL: false)!
                     guard components.scheme == "https" else { return }
                     components.scheme = "wss"; components.path = "/v1/events"; components.query = nil
@@ -124,10 +211,12 @@ protocol SpeechOutput: AnyObject {
     func stop()
     func begin(run: UUID)
     func seal(run: UUID)
+    func setPlaybackHandler(_ handler: ((SpeechPlaybackEvent) -> Void)?)
 }
 extension SpeechOutput {
     func begin(run: UUID) {}
     func seal(run: UUID) {}
+    func setPlaybackHandler(_ handler: ((SpeechPlaybackEvent) -> Void)?) {}
 }
 
 enum SpeechPlaybackState: String, Codable, Sendable { case started, stopped, failed }
@@ -200,6 +289,10 @@ final class NativeSpeechOutput: NSObject, SpeechOutput, AVSpeechSynthesizerDeleg
     var onPlayback: ((SpeechPlaybackEvent) -> Void)?
     private var suppressed = true
     override init() { super.init(); engine.delegate = self }
+    func setPlaybackHandler(_ handler: ((SpeechPlaybackEvent) -> Void)?) {
+        stop() // Drain old-run callbacks through the old session, never the new one.
+        onPlayback = handler
+    }
     func speak(_ text: String) {
         guard !suppressed else { return }
         let utterance = AVSpeechUtterance(string: text)
@@ -243,6 +336,9 @@ final class RealtimeSpeech {
     var ownedRun: UUID? { device != nil && owner == device ? ownerRun : nil }
     init(output: SpeechOutput) { self.output = output }
     convenience init() { self.init(output: NativeSpeechOutput()) }
+    func setPlaybackHandler(_ handler: ((SpeechPlaybackEvent) -> Void)?) {
+        stop(); output.setPlaybackHandler(handler)
+    }
     func stop() { output.stop(); run = nil; received = ""; pending = ""; fence = nil; lineStart = true }
     func receive(_ event: RealtimeEvent) {
         if event.type == "connection.ready" { device = event.payload.device_id; owner = nil; ownerRun = nil; stop(); return }

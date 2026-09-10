@@ -148,7 +148,7 @@ final class JarvisAppModel: ObservableObject {
                 realtimeAvailable = await chat.realtimeAvailable()
                 if realtimeAvailable, let origin = endpointStore.endpoint, lockState == .unlocked {
                     speech.enabled = voiceEnabled
-                    realtime.start(origin: origin, auth: auth) { [weak self] event in await self?.receiveRealtime(event) }
+                    realtime.start(origin: origin, auth: auth, speech: speech) { [weak self] event in await self?.receiveRealtime(event) }
                 }
             }
         } catch { handle(error) }
