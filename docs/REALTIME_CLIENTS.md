@@ -84,6 +84,10 @@ not trigger regeneration. Late submit acknowledgements cannot resurrect a
 completed correlation. Conversation REST `assistant_running` restores busy state
 even when generation originated on a different device. Older Core responses
 without that additive field remain readable.
+Android and iOS also restore their busy/sending state from `assistant_running`
+when opening or reconciling a conversation. Their DTO tests cover both older
+responses without this field and active-generation responses. Those app-level
+Android/iOS tests require the SDK/Xcode CI runners and have not run on this host.
 
 Run `npm ci`, `npm run check`, and `npm run test:unit` from `desktop/`, and
 `cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked` from the root.

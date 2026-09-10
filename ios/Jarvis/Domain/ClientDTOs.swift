@@ -120,6 +120,11 @@ struct ConversationResponse: Decodable, Equatable {
     let id: UUID
     let title: String
     let messages: [ConversationMessage]
+    let assistantRunning: Bool?
+    enum CodingKeys: String, CodingKey {
+        case id, title, messages
+        case assistantRunning = "assistant_running"
+    }
 }
 
 struct ChatTurn: Encodable, Equatable {

@@ -2,6 +2,12 @@ import XCTest
 @testable import Jarvis
 
 final class ClientDTOTests: XCTestCase {
+    func testConversationRecoveryPreservesActiveGenerationAndAcceptsLegacyShape() throws {
+        let legacy = Data(#"{"id":"00000000-0000-0000-0000-000000000001","title":"Fixture","messages":[]}"#.utf8)
+        XCTAssertNil(try JSONDecoder().decode(ConversationResponse.self, from: legacy).assistantRunning)
+        let active = Data(#"{"id":"00000000-0000-0000-0000-000000000001","title":"Fixture","messages":[],"assistant_running":true}"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(ConversationResponse.self, from: active).assistantRunning, true)
+    }
     func testStoppedUtteranceCallbackCannotFreeANewerQueueSlot() {
         let queue = SpeechQueueRegistry()
         let old = NSObject()

@@ -78,6 +78,7 @@ data class ConversationDetailResponse(
     val id: String,
     val title: String,
     val messages: List<ConversationMessage>,
+    val assistant_running: Boolean = false,
 )
 
 @Serializable

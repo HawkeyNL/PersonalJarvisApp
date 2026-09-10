@@ -208,6 +208,7 @@ final class JarvisAppModel: ObservableObject {
             currentConversationId = conversation.id
             currentConversationTitle = conversation.title
             messages = conversation.messages
+            isSending = conversation.assistantRunning == true
         } catch { handle(error) }
     }
 
@@ -215,6 +216,7 @@ final class JarvisAppModel: ObservableObject {
         currentConversationId = nil
         currentConversationTitle = "New conversation"
         messages = []
+        isSending = false
     }
 
     func send(_ text: String) async {
@@ -279,7 +281,7 @@ final class JarvisAppModel: ObservableObject {
                 conversations = try await chat.conversations()
                 if let selected = currentConversationId {
                     let snapshot = try await chat.conversation(id: selected)
-                    if currentConversationId == selected { messages = snapshot.messages; currentConversationTitle = snapshot.title; isSending = false }
+                    if currentConversationId == selected { messages = snapshot.messages; currentConversationTitle = snapshot.title; isSending = snapshot.assistantRunning == true }
                 }
             } catch { notice = "Realtime connected; history reconciliation will retry after reconnect." }
         case "conversation.created", "conversation.updated":

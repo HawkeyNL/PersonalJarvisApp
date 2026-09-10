@@ -188,7 +188,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                         conversationId = result.value.id,
                         conversationTitle = result.value.title,
                         messages = result.value.messages,
-                        busy = false,
+                        busy = result.value.assistant_running,
                     )
                 }
                 else -> handleApiFailure(result)
@@ -405,7 +405,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 val selected = _state.value.conversationId
                 if (selected != null) {
                     val snapshot = container.conversations.load(endpoint, selected)
-                    if (snapshot is ApiResult.Success) _state.update { if (it.conversationId == selected) it.copy(messages = snapshot.value.messages, busy = false) else it }
+                    if (snapshot is ApiResult.Success) _state.update { if (it.conversationId == selected) it.copy(messages = snapshot.value.messages, busy = snapshot.value.assistant_running) else it }
                 }
             } else receiveRealtime(event)
         }

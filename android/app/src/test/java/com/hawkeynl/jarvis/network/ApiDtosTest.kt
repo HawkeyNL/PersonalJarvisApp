@@ -8,6 +8,12 @@ import org.junit.Test
 
 class ApiDtosTest {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+    @Test fun `conversation recovery preserves active generation and accepts legacy shape`() {
+        val legacy = """{"id":"conversation","title":"Fixture","messages":[]}"""
+        assertFalse(json.decodeFromString<ConversationDetailResponse>(legacy).assistant_running)
+        val active = """{"id":"conversation","title":"Fixture","messages":[],"assistant_running":true}"""
+        assertTrue(json.decodeFromString<ConversationDetailResponse>(active).assistant_running)
+    }
 
     @Test
     fun `pairing request matches deny-unknown-fields server contract`() {
