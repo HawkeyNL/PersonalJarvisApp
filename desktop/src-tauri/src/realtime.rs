@@ -205,9 +205,12 @@ async fn run(
             let mut owned_run = None;
             gate.set_enabled(voice.load(Ordering::SeqCst));
             let speech_app = app.clone();
-            let speech = super::local_speech::Worker::new(move |status| {
-                let _ = speech_app.emit("jarvis-local-speech", status);
-            });
+            let speech = super::local_speech::Worker::new(
+                move |status| {
+                    let _ = speech_app.emit("jarvis-local-speech", status);
+                },
+                controls.reporter(),
+            );
             loop {
                 let incoming = tokio::select! {
                     biased;
@@ -241,6 +244,16 @@ async fn run(
                         }
                         for action in gate.event(&event.event) {
                             speech.action(action);
+                        }
+                        match &event.event {
+                            Event::AssistantStarted(run)
+                                if owned_run == Some(run.run_id)
+                                    && voice.load(Ordering::SeqCst) =>
+                            {
+                                speech.begin(run.run_id);
+                            }
+                            Event::AssistantCompleted { run, .. } => speech.seal(run.run_id),
+                            _ => {}
                         }
                         if app.emit("jarvis-realtime", &event).is_err() {
                             break;

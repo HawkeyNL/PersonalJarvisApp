@@ -46,7 +46,16 @@ Its OS callbacks report one started/stopped/failed lifecycle per run through a
 are discarded, and Core atomically checks the current owner/run before fanout.
 The report queue binds its credential snapshot to the enrolled origin and is
 cancelled on logout/origin switch; reports never contain speech text or tokens.
-Desktop/iOS playback reporting and device voice/rate selection remain open.
+Desktop also reports native playback to the fixed `/v1/voice/playback` endpoint.
+Run metadata tracks queued phrases separately from assistant completion: gaps
+between streamed phrases never report completion, and only final queue drainage
+reports stopped. A failed engine reports failed; it does not first claim to be
+speaking. Started means process startup/input delivery succeeded, not proof of
+audible hardware output. Old-generation callbacks cannot terminate a newer run.
+Reports and release commands share a bounded 16-item native queue, fixed status
+values, a five-second request timeout and one immutable socket auth snapshot.
+Transport failure does not interrupt canonical chat; lease reconciliation remains
+authoritative. iOS playback reporting and device voice/rate selection remain open.
 Android release commands now carry a snapshot of the currently observed owned
 run ID, never an arbitrary device identity. A delayed release cannot clear a
 newer run. Android and iOS clear old voice ownership on `connection.ready`;
@@ -61,7 +70,7 @@ Desktop's separate **Stop spraak** button clears the current native speech
 buffer and cancels queued playback without changing its saved enable preference,
 disconnecting realtime, or cancelling inference. Late deltas do not resume that
 utterance; a later assistant run may speak. Desktop stop/mute also releases the
-observed run through native authenticated HTTP. The one-pending-request queue
+observed run through native authenticated HTTP. The shared 16-item control queue
 uses the socket's immutable origin/session snapshot, disables redirects, and is
 cancelled on disconnect/logout/origin switch. Each release carries its run ID so
 a delayed request cannot clear a newer voice lease on the same device.

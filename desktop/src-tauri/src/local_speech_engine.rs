@@ -6,12 +6,22 @@ use tokio::io::AsyncWriteExt;
 pub(super) type SpeechFuture<'a> = Pin<Box<dyn Future<Output = Result<(), Status>> + Send + 'a>>;
 pub(super) trait TtsEngine: Send + Sync + 'static {
     /// Dropping the future must stop playback. Text must not enter argv/logs.
-    fn speak<'a>(&'a self, text: &'a str) -> SpeechFuture<'a>;
+    /// `started` means the local engine accepted the utterance, not proof that
+    /// an attached speaker is audible. Never call it on engine startup failure.
+    fn speak<'a>(
+        &'a self,
+        text: &'a str,
+        started: &'a (dyn Fn() + Send + Sync),
+    ) -> SpeechFuture<'a>;
 }
 
 pub(super) struct NativeEngine;
 impl TtsEngine for NativeEngine {
-    fn speak<'a>(&'a self, text: &'a str) -> SpeechFuture<'a> {
+    fn speak<'a>(
+        &'a self,
+        text: &'a str,
+        started: &'a (dyn Fn() + Send + Sync),
+    ) -> SpeechFuture<'a> {
         Box::pin(async move {
             let executable = if cfg!(target_os = "macos") {
                 "/usr/bin/say"
@@ -39,6 +49,9 @@ impl TtsEngine for NativeEngine {
                 return Err(Status::Failed);
             }
             drop(input);
+            // Report only after successful process creation and input delivery.
+            // A later nonzero exit still produces Failed, not a false success.
+            started();
             match child.wait().await {
                 Ok(status) if status.success() => Ok(()),
                 _ => Err(Status::Failed),

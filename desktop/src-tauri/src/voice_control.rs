@@ -1,23 +1,36 @@
 //! Native, session-bound voice control. No caller-selected endpoint or identity.
+use super::speech_playback::State;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+enum Request {
+    Release(uuid::Uuid),
+    Playback(uuid::Uuid, State),
+}
+
 pub(super) struct VoiceControl {
-    release: mpsc::Sender<uuid::Uuid>,
+    release: mpsc::Sender<Request>,
     task: tauri::async_runtime::JoinHandle<()>,
 }
 
 impl VoiceControl {
     pub fn new(client: reqwest::Client, origin: String, token: String) -> Self {
-        let (release, mut requests) = mpsc::channel(1);
+        let (release, mut requests) = mpsc::channel(16);
         let task = tauri::async_runtime::spawn(async move {
-            while let Some(run_id) = requests.recv().await {
+            while let Some(request) = requests.recv().await {
+                let (path, body) = match request {
+                    Request::Release(run_id) => ("release", serde_json::json!({"run_id":run_id})),
+                    Request::Playback(run_id, state) => (
+                        "playback",
+                        serde_json::json!({"run_id":run_id,"state":state}),
+                    ),
+                };
                 // The origin/token are one immutable snapshot from the socket's
                 // native auth load. Never reload either independently here.
                 let _ = client
-                    .post(format!("{origin}/v1/voice/release"))
+                    .post(format!("{origin}/v1/voice/{path}"))
                     .bearer_auth(&token)
-                    .json(&serde_json::json!({"run_id": run_id}))
+                    .json(&body)
                     .timeout(Duration::from_secs(5))
                     .send()
                     .await;
@@ -28,7 +41,13 @@ impl VoiceControl {
         Self { release, task }
     }
     pub fn release(&self, run: uuid::Uuid) {
-        let _ = self.release.try_send(run);
+        let _ = self.release.try_send(Request::Release(run));
+    }
+    pub fn reporter(&self) -> impl Fn(uuid::Uuid, State) + Send + Sync + 'static {
+        let sender = self.release.clone();
+        move |run, state| {
+            let _ = sender.try_send(Request::Playback(run, state));
+        }
     }
 }
 impl Drop for VoiceControl {
@@ -66,6 +85,41 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn playback_posts_only_run_and_fixed_status_in_order() {
+        tauri::async_runtime::block_on(async {
+            tokio::time::timeout(Duration::from_secs(3), async {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let control = VoiceControl::new(
+                    crate::native_http_client().unwrap(),
+                    format!("http://{}", listener.local_addr().unwrap()),
+                    "fixture-session".into(),
+                );
+                let report = control.reporter();
+                let run = uuid::Uuid::from_u128(8);
+                report(run, State::Started);
+                report(run, State::Stopped);
+                for state in ["started", "stopped"] {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let received = request(&mut socket).await;
+                    assert!(received.starts_with("POST /v1/voice/playback HTTP/1.1\r\n"));
+                    assert!(received
+                        .to_ascii_lowercase()
+                        .contains("authorization: bearer fixture-session\r\n"));
+                    let body: serde_json::Value =
+                        serde_json::from_str(received.split_once("\r\n\r\n").unwrap().1).unwrap();
+                    assert_eq!(body, serde_json::json!({"run_id":run,"state":state}));
+                    socket
+                        .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+                        .await
+                        .unwrap();
+                }
+            })
+            .await
+            .unwrap();
+        });
     }
 
     #[test]

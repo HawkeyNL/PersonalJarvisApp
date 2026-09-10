@@ -1,10 +1,11 @@
 //! Fixed offline OS tools only. No PATH lookup, shell, cloud fallback or text
 //! in argv. Only fixed, non-secret status values may leave this module.
 use super::local_speech_engine::{NativeEngine, TtsEngine};
+use super::speech_playback::{Playback, State};
 use jarvis_client_core::speech::SpeechAction;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 use tokio::sync::{mpsc, watch};
 
@@ -32,16 +33,47 @@ pub(crate) struct Worker {
     task: tauri::async_runtime::JoinHandle<()>,
     report: Arc<dyn Fn(Status) + Send + Sync>,
     overflowed: AtomicBool,
+    playback: Arc<PlaybackReporter>,
+}
+
+struct PlaybackReporter {
+    state: Mutex<Playback>,
+    report: Box<dyn Fn(uuid::Uuid, State) + Send + Sync>,
+}
+impl PlaybackReporter {
+    fn change(&self, change: impl FnOnce(&mut Playback) -> Option<(uuid::Uuid, State)>) {
+        if let Ok(mut state) = self.state.lock() {
+            if let Some((run, event)) = change(&mut state) {
+                (self.report)(run, event);
+            }
+        }
+    }
 }
 
 impl Worker {
-    pub fn new(report: impl Fn(Status) + Send + Sync + 'static) -> Self {
-        Self::with_engine(report, Arc::new(NativeEngine))
+    pub fn new(
+        report: impl Fn(Status) + Send + Sync + 'static,
+        playback: impl Fn(uuid::Uuid, State) + Send + Sync + 'static,
+    ) -> Self {
+        Self::with_reports(report, Arc::new(NativeEngine), playback)
     }
+    #[cfg(test)]
     fn with_engine(
         report: impl Fn(Status) + Send + Sync + 'static,
         engine: Arc<dyn TtsEngine>,
     ) -> Self {
+        Self::with_reports(report, engine, |_, _| {})
+    }
+    fn with_reports(
+        report: impl Fn(Status) + Send + Sync + 'static,
+        engine: Arc<dyn TtsEngine>,
+        playback: impl Fn(uuid::Uuid, State) + Send + Sync + 'static,
+    ) -> Self {
+        let playback = Arc::new(PlaybackReporter {
+            state: Mutex::new(Playback::default()),
+            report: Box::new(playback),
+        });
+        let task_playback = playback.clone();
         let report: Arc<dyn Fn(Status) + Send + Sync> = Arc::new(report);
         let task_report = report.clone();
         let (queue, mut receiver) = mpsc::channel::<(u64, String)>(32);
@@ -53,15 +85,20 @@ impl Worker {
                 if epoch != *changed.borrow_and_update() || failed_epoch == Some(epoch) {
                     continue;
                 }
-                task_report(Status::Speaking);
+                let started = || {
+                    task_report(Status::Speaking);
+                    task_playback.change(|p| p.started(epoch));
+                };
                 tokio::select! {
                     biased;
                     _=changed.changed()=>{task_report(Status::Idle);}
-                    result=engine.speak(&text)=>{
+                    result=engine.speak(&text, &started)=>{
                         if let Err(status) = result {
                             failed_epoch = Some(epoch);
+                            task_playback.change(|p|p.failed(epoch));
                             task_report(status);
                         } else {
+                            task_playback.change(|p|p.finished(epoch));
                             task_report(Status::Idle);
                         }
                     },
@@ -74,11 +111,23 @@ impl Worker {
             task,
             report,
             overflowed: AtomicBool::new(false),
+            playback,
         }
+    }
+    pub fn begin(&self, run: uuid::Uuid) {
+        let epoch = *self.generation.borrow();
+        self.playback.change(|p| {
+            p.begin(run, epoch);
+            None
+        });
+    }
+    pub fn seal(&self, run: uuid::Uuid) {
+        self.playback.change(|p| p.seal(run));
     }
     pub fn action(&self, action: SpeechAction) {
         match action {
             SpeechAction::Stop => {
+                self.playback.change(Playback::stop);
                 self.overflowed.store(false, Ordering::SeqCst);
                 self.generation.send_modify(|g| *g = g.wrapping_add(1));
                 (self.report)(Status::Idle);
@@ -88,7 +137,13 @@ impl Worker {
                     return;
                 }
                 let epoch = *self.generation.borrow();
+                // Register before sending: the worker may finish immediately.
+                self.playback.change(|p| {
+                    p.queued(epoch);
+                    None
+                });
                 if self.queue.try_send((epoch, text)).is_err() {
+                    self.playback.change(|p| p.failed(epoch));
                     self.overflowed.store(true, Ordering::SeqCst);
                     self.generation.send_modify(|g| *g = g.wrapping_add(1));
                     (self.report)(Status::QueueFull);
@@ -110,14 +165,89 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    struct QuickEngine;
+    impl TtsEngine for QuickEngine {
+        fn speak<'a>(
+            &'a self,
+            _text: &'a str,
+            started: &'a (dyn Fn() + Send + Sync),
+        ) -> SpeechFuture<'a> {
+            Box::pin(async move {
+                started();
+                Ok(())
+            })
+        }
+    }
+    #[test]
+    fn worker_reports_one_run_lifecycle_not_one_per_phrase() {
+        tauri::async_runtime::block_on(async {
+            let (sender, mut events) = mpsc::unbounded_channel();
+            let worker = Worker::with_reports(
+                |_| {},
+                Arc::new(QuickEngine),
+                move |run, state| {
+                    let _ = sender.send((run, state));
+                },
+            );
+            let run = uuid::Uuid::from_u128(12);
+            worker.begin(run);
+            worker.action(SpeechAction::Speak("First sentence.".into()));
+            worker.action(SpeechAction::Speak("Second sentence.".into()));
+            worker.seal(run);
+            for expected in [State::Started, State::Stopped] {
+                assert_eq!(
+                    tokio::time::timeout(std::time::Duration::from_secs(2), events.recv())
+                        .await
+                        .unwrap(),
+                    Some((run, expected))
+                );
+            }
+            worker.seal(run);
+            worker.action(SpeechAction::Stop);
+            assert!(events.try_recv().is_err());
+        });
+    }
+
     struct FailingEngine(Arc<AtomicUsize>);
     impl TtsEngine for FailingEngine {
-        fn speak<'a>(&'a self, _text: &'a str) -> SpeechFuture<'a> {
+        fn speak<'a>(
+            &'a self,
+            _text: &'a str,
+            _started: &'a (dyn Fn() + Send + Sync),
+        ) -> SpeechFuture<'a> {
             Box::pin(async move {
                 self.0.fetch_add(1, Ordering::SeqCst);
                 Err(Status::Unavailable)
             })
         }
+    }
+    #[test]
+    fn unavailable_engine_reports_failed_once_without_started_or_stopped() {
+        tauri::async_runtime::block_on(async {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let (sender, mut events) = mpsc::unbounded_channel();
+            let worker = Worker::with_reports(
+                |_| {},
+                Arc::new(FailingEngine(calls.clone())),
+                move |run, state| {
+                    let _ = sender.send((run, state));
+                },
+            );
+            let run = uuid::Uuid::from_u128(13);
+            worker.begin(run);
+            worker.action(SpeechAction::Speak("First phrase.".into()));
+            worker.action(SpeechAction::Speak("Remaining phrase.".into()));
+            worker.seal(run);
+            assert_eq!(
+                tokio::time::timeout(std::time::Duration::from_secs(2), events.recv())
+                    .await
+                    .unwrap(),
+                Some((run, State::Failed))
+            );
+            worker.action(SpeechAction::Stop);
+            assert!(events.try_recv().is_err());
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+        });
     }
     async fn next_status(receiver: &mut mpsc::UnboundedReceiver<Status>, expected: Status) {
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
@@ -143,7 +273,13 @@ mod tests {
             );
             worker.action(SpeechAction::Speak("First phrase.".into()));
             worker.action(SpeechAction::Speak("Second phrase.".into()));
-            next_status(&mut receiver, Status::Unavailable).await;
+            // A failed startup must never advertise Speaking, even briefly.
+            assert_eq!(
+                tokio::time::timeout(std::time::Duration::from_secs(2), receiver.recv())
+                    .await
+                    .unwrap(),
+                Some(Status::Unavailable)
+            );
             worker.action(SpeechAction::Stop);
             worker.action(SpeechAction::Speak("Next run.".into()));
             next_status(&mut receiver, Status::Unavailable).await;
@@ -159,9 +295,14 @@ mod tests {
         }
     }
     impl TtsEngine for PendingEngine {
-        fn speak<'a>(&'a self, _text: &'a str) -> SpeechFuture<'a> {
+        fn speak<'a>(
+            &'a self,
+            _text: &'a str,
+            started: &'a (dyn Fn() + Send + Sync),
+        ) -> SpeechFuture<'a> {
             Box::pin(async move {
                 let _guard = PlaybackGuard(self.0.clone());
+                started();
                 let _ = self.0.send("started");
                 std::future::pending().await
             })
