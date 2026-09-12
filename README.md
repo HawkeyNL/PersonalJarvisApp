@@ -28,10 +28,12 @@ system credential store, Android uses its keystore-backed encrypted storage,
 and iOS uses Keychain for device/session secrets.
 
 Application binaries must use private GHCR upstream storage, not public GitHub
-Release or Actions artifacts. The old public publisher is disabled while the
-private distribution/mirror migration is unfinished. Desktop updates retain
+Release or Actions artifacts. The release workflow transfers desktop/Android/iOS
+builds privately and promotes a complete signed OCI release only after exact-byte
+redownload validation. Home Node deployment and real-device acceptance are separate
+owner steps, not implied by passing local tests. Desktop updates retain
 Tauri signature validation; Android retains package/certificate/hash checks.
-iOS supports an unsigned physical-device IPA candidate for owner-side signing,
+iOS includes an unsigned physical-device IPA installer for owner-side signing,
 not automatic installation. See [iOS sideload candidates](docs/IOS_SIDELOAD.md).
 No Apple account credentials or iOS provisioning secrets are used by CI.
 

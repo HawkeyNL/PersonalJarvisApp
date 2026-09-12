@@ -2,8 +2,8 @@
 
 This module is deliberately credential-free. Platform jobs produce and verify
 signed artifacts; this code binds their exact bytes and public signing identities
-into one complete desktop/Android downloadable release manifest. The iOS
-client is source-and-CI only and is intentionally absent from release assets.
+into one complete release manifest. iOS is a manual-owner-signing installer,
+never an automatically installable update or an Apple-signed distribution.
 """
 from __future__ import annotations
 
@@ -165,6 +165,7 @@ def expected_assets(version: str) -> set[str]:
             f"Jarvis_{version}_macos_arm64.dmg",
             f"Jarvis_{version}_android_universal.apk",
             f"Jarvis_{version}_android_universal.aab",
+            f"Jarvis_{version}_ios_arm64_unsigned.ipa",
         }
     )
 
@@ -240,6 +241,12 @@ def build(
         {
             "schema_version": 1,
             "installers": [
+                {
+                    "platform": "ios",
+                    "architecture": "arm64",
+                    "distribution": "manual-owner-signing",
+                    "artifact": _artifact(assets / f"Jarvis_{version}_ios_arm64_unsigned.ipa", version, "ios", "arm64"),
+                },
                 {
                     "platform": "macos",
                     "architecture": "arm64",

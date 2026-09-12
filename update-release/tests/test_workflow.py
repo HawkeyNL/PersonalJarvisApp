@@ -52,11 +52,12 @@ class PrivateReleaseWorkflowTests(unittest.TestCase):
             self.assertIn(required, self.workflow)
 
     def test_manifest_publication_waits_for_every_distributed_platform(self) -> None:
-        self.assertIn("needs: [validate, desktop, android]", self.workflow)
+        self.assertIn("needs: [validate, desktop, android, ios-sideload]", self.workflow)
         publish = self.workflow.index("publish:")
-        upload_manifest = self.workflow.index('gh release upload "$RELEASE_TAG"', publish)
-        publish_draft = self.workflow.index("--draft=false --latest", upload_manifest)
-        self.assertLess(upload_manifest, publish_draft)
+        sign_manifest = self.workflow.index('signer sign ../latest.json', publish)
+        publish_private = self.workflow.index('private_registry.py publish', sign_manifest)
+        self.assertLess(sign_manifest, publish_private)
+        self.assertNotIn('gh release ', self.workflow)
 
     def test_release_actions_are_immutably_pinned(self) -> None:
         actions = re.findall(r"uses:\s+([^\s#]+)", self.workflow)
@@ -66,7 +67,7 @@ class PrivateReleaseWorkflowTests(unittest.TestCase):
                 self.assertRegex(action, r"@[0-9a-f]{40}$")
 
     def test_job_environment_never_exposes_release_secrets(self) -> None:
-        for job in ("validate", "desktop", "android", "publish"):
+        for job in ("validate", "desktop", "android", "ios-sideload", "publish"):
             start = self.workflow.index(f"  {job}:")
             steps = self.workflow.index("    steps:", start)
             with self.subTest(job=job):
@@ -78,7 +79,11 @@ class PrivateReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("assembleRelease bundleRelease", self.workflow)
         self.assertIn("GH_REPO: ${{ github.repository }}", self.workflow)
 
-    def test_ios_distribution_is_deliberately_outside_release_ci(self) -> None:
+    def test_ios_has_only_unsigned_owner_installation_not_apple_distribution(self) -> None:
+        section = self.workflow.split('  ios-sideload:', 1)[1].split('  publish:', 1)[0]
+        self.assertIn('CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO', section)
+        self.assertIn('ios_sideload.py', section)
+        self.assertNotIn('secrets.', section)
         for forbidden in (
             "  ios:",
             "TestFlight",
@@ -116,8 +121,9 @@ class PrivateReleaseWorkflowTests(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, self.ci_workflow)
 
-    def test_final_draft_is_revalidated_before_publish(self) -> None:
+    def test_final_private_generation_is_verified_before_publish(self) -> None:
         section = self.workflow[self.workflow.index("  publish:"):]
-        self.assertIn("verify_published.py", section)
-        self.assertIn("signatures.py final", section)
-        self.assertLess(section.index("verify_published.py"), section.index("--draft=false --latest"))
+        self.assertIn("signatures.py latest.json", section)
+        self.assertLess(section.index("signatures.py latest.json"), section.index("private_registry.py publish"))
+        self.assertIn('packages: write', section)
+        self.assertNotIn('contents: write', section)

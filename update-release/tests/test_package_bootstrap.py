@@ -6,9 +6,12 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class PackageBootstrapTests(unittest.TestCase):
-    def test_public_release_publisher_is_disabled_during_migration(self):
+    def test_public_release_publisher_has_been_removed(self):
         workflow = (ROOT / '.github/workflows/release.yml').read_text()
-        self.assertIn('if: false &&', workflow)
+        self.assertNotIn('gh release ', workflow)
+        self.assertNotIn('actions/upload-artifact', workflow)
+        self.assertNotIn('actions/download-artifact', workflow)
+        self.assertIn('private_registry.py publish', workflow)
         bootstrap = (ROOT / '.github/workflows/package-bootstrap.yml').read_text()
         self.assertIn('branches: [main]', bootstrap)
         self.assertNotIn('feat/tagged-client-release', bootstrap)
