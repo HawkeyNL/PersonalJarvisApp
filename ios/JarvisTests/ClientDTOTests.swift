@@ -51,6 +51,7 @@ final class ClientDTOTests: XCTestCase {
         defer { session.invalidateAndCancel() }
         let fixtures = [
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 99999\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 99999\r\n\r\nA",
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n8\r\nAAAAAAAA\r\n9\r\nBBBBBBBBB\r\n",
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n8\r\nAAAAAAAA\r\n8\r\nBBBBBBBB\r\n0\r\n\r\n"
         ]
@@ -64,11 +65,15 @@ final class ClientDTOTests: XCTestCase {
             let request = URLRequest(url: URL(string: "http://127.0.0.1:\(port.rawValue)/fixture")!)
             do {
                 let (data, _) = try await BoundedAPIResponse.read(session: session, request: request, limit: 16)
-                XCTAssertEqual(index, 2, "Oversized response must fail before EOF")
+                XCTAssertEqual(index, 3, "Oversized response must fail before EOF")
                 XCTAssertEqual(data, Data(repeating: 65, count: 8) + Data(repeating: 66, count: 8))
             } catch let error as JarvisAPIError {
-                XCTAssertNotEqual(index, 2, "Exact-limit response must succeed")
+                XCTAssertTrue(index == 1 || index == 2, "Only oversized delivered responses use the size error")
                 XCTAssertEqual(error, .responseTooLarge)
+            } catch let error as URLError where index == 0 && error.code == .timedOut {
+                // Foundation may withhold the response callback until body
+                // bytes arrive. A header-only peer must still fail within the
+                // configured resource timeout, not hang or accumulate a body.
             } catch {
                 XCTFail("HTTP fixture \(index) failed unexpectedly: \(error)")
             }

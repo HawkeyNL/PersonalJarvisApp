@@ -48,9 +48,10 @@ enum BoundedAPIResponse {
     }
 }
 
-// URLSession's AsyncBytes may wait for body data before returning its response.
-// Use header/data callbacks so an oversized advertised body is refused even
-// when the peer sends no body at all. All state is protected by this lock;
+// Bound headers when Foundation delivers the response, and each body chunk
+// before accumulation. A peer sending headers without body bytes may not trigger
+// the response callback; the session resource timeout bounds that case.
+// All state is protected by this lock;
 // continuation completion and cancellation happen outside the lock.
 private final class BoundedAPIReceiver: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let lock = NSLock()

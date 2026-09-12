@@ -149,10 +149,14 @@ reading; chunked bodies fail before appending a chunk beyond the limit. A mock
 HTTP test sends an oversized unfinished chunked response and verifies immediate
 rejection, plus acceptance exactly at the limit. Only fixed error text reaches
 the UI. iOS now uses native response/data delegate callbacks with a 16 MiB bound,
-rejects oversized advertised lengths before waiting for body bytes, and cancels
+rejects oversized advertised lengths when Foundation delivers the response, and cancels
 the underlying data task on every exit and caller
 cancellation. Its loopback TCP regression covers unfinished oversized bodies,
-oversized headers, and exact-limit success. Those XCTest cases still require the
+oversized advertised lengths with an unfinished body, and exact-limit success.
+Foundation can withhold a header-only response until body data arrives; that
+silent-peer fixture instead requires the configured resource timeout to fail
+closed. No successful response or unbounded body is accepted in that case.
+Those XCTest cases still require the
 macOS runner; the desktop test does not prove the iOS implementation works.
 
 Desktop native auth storage now serializes metadata/token snapshots and changes
