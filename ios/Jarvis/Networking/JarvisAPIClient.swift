@@ -37,26 +37,99 @@ enum BoundedAPIResponse {
     static func read(session: URLSession, request: URLRequest,
                      limit: Int = maximumBytes) async throws -> (Data, URLResponse) {
         guard limit >= 0 else { throw JarvisAPIError.responseTooLarge }
-        let (bytes, response) = try await session.bytes(for: request)
-        // AsyncBytes exposes its task: abandoning iteration alone is not our
-        // cleanup contract. Cancel on overflow, decoding-independent return,
-        // transport failure, and caller cancellation alike.
-        defer { bytes.task.cancel() }
+        let receiver = BoundedAPIReceiver(limit: limit)
         return try await withTaskCancellationHandler {
-            try Task.checkCancellation()
-            guard response.expectedContentLength <= Int64(limit) else {
-                throw JarvisAPIError.responseTooLarge
+            try await withCheckedThrowingContinuation { continuation in
+                receiver.start(session: session, request: request, continuation: continuation)
             }
-            var data = Data()
-            for try await byte in bytes {
-                try Task.checkCancellation()
-                guard data.count < limit else { throw JarvisAPIError.responseTooLarge }
-                data.append(byte)
-            }
-            return (data, response)
         } onCancel: {
-            bytes.task.cancel()
+            receiver.finish(error: CancellationError())
         }
+    }
+}
+
+// URLSession's AsyncBytes may wait for body data before returning its response.
+// Use header/data callbacks so an oversized advertised body is refused even
+// when the peer sends no body at all. All state is protected by this lock;
+// continuation completion and cancellation happen outside the lock.
+private final class BoundedAPIReceiver: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private let limit: Int
+    private var finished = false
+    private var task: URLSessionDataTask?
+    private var continuation: CheckedContinuation<(Data, URLResponse), Error>?
+    private var response: URLResponse?
+    private var data = Data()
+
+    init(limit: Int) { self.limit = limit }
+
+    func start(session: URLSession, request: URLRequest,
+               continuation: CheckedContinuation<(Data, URLResponse), Error>) {
+        lock.lock()
+        guard !finished else {
+            lock.unlock()
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+        self.continuation = continuation
+        let task = session.dataTask(with: request)
+        task.delegate = self
+        self.task = task
+        lock.unlock()
+        task.resume()
+    }
+
+    func finish(error: Error?) {
+        lock.lock()
+        guard !finished else { lock.unlock(); return }
+        finished = true
+        let result: Result<(Data, URLResponse), Error>
+        if let error { result = .failure(error) }
+        else if let response { result = .success((data, response)) }
+        else { result = .failure(JarvisAPIError.invalidResponse) }
+        let continuation = self.continuation
+        let task = self.task
+        self.continuation = nil
+        self.task = nil
+        data = Data()
+        lock.unlock()
+        task?.cancel()
+        continuation?.resume(with: result)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
+                    didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        if response.expectedContentLength > Int64(limit) {
+            finish(error: JarvisAPIError.responseTooLarge)
+            completionHandler(.cancel)
+            return
+        }
+        lock.lock()
+        let active = !finished
+        if active { self.response = response }
+        lock.unlock()
+        completionHandler(active ? .allow : .cancel)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
+        lock.lock()
+        guard !finished else { lock.unlock(); return }
+        let oversized = chunk.count > limit - data.count
+        if !oversized { data.append(chunk) }
+        lock.unlock()
+        if oversized { finish(error: JarvisAPIError.responseTooLarge) }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        finish(error: error)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
 }
 
