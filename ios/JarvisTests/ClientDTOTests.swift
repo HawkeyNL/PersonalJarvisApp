@@ -50,9 +50,9 @@ final class ClientDTOTests: XCTestCase {
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
         let fixtures = [
-            "HTTP/1.1 200 OK\r\nContent-Length: 99999\r\n\r\n",
-            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n8\r\nAAAAAAAA\r\n9\r\nBBBBBBBBB\r\n",
-            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n8\r\nAAAAAAAA\r\n8\r\nBBBBBBBB\r\n0\r\n\r\n"
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 99999\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n8\r\nAAAAAAAA\r\n9\r\nBBBBBBBBB\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n8\r\nAAAAAAAA\r\n8\r\nBBBBBBBB\r\n0\r\n\r\n"
         ]
         for (index, response) in fixtures.enumerated() {
             let ready = expectation(description: "Loopback HTTP fixture ready")
@@ -69,6 +69,8 @@ final class ClientDTOTests: XCTestCase {
             } catch let error as JarvisAPIError {
                 XCTAssertNotEqual(index, 2, "Exact-limit response must succeed")
                 XCTAssertEqual(error, .responseTooLarge)
+            } catch {
+                XCTFail("HTTP fixture \(index) failed unexpectedly: \(error)")
             }
             await fulfillment(of: [sent], timeout: 5)
         }
