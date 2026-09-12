@@ -1,5 +1,11 @@
 # Unified Jarvis client release setup
 
+> Migration notice: the public publisher described below is disabled. Do not
+> execute its release checklist. Private GHCR distribution replaces public
+> GitHub assets. iOS now has an unsigned owner-signing candidate build; see
+> [IOS_SIDELOAD.md](IOS_SIDELOAD.md). Full release/mirror promotion is not yet
+> implemented. macOS signing/notarization requirements remain unchanged.
+
 Repository: `HawkeyNL/PersonalJarvisApp` (public). Releases use `app-vX.Y.Z`
 and coordinate distributable desktop and Android artifacts from one exact
 source revision. iOS shares the application version but is validated only by

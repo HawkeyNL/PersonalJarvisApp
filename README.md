@@ -27,13 +27,13 @@ No production address is compiled into an app. Desktop uses the operating
 system credential store, Android uses its keystore-backed encrypted storage,
 and iOS uses Keychain for device/session secrets.
 
-GitHub Release artifacts here are public upstream transport. Desktop updates
-and the signed Android APK can be mirrored by the Home Node and delivered only
-to enrolled, authenticated clients. Desktop still verifies Tauri updater
-signatures; Android verifies hash, package identity, version code, and its
-pinned signing certificate. iOS is source-and-CI only: the owner installs it
-locally from Xcode using a Personal Team or registered-device development
-signing. No IPA or iOS artifact is published or mirrored.
+Application binaries must use private GHCR upstream storage, not public GitHub
+Release or Actions artifacts. The old public publisher is disabled while the
+private distribution/mirror migration is unfinished. Desktop updates retain
+Tauri signature validation; Android retains package/certificate/hash checks.
+iOS supports an unsigned physical-device IPA candidate for owner-side signing,
+not automatic installation. See [iOS sideload candidates](docs/IOS_SIDELOAD.md).
+No Apple account credentials or iOS provisioning secrets are used by CI.
 
 See [release setup](docs/GITHUB_RELEASE_SETUP.md) for the protected release
 environment, required variables/secrets, and the first-release checklist.
