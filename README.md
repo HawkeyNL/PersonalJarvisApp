@@ -73,7 +73,9 @@ xcodebuild -project Jarvis.xcodeproj -scheme Jarvis \
 
 Normal CI never receives production signing credentials. Its iOS job uses an
 unsigned simulator build. Distributable desktop and Android releases are
-created only by manually dispatching the protected workflow from `main`.
+created by the protected workflow, either manually from `main` or from a stable
+`app-vX.Y.Z` tag pointing to a reviewed commit reachable from `main`. The tag must
+match the checked-in client versions; it does not silently rewrite them.
 
 ## Shared protocol pin
 

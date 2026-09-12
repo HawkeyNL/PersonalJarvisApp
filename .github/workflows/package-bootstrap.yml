@@ -1,0 +1,65 @@
+name: Bootstrap private client artifact package
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/package-bootstrap.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-client-package-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    if: github.repository == 'HawkeyNL/PersonalJarvisApp' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: application-release
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PACKAGE_API: /users/HawkeyNL/packages/container/jarvis-client-artifacts
+      IMAGE: ghcr.io/hawkeynl/jarvis-client-artifacts
+    steps:
+      - name: Refuse an existing public package
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=$(printf 'Authorization: Bearer %s\n' "$GH_TOKEN" | curl --silent --show-error --output "$RUNNER_TEMP/package.json" --write-out '%{http_code}' \
+            --header @- \
+            "https://api.github.com$PACKAGE_API")
+          case "$status" in
+            200) jq -e '.visibility == "private"' "$RUNNER_TEMP/package.json" >/dev/null ;;
+            404) ;; # GHCR creates new packages private by default.
+            *) echo "Cannot verify package visibility (HTTP $status)" >&2; exit 1 ;;
+          esac
+      - name: Upload empty bootstrap image only
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DOCKER_CONFIG="$RUNNER_TEMP/ghcr-bootstrap-auth"
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          mkdir "$RUNNER_TEMP/package-bootstrap"
+          printf '%s\n' 'FROM scratch' \
+            'LABEL org.opencontainers.image.title="Jarvis client artifacts bootstrap (not an application release)"' \
+            'LABEL org.opencontainers.image.source="https://github.com/HawkeyNL/PersonalJarvisApp"' \
+            > "$RUNNER_TEMP/package-bootstrap/Dockerfile"
+          docker build --tag "$IMAGE:bootstrap-$GITHUB_RUN_ID" "$RUNNER_TEMP/package-bootstrap"
+          docker push "$IMAGE:bootstrap-$GITHUB_RUN_ID"
+      - name: Verify private visibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "$PACKAGE_API" --jq '.visibility' > "$RUNNER_TEMP/visibility"
+          test "$(cat "$RUNNER_TEMP/visibility")" = private || {
+            echo "Package is not private; do not upload application artifacts" >&2
+            exit 1
+          }
+          echo 'Private package created. Bootstrap contains no application binaries.' >> "$GITHUB_STEP_SUMMARY"

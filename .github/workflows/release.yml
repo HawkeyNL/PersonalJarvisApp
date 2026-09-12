@@ -1,6 +1,8 @@
 name: Unified Jarvis client release
 
 on:
+  push:
+    tags: ['app-v*']
   workflow_dispatch:
     inputs:
       version:
@@ -21,15 +23,20 @@ permissions:
 
 jobs:
   validate:
-    if: github.repository == 'HawkeyNL/PersonalJarvisApp' && github.ref == 'refs/heads/main'
+    # Disabled until signed artifacts and cross-job transfers use private
+    # storage. Never publish public release assets under the old architecture.
+    if: false && github.repository == 'HawkeyNL/PersonalJarvisApp' && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/app-v')))
     runs-on: ubuntu-24.04
     outputs:
       release_tag: ${{ steps.identity.outputs.release_tag }}
       released_at: ${{ steps.identity.outputs.released_at }}
+      app_version: ${{ steps.identity.outputs.app_version }}
+      android_version_code: ${{ steps.identity.outputs.android_version_code }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+          fetch-depth: 0
       - id: identity
         env:
           APP_VERSION: ${{ inputs.version }}
@@ -38,6 +45,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          # Reject tags pointing outside reviewed main before invoking release
+          # tooling or granting any downstream job signing credentials.
+          git merge-base --is-ancestor HEAD origin/main || {
+            echo "Release source must be reachable from main" >&2
+            exit 2
+          }
+          python3 update-release/release_identity.py \
+            --event "$GITHUB_EVENT_NAME" --ref "$GITHUB_REF" \
+            --version "$APP_VERSION" --android-version-code "$ANDROID_VERSION_CODE" > identity.json
+          APP_VERSION=$(jq -er .app_version identity.json)
+          ANDROID_VERSION_CODE=$(jq -er .android_version_code identity.json)
           [[ "$ANDROID_SIGNING_CERTIFICATE_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
             echo "ANDROID_SIGNING_CERTIFICATE_SHA256 must be a lowercase SHA-256 digest" >&2
             exit 2
@@ -48,9 +66,15 @@ jobs:
           # A failing API request is not proof that a tag/release is absent.
           gh api --paginate "repos/$GH_REPO/tags" --jq '.[].name' > "$RUNNER_TEMP/tags"
           gh release list --limit 1000 --json tagName --jq '.[].tagName' > "$RUNNER_TEMP/releases"
-          if grep -Fxq "app-v$APP_VERSION" "$RUNNER_TEMP/tags" ||
-             grep -Fxq "app-v$APP_VERSION" "$RUNNER_TEMP/releases"; then
-            echo "Application tag/release already exists" >&2
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            test "$GITHUB_REF_NAME" = "app-v$APP_VERSION"
+            test "$(git rev-parse "refs/tags/$GITHUB_REF_NAME^{commit}")" = "$(git rev-parse HEAD)"
+          elif grep -Fxq "app-v$APP_VERSION" "$RUNNER_TEMP/tags"; then
+            echo "Application tag already exists; use its tag-triggered run" >&2
+            exit 1
+          fi
+          if grep -Fxq "app-v$APP_VERSION" "$RUNNER_TEMP/releases"; then
+            echo "Application release already exists" >&2
             exit 1
           fi
           if [[ -s "$RUNNER_TEMP/releases" ]]; then
@@ -62,6 +86,8 @@ jobs:
               --previous "$RUNNER_TEMP/previous/latest.json"
           fi
           echo "release_tag=app-v$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "android_version_code=$ANDROID_VERSION_CODE" >> "$GITHUB_OUTPUT"
           echo "released_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
   desktop:
@@ -93,7 +119,7 @@ jobs:
     timeout-minutes: 60
     environment: application-release
     env:
-      APP_VERSION: ${{ inputs.version }}
+      APP_VERSION: ${{ needs.validate.outputs.app_version }}
       JARVIS_TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_SIGNING_PUBLIC_KEY }}
       RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
       TAURI_RELEASE_CONFIG: '{"build":{"beforeBuildCommand":""}}'
@@ -283,8 +309,8 @@ jobs:
     timeout-minutes: 45
     environment: application-release
     env:
-      APP_VERSION: ${{ inputs.version }}
-      JARVIS_ANDROID_VERSION_CODE: ${{ inputs.android_version_code }}
+      APP_VERSION: ${{ needs.validate.outputs.app_version }}
+      JARVIS_ANDROID_VERSION_CODE: ${{ needs.validate.outputs.android_version_code }}
     defaults:
       run:
         working-directory: android
@@ -357,13 +383,13 @@ jobs:
     permissions:
       contents: write
     env:
-      APP_VERSION: ${{ inputs.version }}
+      APP_VERSION: ${{ needs.validate.outputs.app_version }}
       RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
       RELEASED_AT: ${{ needs.validate.outputs.released_at }}
       SOURCE_REVISION: ${{ github.sha }}
       JARVIS_TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_SIGNING_PUBLIC_KEY }}
       ANDROID_SIGNING_CERTIFICATE_SHA256: ${{ vars.ANDROID_SIGNING_CERTIFICATE_SHA256 }}
-      ANDROID_VERSION_CODE: ${{ inputs.android_version_code }}
+      ANDROID_VERSION_CODE: ${{ needs.validate.outputs.android_version_code }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:

@@ -19,7 +19,13 @@ private final class BoundedResponseServer {
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
         listener.stateUpdateHandler = { state in
-            if case .ready = state { ready.fulfill() }
+            switch state {
+            case .ready: ready.fulfill()
+            case .failed(let error):
+                XCTFail("Loopback fixture listener failed: \(error)")
+                ready.fulfill()
+            default: break
+            }
         }
         listener.newConnectionHandler = { [weak self] connection in
             guard let self, self.connection == nil else { connection.cancel(); return }
@@ -60,8 +66,14 @@ final class ClientDTOTests: XCTestCase {
             let sent = expectation(description: "Loopback HTTP fixture sent headers/body")
             let server = try BoundedResponseServer(response: response, ready: ready, sent: sent)
             defer { server.stop() }
-            await fulfillment(of: [ready], timeout: 5)
+            // Simulator startup can be delayed on a loaded shared runner.
+            // Keep this separate from the deliberately short HTTP timeout.
+            await fulfillment(of: [ready], timeout: 30)
             let port = try XCTUnwrap(server.listener.port)
+            guard case .ready = server.listener.state, port.rawValue != 0 else {
+                XCTFail("Loopback fixture never became ready; refusing a request to port zero")
+                return
+            }
             let request = URLRequest(url: URL(string: "http://127.0.0.1:\(port.rawValue)/fixture")!)
             do {
                 let (data, _) = try await BoundedAPIResponse.read(session: session, request: request, limit: 16)
