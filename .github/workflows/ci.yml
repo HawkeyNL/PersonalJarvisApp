@@ -179,3 +179,21 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             test
+      - name: Validate unsigned physical-device IPA packaging
+        # setup-python below makes packaging independent of the runner's Python.
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Build and validate unsigned physical-device IPA
+        run: |
+          xcodebuild -project Jarvis.xcodeproj -scheme Jarvis \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/JarvisDevice" \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+          python3 ../update-release/ios_sideload.py \
+            --app "$RUNNER_TEMP/JarvisDevice/Build/Products/Release-iphoneos/Jarvis.app" \
+            --output "$RUNNER_TEMP/ios-validation" \
+            --version "$(python3 -c 'import json; print(json.load(open("../desktop/package.json"))["version"])')" \
+            --revision "$GITHUB_SHA"
+          # Validate only: no public Actions artifact or package upload in CI.

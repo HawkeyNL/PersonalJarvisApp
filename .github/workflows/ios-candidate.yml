@@ -1,0 +1,89 @@
+name: Private iOS sideload candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Checked-in application SemVer; candidate only
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-sideload-candidate
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    if: github.repository == 'HawkeyNL/PersonalJarvisApp' && github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 30
+    environment: application-release
+    permissions:
+      contents: read
+      packages: write
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      APP_VERSION: ${{ inputs.version }}
+      IMAGE: ghcr.io/hawkeynl/jarvis-client-artifacts
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Validate reviewed source and packaging tests
+        run: |
+          python3 update-release/client_release.py --version "$APP_VERSION"
+          python3 scripts/check-deployment-privacy.py
+          python3 -m unittest discover -s update-release/tests -v
+      - name: Build physical iPhone app without owner signing
+        run: |
+          xcodebuild -project ios/Jarvis.xcodeproj -scheme Jarvis \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/JarvisDevice" \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+          python3 update-release/ios_sideload.py \
+            --app "$RUNNER_TEMP/JarvisDevice/Build/Products/Release-iphoneos/Jarvis.app" \
+            --output "$RUNNER_TEMP/ios-candidate" \
+            --version "$APP_VERSION" --revision "$GITHUB_SHA"
+      - uses: oras-project/setup-oras@8d34698a59f5ffe24821f0b48ab62a3de8b64b20 # v1.2.3
+        with:
+          version: 1.2.3
+      - name: Upload only to existing private package and verify exact bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api /users/HawkeyNL/packages/container/jarvis-client-artifacts \
+            --jq .visibility > "$RUNNER_TEMP/package-visibility"
+          test "$(cat "$RUNNER_TEMP/package-visibility")" = private
+          registry_config="$RUNNER_TEMP/ios-registry-auth.json"
+          trap 'oras logout --registry-config "$registry_config" ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$GH_TOKEN" | oras login --registry-config "$registry_config" \
+            ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          cd "$RUNNER_TEMP/ios-candidate"
+          ipa="Jarvis_${APP_VERSION}_ios_arm64_unsigned.ipa"
+          oras push --registry-config "$registry_config" --format json \
+            --artifact-type application/vnd.jarvis.ios-sideload-candidate.v1 \
+            --annotation "org.opencontainers.image.source=https://github.com/HawkeyNL/PersonalJarvisApp" \
+            --annotation "org.opencontainers.image.revision=$GITHUB_SHA" \
+            "$IMAGE:ios-candidate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            "$ipa:application/octet-stream" ios-candidate.json:application/json \
+            > "$RUNNER_TEMP/ios-push.json"
+          digest=$(jq -er .digest "$RUNNER_TEMP/ios-push.json")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          mkdir "$RUNNER_TEMP/ios-redownload"
+          oras pull --registry-config "$registry_config" \
+            "$IMAGE@$digest" --output "$RUNNER_TEMP/ios-redownload"
+          cmp "$ipa" "$RUNNER_TEMP/ios-redownload/$ipa"
+          cmp ios-candidate.json "$RUNNER_TEMP/ios-redownload/ios-candidate.json"
+          gh api /users/HawkeyNL/packages/container/jarvis-client-artifacts \
+            --jq .visibility > "$RUNNER_TEMP/package-visibility-after"
+          test "$(cat "$RUNNER_TEMP/package-visibility-after")" = private
+          printf 'Private iOS candidate verified: `%s@%s`\n\nRequires owner signing; not an application release or automatic update.\n' \
+            "$IMAGE" "$digest" >> "$GITHUB_STEP_SUMMARY"

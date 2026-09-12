@@ -95,7 +95,7 @@ class PrivateReleaseWorkflowTests(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, self.workflow)
 
-    def test_ios_ci_is_unsigned_simulator_validation_only(self) -> None:
+    def test_ios_ci_validates_simulator_and_unsigned_device_packaging(self) -> None:
         for required in (
             "iOS simulator",
             "-sdk iphonesimulator",
@@ -103,6 +103,8 @@ class PrivateReleaseWorkflowTests(unittest.TestCase):
             "CODE_SIGNING_REQUIRED=NO",
             "build",
             "test",
+            "-sdk iphoneos",
+            "ios_sideload.py",
         ):
             self.assertIn(required, self.ci_workflow)
         for forbidden in (
@@ -110,7 +112,6 @@ class PrivateReleaseWorkflowTests(unittest.TestCase):
             "-exportArchive",
             "TestFlight",
             "App Store Connect",
-            ".ipa",
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, self.ci_workflow)
