@@ -9,7 +9,10 @@ owner actions; it does not authorize a release.
 ## GitHub configuration
 
 Create the protected Environment `application-release`. Where the GitHub plan
-supports it, require owner approval and restrict deployments to `main`.
+supports it, require owner approval. Permit the `main` branch for manual releases
+and the tag pattern `app-v*` for tag-triggered releases. The validation job also
+requires the source commit to be reachable from `main`; the tag pattern alone
+is not the trust boundary. Change these Environment rules manually after review.
 Ordinary `ci.yml` must remain read-only and must not reference this Environment.
 Allow the release workflow's final job to use its repository-scoped
 `GITHUB_TOKEN` with `contents: write`. No personal token, Home Node SSH access,
@@ -94,8 +97,10 @@ rotation requires a migration trusted by already-installed clients.
    ```
 
 7. Run the complete client CI on `main`.
-8. Manually dispatch `.github/workflows/release.yml` with `version=0.1.0` and
-   `android_version_code=1`.
+8. Either manually dispatch `.github/workflows/release.yml` from `main` with
+   `version=0.1.0` and `android_version_code=1`, OR create and push `app-v0.1.0`
+   at the reviewed main commit. Do not do both. The tag path reads the checked-in
+   Android versionCode and validates all client version fields before signing.
 9. Approve the `application-release` Environment jobs if configured.
 10. Verify Linux, Windows, notarized macOS, and signed APK/AAB jobs. Separately
     confirm the ordinary iOS simulator CI job passed without signing.
@@ -112,6 +117,24 @@ Production desktop/Android signing, macOS notarization, and public release
 publication can only be verified in the protected GitHub workflow with the real
 owner credentials; local tests deliberately cannot claim those outcomes. iOS
 device installation is performed locally from Xcode and is outside CI/CD.
+
+## Tag-triggered releases
+
+Only tags `app-vMAJOR.MINOR.PATCH` are accepted; Core tags `vX.Y.Z` do not release
+clients. Update and review npm/Tauri/Cargo, Android versionName/versionCode and
+iOS marketing/build metadata **before** making the tag. A tag does not rewrite
+source metadata, increment Android versionCode or bypass CI. Mismatches fail
+closed, rather than publishing clients that report different versions.
+
+No release may already exist under the tag. A failed signing run can be rerun
+under the same existing tag if no draft/release has yet been created. If a draft
+exists, stop and inspect it; do not force-push tags or blindly publish partial
+assets. No Home Node SSH key, LAN address or GitHub personal access token belongs
+in this workflow. The Home Node pulls the completed signed release outbound.
+
+The current server-side Docker/public-archive integration is not completed by
+this tag-trigger change. Do not infer successful deployment from a green
+manifest unit test or a newly created tag.
 
 ## Updating the protocol dependency
 

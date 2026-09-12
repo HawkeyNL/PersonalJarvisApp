@@ -16,11 +16,14 @@ class PrivateReleaseWorkflowTests(unittest.TestCase):
         cls.workflow = WORKFLOW.read_text(encoding="utf-8")
         cls.ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
-    def test_release_is_manual_main_only_and_uses_a_protected_environment(self) -> None:
+    def test_release_requires_main_source_and_a_protected_environment(self) -> None:
         self.assertIn("workflow_dispatch:", self.workflow)
         self.assertNotIn("pull_request:", self.workflow)
         self.assertIn("github.ref == 'refs/heads/main'", self.workflow)
         self.assertIn("environment: application-release", self.workflow)
+        self.assertIn("tags: ['app-v*']", self.workflow)
+        self.assertIn("git merge-base --is-ancestor HEAD origin/main", self.workflow)
+        self.assertIn("needs.validate.outputs.app_version", self.workflow)
 
     def test_github_never_receives_home_node_deployment_coordinates(self) -> None:
         for forbidden in (
