@@ -1,4 +1,5 @@
 import XCTest
+import Network
 @testable import Jarvis
 
 private final class NoNetworkProtocol: URLProtocol {
@@ -8,44 +9,64 @@ private final class NoNetworkProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
-private final class BoundedResponseProtocol: URLProtocol {
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        let advertised = request.url!.path == "/advertised"
-        let exact = request.url!.path == "/exact"
-        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
-                                       headerFields: advertised ? ["Content-Length": "99999"] : [:])!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        if advertised { return } // Never send a body or EOF: reject from headers.
-        client?.urlProtocol(self, didLoad: Data(repeating: 65, count: 8))
-        client?.urlProtocol(self, didLoad: Data(repeating: 66, count: exact ? 8 : 9))
-        if exact { client?.urlProtocolDidFinishLoading(self) }
-        // Oversized body deliberately never finishes: waiting for EOF is wrong.
+private final class BoundedResponseServer {
+    let listener: NWListener
+    private let queue = DispatchQueue(label: "jarvis.tests.bounded-http")
+    private var connection: NWConnection?
+
+    init(response: String, ready: XCTestExpectation) throws {
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        listener = try NWListener(using: parameters)
+        listener.stateUpdateHandler = { state in
+            if case .ready = state { ready.fulfill() }
+        }
+        listener.newConnectionHandler = { [weak self] connection in
+            guard let self, self.connection == nil else { connection.cancel(); return }
+            self.connection = connection
+            connection.start(queue: self.queue)
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { _, _, _, error in
+                guard error == nil else { connection.cancel(); return }
+                // Keep the socket open, including on oversized responses. The
+                // reader must reject before EOF rather than wait for completion.
+                connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in })
+            }
+        }
+        listener.start(queue: queue)
     }
-    override func stopLoading() {}
+    func stop() {
+        queue.sync { connection?.cancel(); listener.cancel() }
+    }
 }
 
 final class ClientDTOTests: XCTestCase {
     func testHTTPBodyIsBoundedBeforeEOFWithOrWithoutContentLength() async throws {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [BoundedResponseProtocol.self]
-        configuration.timeoutIntervalForRequest = 2
-        configuration.timeoutIntervalForResource = 2
+        configuration.timeoutIntervalForRequest = 5
+        configuration.timeoutIntervalForResource = 5
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
-        for path in ["advertised", "oversized"] {
-            let request = URLRequest(url: URL(string: "https://jarvis.example.com/\(path)")!)
+        let fixtures = [
+            "HTTP/1.1 200 OK\r\nContent-Length: 99999\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n8\r\nAAAAAAAA\r\n9\r\nBBBBBBBBB\r\n",
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n8\r\nAAAAAAAA\r\n8\r\nBBBBBBBB\r\n0\r\n\r\n"
+        ]
+        for (index, response) in fixtures.enumerated() {
+            let ready = expectation(description: "Loopback HTTP fixture ready")
+            let server = try BoundedResponseServer(response: response, ready: ready)
+            defer { server.stop() }
+            await fulfillment(of: [ready], timeout: 5)
+            let port = try XCTUnwrap(server.listener.port)
+            let request = URLRequest(url: URL(string: "http://127.0.0.1:\(port.rawValue)/fixture")!)
             do {
-                _ = try await BoundedAPIResponse.read(session: session, request: request, limit: 16)
-                XCTFail("Oversized response must fail before EOF")
+                let (data, _) = try await BoundedAPIResponse.read(session: session, request: request, limit: 16)
+                XCTAssertEqual(index, 2, "Oversized response must fail before EOF")
+                XCTAssertEqual(data, Data(repeating: 65, count: 8) + Data(repeating: 66, count: 8))
             } catch let error as JarvisAPIError {
+                XCTAssertNotEqual(index, 2, "Exact-limit response must succeed")
                 XCTAssertEqual(error, .responseTooLarge)
             }
         }
-        let request = URLRequest(url: URL(string: "https://jarvis.example.com/exact")!)
-        let (data, _) = try await BoundedAPIResponse.read(session: session, request: request, limit: 16)
-        XCTAssertEqual(data, Data(repeating: 65, count: 8) + Data(repeating: 66, count: 8))
     }
 
     @MainActor

@@ -150,7 +150,7 @@ HTTP test sends an oversized unfinished chunked response and verifies immediate
 rejection, plus acceptance exactly at the limit. Only fixed error text reaches
 the UI. iOS now reads `URLSession.AsyncBytes` with a 16 MiB bound, rejects oversized
 advertised lengths, and cancels the underlying data task on every exit and caller
-cancellation. Its URLProtocol regression covers unfinished oversized bodies,
+cancellation. Its loopback TCP regression covers unfinished oversized bodies,
 oversized headers, and exact-limit success. Those XCTest cases still require the
 macOS runner; the desktop test does not prove the iOS implementation works.
 
