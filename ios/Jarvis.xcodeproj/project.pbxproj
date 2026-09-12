@@ -6,7 +6,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-        A00000000000000000000020 /* RealtimeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000020 /* RealtimeService.swift */; };
+        A00000000000000000000020 /* RealtimeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000030 /* RealtimeService.swift */; };
 		A00000000000000000000001 /* JarvisApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000001 /* JarvisApp.swift */; };
 		A00000000000000000000002 /* JarvisAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000002 /* JarvisAppModel.swift */; };
 		A00000000000000000000003 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000003 /* AppState.swift */; };
@@ -41,7 +41,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-        B00000000000000000000020 /* RealtimeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Jarvis/Services/RealtimeService.swift; sourceTree = SOURCE_ROOT; };
+        B00000000000000000000030 /* RealtimeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Jarvis/Services/RealtimeService.swift; sourceTree = SOURCE_ROOT; };
 		B00000000000000000000001 /* JarvisApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/JarvisApp.swift; sourceTree = "<group>"; };
 		B00000000000000000000002 /* JarvisAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/JarvisAppModel.swift; sourceTree = "<group>"; };
 		B00000000000000000000003 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/AppState.swift; sourceTree = "<group>"; };
@@ -98,6 +98,7 @@
 				B0000000000000000000000A /* BiometricLock.swift */,
 				B0000000000000000000000B /* AuthService.swift */,
 				B0000000000000000000000C /* ChatService.swift */,
+                B00000000000000000000030 /* RealtimeService.swift */,
 				B0000000000000000000000D /* RootView.swift */,
 				B0000000000000000000000E /* LockView.swift */,
 				B0000000000000000000000F /* ChatView.swift */,
