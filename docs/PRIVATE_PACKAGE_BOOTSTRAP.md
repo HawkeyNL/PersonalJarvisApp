@@ -12,10 +12,11 @@ binaries or signing secrets. New GHCR packages are private by default. The job
 refuses an existing non-private package and checks private visibility after
 upload. It never changes package visibility or repository settings.
 
-The temporary feature-branch trigger allows this first bootstrap before merge;
-remove that trigger after bootstrap/review. The `application-release` environment
-may require owner approval or may restrict the branch. Do not bypass those
-protections. No signing secret is referenced by this workflow. Its temporary
+Bootstrap runs only from reviewed main, on workflow changes or manual dispatch.
+The old public release publisher is explicitly disabled until private artifact
+distribution is implemented. The `application-release` environment may require
+owner approval. Do not bypass those protections. No signing secret is referenced
+by this workflow. Its temporary
 GITHUB_TOKEN needs only contents:read and packages:write.
 
 After success, open the GitHub profile's Packages tab and select

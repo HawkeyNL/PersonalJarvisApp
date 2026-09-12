@@ -23,7 +23,9 @@ permissions:
 
 jobs:
   validate:
-    if: github.repository == 'HawkeyNL/PersonalJarvisApp' && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/app-v')))
+    # Disabled until signed artifacts and cross-job transfers use private
+    # storage. Never publish public release assets under the old architecture.
+    if: false && github.repository == 'HawkeyNL/PersonalJarvisApp' && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/app-v')))
     runs-on: ubuntu-24.04
     outputs:
       release_tag: ${{ steps.identity.outputs.release_tag }}

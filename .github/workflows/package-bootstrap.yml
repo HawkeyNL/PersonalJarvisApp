@@ -3,7 +3,7 @@ name: Bootstrap private client artifact package
 on:
   workflow_dispatch:
   push:
-    branches: [feat/tagged-client-release]
+    branches: [main]
     paths: [.github/workflows/package-bootstrap.yml]
 
 permissions:
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   bootstrap:
-    if: github.repository == 'HawkeyNL/PersonalJarvisApp' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/tagged-client-release')
+    if: github.repository == 'HawkeyNL/PersonalJarvisApp' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     environment: application-release
     timeout-minutes: 10
