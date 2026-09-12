@@ -422,13 +422,13 @@ final class RealtimeSpeech {
             let line = String(pending[..<(lineEnd ?? pending.endIndex)])
             let trimmed = String(line.drop(while: { $0 == " " }))
             let marker = trimmed.first.flatMap { "`~".contains($0) ? $0 : nil }
-            let count = marker.map { mark in trimmed.prefix(while: { $0 == mark }).count } ?? 0
-            let opening = lineStart && line.count - trimmed.count <= 3 && count >= 3
+            let markerCount = marker.map { mark in trimmed.prefix(while: { $0 == mark }).count } ?? 0
+            let opening = lineStart && line.count - trimmed.count <= 3 && markerCount >= 3
             if fence != nil || opening {
                 guard let end = lineEnd else { return }
                 if let current = fence {
-                    if opening && marker == current.first && count >= current.count && trimmed.dropFirst(count).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { fence = nil }
-                } else if let marker { fence = String(repeating: String(marker), count: count) }
+                    if opening && marker == current.first && markerCount >= current.count && trimmed.dropFirst(markerCount).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { fence = nil }
+                } else if let marker { fence = String(repeating: String(marker), count: markerCount) }
                 lineStart = line.hasSuffix("\n")
                 pending.removeSubrange(..<end)
                 continue
