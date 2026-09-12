@@ -1,15 +1,14 @@
 # Unified Jarvis client release setup
 
-> Migration notice: the public publisher described below is disabled. Do not
-> execute its release checklist. Private GHCR distribution replaces public
-> GitHub assets. iOS now has an unsigned owner-signing candidate build; see
-> [IOS_SIDELOAD.md](IOS_SIDELOAD.md). Full release/mirror promotion is not yet
-> implemented. macOS signing/notarization requirements remain unchanged.
+> Private GHCR distribution replaces public GitHub artifacts. The workflow and
+> Rust mirror require separate review/CI/production acceptance before activation.
+> iOS joins the private release as an unsigned, manual-owner-signing installer.
+> The separate candidate workflow also remains available; see [IOS_SIDELOAD.md](IOS_SIDELOAD.md).
 
 Repository: `HawkeyNL/PersonalJarvisApp` (public). Releases use `app-vX.Y.Z`
 and coordinate distributable desktop and Android artifacts from one exact
-source revision. iOS shares the application version but is validated only by
-unsigned simulator CI and installed locally with Xcode. This document describes
+source revision. iOS shares the version and provides a physical-device unsigned
+IPA for local owner signing, never an automatic updater target. This document describes
 owner actions; it does not authorize a release.
 
 ## GitHub configuration
@@ -20,9 +19,12 @@ and the tag pattern `app-v*` for tag-triggered releases. The validation job also
 requires the source commit to be reachable from `main`; the tag pattern alone
 is not the trust boundary. Change these Environment rules manually after review.
 Ordinary `ci.yml` must remain read-only and must not reference this Environment.
-Allow the release workflow's final job to use its repository-scoped
-`GITHUB_TOKEN` with `contents: write`. No personal token, Home Node SSH access,
-or third release repository is needed.
+Allow the release/signing jobs to use their repository-scoped `GITHUB_TOKEN`
+with `contents: read` and `packages: write`. The existing container package
+`ghcr.io/hawkeynl/jarvis-client-artifacts` must be private and grant this repository
+Actions access. Visibility is checked before/after transfers. No personal token,
+Home Node SSH access, DNS secret or third release repository is needed in CI.
+The Home Node alone stores a local read:packages token for outbound pulls.
 
 Repository variables:
 
@@ -56,9 +58,8 @@ Environment secrets for macOS desktop signing/notarization:
 - `MACOS_NOTARY_API_PRIVATE_KEY_BASE64`
 
 macOS release artifacts must be Developer ID signed, hardened, notarized, and
-stapled. These macOS identities are unrelated to iOS. GitHub Actions does not
-sign, archive, upload, or publish iOS and needs no iOS signing secret or team
-identifier. Windows artifacts receive Tauri updater signatures but are not
+stapled. These macOS identities are unrelated to iOS. This coordinated workflow
+needs no iOS signing secret or team identifier. Windows artifacts receive Tauri updater signatures but are not
 currently Authenticode-signed.
 
 For `main`, recommend required pull requests, required client CI checks, blocked
@@ -108,18 +109,19 @@ rotation requires a migration trusted by already-installed clients.
    at the reviewed main commit. Do not do both. The tag path reads the checked-in
    Android versionCode and validates all client version fields before signing.
 9. Approve the `application-release` Environment jobs if configured.
-10. Verify Linux, Windows, notarized macOS, and signed APK/AAB jobs. Separately
-    confirm the ordinary iOS simulator CI job passed without signing.
-11. Verify the final job creates `app-v0.1.0` only after redownloading and
-    checking the complete same-revision artifact set and signed manifest.
-12. Inspect the public release. It must contain no IPA or iOS artifact. Never
-    manually publish an incomplete draft.
+10. Verify Linux, Windows, notarized macOS, signed APK/AAB and unsigned iPhone IPA
+    jobs. The iOS job requires no Apple signing or distribution credentials.
+11. Verify the final job promotes the private OCI tag `app-v0.1.0` and `stable`
+    only after redownloading/checking the complete same-revision artifact set
+    and signed manifest. No GitHub Release is created.
+12. Inspect the private package and immutable digest reported in the job summary.
+    Partial platform builds stay private and are never made active as `stable`.
 13. Configure the server-owned Home Node mirror from PersonalJarvis, perform one
     manual sync, then enable its timer.
 14. Test update capability/download with an enrolled client. A second signed
     release is required to prove an actual upgrade end to end.
 
-Production desktop/Android signing, macOS notarization, and public release
+Production desktop/Android signing, macOS notarization, and private release
 publication can only be verified in the protected GitHub workflow with the real
 owner credentials; local tests deliberately cannot claim those outcomes. iOS
 device installation is performed locally from Xcode and is outside CI/CD.
@@ -132,15 +134,19 @@ iOS marketing/build metadata **before** making the tag. A tag does not rewrite
 source metadata, increment Android versionCode or bypass CI. Mismatches fail
 closed, rather than publishing clients that report different versions.
 
-No release may already exist under the tag. A failed signing run can be rerun
-under the same existing tag if no draft/release has yet been created. If a draft
-exists, stop and inspect it; do not force-push tags or blindly publish partial
-assets. No Home Node SSH key, LAN address or GitHub personal access token belongs
+No private version may already exist under the OCI tag. A failed signing run can
+be rerun with **all jobs**, so the run-attempt identities match, provided no
+version has yet been promoted. If promotion partly succeeded, stop and inspect
+its digest; do not force-push tags or overwrite immutable artifacts.
+No Home Node SSH key, LAN address or GitHub personal access token belongs
 in this workflow. The Home Node pulls the completed signed release outbound.
 
-The current server-side Docker/public-archive integration is not completed by
-this tag-trigger change. Do not infer successful deployment from a green
-manifest unit test or a newly created tag.
+The Core repository documents the native Rust service in
+`deploy/app-updates/PRIVATE_CLIENT_RELEASES.md`: separate public installer copies,
+root-controlled `/var/lib/jarvis-app-updates`, pinned updater public key and APK
+certificate, authenticated Core delivery, and optional approved stable tracking.
+It is not a Docker service. Do not infer successful deployment or real device
+updating from a green manifest unit test or a newly created tag.
 
 ## Updating the protocol dependency
 

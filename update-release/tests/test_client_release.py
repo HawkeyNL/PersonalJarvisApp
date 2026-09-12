@@ -100,10 +100,10 @@ class ClientReleaseTests(unittest.TestCase):
             value = self.fixture(Path(temporary))
             self.assertEqual(len(value["artifacts"]), 4)
             self.assertEqual(value["release"]["tag"], "app-v0.1.0")
-            self.assertEqual(len(value["installers"]), 2)
+            self.assertEqual(len(value["installers"]), 3)
             self.assertEqual(
                 {Path(item["artifact"]["path"]).suffix for item in value["installers"]},
-                {".dmg", ".aab"},
+                {".dmg", ".aab", ".ipa"},
             )
 
     def test_malformed_records_fail_closed(self):
@@ -161,7 +161,14 @@ class ClientReleaseTests(unittest.TestCase):
             value = self.fixture(Path(temporary))
         self.assertEqual(value["release"]["product"], "clients")
         self.assertEqual({entry["platform"] for entry in value["artifacts"]}, {"linux", "windows", "macos", "android"})
-        self.assertEqual({entry["platform"] for entry in value["installers"]}, {"macos", "android"})
+        self.assertEqual({entry["platform"] for entry in value["installers"]}, {"macos", "android", "ios"})
+        ios = next(entry for entry in value['installers'] if entry['platform'] == 'ios')
+        self.assertEqual(ios['distribution'], 'manual-owner-signing')
+        self.assertTrue(ios['artifact']['path'].endswith('_unsigned.ipa'))
+        unsafe = copy.deepcopy(value)
+        next(entry for entry in unsafe['installers'] if entry['platform'] == 'ios')['distribution'] = 'home-node-updater'
+        with self.assertRaises(ValueError):
+            validate_manifest(unsafe)
         validate_progression(value, "0.1.1", 2)
         for version, android_code in (("0.1.0", 2), ("0.1.1", 1)):
             with self.subTest(version=version), self.assertRaises(ValueError):

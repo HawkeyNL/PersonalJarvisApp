@@ -23,9 +23,7 @@ permissions:
 
 jobs:
   validate:
-    # Disabled until signed artifacts and cross-job transfers use private
-    # storage. Never publish public release assets under the old architecture.
-    if: false && github.repository == 'HawkeyNL/PersonalJarvisApp' && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/app-v')))
+    if: github.repository == 'HawkeyNL/PersonalJarvisApp' && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/app-v')))
     runs-on: ubuntu-24.04
     outputs:
       release_tag: ${{ steps.identity.outputs.release_tag }}
@@ -63,28 +61,12 @@ jobs:
           python3 update-release/client_release.py --version "$APP_VERSION" \
             --android-version-code "$ANDROID_VERSION_CODE"
           python3 scripts/check-deployment-privacy.py
-          # A failing API request is not proof that a tag/release is absent.
-          gh api --paginate "repos/$GH_REPO/tags" --jq '.[].name' > "$RUNNER_TEMP/tags"
-          gh release list --limit 1000 --json tagName --jq '.[].tagName' > "$RUNNER_TEMP/releases"
           if [[ "$GITHUB_EVENT_NAME" == push ]]; then
             test "$GITHUB_REF_NAME" = "app-v$APP_VERSION"
             test "$(git rev-parse "refs/tags/$GITHUB_REF_NAME^{commit}")" = "$(git rev-parse HEAD)"
-          elif grep -Fxq "app-v$APP_VERSION" "$RUNNER_TEMP/tags"; then
-            echo "Application tag already exists; use its tag-triggered run" >&2
-            exit 1
           fi
-          if grep -Fxq "app-v$APP_VERSION" "$RUNNER_TEMP/releases"; then
-            echo "Application release already exists" >&2
-            exit 1
-          fi
-          if [[ -s "$RUNNER_TEMP/releases" ]]; then
-            latest_tag=$(head -n 1 "$RUNNER_TEMP/releases")
-            mkdir "$RUNNER_TEMP/previous"
-            gh release download "$latest_tag" --pattern latest.json --dir "$RUNNER_TEMP/previous"
-            python3 update-release/client_release.py --version "$APP_VERSION" \
-              --android-version-code "$ANDROID_VERSION_CODE" \
-              --previous "$RUNNER_TEMP/previous/latest.json"
-          fi
+          # Private publication validates prior signed metadata, monotonic
+          # Android build identity and immutable app-v tags in GHCR.
           echo "release_tag=app-v$APP_VERSION" >> "$GITHUB_OUTPUT"
           echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
           echo "android_version_code=$ANDROID_VERSION_CODE" >> "$GITHUB_OUTPUT"
@@ -118,6 +100,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     environment: application-release
+    permissions:
+      contents: read
+      packages: write
     env:
       APP_VERSION: ${{ needs.validate.outputs.app_version }}
       JARVIS_TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_SIGNING_PUBLIC_KEY }}
@@ -127,6 +112,9 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
       - name: Install Ubuntu packaging dependencies
         if: runner.os == 'Linux'
         shell: bash
@@ -289,12 +277,14 @@ jobs:
               --example verify_update_signature \
               -- "$artifact" "$signature"
           done
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: oras-project/setup-oras@8d34698a59f5ffe24821f0b48ab62a3de8b64b20 # v1.2.3
         with:
-          name: desktop-${{ matrix.platform }}-${{ github.sha }}
-          path: ${{ runner.temp }}/desktop-assets/*
-          if-no-files-found: error
-          retention-days: 7
+          version: 1.2.3
+      - name: Transfer exact desktop bytes through private GHCR
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 update-release/private_registry.py push-part --directory "$RUNNER_TEMP/desktop-assets" --version "$APP_VERSION" --target "${{ matrix.platform }}"
       - name: Remove ephemeral macOS signing material
         if: always() && matrix.platform == 'macos'
         shell: bash
@@ -308,6 +298,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: application-release
+    permissions:
+      contents: read
+      packages: write
     env:
       APP_VERSION: ${{ needs.validate.outputs.app_version }}
       JARVIS_ANDROID_VERSION_CODE: ${{ needs.validate.outputs.android_version_code }}
@@ -318,6 +311,9 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
@@ -366,22 +362,63 @@ jobs:
           mkdir -p "$RUNNER_TEMP/android-assets"
           cp "$apk" "$RUNNER_TEMP/android-assets/Jarvis_${APP_VERSION}_android_universal.apk"
           cp "$aab" "$RUNNER_TEMP/android-assets/Jarvis_${APP_VERSION}_android_universal.aab"
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: oras-project/setup-oras@8d34698a59f5ffe24821f0b48ab62a3de8b64b20 # v1.2.3
         with:
-          name: android-${{ github.sha }}
-          path: ${{ runner.temp }}/android-assets/*
-          if-no-files-found: error
-          retention-days: 7
+          version: 1.2.3
+      - name: Transfer exact Android bytes through private GHCR
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 update-release/private_registry.py push-part --directory "$RUNNER_TEMP/android-assets" --version "$APP_VERSION" --target android
       - name: Remove ephemeral Android keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/jarvis-release.jks"
 
+  ios-sideload:
+    name: Unsigned iPhone installer for local owner signing
+    needs: validate
+    runs-on: macos-15
+    timeout-minutes: 30
+    environment: application-release
+    permissions:
+      contents: read
+      packages: write
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      APP_VERSION: ${{ needs.validate.outputs.app_version }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Build physical iPhone payload without signing credentials
+        run: |
+          xcodebuild -project ios/Jarvis.xcodeproj -scheme Jarvis \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/JarvisDevice" ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+          python3 update-release/ios_sideload.py \
+            --app "$RUNNER_TEMP/JarvisDevice/Build/Products/Release-iphoneos/Jarvis.app" \
+            --output "$RUNNER_TEMP/ios-candidate" --version "$APP_VERSION" --revision "$GITHUB_SHA"
+          mkdir "$RUNNER_TEMP/ios-assets"
+          cp "$RUNNER_TEMP/ios-candidate/Jarvis_${APP_VERSION}_ios_arm64_unsigned.ipa" "$RUNNER_TEMP/ios-assets/"
+      - uses: oras-project/setup-oras@8d34698a59f5ffe24821f0b48ab62a3de8b64b20 # v1.2.3
+        with:
+          version: 1.2.3
+      - name: Transfer unsigned iPhone payload privately
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 update-release/private_registry.py push-part --directory "$RUNNER_TEMP/ios-assets" --version "$APP_VERSION" --target ios
+
   publish:
-    needs: [validate, desktop, android]
+    needs: [validate, desktop, android, ios-sideload]
     runs-on: ubuntu-24.04
     environment: application-release
     permissions:
-      contents: write
+      contents: read
+      packages: write
     env:
       APP_VERSION: ${{ needs.validate.outputs.app_version }}
       RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
@@ -394,15 +431,16 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+      - uses: oras-project/setup-oras@8d34698a59f5ffe24821f0b48ab62a3de8b64b20 # v1.2.3
         with:
-          pattern: desktop-*-${{ github.sha }}
-          path: staged
-          merge-multiple: true
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+          version: 1.2.3
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          name: android-${{ github.sha }}
-          path: staged
+          python-version: '3.12'
+      - name: Collect private platform builds from this exact run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 update-release/private_registry.py pull-parts --directory staged --version "$APP_VERSION"
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
@@ -429,19 +467,11 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         working-directory: desktop
         run: npm run tauri -- signer sign ../latest.json
-      - name: Publish only a completely revalidated draft
+      - name: Publish complete signed release only to private GHCR
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           python3 update-release/signatures.py latest.json
-          gh release create "$RELEASE_TAG" --draft --target "$SOURCE_REVISION" \
-            --title "Jarvis $APP_VERSION" --notes "Unified client release. Source revision: $SOURCE_REVISION"
-          gh release upload "$RELEASE_TAG" staged/* latest.json latest.json.sig
-          mkdir final
-          gh release download "$RELEASE_TAG" --dir final
-          python3 update-release/verify_published.py final staged latest.json "$APP_VERSION" "$SOURCE_REVISION"
-          python3 update-release/signatures.py final
-          gh release view "$RELEASE_TAG" --json isDraft,targetCommitish > release-state.json
-          python3 -c 'import json,os; r=json.load(open("release-state.json")); assert r["isDraft"] is True; assert r["targetCommitish"] == os.environ["SOURCE_REVISION"]'
-          gh release edit "$RELEASE_TAG" --draft=false --latest
+          cp latest.json latest.json.sig staged/
+          python3 update-release/private_registry.py publish --directory staged --version "$APP_VERSION"
