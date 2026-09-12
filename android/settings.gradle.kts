@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "JarvisAndroid"
 include(":app")
+include(":realtime-core")

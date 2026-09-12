@@ -129,6 +129,8 @@ jobs:
             android/gradle/wrapper/gradle-wrapper.properties
             android/app/build.gradle.kts
       - uses: android-actions/setup-android@v3
+      - name: Test SDK-independent realtime state
+        run: ./gradlew :realtime-core:test --no-daemon
       - name: Install compile SDK
         run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
       - name: Test, lint and build debug APK

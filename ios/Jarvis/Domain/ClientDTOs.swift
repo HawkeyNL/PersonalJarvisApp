@@ -108,8 +108,11 @@ struct ConversationMessage: Decodable, Identifiable, Equatable {
     let content: String
     let model: String?
     let at: String
+    var canonicalId: String? = nil
 
-    var id: String { "\(at)-\(role)-\(content)" }
+    enum CodingKeys: String, CodingKey { case role, content, model, at; case canonicalId = "id" }
+
+    var id: String { canonicalId ?? "\(at)-\(role)-\(content)" }
     var isAssistant: Bool { role == "assistant" || role == "jarvis" }
 }
 
@@ -117,6 +120,11 @@ struct ConversationResponse: Decodable, Equatable {
     let id: UUID
     let title: String
     let messages: [ConversationMessage]
+    let assistantRunning: Bool?
+    enum CodingKeys: String, CodingKey {
+        case id, title, messages
+        case assistantRunning = "assistant_running"
+    }
 }
 
 struct ChatTurn: Encodable, Equatable {

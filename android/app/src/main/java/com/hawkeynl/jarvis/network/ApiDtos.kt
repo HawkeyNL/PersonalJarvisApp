@@ -70,6 +70,7 @@ data class ConversationMessage(
     val content: String,
     val model: String? = null,
     val at: String,
+    val id: String? = null,
 )
 
 @Serializable
@@ -77,6 +78,7 @@ data class ConversationDetailResponse(
     val id: String,
     val title: String,
     val messages: List<ConversationMessage>,
+    val assistant_running: Boolean = false,
 )
 
 @Serializable

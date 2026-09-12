@@ -7,6 +7,21 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Local voice") {
+                    Toggle("Speak replies on this active device", isOn: $model.voiceEnabled)
+                    Picker("System voice", selection: $model.selectedVoice) {
+                        Text("Local system default").tag("")
+                        if !model.selectedVoice.isEmpty && !model.availableVoices.contains(where: { $0.id == model.selectedVoice }) {
+                            Text("Saved voice unavailable").tag(model.selectedVoice)
+                        }
+                        ForEach(model.availableVoices) { voice in Text(voice.label).tag(voice.id) }
+                    }
+                    Button("Refresh available system voices") { model.refreshLocalVoices() }
+                    Text("Speech rate: \(model.voiceRate, specifier: "%.2f")×")
+                    Slider(value: $model.voiceRate, in: 0.5...2, step: 0.25)
+                        .accessibilityLabel("Speech rate for subsequent phrases")
+                    Button("Stop current speech") { model.stopSpeaking() }
+                }
                 Section("Home Node") {
                     TextField("https://jarvis.local", text: $model.endpointText)
                         .textInputAutocapitalization(.never)
@@ -29,6 +44,7 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .task { model.refreshLocalVoices() }
             .confirmationDialog(
                 "Remove this device identity?",
                 isPresented: $showResetConfirmation,

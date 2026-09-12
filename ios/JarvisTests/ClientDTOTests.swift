@@ -1,7 +1,356 @@
 import XCTest
+import Network
 @testable import Jarvis
 
+private final class NoNetworkProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost)) }
+    override func stopLoading() {}
+}
+
+private final class BoundedResponseServer {
+    let listener: NWListener
+    private let queue = DispatchQueue(label: "jarvis.tests.bounded-http")
+    private var connection: NWConnection?
+
+    init(response: String, ready: XCTestExpectation, sent: XCTestExpectation) throws {
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        listener = try NWListener(using: parameters)
+        listener.stateUpdateHandler = { state in
+            if case .ready = state { ready.fulfill() }
+        }
+        listener.newConnectionHandler = { [weak self] connection in
+            guard let self, self.connection == nil else { connection.cancel(); return }
+            self.connection = connection
+            connection.start(queue: self.queue)
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { _, _, _, error in
+                guard error == nil else { connection.cancel(); return }
+                // Keep the socket open, including on oversized responses. The
+                // reader must reject before EOF rather than wait for completion.
+                connection.send(content: Data(response.utf8), completion: .contentProcessed { error in
+                    XCTAssertNil(error, "Fixture must send its response successfully")
+                    sent.fulfill()
+                })
+            }
+        }
+        listener.start(queue: queue)
+    }
+    func stop() {
+        queue.sync { connection?.cancel(); listener.cancel() }
+    }
+}
+
 final class ClientDTOTests: XCTestCase {
+    func testHTTPBodyIsBoundedBeforeEOFWithOrWithoutContentLength() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 5
+        configuration.timeoutIntervalForResource = 5
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let fixtures = [
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 99999\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 99999\r\n\r\nA",
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n8\r\nAAAAAAAA\r\n9\r\nBBBBBBBBB\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n8\r\nAAAAAAAA\r\n8\r\nBBBBBBBB\r\n0\r\n\r\n"
+        ]
+        for (index, response) in fixtures.enumerated() {
+            let ready = expectation(description: "Loopback HTTP fixture ready")
+            let sent = expectation(description: "Loopback HTTP fixture sent headers/body")
+            let server = try BoundedResponseServer(response: response, ready: ready, sent: sent)
+            defer { server.stop() }
+            await fulfillment(of: [ready], timeout: 5)
+            let port = try XCTUnwrap(server.listener.port)
+            let request = URLRequest(url: URL(string: "http://127.0.0.1:\(port.rawValue)/fixture")!)
+            do {
+                let (data, _) = try await BoundedAPIResponse.read(session: session, request: request, limit: 16)
+                XCTAssertEqual(index, 3, "Oversized response must fail before EOF")
+                XCTAssertEqual(data, Data(repeating: 65, count: 8) + Data(repeating: 66, count: 8))
+            } catch let error as JarvisAPIError {
+                XCTAssertTrue(index == 1 || index == 2, "Only oversized delivered responses use the size error")
+                XCTAssertEqual(error, .responseTooLarge)
+            } catch let error as URLError where index == 0 && error.code == .timedOut {
+                // Foundation may withhold the response callback until body
+                // bytes arrive. A header-only peer must still fail within the
+                // configured resource timeout, not hang or accumulate a body.
+            } catch {
+                XCTFail("HTTP fixture \(index) failed unexpectedly: \(error)")
+            }
+            await fulfillment(of: [sent], timeout: 5)
+        }
+    }
+
+    @MainActor
+    func testLateChatPresentationCannotPopulateAnotherSession() async {
+        var lifetime = ChatPresentationLifetime()
+        let old = lifetime.id
+        var rows = ["old conversation"]
+        let late = Task { @MainActor in
+            if lifetime.accepts(old) { rows.append("late old response") }
+        }
+        lifetime.invalidate()
+        rows = ["new session"]
+        await late.value
+        XCTAssertEqual(rows, ["new session"])
+        XCTAssertFalse(lifetime.accepts(old))
+        let current = lifetime.id
+        XCTAssertTrue(lifetime.accepts(current))
+        lifetime.invalidate()
+        XCTAssertFalse(lifetime.accepts(current))
+    }
+    func testLocalVoiceSelectionIsBoundedAndNeverSubstitutesMissingExplicitVoice() {
+        let records = [LocalSpeechVoice(id: "local", label: "Fixture voice"),
+                       LocalSpeechVoice(id: "local", label: "Duplicate"),
+                       LocalSpeechVoice(id: "bad\n", label: "Invalid"),
+                       LocalSpeechVoice(id: "long", label: String(repeating: "x", count: 257))]
+        let voices = LocalSpeechVoice.catalog(records)
+        XCTAssertEqual(voices, [records[0]])
+        XCTAssertEqual(LocalSpeechVoice.selected(in: voices, id: "local", defaultID: nil), "local")
+        XCTAssertNil(LocalSpeechVoice.selected(in: voices, id: "removed", defaultID: "local"))
+        XCTAssertEqual(LocalSpeechVoice.selected(in: voices, id: "", defaultID: "removed"), "local")
+        XCTAssertNil(LocalSpeechVoice.selected(in: [], id: "", defaultID: nil))
+        XCTAssertEqual(LocalSpeechVoice.catalog((0..<1000).lazy.map { LocalSpeechVoice(id: "v\($0)", label: "Voice \($0)") }).count, 128)
+    }
+    func testSpeechRateIsBoundedAndRejectsNonFinitePreferences() {
+        for value in [Double.nan, Double.infinity, -Double.infinity] { XCTAssertEqual(SpeechRate.normalize(value), 1) }
+        XCTAssertEqual(SpeechRate.normalize(-100), 0.5)
+        XCTAssertEqual(SpeechRate.normalize(100), 2)
+        XCTAssertEqual(SpeechRate.normalize(1.25), 1.25)
+    }
+    func testEveryChatPathRefusesOriginSwitchDuringCredentialLoad() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [NoNetworkProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let origin = URL(string: "https://jarvis.example.com")!
+        let api = JarvisAPIClient(baseURL: origin, session: session)
+        let chat = ChatService(api: api, tokenLoader: {
+            // Force actor reentrancy exactly between binding capture and use.
+            await api.configure(baseURL: URL(string: "https://home.example.org")!)
+            await api.configure(baseURL: origin)
+            return "fixture-session"
+        })
+        for operation in 0..<4 {
+            do {
+                switch operation {
+                case 0: _ = try await chat.conversations()
+                case 1: _ = try await chat.conversation(id: UUID())
+                case 2: _ = try await chat.submit(requestId: UUID(), text: "Fixture", conversationId: nil, history: [])
+                default: _ = try await chat.send(text: "Fixture", conversationId: nil, history: [])
+                }
+                XCTFail("Stale credential binding must fail before HTTP dispatch")
+            } catch let error as JarvisAPIError {
+                XCTAssertEqual(error, .invalidConfiguration)
+            }
+        }
+        let capability = await chat.realtimeAvailable()
+        XCTAssertFalse(capability)
+    }
+    @MainActor
+    func testPlaybackRequestContainsOnlyNativeAuthAndTypedRunState() throws {
+        let run = UUID()
+        let event = SpeechPlaybackEvent(run: run, state: .started)
+        let request = try XCTUnwrap(VoicePlaybackReporter.request(origin: URL(string: "https://jarvis.example.com")!, token: "fixture-session", event: event))
+        XCTAssertEqual(request.url?.absoluteString, "https://jarvis.example.com/v1/voice/playback")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.timeoutInterval, 5)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer fixture-session")
+        let body = try JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: String]
+        XCTAssertEqual(body, ["run_id":run.uuidString,"state":"started"])
+        for invalid in ["http://jarvis.example.com", "https://user:password@jarvis.example.com", "https://jarvis.example.com/wrong", "https://jarvis.example.com?token=fixture", "https://jarvis.example.com#fragment"] {
+            XCTAssertNil(VoicePlaybackReporter.request(origin: URL(string: invalid)!, token: "fixture-session", event: event))
+        }
+    }
+    func testSpeechRunWaitsForFinalSealAndDrainsOnlyOnce() {
+        let queue = SpeechQueueRegistry()
+        let run = UUID()
+        let first = NSObject(), second = NSObject()
+        queue.begin(run: run)
+        XCTAssertTrue(queue.insert(first))
+        queue.didStart(first)
+        queue.remove(first)
+        XCTAssertEqual(queue.drain(), [SpeechPlaybackEvent(run: run, state: .started)])
+        XCTAssertTrue(queue.insert(second))
+        queue.didStart(second)
+        queue.seal(run: run)
+        XCTAssertTrue(queue.drain().isEmpty)
+        queue.remove(second)
+        XCTAssertEqual(queue.drain(), [SpeechPlaybackEvent(run: run, state: .stopped)])
+        queue.remove(second); queue.seal(run: run); queue.clear()
+        XCTAssertTrue(queue.drain().isEmpty)
+    }
+    func testCancelledOldUtteranceCannotFailNewRun() {
+        let queue = SpeechQueueRegistry()
+        let oldRun = UUID(), newRun = UUID()
+        let old = NSObject(), current = NSObject()
+        queue.begin(run: oldRun); XCTAssertTrue(queue.insert(old))
+        queue.clear()
+        XCTAssertEqual(queue.drain(), [SpeechPlaybackEvent(run: oldRun, state: .stopped)])
+        queue.begin(run: newRun); XCTAssertTrue(queue.insert(current))
+        queue.fail(old); queue.didStart(old); queue.remove(old); queue.seal(run: oldRun)
+        XCTAssertTrue(queue.drain().isEmpty)
+        queue.didStart(current); queue.fail(current); queue.remove(current)
+        XCTAssertEqual(queue.drain(), [SpeechPlaybackEvent(run: newRun, state: .started), SpeechPlaybackEvent(run: newRun, state: .failed)])
+        queue.seal(run: newRun)
+        XCTAssertTrue(queue.drain().isEmpty)
+    }
+    func testSpeechMetadataQueueIsBounded() {
+        let queue = SpeechQueueRegistry()
+        for _ in 0..<100 { queue.begin(run: UUID()); queue.clear() }
+        XCTAssertEqual(queue.drain().count, 16)
+        XCTAssertTrue(queue.drain().isEmpty)
+    }
+    func testRecoveryCannotDispatchUsingAnOldOriginBinding() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [NoNetworkProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let origin = URL(string: "https://jarvis.example.com")!
+        let api = JarvisAPIClient(baseURL: origin, session: session)
+        let binding = await api.binding()
+        await api.configure(baseURL: URL(string: "https://home.example.org")!)
+        await api.configure(baseURL: origin)
+        do {
+            let _: RecoveredChatRun = try await api.get("/v1/assistant/requests/00000000-0000-0000-0000-000000000001", token: "fixture-session", expectedBinding: binding)
+            XCTFail("Old binding must be refused")
+        } catch let error as JarvisAPIError {
+            XCTAssertEqual(error, .invalidConfiguration)
+        }
+        do {
+            let _: VoiceReleaseResult = try await api.post("/v1/voice/release",
+                body: VoiceReleaseRequest(run_id: UUID()), token: "fixture-session", expectedBinding: binding)
+            XCTFail("Old binding must also refuse voice mutation")
+        } catch let error as JarvisAPIError {
+            XCTAssertEqual(error, .invalidConfiguration)
+        }
+    }
+    func testOnlyMatchingTerminalRecoveryClearsPendingRequest() {
+        var pending = PendingChatRequests()
+        let request = UUID()
+        XCTAssertTrue(pending.insert(request, optimisticID: "row"))
+        pending.reconcile(request, result: RecoveredChatRun(request_id: UUID(), run_id: UUID(), conversation_id: UUID(), state: "completed"))
+        pending.reconcile(request, result: RecoveredChatRun(request_id: request, run_id: UUID(), conversation_id: UUID(), state: "running"))
+        XCTAssertEqual(pending[request], "row")
+        pending.reconcile(request, result: RecoveredChatRun(request_id: request, run_id: UUID(), conversation_id: UUID(), state: "interrupted"))
+        XCTAssertNil(pending[request])
+    }
+    func testPendingRequestsAreBoundedAndClearedAcrossSessions() {
+        var pending = PendingChatRequests()
+        let first = UUID()
+        XCTAssertTrue(pending.insert(first, optimisticID: "first"))
+        for _ in 0..<31 { XCTAssertTrue(pending.insert(UUID(), optimisticID: "fixture")) }
+        XCTAssertTrue(pending.isFull)
+        XCTAssertFalse(pending.insert(UUID(), optimisticID: "overflow"))
+        XCTAssertFalse(pending.insert(first, optimisticID: "replacement"))
+        XCTAssertEqual(pending[first], "first")
+        pending.removeValue(forKey: first)
+        XCTAssertFalse(pending.isFull)
+        XCTAssertNil(pending[first])
+        pending.clear()
+        XCTAssertFalse(pending.isFull)
+    }
+    func testConversationRecoveryPreservesActiveGenerationAndAcceptsLegacyShape() throws {
+        let legacy = Data(#"{"id":"00000000-0000-0000-0000-000000000001","title":"Fixture","messages":[]}"#.utf8)
+        XCTAssertNil(try JSONDecoder().decode(ConversationResponse.self, from: legacy).assistantRunning)
+        let active = Data(#"{"id":"00000000-0000-0000-0000-000000000001","title":"Fixture","messages":[],"assistant_running":true}"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(ConversationResponse.self, from: active).assistantRunning, true)
+    }
+    func testStoppedUtteranceCallbackCannotFreeANewerQueueSlot() {
+        let queue = SpeechQueueRegistry()
+        let old = NSObject()
+        XCTAssertTrue(queue.insert(old))
+        queue.clear()
+        let current = (0..<32).map { _ in NSObject() }
+        for utterance in current { XCTAssertTrue(queue.insert(utterance)) }
+        queue.remove(old)
+        XCTAssertFalse(queue.insert(NSObject()))
+        queue.remove(current[0])
+        queue.remove(current[0])
+        let next = NSObject()
+        XCTAssertTrue(queue.insert(next))
+        XCTAssertFalse(queue.insert(NSObject()))
+    }
+    @MainActor
+    func testFragmentedFencesNeverSpeakEmbeddedCode() throws {
+        final class FakeSpeech: SpeechOutput {
+            var spoken: [String] = []
+            func speak(_ text: String) { spoken.append(text) }
+            func stop() {}
+        }
+        let id = "00000000-0000-0000-0000-000000000001"
+        let identity = ["run_id":id,"request_id":id,"conversation_id":id]
+        func event(_ type: String, _ payload: [String: Any]) throws -> RealtimeEvent {
+            let bytes = try JSONSerialization.data(withJSONObject: ["protocol":1,"epoch":id,"sequence":1,"event_id":id,"type":type,"payload":payload])
+            return try JSONDecoder().decode(RealtimeEvent.self, from: bytes)
+        }
+        func render(_ text: String, streaming: Bool) throws -> [String] {
+            let out = FakeSpeech(); let voice = RealtimeSpeech(output: out); voice.enabled = true
+            voice.receive(try event("connection.ready", ["device_id":id]))
+            voice.receive(try event("voice.owner_changed", ["device_id":id,"run_id":id]))
+            voice.receive(try event("assistant.started", identity))
+            if streaming { for ch in text { voice.receive(try event("assistant.delta", ["run":identity,"text":String(ch)])) } }
+            let completed = try event("assistant.completed", ["run":identity,"message":["id":id,"conversation_id":id,"role":"assistant","content":text,"created_at":"2026-01-01T00:00:00Z"]])
+            voice.receive(completed); voice.receive(completed)
+            return out.spoken
+        }
+        for text in [
+            "Before.\n   ```rust\nlet s = \"```\";\nnot speech\n   ```\nAfter.",
+            "Before.\n  ~~~~text\ncode\n~~~\nstill code\n  ~~~~\nAfter.",
+            "Before.\n```\nunterminated code",
+        ] {
+            let spoken = try render(text, streaming: true)
+            XCTAssertEqual(spoken, try render(text, streaming: false))
+            XCTAssertEqual(spoken.first, "Before.")
+            XCTAssertTrue(spoken.allSatisfy { $0 == "Before." || $0 == "After." })
+        }
+    }
+    @MainActor
+    func testRealtimeVoiceOnlySpeaksOnOwnerAndDoesNotRepeatFinal() throws {
+        final class FakeSpeech: SpeechOutput {
+            var spoken: [String] = []
+            func speak(_ text: String) { spoken.append(text) }
+            func stop() {}
+        }
+        let a = "00000000-0000-0000-0000-000000000001"
+        let b = "00000000-0000-0000-0000-000000000002"
+        let run = "00000000-0000-0000-0000-000000000003"
+        func event(_ type: String, _ payload: [String: Any]) throws -> RealtimeEvent {
+            let bytes = try JSONSerialization.data(withJSONObject: ["protocol":1,"epoch":a,"sequence":1,"event_id":a,"type":type,"payload":payload])
+            return try JSONDecoder().decode(RealtimeEvent.self, from: bytes)
+        }
+        let outA = FakeSpeech(); let outB = FakeSpeech()
+        let voiceA = RealtimeSpeech(output:outA); let voiceB = RealtimeSpeech(output:outB)
+        voiceA.enabled = true; voiceB.enabled = true
+        voiceA.receive(try event("connection.ready",["device_id":a]))
+        voiceB.receive(try event("connection.ready",["device_id":b]))
+        let identity = ["run_id":run,"request_id":a,"conversation_id":b]
+        let events = [
+            try event("voice.owner_changed",["device_id":a,"run_id":run]),
+            try event("assistant.started",identity),
+            try event("assistant.delta",["run":identity,"text":"One answer. Next"]),
+            try event("assistant.completed",["run":identity,"message":["id":a,"conversation_id":b,"role":"assistant","content":"One answer. Next sentence.","created_at":"2026-01-01T00:00:00Z"]]),
+        ]
+        for event in events { voiceA.receive(event); voiceB.receive(event) }
+        voiceA.receive(events.last!)
+        XCTAssertEqual(outA.spoken,["One answer.","Next sentence."])
+        XCTAssertTrue(outB.spoken.isEmpty)
+        XCTAssertEqual(voiceA.ownedRun, UUID(uuidString: run))
+        XCTAssertNil(voiceB.ownedRun)
+        voiceA.stop()
+        XCTAssertTrue(voiceA.enabled)
+        voiceA.receive(try event("assistant.delta", ["run":identity,"text":"Late speech. "]))
+        XCTAssertEqual(outA.spoken,["One answer.","Next sentence."])
+        let release = try JSONSerialization.jsonObject(with: JSONEncoder().encode(VoiceReleaseRequest(run_id: UUID(uuidString: run)!))) as? [String: String]
+        XCTAssertEqual(release?.count, 1)
+        XCTAssertEqual(release?["run_id"].flatMap(UUID.init(uuidString:)), UUID(uuidString: run))
+        // A new connection must not reuse an old voice lease. Even a late
+        // started/delta event cannot speak until ownership is explicitly sent.
+        voiceA.receive(try event("connection.ready", ["device_id":a]))
+        voiceA.receive(try event("assistant.started", identity))
+        voiceA.receive(try event("assistant.delta", ["run":identity,"text":"Stale speech. "]))
+        XCTAssertEqual(outA.spoken,["One answer.","Next sentence."])
+    }
     func testEnrollmentUsesBackendFieldNames() throws {
         let encoded = try JSONEncoder().encode(
             EnrollmentRequest(name: "Gus's iPhone", platform: "ios", publicKey: "ab")

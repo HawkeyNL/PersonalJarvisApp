@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { nextSpeechStatus } from "../speechStatus";
 import NavIcon from "./NavIcon.vue";
 import {
   messages,
@@ -15,8 +17,16 @@ import { useMic } from "../useMic";
 import { wakePulse } from "../voicewake";
 import {
   voiceEnabled,
+  voiceRate,
+  setVoiceRate,
+  voiceChoice,
+  localVoices,
+  voiceChoiceError,
+  refreshLocalVoices,
+  setVoiceChoice,
   headset,
   setVoiceEnabled,
+  stopSpeaking,
   setHeadset,
   canSpeak,
   refreshRoute,
@@ -28,6 +38,10 @@ const focused = ref(false);
 const woke = ref(false);
 const chatHover = ref(false);
 const policy = computed(() => canSpeak());
+const localSpeechStatus = ref("");
+let speechUnlisten: UnlistenFn | undefined;
+let disposed = false;
+onUnmounted(() => { disposed = true; speechUnlisten?.(); });
 
 const mic = useMic((said) => send(said));
 
@@ -107,6 +121,15 @@ async function removeChat(id: string) {
 }
 
 onMounted(async () => {
+  try {
+    const cleanup = await listen<unknown>("jarvis-local-speech", event => {
+      if (disposed) return;
+      localSpeechStatus.value = nextSpeechStatus(localSpeechStatus.value, event.payload);
+    });
+    if (disposed) { cleanup(); return; }
+    speechUnlisten = cleanup;
+  } catch { /* Browser-only preview has no native speech engine. */ }
+  if (disposed) return;
   refreshRoute();
   await initChat();
   await nextTick();
@@ -192,6 +215,7 @@ onMounted(async () => {
         <div class="policy" :class="policy.allowed ? 'ok' : 'off'">
           <span class="pdot" :class="policy.allowed ? 'on' : ''"></span>
           {{ policy.allowed ? "Jarvis kan praten" : "Jarvis is stil" }} · {{ policy.reason }}
+          <span v-if="localSpeechStatus" role="status"> · {{ localSpeechStatus }}</span>
         </div>
         <form class="row" @submit.prevent="onSend">
           <button
@@ -221,6 +245,19 @@ onMounted(async () => {
           >
             <NavIcon :name="voiceEnabled ? 'sound-on' : 'sound-off'" />
           </button>
+          <button v-if="voiceEnabled" type="button" title="Stop huidige spraak" @click="stopSpeaking">Stop spraak</button>
+          <select v-if="voiceEnabled" :value="voiceRate" aria-label="Spreeksnelheid voor volgende fragmenten"
+            @change="setVoiceRate(Number(($event.target as HTMLSelectElement).value))">
+            <option v-for="rate in [0.5,0.75,1,1.25,1.5,1.75,2]" :key="rate" :value="rate">{{rate}}×</option>
+          </select>
+          <button v-if="voiceEnabled" type="button" @click="refreshLocalVoices">Stemmen</button>
+          <select v-if="voiceEnabled" :value="voiceChoice" aria-label="Lokale stem"
+            @change="setVoiceChoice(($event.target as HTMLSelectElement).value)">
+            <option value="">Systeemstandaard</option>
+            <option v-if="voiceChoice && !localVoices.some(v=>v.id===voiceChoice)" :value="voiceChoice">Opgeslagen stem</option>
+            <option v-for="voice in localVoices" :key="voice.id" :value="voice.id">{{voice.label}}</option>
+          </select>
+          <span v-if="voiceChoiceError" role="status">{{voiceChoiceError}}</span>
           <button
             type="button"
             class="ic"

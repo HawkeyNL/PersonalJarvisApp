@@ -25,6 +25,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -218,6 +219,12 @@ private fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel) {
             modifier = Modifier.padding(16.dp),
             style = MaterialTheme.typography.titleLarge,
         )
+        if (state.voiceEnabled) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(state.voiceStatus ?: "Lokale spraak ingeschakeld", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(onClick = actions::stopSpeaking) { Text("Stop spraak") }
+            }
+        }
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
@@ -295,12 +302,41 @@ private fun SettingsScreen(
     actions: JarvisViewModel,
     onInstallUpdate: () -> Unit,
 ) {
+    var voiceMenu by remember { mutableStateOf(false) }
     LazyColumn(
         modifier = Modifier.fillMaxSize().imePadding().testTag("settings"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item { Text("Instellingen", style = MaterialTheme.typography.headlineSmall) }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Lokale spraak op actief apparaat")
+                Switch(checked = state.voiceEnabled, onCheckedChange = actions::setVoiceEnabled)
+            }
+        }
+        item {
+            Text("Spreeksnelheid: ${state.voiceRate}× (volgende fragmenten)")
+            androidx.compose.material3.Slider(value = state.voiceRate, onValueChange = actions::setVoiceRate,
+                valueRange = 0.5f..2f, steps = 5)
+        }
+        item {
+            androidx.compose.foundation.layout.Box {
+                OutlinedButton(onClick = { actions.refreshLocalVoices(); voiceMenu = true }) {
+                    Text(if (state.selectedVoice.isEmpty()) "Stem: lokale standaard" else
+                        state.availableVoices.firstOrNull { it.id == state.selectedVoice }?.label ?: "Opgeslagen lokale stem")
+                }
+                androidx.compose.material3.DropdownMenu(expanded = voiceMenu, onDismissRequest = { voiceMenu = false }) {
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Lokale standaard") },
+                        onClick = { actions.selectLocalVoice(""); voiceMenu = false })
+                    for (voice in state.availableVoices) {
+                        androidx.compose.material3.DropdownMenuItem(text = { Text(voice.label) },
+                            onClick = { actions.selectLocalVoice(voice.id); voiceMenu = false })
+                    }
+                    if (state.availableVoices.isEmpty()) Text("Geen geïnstalleerde offline stemmen beschikbaar")
+                }
+            }
+        }
         item {
             OutlinedTextField(
                 value = state.endpointDraft,

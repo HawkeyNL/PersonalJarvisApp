@@ -1,5 +1,14 @@
 import Foundation
 
+private final class RejectAPIRedirects: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
 enum JarvisAPIError: LocalizedError, Equatable {
     case invalidConfiguration
     case unreachable
@@ -7,6 +16,7 @@ enum JarvisAPIError: LocalizedError, Equatable {
     case unauthorized
     case rejected(status: Int, message: String?)
     case invalidResponse
+    case responseTooLarge
 
     var errorDescription: String? {
         switch self {
@@ -16,12 +26,124 @@ enum JarvisAPIError: LocalizedError, Equatable {
         case .unauthorized: "This session is no longer authorized."
         case let .rejected(status, message): message ?? "The Home Node rejected the request (HTTP \(status))."
         case .invalidResponse: "The Home Node returned an unexpected response."
+        case .responseTooLarge: "The Home Node response exceeds the safe size limit."
         }
+    }
+}
+
+enum BoundedAPIResponse {
+    static let maximumBytes = 16 * 1024 * 1024
+
+    static func read(session: URLSession, request: URLRequest,
+                     limit: Int = maximumBytes) async throws -> (Data, URLResponse) {
+        guard limit >= 0 else { throw JarvisAPIError.responseTooLarge }
+        let receiver = BoundedAPIReceiver(limit: limit)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                receiver.start(session: session, request: request, continuation: continuation)
+            }
+        } onCancel: {
+            receiver.finish(error: CancellationError())
+        }
+    }
+}
+
+// Bound headers when Foundation delivers the response, and each body chunk
+// before accumulation. A peer sending headers without body bytes may not trigger
+// the response callback; the session resource timeout bounds that case.
+// All state is protected by this lock;
+// continuation completion and cancellation happen outside the lock.
+private final class BoundedAPIReceiver: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private let limit: Int
+    private var finished = false
+    private var task: URLSessionDataTask?
+    private var transport: URLSession?
+    private var continuation: CheckedContinuation<(Data, URLResponse), Error>?
+    private var response: URLResponse?
+    private var data = Data()
+
+    init(limit: Int) { self.limit = limit }
+
+    func start(session: URLSession, request: URLRequest,
+               continuation: CheckedContinuation<(Data, URLResponse), Error>) {
+        lock.lock()
+        guard !finished else {
+            lock.unlock()
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+        self.continuation = continuation
+        // Data/response callbacks belong to the session delegate, not merely
+        // the task-specific progress delegate. Preserve all transport settings.
+        let transport = URLSession(configuration: session.configuration, delegate: self, delegateQueue: nil)
+        self.transport = transport
+        let task = transport.dataTask(with: request)
+        self.task = task
+        lock.unlock()
+        task.resume()
+    }
+
+    func finish(error: Error?) {
+        lock.lock()
+        guard !finished else { lock.unlock(); return }
+        finished = true
+        let result: Result<(Data, URLResponse), Error>
+        if let error { result = .failure(error) }
+        else if let response { result = .success((data, response)) }
+        else { result = .failure(JarvisAPIError.invalidResponse) }
+        let continuation = self.continuation
+        let task = self.task
+        let transport = self.transport
+        self.continuation = nil
+        self.task = nil
+        self.transport = nil
+        data = Data()
+        lock.unlock()
+        task?.cancel()
+        transport?.invalidateAndCancel()
+        continuation?.resume(with: result)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
+                    didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        if response.expectedContentLength > Int64(limit) {
+            finish(error: JarvisAPIError.responseTooLarge)
+            completionHandler(.cancel)
+            return
+        }
+        lock.lock()
+        let active = !finished
+        if active { self.response = response }
+        lock.unlock()
+        completionHandler(active ? .allow : .cancel)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
+        lock.lock()
+        guard !finished else { lock.unlock(); return }
+        let oversized = chunk.count > limit - data.count
+        if !oversized { data.append(chunk) }
+        lock.unlock()
+        if oversized { finish(error: JarvisAPIError.responseTooLarge) }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        finish(error: error)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
 }
 
 actor JarvisAPIClient {
     private var baseURL: URL?
+    private var bindingID = UUID()
     private let session: URLSession
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -39,11 +161,16 @@ actor JarvisAPIClient {
             configuration.httpShouldSetCookies = false
             configuration.timeoutIntervalForRequest = 15
             configuration.timeoutIntervalForResource = 30
-            self.session = URLSession(configuration: configuration)
+            self.session = URLSession(configuration: configuration, delegate: RejectAPIRedirects(), delegateQueue: nil)
         }
     }
 
-    func configure(baseURL: URL) { self.baseURL = baseURL }
+    func configure(baseURL: URL) { bindingID = UUID(); self.baseURL = baseURL }
+    func binding() -> UUID { bindingID }
+    func binding(for origin: URL) throws -> UUID {
+        guard baseURL == origin else { throw JarvisAPIError.invalidConfiguration }
+        return bindingID
+    }
 
     func checkReadiness() async throws {
         _ = try await request(path: "/readyz", method: "GET", response: EmptyOrJSON.self)
@@ -53,18 +180,20 @@ actor JarvisAPIClient {
         _ path: String,
         token: String? = nil,
         headers: [String: String] = [:],
+        expectedBinding: UUID? = nil,
         response: Response.Type = Response.self
     ) async throws -> Response {
-        try await request(path: path, method: "GET", token: token, headers: headers, response: response)
+        try await request(path: path, method: "GET", token: token, headers: headers, expectedBinding: expectedBinding, response: response)
     }
 
     func post<Body: Encodable, Response: Decodable>(
         _ path: String,
         body: Body,
         token: String? = nil,
+        expectedBinding: UUID? = nil,
         response: Response.Type = Response.self
     ) async throws -> Response {
-        try await request(path: path, method: "POST", body: body, token: token, response: response)
+        try await request(path: path, method: "POST", body: body, token: token, expectedBinding: expectedBinding, response: response)
     }
 
     func post<Response: Decodable>(
@@ -85,8 +214,11 @@ actor JarvisAPIClient {
         body: (any Encodable)? = nil,
         token: String? = nil,
         headers: [String: String] = [:],
+        expectedBinding: UUID? = nil,
         response: Response.Type
     ) async throws -> Response {
+        try Task.checkCancellation()
+        if let expectedBinding, expectedBinding != bindingID { throw JarvisAPIError.invalidConfiguration }
         guard let baseURL else { throw JarvisAPIError.invalidConfiguration }
         guard let url = URL(string: path, relativeTo: baseURL)?.absoluteURL else {
             throw JarvisAPIError.invalidConfiguration
@@ -102,7 +234,9 @@ actor JarvisAPIClient {
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
 
         do {
-            let (data, rawResponse) = try await session.data(for: request)
+            let (data, rawResponse) = try await BoundedAPIResponse.read(session: session, request: request)
+            try Task.checkCancellation()
+            if let expectedBinding, expectedBinding != bindingID { throw JarvisAPIError.invalidConfiguration }
             guard let http = rawResponse as? HTTPURLResponse else { throw JarvisAPIError.invalidResponse }
             guard (200..<300).contains(http.statusCode) else {
                 if http.statusCode == 401 { throw JarvisAPIError.unauthorized }
@@ -115,6 +249,8 @@ actor JarvisAPIClient {
             return try decoder.decode(Response.self, from: data)
         } catch let error as JarvisAPIError {
             throw error
+        } catch is CancellationError {
+            throw CancellationError()
         } catch let error as URLError where error.code == .timedOut {
             throw JarvisAPIError.timedOut
         } catch is DecodingError {
