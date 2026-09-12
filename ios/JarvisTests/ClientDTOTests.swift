@@ -14,7 +14,7 @@ private final class BoundedResponseServer {
     private let queue = DispatchQueue(label: "jarvis.tests.bounded-http")
     private var connection: NWConnection?
 
-    init(response: String, ready: XCTestExpectation) throws {
+    init(response: String, ready: XCTestExpectation, sent: XCTestExpectation) throws {
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
@@ -29,7 +29,10 @@ private final class BoundedResponseServer {
                 guard error == nil else { connection.cancel(); return }
                 // Keep the socket open, including on oversized responses. The
                 // reader must reject before EOF rather than wait for completion.
-                connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in })
+                connection.send(content: Data(response.utf8), completion: .contentProcessed { error in
+                    XCTAssertNil(error, "Fixture must send its response successfully")
+                    sent.fulfill()
+                })
             }
         }
         listener.start(queue: queue)
@@ -53,7 +56,8 @@ final class ClientDTOTests: XCTestCase {
         ]
         for (index, response) in fixtures.enumerated() {
             let ready = expectation(description: "Loopback HTTP fixture ready")
-            let server = try BoundedResponseServer(response: response, ready: ready)
+            let sent = expectation(description: "Loopback HTTP fixture sent headers/body")
+            let server = try BoundedResponseServer(response: response, ready: ready, sent: sent)
             defer { server.stop() }
             await fulfillment(of: [ready], timeout: 5)
             let port = try XCTUnwrap(server.listener.port)
@@ -66,6 +70,7 @@ final class ClientDTOTests: XCTestCase {
                 XCTAssertNotEqual(index, 2, "Exact-limit response must succeed")
                 XCTAssertEqual(error, .responseTooLarge)
             }
+            await fulfillment(of: [sent], timeout: 5)
         }
     }
 

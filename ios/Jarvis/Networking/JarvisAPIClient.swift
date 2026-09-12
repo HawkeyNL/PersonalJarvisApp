@@ -57,6 +57,7 @@ private final class BoundedAPIReceiver: NSObject, URLSessionDataDelegate, @unche
     private let limit: Int
     private var finished = false
     private var task: URLSessionDataTask?
+    private var transport: URLSession?
     private var continuation: CheckedContinuation<(Data, URLResponse), Error>?
     private var response: URLResponse?
     private var data = Data()
@@ -72,8 +73,11 @@ private final class BoundedAPIReceiver: NSObject, URLSessionDataDelegate, @unche
             return
         }
         self.continuation = continuation
-        let task = session.dataTask(with: request)
-        task.delegate = self
+        // Data/response callbacks belong to the session delegate, not merely
+        // the task-specific progress delegate. Preserve all transport settings.
+        let transport = URLSession(configuration: session.configuration, delegate: self, delegateQueue: nil)
+        self.transport = transport
+        let task = transport.dataTask(with: request)
         self.task = task
         lock.unlock()
         task.resume()
@@ -89,11 +93,14 @@ private final class BoundedAPIReceiver: NSObject, URLSessionDataDelegate, @unche
         else { result = .failure(JarvisAPIError.invalidResponse) }
         let continuation = self.continuation
         let task = self.task
+        let transport = self.transport
         self.continuation = nil
         self.task = nil
+        self.transport = nil
         data = Data()
         lock.unlock()
         task?.cancel()
+        transport?.invalidateAndCancel()
         continuation?.resume(with: result)
     }
 
