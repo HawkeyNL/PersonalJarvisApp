@@ -84,6 +84,16 @@ android {
     }
 }
 
+// The release pipeline deliberately tests the release variant as well as debug.
+// Do not rely on AGP's default host-test selection to create this task.
+androidComponents {
+    beforeVariants(selector().withBuildType("release")) { variant ->
+        requireNotNull(variant.hostTests[com.android.build.api.variant.HostTestBuilder.UNIT_TEST_TYPE]) {
+            "Release unit-test component is unavailable"
+        }.enable = true
+    }
+}
+
 tasks.matching { it.name == "assembleRelease" || it.name == "bundleRelease" }.configureEach {
     doFirst {
         check(releaseSigningConfigured) {
