@@ -134,8 +134,12 @@ jobs:
             android/gradle/wrapper/gradle-wrapper.properties
             android/app/build.gradle.kts
       - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
       - name: Test SDK-independent realtime state
         run: ./gradlew :realtime-core:test --no-daemon
+      - name: Verify release signing guard with strict configuration cache
+        run: python3 ../update-release/test_android_signing_cache.py -v
       - name: Install compile SDK
         run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
       - name: Test, lint and build debug APK

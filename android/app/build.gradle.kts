@@ -95,8 +95,12 @@ androidComponents {
 }
 
 tasks.matching { it.name == "assembleRelease" || it.name == "bundleRelease" }.configureEach {
+    // Snapshot only the non-secret boolean while configuring the task. Reading
+    // the top-level property inside doFirst captures the Gradle script object,
+    // which cannot be serialized by the configuration cache.
+    val signingConfigured = releaseSigningConfigured
     doFirst {
-        check(releaseSigningConfigured) {
+        check(signingConfigured) {
             "Release APK/AAB signing is not configured; refusing to create a distributable mobile release"
         }
     }
