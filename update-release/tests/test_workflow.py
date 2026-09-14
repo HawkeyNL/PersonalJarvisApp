@@ -79,6 +79,13 @@ class PrivateReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("assembleRelease bundleRelease", self.workflow)
         self.assertIn("GH_REPO: ${{ github.repository }}", self.workflow)
 
+    def test_release_variant_tests_are_checked_before_a_signed_release(self) -> None:
+        self.assertIn('testReleaseUnitTest lintRelease assembleRelease bundleRelease', self.workflow)
+        self.assertIn('./gradlew :app:testReleaseUnitTest :app:lintRelease --no-daemon', self.ci_workflow)
+        # CI executes the real tasks, rather than replacing release tests with
+        # debug-only coverage or merely grepping a Gradle task listing.
+        self.assertNotIn('secrets.', self.ci_workflow)
+
     def test_ios_has_only_unsigned_owner_installation_not_apple_distribution(self) -> None:
         section = self.workflow.split('  ios-sideload:', 1)[1].split('  publish:', 1)[0]
         self.assertIn('CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO', section)

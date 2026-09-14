@@ -140,6 +140,8 @@ jobs:
         run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
       - name: Test, lint and build debug APK
         run: ./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon
+      - name: Test and lint release variant without signing secrets
+        run: ./gradlew :app:testReleaseUnitTest :app:lintRelease --no-daemon
       # Validate the APK on the runner without publishing binaries as
       # downloadable Actions artifacts in this public source repository.
 

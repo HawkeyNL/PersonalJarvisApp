@@ -62,9 +62,15 @@ Create `local.properties` through Android Studio, or set `ANDROID_HOME`. Then ru
 
 ```bash
 ./gradlew testDebugUnitTest
+./gradlew :app:testReleaseUnitTest :app:lintRelease
 ./gradlew lintDebug
 ./gradlew assembleDebug
 ```
+
+Release host unit tests are explicitly enabled in `app/build.gradle.kts`.
+Ordinary CI runs them without signing secrets, so missing release-test tasks
+cannot first surface during publication. This does not disable release
+minification or permit unsigned `assembleRelease`/`bundleRelease` distribution.
 
 Install the debug artifact on a connected emulator/device:
 
