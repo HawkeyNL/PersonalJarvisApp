@@ -66,6 +66,26 @@ class PrivateReleaseWorkflowTests(unittest.TestCase):
             with self.subTest(action=action):
                 self.assertRegex(action, r"@[0-9a-f]{40}$")
 
+    def test_sdk_and_registry_actions_use_reviewed_node24_pins(self) -> None:
+        pins = {
+            "oras-project/setup-oras": "1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d",
+            "android-actions/setup-android": "40fd30fb8d7440372e1316f5d1809ec01dcd3699",
+        }
+        counts = dict.fromkeys(pins, 0)
+        for path in (REPOSITORY / ".github/workflows").glob("*.yml"):
+            source = path.read_text()
+            for action, revision in re.findall(r"uses:\s+([^\s@]+)@([^\s#]+)", source):
+                if action in pins:
+                    with self.subTest(workflow=path.name, action=action):
+                        self.assertEqual(revision, pins[action])
+                        counts[action] += 1
+            if "android-actions/setup-android@" in source:
+                self.assertIn("cmdline-tools-version: '12266719'", source)
+                self.assertIn("packages: 'platform-tools'", source)
+            if "oras-project/setup-oras@" in source:
+                self.assertIn("version: 1.2.3", source)
+        self.assertTrue(all(counts.values()))
+
     def test_job_environment_never_exposes_release_secrets(self) -> None:
         for job in ("validate", "desktop", "android", "ios-sideload", "publish"):
             start = self.workflow.index(f"  {job}:")
