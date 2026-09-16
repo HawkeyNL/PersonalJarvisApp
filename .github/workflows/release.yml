@@ -356,8 +356,10 @@ jobs:
           test -n "$apk" && test "$(printf '%s\n' "$apk" | wc -l)" -eq 1 || { echo "expected exactly one signed release APK" >&2; exit 2; }
           aab=$(find app/build/outputs/bundle/release -type f -name '*.aab')
           test -n "$aab" && test "$(printf '%s\n' "$aab" | wc -l)" -eq 1 || { echo "expected exactly one signed release AAB" >&2; exit 2; }
-          apksigner verify --verbose "$apk"
-          fingerprint=$(apksigner verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:upper:]' '[:lower:]')
+          apksigner_path="${ANDROID_HOME:?Android SDK is required}/build-tools/36.0.0/apksigner"
+          test -x "$apksigner_path" || { echo "Required Android Build Tools 36.0.0 apksigner is unavailable" >&2; exit 2; }
+          "$apksigner_path" verify --verbose "$apk"
+          fingerprint=$("$apksigner_path" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:upper:]' '[:lower:]')
           [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]] || { echo "APK signing certificate digest is unavailable" >&2; exit 2; }
           test "$fingerprint" = "$EXPECTED_ANDROID_SIGNER" || { echo "APK signer does not match the pinned release identity" >&2; exit 2; }
           mkdir -p "$RUNNER_TEMP/android-assets"
