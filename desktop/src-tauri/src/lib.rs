@@ -465,12 +465,34 @@ struct LoginResponse {
 /// Complete device login and persist the returned bearer without ever
 /// serializing it through Tauri IPC or the webview.
 #[tauri::command]
+fn auth_remember_enrolled_device(
+    app: AppHandle,
+    device_id: String,
+    expected_origin: String,
+) -> Result<(), String> {
+    uuid::Uuid::parse_str(&device_id).map_err(|_| "invalid device id".to_string())?;
+    let _guard = auth_storage()?;
+    let mut metadata = load_metadata(&app)?;
+    if metadata.home_node_origin.as_deref() != Some(expected_origin.as_str())
+        || metadata.device_id.is_some()
+    {
+        return Err("Home Node or device binding changed".into());
+    }
+    // Metadata only, never authentication. Login still requires this device's
+    // private-key signature and the account password. Keep the ID if a network
+    // failure occurs after the one-use activation has already committed.
+    metadata.device_id = Some(device_id);
+    save_metadata(&app, &metadata)
+}
+
+#[tauri::command]
 async fn auth_complete_login(
     app: AppHandle,
     device_id: String,
     challenge_id: String,
     signature: String,
     password: Option<String>,
+    expected_origin: String,
 ) -> Result<(), String> {
     if password
         .as_ref()
@@ -489,6 +511,9 @@ async fn auth_complete_login(
         let origin = load_metadata(&app)?
             .home_node_origin
             .ok_or_else(|| "Home Node is not configured".to_string())?;
+        if origin != expected_origin {
+            return Err("Home Node changed; sign in again".into());
+        }
         (origin, *guard)
     };
     let response = native_http_client()?
@@ -795,6 +820,7 @@ pub fn run() {
             auth_sign,
             auth_sign_pairing_approval,
             auth_sign_account_approval,
+            auth_remember_enrolled_device,
             auth_complete_login,
             auth_request,
             auth_status,

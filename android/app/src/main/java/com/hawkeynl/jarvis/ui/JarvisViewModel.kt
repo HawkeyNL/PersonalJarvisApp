@@ -353,7 +353,10 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 
     private suspend fun handleEnrollment(result: EnrollmentOutcome) {
         when (result) {
-            EnrollmentOutcome.PasswordRequired -> enrollmentError("Voer je accountwachtwoord in om aan te melden.")
+            EnrollmentOutcome.PasswordRequired -> _state.update {
+                it.copy(busy = false, pairingPending = false, authenticated = false, locked = false,
+                    activationRequired = false, error = "Voer je accountwachtwoord in om aan te melden.")
+            }
             EnrollmentOutcome.ActivationRequired -> _state.update { it.copy(busy = false, pairingPending = false, activationRequired = true, error = null) }
             is EnrollmentOutcome.Pending -> _state.update {
                 it.copy(
@@ -369,6 +372,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                         busy = false,
                         pairingPending = false,
                         authenticated = true,
+                        activationRequired = false,
                         locked = true,
                         error = null,
                     )

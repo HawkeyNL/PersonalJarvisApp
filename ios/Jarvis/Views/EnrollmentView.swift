@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct EnrollmentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var model: JarvisAppModel
     @State private var password = ""
     @State private var activationCode = ""
@@ -15,6 +16,9 @@ struct EnrollmentView: View {
         }
         .padding()
         .onDisappear { password = ""; activationCode = "" }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { password = ""; activationCode = "" }
+        }
     }
 
     private var title: String {

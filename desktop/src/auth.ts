@@ -5,6 +5,7 @@
 // non-secret session state. The private key and bearer token never enter JS.
 import { invoke } from "@tauri-apps/api/core";
 import { chatSession } from "./chatSession";
+import { homeNodeOrigin } from "./homeNode";
 import { getJson, getJsonAuth, getJsonWithHeaders, postAuth, postJson, postJsonAuth, postJsonWithHeaders } from "./api";
 import { scheduleAutomaticUpdateCheck } from "./updates";
 
@@ -40,7 +41,10 @@ export class AccountActivationRequired extends Error {}
 
 /// Log in with the local device key. An unknown device creates one bounded
 /// pairing request and waits; it can never self-enrol through a session token.
-export async function login(enrolledDeviceId?: string, password?: string): Promise<void> {
+export async function login(enrolledDeviceId?: string, password?: string, boundOrigin?: string): Promise<void> {
+  const currentOrigin = await homeNodeOrigin();
+  const expectedOrigin = boundOrigin ?? currentOrigin;
+  if (currentOrigin !== expectedOrigin) throw new Error("Home Node changed; sign in again");
   const account = await accountStatus();
   if (account.bootstrap_required) throw new AccountActivationRequired();
   if (account.password_required && !password && !sessionStorage.getItem(PAIRING_WAIT_KEY)) throw new AccountPasswordRequired();
@@ -70,7 +74,7 @@ export async function login(enrolledDeviceId?: string, password?: string): Promi
       const pairing = await postJson<PairingWait>("/v1/auth/pairing/requests", {
         name: info.name, platform: info.platform, public_key: publicKey,
         password,
-      });
+      }, expectedOrigin);
       sessionStorage.setItem(PAIRING_WAIT_KEY, JSON.stringify(pairing));
       throw new PairingPending();
     }
@@ -80,6 +84,7 @@ export async function login(enrolledDeviceId?: string, password?: string): Promi
   const challenge = await postJson<{ challenge_id: string; nonce: string }>(
     "/v1/auth/challenge",
     { device_id: deviceId },
+    expectedOrigin,
   );
   const signature = await invoke<string>("auth_sign", {
     nonceHex: challenge.nonce,
@@ -89,6 +94,7 @@ export async function login(enrolledDeviceId?: string, password?: string): Promi
     challengeId: challenge.challenge_id,
     signature,
     password,
+    expectedOrigin,
   });
   sessionStorage.removeItem(PAIRING_WAIT_KEY);
   scheduleAutomaticUpdateCheck(true, true);
@@ -97,13 +103,15 @@ export async function login(enrolledDeviceId?: string, password?: string): Promi
 /** Local-LAN first-owner bootstrap. The secret is used once, never persisted,
  * and is expected to come from the root-operated Home Node provisioning flow. */
 export async function bootstrapFirstDevice(secret: string, password: string): Promise<void> {
+  const expectedOrigin = await homeNodeOrigin();
   const publicKey = await invoke<string>("auth_public_key");
   const info = await invoke<{ platform: string; name: string }>("device_info");
   const enrolled = await postJsonWithHeaders<{ device_id: string }>("/v1/auth/bootstrap", {
     name: info.name, platform: info.platform, public_key: publicKey,
     password,
-  }, { "X-Jarvis-Bootstrap-Secret": secret });
-  await login(enrolled.device_id, password);
+  }, { "X-Jarvis-Bootstrap-Secret": secret }, expectedOrigin);
+  await invoke("auth_remember_enrolled_device", { deviceId: enrolled.device_id, expectedOrigin });
+  await login(enrolled.device_id, password, expectedOrigin);
 }
 
 /** Drop the locally stored session token (keeps the enrolled device + key), so
