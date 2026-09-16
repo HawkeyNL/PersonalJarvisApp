@@ -2,6 +2,8 @@ import Foundation
 
 enum AuthServiceOutcome: Equatable {
     case needsEnrollment
+    case needsPassword
+    case needsActivation
     case awaitingApproval(expiresAt: Date)
     case authenticated
     case signedOut
@@ -22,7 +24,7 @@ actor AuthService {
         self.credentials = credentials
     }
 
-    func restore() async throws -> AuthServiceOutcome {
+    func restore(password: String? = nil) async throws -> AuthServiceOutcome {
         if let session = try await credentials.session() {
             do {
                 let _: AuthenticatedIdentity = try await api.get("/v1/auth/me", token: session.token)
@@ -32,23 +34,28 @@ actor AuthService {
             }
         }
         if let deviceId = try await credentials.deviceId() {
-            try await login(deviceId: deviceId)
+            let status: AccountStatus = try await api.get("/v1/auth/account/status")
+            if status.passwordRequired && password == nil { return .needsPassword }
+            try await login(deviceId: deviceId, password: password)
             return .authenticated
         }
         if let ticket = try await credentials.pairingTicket() {
             return try await poll(ticket: ticket)
         }
-        return .needsEnrollment
+        let status: AccountStatus = try await api.get("/v1/auth/account/status")
+        return status.bootstrapRequired ? .needsActivation : .needsEnrollment
     }
 
-    func requestEnrollment(deviceName: String) async throws -> AuthServiceOutcome {
+    func requestEnrollment(deviceName: String, password: String? = nil) async throws -> AuthServiceOutcome {
+        if try await credentials.deviceId() != nil { return try await restore(password: password) }
         if let ticket = try await credentials.pairingTicket() {
             return try await poll(ticket: ticket)
         }
         let request = EnrollmentRequest(
             name: deviceName.prefix(128).description,
             platform: "ios",
-            publicKey: try await identity.publicKeyHex()
+            publicKey: try await identity.publicKeyHex(),
+            password: password
         )
         let response: PairingRequestResponse = try await api.post(
             "/v1/auth/pairing/requests",
@@ -66,6 +73,15 @@ actor AuthService {
     func refreshEnrollment() async throws -> AuthServiceOutcome {
         guard let ticket = try await credentials.pairingTicket() else { return .needsEnrollment }
         return try await poll(ticket: ticket)
+    }
+
+    func activateFirstDevice(deviceName: String, code: String, password: String) async throws -> AuthServiceOutcome {
+        guard password.count >= 15, password.utf8.count <= 1024 else { throw JarvisAPIError.invalidConfiguration }
+        let response = try await api.activateFirstDevice(EnrollmentRequest(name: String(deviceName.prefix(128)),
+            platform: "ios", publicKey: try await identity.publicKeyHex(), password: password), code: code)
+        try await credentials.save(deviceId: response.deviceId)
+        try await login(deviceId: response.deviceId, password: password)
+        return .authenticated
     }
 
     func sessionToken() async throws -> String? { try await credentials.session()?.token }
@@ -122,15 +138,14 @@ actor AuthService {
             guard let deviceId = status.deviceId else { throw JarvisAPIError.invalidResponse }
             try await credentials.save(deviceId: deviceId)
             try await credentials.clearPairingTicket()
-            try await login(deviceId: deviceId)
-            return .authenticated
+            return try await restore()
         case .denied, .expired:
             try await credentials.clearPairingTicket()
             return .needsEnrollment
         }
     }
 
-    private func login(deviceId: UUID) async throws {
+    private func login(deviceId: UUID, password: String? = nil) async throws {
         let challenge: ChallengeResponse = try await api.post(
             "/v1/auth/challenge",
             body: ChallengeRequest(deviceId: deviceId)
@@ -141,7 +156,8 @@ actor AuthService {
             body: LoginRequest(
                 deviceId: deviceId,
                 challengeId: challenge.challengeId,
-                signature: signature
+                signature: signature,
+                password: password
             )
         )
         try await credentials.save(session: SecureSession(token: response.token, expiresAt: response.expiresAt))

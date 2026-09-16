@@ -17,7 +17,14 @@ data class PairingCreateRequest(
     val name: String,
     val platform: String,
     val public_key: String,
-)
+    val password: String? = null,
+) { override fun toString() = "PairingCreateRequest([redacted])" }
+
+@Serializable
+data class AccountStatus(val protocol: Int, val password_required: Boolean, val bootstrap_required: Boolean)
+
+@Serializable
+data class FirstDeviceResponse(val device_id: String)
 
 @Serializable
 data class PairingTicket(
@@ -46,7 +53,8 @@ data class LoginRequest(
     val device_id: String,
     val challenge_id: String,
     val signature: String,
-)
+    val password: String? = null,
+) { override fun toString() = "LoginRequest([redacted])" }
 
 @Serializable
 data class LoginResponse(

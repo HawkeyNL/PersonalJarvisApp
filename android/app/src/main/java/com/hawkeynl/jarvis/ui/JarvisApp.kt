@@ -82,6 +82,9 @@ private fun AppLockScreen(message: String?, onRetry: () -> Unit, onReset: () -> 
 
 @Composable
 private fun OnboardingScreen(state: JarvisUiState, actions: JarvisViewModel) {
+    // Deliberately not rememberSaveable: never serialize passwords into activity state.
+    var password by remember { mutableStateOf("") }
+    var activationCode by remember { mutableStateOf("") }
     LazyColumn(
         modifier = Modifier.fillMaxSize().imePadding().testTag("onboarding"),
         contentPadding = PaddingValues(24.dp),
@@ -128,8 +131,23 @@ private fun OnboardingScreen(state: JarvisUiState, actions: JarvisViewModel) {
                             )
                             CircularProgressIndicator()
                         } else {
-                            Button(onClick = actions::beginEnrollment, enabled = !state.busy) {
-                                Text(if (state.busy) "Bezig…" else "Koppel deze telefoon")
+                            if (state.activationRequired) {
+                                Text("Gebruik de eenmalige code van je Home Node en kies een wachtwoord van minimaal 15 tekens.")
+                                OutlinedTextField(value = activationCode, onValueChange = { activationCode = it.take(256) },
+                                    label = { Text("Activatiecode") }, singleLine = true,
+                                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
+                            }
+                            OutlinedTextField(value = password, onValueChange = { password = it.take(1024) },
+                                label = { Text("Accountwachtwoord") }, singleLine = true,
+                                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
+                            Button(onClick = {
+                                val suppliedPassword = password.ifEmpty { null }
+                                val suppliedCode = if (state.activationRequired) activationCode else null
+                                password = ""
+                                activationCode = ""
+                                actions.beginEnrollment(suppliedPassword, suppliedCode)
+                            }, enabled = !state.busy) {
+                                Text(if (state.busy) "Bezig…" else "Doorgaan")
                             }
                         }
                     }

@@ -319,6 +319,51 @@ fn auth_sign_pairing_approval(
     Ok(hex::encode(key.sign(&message).to_bytes()))
 }
 
+/// Account administration is always explicitly owner-approved, action-bound,
+/// expiring, and signed natively. A password/session alone is insufficient.
+#[tauri::command]
+fn auth_sign_account_approval(
+    app: AppHandle,
+    approval: jarvis_client_core::account::AccountApproval,
+) -> Result<String, String> {
+    use jarvis_client_core::account::{account_approval_message, AccountAction};
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    if approval.expires_at <= now || approval.expires_at > now + 300 {
+        return Err("account approval expired or invalid".into());
+    }
+    let (origin, epoch) = {
+        let guard = auth_storage()?;
+        let metadata = load_metadata(&app)?;
+        if metadata.device_id.as_deref() != Some(approval.device_id.to_string().as_str()) {
+            return Err("account approver does not match this device".into());
+        }
+        (
+            metadata
+                .home_node_origin
+                .ok_or("Home Node is not configured")?,
+            *guard,
+        )
+    };
+    let reason = match approval.action {
+        AccountAction::PasswordSet if approval.target == approval.user_id => {
+            "Jarvis-accountwachtwoord wijzigen".to_string()
+        }
+        AccountAction::PasswordSet => return Err("invalid password approval target".into()),
+        AccountAction::DeviceRevoke => format!("Jarvis-apparaat {} intrekken", approval.target),
+    };
+    let message = account_approval_message(&approval).map_err(str::to_string)?;
+    authenticate_owner(&reason, true)?;
+    let guard = auth_storage()?;
+    let current = load_metadata(&app)?;
+    validate_login_binding(*guard, epoch, current.home_node_origin.as_deref(), &origin)?;
+    if approval.expires_at <= time::OffsetDateTime::now_utc().unix_timestamp() {
+        return Err("account approval expired".into());
+    }
+    Ok(hex::encode(
+        get_or_create_signing_key(&app)?.sign(&message).to_bytes(),
+    ))
+}
+
 /// Persist the device id and session token after a successful login.
 fn save_auth(
     app: &AppHandle,
@@ -373,6 +418,8 @@ fn authenticated_api_path(path: &str) -> bool {
         "/v1/auth/logout",
         "/v1/auth/me",
         "/v1/auth/pairing/requests",
+        "/v1/auth/account/password/requests",
+        "/v1/auth/account/requests",
         "/v1/auth/unlock",
         "/v1/system",
         "/v1/holdings",
@@ -423,7 +470,14 @@ async fn auth_complete_login(
     device_id: String,
     challenge_id: String,
     signature: String,
+    password: Option<String>,
 ) -> Result<(), String> {
+    if password
+        .as_ref()
+        .is_some_and(|value| value.len() > 1024 || value.chars().any(char::is_control))
+    {
+        return Err("account password is invalid".to_string());
+    }
     uuid::Uuid::parse_str(&device_id).map_err(|_| "login device id is invalid".to_string())?;
     uuid::Uuid::parse_str(&challenge_id)
         .map_err(|_| "login challenge id is invalid".to_string())?;
@@ -443,6 +497,7 @@ async fn auth_complete_login(
             "device_id": device_id,
             "challenge_id": challenge_id,
             "signature": signature,
+            "password": password,
         }))
         .send()
         .await
@@ -739,6 +794,7 @@ pub fn run() {
             auth_public_key,
             auth_sign,
             auth_sign_pairing_approval,
+            auth_sign_account_approval,
             auth_complete_login,
             auth_request,
             auth_status,
@@ -881,6 +937,11 @@ mod tests {
     fn native_authenticated_proxy_is_bounded_and_excludes_updater_routes() {
         assert!(authenticated_api_path("/v1/conversations"));
         assert!(authenticated_api_path("/v1/auth/unlock/pending?wait=20"));
+        assert!(authenticated_api_path("/v1/auth/account/password/requests"));
+        assert!(authenticated_api_path(
+            "/v1/auth/account/requests/fixture/approve"
+        ));
+        assert!(!authenticated_api_path("/v1/auth/bootstrap"));
         assert!(!authenticated_api_path("/v1/auth/login"));
         assert!(!authenticated_api_path("/v1/app-updates/capability"));
         assert!(!authenticated_api_path("https://other.example/v1/devices"));

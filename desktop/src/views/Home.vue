@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { getJson, ApiError } from "../api";
-import { currentAuthStatus, login, clearSession, listDevices, PairingPending } from "../auth";
+import { currentAuthStatus, login, clearSession, listDevices, PairingPending, AccountPasswordRequired, AccountActivationRequired, bootstrapFirstDevice } from "../auth";
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
 import ReactorCore from "../components/ReactorCore.vue";
 import JarvisConsole from "../components/JarvisConsole.vue";
@@ -19,6 +19,35 @@ let authTrying = false;
 const originInput = ref("");
 const configBusy = ref(false);
 const configError = ref<string | null>(null);
+const accountMode = ref<"login" | "activate" | null>(null);
+const password = ref("");
+const activationCode = ref("");
+const accountError = ref<string | null>(null);
+const accountBusy = ref(false);
+
+async function submitAccount() {
+  accountBusy.value = true;
+  accountError.value = null;
+  const suppliedPassword = password.value;
+  const suppliedCode = activationCode.value;
+  password.value = "";
+  activationCode.value = "";
+  try {
+    if (accountMode.value === "activate") await bootstrapFirstDevice(suppliedCode, suppliedPassword);
+    else await login(undefined, suppliedPassword);
+    accountMode.value = null;
+    await refreshAuth();
+  } catch (error) {
+    if (error instanceof PairingPending) {
+      accountMode.value = null;
+      auth.value = "wachten";
+    } else {
+      accountError.value = "Aanmelden of activeren mislukt. Controleer je gegevens en probeer opnieuw.";
+    }
+  } finally {
+    accountBusy.value = false;
+  }
+}
 
 async function pollBackend() {
   if (!homeNodeConfig.value.configured) {
@@ -28,7 +57,7 @@ async function pollBackend() {
   try {
     await getJson("/readyz");
     backend.value = "ok";
-    if (auth.value !== "in") await refreshAuth(); // retry login once the backend is up
+    if (auth.value !== "in" && !accountMode.value && !accountBusy.value) await refreshAuth();
   } catch {
     backend.value = "fout";
   }
@@ -92,6 +121,8 @@ async function refreshAuth() {
     }
     auth.value = "in";
   } catch (error) {
+    if (error instanceof AccountPasswordRequired) accountMode.value = "login";
+    if (error instanceof AccountActivationRequired) accountMode.value = "activate";
     auth.value = error instanceof PairingPending ? "wachten" : "fout";
   } finally {
     authTrying = false;
@@ -108,7 +139,11 @@ onMounted(async () => {
     backend.value = "unconfigured";
   }
 });
-onBeforeUnmount(() => clearInterval(pollTimer));
+onBeforeUnmount(() => {
+  clearInterval(pollTimer);
+  password.value = "";
+  activationCode.value = "";
+});
 </script>
 
 <template>
@@ -136,6 +171,16 @@ onBeforeUnmount(() => clearInterval(pollTimer));
       <p v-if="configError" class="config-error" role="alert">{{ configError }}</p>
       <p class="setup-hint">Lokale HTTP op localhost is uitsluitend toegestaan in een development-build.</p>
     </form>
+    <form v-if="accountMode && backend === 'ok'" class="connection-setup glass" @submit.prevent="submitAccount">
+      <h2>{{ accountMode === "activate" ? "Activeer je eerste apparaat" : "Aanmelden bij Jarvis" }}</h2>
+      <p v-if="accountMode === 'activate'">Gebruik de eenmalige activatiecode van je Home Node en kies een accountwachtwoord van minimaal 15 tekens.</p>
+      <label v-if="accountMode === 'activate'" for="activation-code">Activatiecode</label>
+      <input v-if="accountMode === 'activate'" id="activation-code" v-model="activationCode" type="password" autocomplete="off" maxlength="256" required />
+      <label for="account-password">Accountwachtwoord</label>
+      <input id="account-password" v-model="password" type="password" :autocomplete="accountMode === 'activate' ? 'new-password' : 'current-password'" :minlength="accountMode === 'activate' ? 15 : undefined" maxlength="1024" required />
+      <button type="submit" :disabled="accountBusy">{{ accountBusy ? "Bezig…" : "Doorgaan" }}</button>
+      <p v-if="accountError" class="config-error" role="alert">{{ accountError }}</p>
+    </form>
     <p v-if="auth === 'wachten'" class="pairing-wait">
       Wacht op goedkeuring vanaf een vertrouwd Jarvis-apparaat.
     </p>
@@ -143,7 +188,7 @@ onBeforeUnmount(() => clearInterval(pollTimer));
       Home Node niet bereikbaar op {{ homeNodeConfig.origin }}. Controleer het netwerk en probeer opnieuw.
     </p>
     <!-- Floating conversation + hover-reveal input. -->
-    <JarvisConsole />
+    <JarvisConsole v-if="auth === 'in'" />
   </section>
 </template>
 

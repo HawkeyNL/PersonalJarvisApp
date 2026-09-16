@@ -43,6 +43,7 @@ sealed interface AndroidUpdateUiState {
 }
 
 data class JarvisUiState(
+    val activationRequired: Boolean = false,
     val voiceEnabled: Boolean = false,
     val voiceRate: Float = 1f,
     val selectedVoice: String = "",
@@ -154,7 +155,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun beginEnrollment() {
+    fun beginEnrollment(password: String? = null, activationCode: String? = null) {
         val endpoint = _state.value.endpoint ?: return
         viewModelScope.launch {
             _state.update { it.copy(busy = true, error = null) }
@@ -162,6 +163,8 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 endpoint,
                 "Jarvis Android (${Build.MODEL.take(40)})",
                 Instant.now().epochSecond,
+                password,
+                activationCode,
             )
             handleEnrollment(result)
             if (result is EnrollmentOutcome.Pending) pollPairingUntilResolved(endpoint)
@@ -350,6 +353,8 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 
     private suspend fun handleEnrollment(result: EnrollmentOutcome) {
         when (result) {
+            EnrollmentOutcome.PasswordRequired -> enrollmentError("Voer je accountwachtwoord in om aan te melden.")
+            EnrollmentOutcome.ActivationRequired -> _state.update { it.copy(busy = false, pairingPending = false, activationRequired = true, error = null) }
             is EnrollmentOutcome.Pending -> _state.update {
                 it.copy(
                     busy = false,

@@ -2,6 +2,8 @@ import SwiftUI
 
 struct EnrollmentView: View {
     @ObservedObject var model: JarvisAppModel
+    @State private var password = ""
+    @State private var activationCode = ""
 
     var body: some View {
         ContentUnavailableView {
@@ -12,6 +14,7 @@ struct EnrollmentView: View {
             actions
         }
         .padding()
+        .onDisappear { password = ""; activationCode = "" }
     }
 
     private var title: String {
@@ -23,6 +26,8 @@ struct EnrollmentView: View {
             switch model.enrollmentState {
             case .awaitingApproval: "Approval required"
             case .authenticated: "Connected"
+            case .needsActivation: "Activate your first device"
+            case .needsPassword: "Account password required"
             default: "Enroll this iPhone or iPad"
             }
         }
@@ -42,6 +47,8 @@ struct EnrollmentView: View {
             case let .awaitingApproval(expiresAt):
                 "Approve this unique device identity from an existing trusted Jarvis device before \(expiresAt.formatted())."
             case .signedOut: "Your session is signed out. Sign in again with this device identity."
+            case .needsActivation: "Use the one-time code from your Home Node and choose a password of at least 15 characters."
+            case .needsPassword: "Your password and this device's signature are both required."
             case let .failed(message): message
             default: "This creates a unique Ed25519 identity in this device's Keychain."
             }
@@ -64,13 +71,23 @@ struct EnrollmentView: View {
                     .buttonStyle(.borderedProminent)
             case .requesting, .authenticating:
                 ProgressView()
-            case .signedOut:
-                Button("Sign in") { Task { await model.beginSignIn() } }
-                    .buttonStyle(.borderedProminent)
             case .authenticated:
                 EmptyView()
             default:
-                Button("Request enrollment") { Task { await model.requestEnrollment() } }
+                if model.enrollmentState == .needsActivation {
+                    SecureField("One-time activation code", text: $activationCode)
+                        .textInputAutocapitalization(.never)
+                }
+                SecureField("Account password", text: $password)
+                    .textContentType(model.enrollmentState == .needsActivation ? .newPassword : .password)
+                Button("Continue") {
+                    let suppliedPassword = password
+                    let suppliedCode = model.enrollmentState == .needsActivation ? activationCode : nil
+                    password = ""
+                    activationCode = ""
+                    Task { await model.requestEnrollment(password: suppliedPassword, activationCode: suppliedCode) }
+                }
+                    .disabled(password.isEmpty)
                     .buttonStyle(.borderedProminent)
             }
         }

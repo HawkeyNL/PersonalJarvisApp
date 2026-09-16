@@ -3,6 +3,8 @@ package com.hawkeynl.jarvis.network
 import java.io.File
 
 interface JarvisApi {
+    suspend fun accountStatus(endpoint: HomeNodeEndpoint): ApiResult<AccountStatus>
+    suspend fun activateFirstDevice(endpoint: HomeNodeEndpoint, request: PairingCreateRequest, code: String): ApiResult<FirstDeviceResponse>
     suspend fun ready(endpoint: HomeNodeEndpoint): ApiResult<HealthResponse>
     suspend fun createPairing(
         endpoint: HomeNodeEndpoint,

@@ -142,13 +142,19 @@ final class JarvisAppModel: ObservableObject {
         }
     }
 
-    func requestEnrollment() async {
+    func requestEnrollment(password: String? = nil, activationCode: String? = nil) async {
         let generation = presentation.id
         enrollmentState = .requesting
         do {
-            let result = try await auth.requestEnrollment(deviceName: UIDevice.current.name)
+            let result: AuthServiceOutcome
+            if let activationCode, let password {
+                result = try await auth.activateFirstDevice(deviceName: UIDevice.current.name, code: activationCode, password: password)
+            } else {
+                result = try await auth.requestEnrollment(deviceName: UIDevice.current.name, password: password)
+            }
             guard presentation.accepts(generation) else { return }
             apply(awaitResult: result)
+            if result == .authenticated { await restoreAuthentication() }
         }
         catch { if presentation.accepts(generation) { handle(error) } }
     }
@@ -350,6 +356,8 @@ final class JarvisAppModel: ObservableObject {
     private func apply(awaitResult result: AuthServiceOutcome) {
         switch result {
         case .needsEnrollment: enrollmentState = .notStarted
+        case .needsPassword: enrollmentState = .needsPassword
+        case .needsActivation: enrollmentState = .needsActivation
         case let .awaitingApproval(expiresAt): enrollmentState = .awaitingApproval(expiresAt: expiresAt)
         case .authenticated: enrollmentState = .authenticated
         case .signedOut: enrollmentState = .signedOut
