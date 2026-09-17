@@ -14,6 +14,8 @@ struct ChatView: View {
                 }
             }
             .navigationTitle(model.currentConversationTitle)
+            .toolbarBackground(JarvisTheme.panel, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 if model.isAuthenticated {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -44,6 +46,7 @@ struct ChatView: View {
                     }
                     .padding()
                 }
+                .background(JarvisTheme.background)
                 .onChange(of: model.messages.count) { _, _ in
                     if let last = model.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
@@ -80,7 +83,7 @@ private struct MessageBubble: View {
             Text(message.content)
                 .textSelection(.enabled)
                 .padding(12)
-                .background(message.isAssistant ? Color.secondary.opacity(0.13) : Color.accentColor.opacity(0.18))
+                .background(message.isAssistant ? JarvisTheme.panel : JarvisTheme.accent.opacity(0.18))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
             if message.isAssistant { Spacer(minLength: 48) }
         }
