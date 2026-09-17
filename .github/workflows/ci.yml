@@ -29,8 +29,9 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
-          python3 update-release/client_release.py \
-            --version 0.1.1 --android-version-code 2
+          app_version=$(jq -er .version desktop/package.json)
+          python3 update-release/release_identity.py \
+            --event push --ref "refs/tags/app-v$app_version"
           python3 -m unittest discover -s update-release/tests -v
       - uses: oras-project/setup-oras@8d34698a59f5ffe24821f0b48ab62a3de8b64b20 # v1.2.3
         with:

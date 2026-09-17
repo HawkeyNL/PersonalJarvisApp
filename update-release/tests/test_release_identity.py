@@ -1,20 +1,25 @@
 from pathlib import Path
+import json
 import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "update-release"))
 from release_identity import resolve
+from client_release import _mobile_versions
+
+VERSION = json.loads((ROOT / "desktop/package.json").read_text())["version"]
+ANDROID_CODE = str(_mobile_versions(ROOT, VERSION)[0])
 
 
 class ReleaseIdentityTests(unittest.TestCase):
     def test_stable_tag_uses_checked_in_android_code(self):
-        self.assertEqual(resolve(ROOT, "push", "refs/tags/app-v0.1.1"),
-                         {"app_version": "0.1.1", "android_version_code": "2"})
+        self.assertEqual(resolve(ROOT, "push", f"refs/tags/app-v{VERSION}"),
+                         {"app_version": VERSION, "android_version_code": ANDROID_CODE})
 
     def test_manual_main_remains_supported(self):
-        self.assertEqual(resolve(ROOT, "workflow_dispatch", "refs/heads/main", "0.1.1", "2"),
-                         resolve(ROOT, "push", "refs/tags/app-v0.1.1"))
+        self.assertEqual(resolve(ROOT, "workflow_dispatch", "refs/heads/main", VERSION, ANDROID_CODE),
+                         resolve(ROOT, "push", f"refs/tags/app-v{VERSION}"))
 
     def test_unsafe_or_mismatching_tags_are_rejected(self):
         for ref in ("refs/heads/main", "refs/tags/v0.1.1", "refs/tags/app-v1.2.3",
