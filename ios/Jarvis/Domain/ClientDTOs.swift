@@ -1,5 +1,21 @@
 import Foundation
 
+struct AccountStatus: Decodable, Equatable {
+    let protocolVersion: Int
+    let passwordRequired: Bool
+    let bootstrapRequired: Bool
+    enum CodingKeys: String, CodingKey {
+        case protocolVersion = "protocol"
+        case passwordRequired = "password_required"
+        case bootstrapRequired = "bootstrap_required"
+    }
+}
+
+struct FirstDeviceResponse: Decodable {
+    let deviceId: UUID
+    enum CodingKeys: String, CodingKey { case deviceId = "device_id" }
+}
+
 // Client-local mirrors of the current v1 API. Replace these with generated or
 // shared contract types once Jarvis publishes an authoritative mobile schema.
 
@@ -7,9 +23,10 @@ struct EnrollmentRequest: Encodable, Equatable {
     let name: String
     let platform: String
     let publicKey: String
+    var password: String? = nil
 
     enum CodingKeys: String, CodingKey {
-        case name, platform
+        case name, platform, password
         case publicKey = "public_key"
     }
 }
@@ -60,11 +77,12 @@ struct LoginRequest: Encodable, Equatable {
     let deviceId: UUID
     let challengeId: UUID
     let signature: String
+    var password: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case deviceId = "device_id"
         case challengeId = "challenge_id"
-        case signature
+        case signature, password
     }
 }
 

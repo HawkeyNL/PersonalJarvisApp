@@ -9,6 +9,8 @@ enum ConnectionState: Equatable {
 
 enum EnrollmentState: Equatable {
     case notStarted
+    case needsPassword
+    case needsActivation
     case requesting
     case awaitingApproval(expiresAt: Date)
     case authenticating

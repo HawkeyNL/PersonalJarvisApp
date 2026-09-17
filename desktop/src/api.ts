@@ -31,8 +31,9 @@ export class NetworkError extends Error {
 
 const REQUEST_TIMEOUT_MS = 10_000;
 
-async function request(path: string, init: RequestInit = {}): Promise<Response> {
+async function request(path: string, init: RequestInit = {}, expectedOrigin?: string): Promise<Response> {
   const origin = await homeNodeOrigin();
+  if (expectedOrigin !== undefined && origin !== expectedOrigin) throw new Error("Home Node changed; sign in again");
   const controller = new AbortController();
   let timedOut = false;
   const timeout = window.setTimeout(() => {
@@ -70,20 +71,20 @@ export async function getJsonWithHeaders<T>(path: string, headers: Record<string
   return (await res.json()) as T;
 }
 
-export async function postJson<T>(path: string, body: unknown): Promise<T> {
+export async function postJson<T>(path: string, body: unknown, expectedOrigin?: string): Promise<T> {
   const res = await request(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  });
+  }, expectedOrigin);
   if (!res.ok) {
     throw new ApiError(res.status, path);
   }
   return (await res.json()) as T;
 }
 
-export async function postJsonWithHeaders<T>(path: string, body: unknown, headers: Record<string, string>): Promise<T> {
-  const res = await request(path, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
+export async function postJsonWithHeaders<T>(path: string, body: unknown, headers: Record<string, string>, expectedOrigin?: string): Promise<T> {
+  const res = await request(path, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) }, expectedOrigin);
   if (!res.ok) throw new ApiError(res.status, path);
   return (await res.json()) as T;
 }

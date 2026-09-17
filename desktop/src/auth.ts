@@ -5,7 +5,8 @@
 // non-secret session state. The private key and bearer token never enter JS.
 import { invoke } from "@tauri-apps/api/core";
 import { chatSession } from "./chatSession";
-import { deleteAuth, getJsonAuth, getJsonWithHeaders, postAuth, postJson, postJsonWithHeaders } from "./api";
+import { homeNodeOrigin } from "./homeNode";
+import { getJson, getJsonAuth, getJsonWithHeaders, postAuth, postJson, postJsonAuth, postJsonWithHeaders } from "./api";
 import { scheduleAutomaticUpdateCheck } from "./updates";
 
 export type AuthStatus = {
@@ -31,9 +32,22 @@ export class PairingPending extends Error {
   constructor() { super("Wacht op goedkeuring vanaf een vertrouwd Jarvis-apparaat."); }
 }
 
+export type AccountStatus = { protocol: number; password_required: boolean; bootstrap_required: boolean };
+export function accountStatus(): Promise<AccountStatus> {
+  return getJson<AccountStatus>("/v1/auth/account/status");
+}
+export class AccountPasswordRequired extends Error {}
+export class AccountActivationRequired extends Error {}
+
 /// Log in with the local device key. An unknown device creates one bounded
 /// pairing request and waits; it can never self-enrol through a session token.
-export async function login(enrolledDeviceId?: string): Promise<void> {
+export async function login(enrolledDeviceId?: string, password?: string, boundOrigin?: string): Promise<void> {
+  const currentOrigin = await homeNodeOrigin();
+  const expectedOrigin = boundOrigin ?? currentOrigin;
+  if (currentOrigin !== expectedOrigin) throw new Error("Home Node changed; sign in again");
+  const account = await accountStatus();
+  if (account.bootstrap_required) throw new AccountActivationRequired();
+  if (account.password_required && !password && !sessionStorage.getItem(PAIRING_WAIT_KEY)) throw new AccountPasswordRequired();
   const publicKey = await invoke<string>("auth_public_key");
   const info = await invoke<{ platform: string; name: string }>("device_info");
 
@@ -50,7 +64,6 @@ export async function login(enrolledDeviceId?: string): Promise<void> {
       );
       if (status.status === "approved" && status.device_id) {
         deviceId = status.device_id;
-        sessionStorage.removeItem(PAIRING_WAIT_KEY);
       } else if (status.status === "pending") {
         throw new PairingPending();
       } else {
@@ -60,15 +73,18 @@ export async function login(enrolledDeviceId?: string): Promise<void> {
     } else {
       const pairing = await postJson<PairingWait>("/v1/auth/pairing/requests", {
         name: info.name, platform: info.platform, public_key: publicKey,
-      });
+        password,
+      }, expectedOrigin);
       sessionStorage.setItem(PAIRING_WAIT_KEY, JSON.stringify(pairing));
       throw new PairingPending();
     }
   }
 
+  if (account.password_required && !password) throw new AccountPasswordRequired();
   const challenge = await postJson<{ challenge_id: string; nonce: string }>(
     "/v1/auth/challenge",
     { device_id: deviceId },
+    expectedOrigin,
   );
   const signature = await invoke<string>("auth_sign", {
     nonceHex: challenge.nonce,
@@ -77,19 +93,25 @@ export async function login(enrolledDeviceId?: string): Promise<void> {
     deviceId,
     challengeId: challenge.challenge_id,
     signature,
+    password,
+    expectedOrigin,
   });
+  sessionStorage.removeItem(PAIRING_WAIT_KEY);
   scheduleAutomaticUpdateCheck(true, true);
 }
 
 /** Local-LAN first-owner bootstrap. The secret is used once, never persisted,
  * and is expected to come from the root-operated Home Node provisioning flow. */
-export async function bootstrapFirstDevice(secret: string): Promise<void> {
+export async function bootstrapFirstDevice(secret: string, password: string): Promise<void> {
+  const expectedOrigin = await homeNodeOrigin();
   const publicKey = await invoke<string>("auth_public_key");
   const info = await invoke<{ platform: string; name: string }>("device_info");
   const enrolled = await postJsonWithHeaders<{ device_id: string }>("/v1/auth/bootstrap", {
     name: info.name, platform: info.platform, public_key: publicKey,
-  }, { "X-Jarvis-Bootstrap-Secret": secret });
-  await login(enrolled.device_id);
+    password,
+  }, { "X-Jarvis-Bootstrap-Secret": secret }, expectedOrigin);
+  await invoke("auth_remember_enrolled_device", { deviceId: enrolled.device_id, expectedOrigin });
+  await login(enrolled.device_id, password, expectedOrigin);
 }
 
 /** Drop the locally stored session token (keeps the enrolled device + key), so
@@ -116,19 +138,40 @@ export async function logout(): Promise<void> {
   await invoke("auth_logout");
 }
 
-/** Fully unlink this device: revoke it server-side (invalidating its sessions)
- *  and wipe the local key/id/token. Destructive — the next login() enrolls a
- *  brand-new device. Best-effort on the server call; always clears locally. */
+type AccountApproval = {
+  request_id: string; user_id: string; device_id: string;
+  action: "password-set" | "device-revoke"; target: string; nonce: string; expires_at: number;
+};
+
+async function approveAccount(approval: AccountApproval): Promise<void> {
+  const signature = await invoke<string>("auth_sign_account_approval", { approval });
+  await postJsonAuth(`/v1/auth/account/requests/${approval.request_id}/approve`, { signature });
+}
+
+export async function revokeDevice(deviceId: string): Promise<void> {
+  const approval = await postJsonAuth<AccountApproval>(`/v1/devices/${deviceId}/revoke-request`, {});
+  if (approval.action !== "device-revoke" || approval.target !== deviceId) throw new Error("Ongeldig intrekkingsverzoek");
+  await approveAccount(approval);
+}
+
+export async function setAccountPassword(password: string, currentPassword?: string): Promise<void> {
+  const approval = await postJsonAuth<AccountApproval>("/v1/auth/account/password/requests", {
+    password, current_password: currentPassword,
+  });
+  if (approval.action !== "password-set" || approval.target !== approval.user_id) throw new Error("Ongeldig wachtwoordverzoek");
+  await approveAccount(approval);
+  await clearSession();
+}
+
+/** Confirm remote revocation before deleting the local signing identity. */
 export async function deregisterDevice(): Promise<void> {
   chatSession.invalidate();
   await invoke("realtime_stop").catch(()=>{});
   const status = await currentAuthStatus();
   if (status.authenticated && status.device_id) {
-    try {
-      await deleteAuth(`/v1/devices/${status.device_id}`);
-    } catch {
-      /* revoke best-effort; still wipe locally so this device is detached */
-    }
+    await revokeDevice(status.device_id);
+  } else {
+    throw new Error("Meld je aan om dit apparaat veilig in te trekken.");
   }
   await invoke("auth_reset");
 }

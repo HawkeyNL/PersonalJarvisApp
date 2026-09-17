@@ -196,6 +196,12 @@ actor JarvisAPIClient {
         try await request(path: path, method: "POST", body: body, token: token, expectedBinding: expectedBinding, response: response)
     }
 
+    func activateFirstDevice(_ body: EnrollmentRequest, code: String) async throws -> FirstDeviceResponse {
+        guard code.count == 64, code.allSatisfy({ $0.isHexDigit }) else { throw JarvisAPIError.invalidConfiguration }
+        return try await request(path: "/v1/auth/bootstrap", method: "POST", body: body,
+            headers: ["X-Jarvis-Bootstrap-Secret": code], expectedBinding: bindingID, response: FirstDeviceResponse.self)
+    }
+
     func post<Response: Decodable>(
         _ path: String,
         token: String? = nil,

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
+import AccountAdministration from "../components/AccountAdministration.vue";
 import { ACCENTS, PRESETS, currentAccent, applyAccent, type Accent } from "../theme";
 import { currentAuthStatus, deregisterDevice, type AuthStatus } from "../auth";
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
@@ -69,6 +70,8 @@ async function doUnlink() {
   try {
     await deregisterDevice();
     session.value = await currentAuthStatus();
+  } catch {
+    homeNodeMessage.value = "Loskoppelen niet voltooid. Bevestig met je apparaat en probeer opnieuw.";
   } finally {
     unlinking.value = false;
     confirmUnlink.value = false;
@@ -104,6 +107,7 @@ onMounted(async () => {
 <template>
   <section class="view settings">
     <h1>Settings</h1>
+    <AccountAdministration v-if="session?.authenticated" />
 
     <div class="panel glass">
       <div class="panel-head">HOME NODE <span class="hint">apparaatconfiguratie</span></div>

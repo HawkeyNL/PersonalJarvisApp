@@ -49,6 +49,20 @@ private final class BoundedResponseServer {
 }
 
 final class ClientDTOTests: XCTestCase {
+    func testAccountStatusAndPasswordRequestsMatchCoreContract() throws {
+        let status = try JSONDecoder().decode(AccountStatus.self, from: Data(#"{"protocol":1,"password_required":true,"bootstrap_required":false}"#.utf8))
+        XCTAssertEqual(status.protocolVersion, 1)
+        XCTAssertTrue(status.passwordRequired)
+        XCTAssertFalse(status.bootstrapRequired)
+        let request = LoginRequest(deviceId: UUID(), challengeId: UUID(), signature: String(repeating: "ab", count: 64), password: "fixture account password")
+        let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as! [String: Any]
+        XCTAssertEqual(encoded["password"] as? String, "fixture account password")
+        XCTAssertNotNil(encoded["device_id"])
+        XCTAssertNotNil(encoded["challenge_id"])
+        let legacy = LoginRequest(deviceId: UUID(), challengeId: UUID(), signature: "fixture")
+        let oldShape = try JSONSerialization.jsonObject(with: JSONEncoder().encode(legacy)) as! [String: Any]
+        XCTAssertNil(oldShape["password"])
+    }
     func testHTTPBodyIsBoundedBeforeEOFWithOrWithoutContentLength() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 5

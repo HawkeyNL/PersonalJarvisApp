@@ -2,6 +2,8 @@ package com.hawkeynl.jarvis.auth
 
 import com.hawkeynl.jarvis.network.AndroidUpdateMetadata
 import com.hawkeynl.jarvis.network.ApiResult
+import com.hawkeynl.jarvis.network.AccountStatus
+import com.hawkeynl.jarvis.network.FirstDeviceResponse
 import com.hawkeynl.jarvis.network.ChallengeRequest
 import com.hawkeynl.jarvis.network.ChallengeResponse
 import com.hawkeynl.jarvis.network.ChatRequest
@@ -30,6 +32,34 @@ class EnrollmentServiceTest {
     private val endpoint = (HomeNodeEndpoint.parse("https://jarvis.test") as EndpointValidation.Valid).endpoint
 
     @Test
+    fun `password does not replace pairing and is requested again after approval`() = runTest {
+        val api = FakeApi().apply { account = AccountStatus(1, true, false) }
+        val sessions = SessionRepository(InMemorySecureValueStore())
+        val service = EnrollmentService(api, FakeIdentity(), sessions)
+        assertEquals(EnrollmentOutcome.PasswordRequired, service.startOrResume(endpoint, "fixture", 100))
+        assertEquals(null, api.created)
+        val password = "fixture account password"
+        assertTrue(service.startOrResume(endpoint, "fixture", 100, password) is EnrollmentOutcome.Pending)
+        assertEquals(null, sessions.session().token)
+        assertTrue(!api.created.toString().contains(password))
+        api.approved = true
+        assertEquals(EnrollmentOutcome.PasswordRequired, service.poll(endpoint))
+        assertEquals("device", sessions.session().deviceId)
+        assertEquals(null, api.loginRequest)
+        assertTrue(service.startOrResume(endpoint, "fixture", 100, password) is EnrollmentOutcome.Authenticated)
+        assertEquals(password, api.loginRequest?.password)
+        assertTrue(!api.loginRequest.toString().contains(password))
+    }
+
+    @Test
+    fun `first account reports activation rather than creating pairing`() = runTest {
+        val api = FakeApi().apply { account = AccountStatus(1, false, true) }
+        val service = EnrollmentService(api, FakeIdentity(), SessionRepository(InMemorySecureValueStore()))
+        assertEquals(EnrollmentOutcome.ActivationRequired, service.startOrResume(endpoint, "fixture", 100))
+        assertEquals(null, api.created)
+    }
+
+    @Test
     fun `persists pending request then signs challenge after approval`() = runTest {
         val api = FakeApi()
         val sessions = SessionRepository(InMemorySecureValueStore())
@@ -56,6 +86,9 @@ private class FakeIdentity : DeviceIdentity {
 }
 
 private class FakeApi : JarvisApi {
+    var account = AccountStatus(1, false, false)
+    override suspend fun accountStatus(endpoint: HomeNodeEndpoint) = ApiResult.Success(account)
+    override suspend fun activateFirstDevice(endpoint: HomeNodeEndpoint, request: PairingCreateRequest, code: String): ApiResult<FirstDeviceResponse> = error("unused")
     var created: PairingCreateRequest? = null
     var approved = false
     var loginRequest: LoginRequest? = null

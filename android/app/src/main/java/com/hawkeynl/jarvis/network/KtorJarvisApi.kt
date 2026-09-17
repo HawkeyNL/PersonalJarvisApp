@@ -36,6 +36,19 @@ import kotlinx.serialization.json.Json
 class KtorJarvisApi(
     private val client: HttpClient = defaultHttpClient(),
 ) : JarvisApi {
+    override suspend fun accountStatus(endpoint: HomeNodeEndpoint) = request<AccountStatus> {
+        client.get(endpoint.url("/v1/auth/account/status"))
+    }
+    override suspend fun activateFirstDevice(endpoint: HomeNodeEndpoint, request: PairingCreateRequest, code: String): ApiResult<FirstDeviceResponse> {
+        if (!code.matches(Regex("[a-fA-F0-9]{64}"))) return ApiResult.InvalidResponse("Ongeldige activatiecode.")
+        return request<FirstDeviceResponse> {
+            client.post(endpoint.url("/v1/auth/bootstrap")) {
+                contentType(ContentType.Application.Json)
+                header("X-Jarvis-Bootstrap-Secret", code)
+                setBody(request)
+            }
+        }
+    }
     override suspend fun ready(endpoint: HomeNodeEndpoint) = request<HealthResponse> {
         client.get(endpoint.url("/readyz"))
     }
