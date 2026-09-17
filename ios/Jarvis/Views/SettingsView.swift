@@ -44,6 +44,10 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .scrollContentBackground(.hidden)
+            .background(JarvisTheme.background)
+            .toolbarBackground(JarvisTheme.panel, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .task { model.refreshLocalVoices() }
             .confirmationDialog(
                 "Remove this device identity?",

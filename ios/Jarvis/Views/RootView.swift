@@ -21,6 +21,8 @@ struct RootView: View {
                 SettingsView(model: model)
                     .tabItem { Label("Settings", systemImage: "gearshape") }
             }
+            .toolbarBackground(JarvisTheme.panel, for: .tabBar)
+            .toolbarBackground(.visible, for: .tabBar)
 
             if model.lockState != .unlocked {
                 LockView(model: model)

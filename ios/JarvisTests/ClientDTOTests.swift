@@ -1,6 +1,65 @@
 import XCTest
 import Network
+import SwiftUI
+import UIKit
 @testable import Jarvis
+
+final class EnrollmentInputTests: XCTestCase {
+    @MainActor
+    func testActivationAndPasswordAcceptFocusAndTyping() async throws {
+        var code = ""
+        var password = ""
+        let form = EnrollmentCredentialsForm(
+            requiresActivation: true,
+            password: Binding(get: { password }, set: { password = $0 }),
+            activationCode: Binding(get: { code }, set: { code = $0 }),
+            submit: {}
+        )
+        let controller = UIHostingController(rootView: form.padding())
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        controller.view.layoutIfNeeded()
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        func fields(in view: UIView) -> [UITextField] {
+            (view as? UITextField).map { [$0] } ?? view.subviews.flatMap { fields(in: $0) }
+        }
+        let inputs = fields(in: controller.view)
+        let activation = try XCTUnwrap(inputs.first { $0.placeholder == "One-time activation code" })
+        let account = try XCTUnwrap(inputs.first { $0.placeholder == "Account password" })
+        for field in [activation, account] {
+            XCTAssertTrue(field.isSecureTextEntry)
+            XCTAssertTrue(field.isEnabled)
+            XCTAssertGreaterThan(field.bounds.height, 0)
+            let center = field.convert(CGPoint(x: field.bounds.midX, y: field.bounds.midY), to: window)
+            let hit = try XCTUnwrap(window.hitTest(center, with: nil))
+            XCTAssertTrue(hit === field || hit.isDescendant(of: field))
+            XCTAssertTrue(field.becomeFirstResponder())
+            XCTAssertTrue(field.isFirstResponder)
+            field.insertText(field === activation ? "ABCD2345EFGH" : "fixture-password-only")
+            field.resignFirstResponder()
+        }
+        XCTAssertEqual(code, "ABCD2345EFGH")
+        XCTAssertEqual(password, "fixture-password-only")
+    }
+
+    @MainActor
+    func testBrandAccentAndBundledIconArePresent() throws {
+        let accent = try XCTUnwrap(UIColor(named: "AccentColor"))
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        XCTAssertTrue(accent.getRed(&red, green: &green, blue: &blue, alpha: &alpha))
+        XCTAssertEqual(red, 52 / 255.0, accuracy: 0.001)
+        XCTAssertEqual(green, 245 / 255.0, accuracy: 0.001)
+        XCTAssertEqual(blue, 160 / 255.0, accuracy: 0.001)
+        let icons = try XCTUnwrap(Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any])
+        let primary = try XCTUnwrap(icons["CFBundlePrimaryIcon"] as? [String: Any])
+        XCTAssertEqual(primary["CFBundleIconName"] as? String, "AppIcon")
+    }
+}
 
 private final class NoNetworkProtocol: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { true }
