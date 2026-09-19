@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { getJson, getJsonAuth, postJsonAuth } from "../api";
 import { currentAuthStatus } from "../auth";
 import { homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
+import SystemUsageChart from "../components/SystemUsageChart.vue";
 
 type Health = { status: string; environment?: string };
 type Check = "checking" | "ok" | "fout";
+const sections = ["Overzicht", "Hardware", "Modellen", "Verbruik"] as const;
+const section = ref<(typeof sections)[number]>("Overzicht");
 
 const livez = ref<Check>("checking");
 const readyz = ref<Check>("checking");
@@ -72,6 +75,7 @@ interface ModelEntry {
   available: boolean;
 }
 interface Registry {
+  live_host?: { sampled_at: number; cpu_percent: number | null; memory_total_bytes: number; memory_used_bytes: number; uptime_seconds: number };
   host: HostInfo;
   software: SoftwareItem[];
   brains: Brain[];
@@ -90,13 +94,24 @@ interface Usage {
   cache_read_tokens?: number;
   total_tokens?: number;
   by_backend: { backend: string; spent_eur: number; total_tokens?: number }[];
-  daily?: { day: string; spent_eur: number; total_tokens: number }[];
+  daily?: { day: string; spent_eur: number; total_tokens: number; input_tokens?: number; output_tokens?: number; cache_read_tokens?: number; cache_write_tokens?: number }[];
 }
 
 const reg = ref<Registry | null>(null);
 const usage = ref<Usage | null>(null);
 const regError = ref<string | null>(null);
 const regBusy = ref(false);
+const sampledAt = computed(() => reg.value?.live_host ? new Date(reg.value.live_host.sampled_at * 1000).toLocaleTimeString("nl-NL") : null);
+function gib(bytes: number) { return (bytes / 1024 ** 3).toFixed(1) + " GiB"; }
+let hardwareTimer: ReturnType<typeof setTimeout> | undefined;
+let disposed = false;
+async function pollHardware() {
+  if (disposed) return;
+  if (section.value === "Hardware" && document.visibilityState === "visible" && !regBusy.value) {
+    await loadRegistry();
+  }
+  if (!disposed) hardwareTimer = setTimeout(pollHardware, 5000);
+}
 
 function eur(n: number): string {
   return "€" + n.toFixed(2);
@@ -116,6 +131,7 @@ const costLabel: Record<Brain["cost"], string> = {
 };
 
 async function loadRegistry(refresh = false) {
+  if (regBusy.value) return;
   regBusy.value = true;
   regError.value = null;
   try {
@@ -204,45 +220,69 @@ function cancelSelfImprove() {
 
 onMounted(async () => {
   await loadHomeNodeConfig();
+  if (disposed) return;
   check();
   loadRegistry();
+  hardwareTimer = setTimeout(pollHardware, 5000);
+});
+onUnmounted(() => {
+  disposed = true;
+  clearTimeout(hardwareTimer);
+  clearInterval(adviceTimer);
+  adviceCtrl.value?.abort();
 });
 </script>
 
 <template>
-  <section class="view">
-    <h1>Status</h1>
-    <p class="muted">
-      Live-verbinding met de backend <code>jarvis-api</code> op
-      <code>{{ homeNodeConfig.origin ?? "niet geconfigureerd" }}</code> (via de Tauri HTTP-plugin).
-    </p>
+  <section class="view system-view">
+    <header class="system-heading">
+      <div>
+        <h1>Systeem</h1>
+        <p class="muted">Je Home Node, AI-resources en verbruik in één overzicht.</p>
+      </div>
+      <button @click="check">Controleer verbinding</button>
+    </header>
+    <nav class="system-sections" aria-label="Systeemonderdelen">
+      <button v-for="item in sections" :key="item" :aria-pressed="section === item"
+        :class="{ selected: section === item }" @click="section = item">{{ item }}</button>
+    </nav>
+
+    <div v-if="section === 'Overzicht'" class="panel connection-panel">
+      <h2 class="phead">VERBINDING <span class="hint">Home Node</span></h2>
+      <div class="connection-grid">
+        <div class="endpoint"><span class="k">Server</span>
+          <code>{{ homeNodeConfig.origin ?? "niet geconfigureerd" }}</code>
+        </div>
 
     <ul class="status-list">
       <li>
         <span class="dot" :class="dotClass(livez)"></span>
-        Liveness <code>/livez</code> — {{ livez }}
+        <div><span class="k">Bereikbaar · /livez</span><strong>{{ livez }}</strong></div>
       </li>
       <li>
         <span class="dot" :class="dotClass(readyz)"></span>
-        Readiness <code>/readyz</code> — {{ readyz }}
-        <span v-if="environment">· {{ environment }}</span>
+        <div><span class="k">Gereed · /readyz</span><strong>{{ readyz }}</strong>
+          <span v-if="environment" class="muted"> · {{ environment }}</span>
+        </div>
       </li>
     </ul>
-
-    <button @click="check">Opnieuw controleren</button>
-    <p v-if="error" class="muted err">Laatste fout: {{ error }}</p>
+      </div>
+      <p v-if="error" class="muted err" role="status">Laatste fout: {{ error }}</p>
+    </div>
 
     <!-- AI-resources: brains Jarvis can route to, and the host it runs on. -->
-    <div class="panel" v-if="reg || regError">
-      <div class="phead">
-        AI-RESOURCES <span class="hint">instant memory · router kiest per taak</span>
-      </div>
+    <div class="panel resources-panel" v-if="reg || regError || regBusy">
+      <h2 class="phead section-wide">
+        AI &amp; HOME NODE <span class="hint">router kiest per taak</span>
+      </h2>
       <p v-if="regError" class="muted err">{{ regError }}</p>
+      <p v-if="regBusy && !reg" class="muted section-wide" role="status">Resources laden…</p>
       <template v-else-if="reg">
-        <p class="active">actief brein: <code>{{ reg.active_brain }}</code></p>
+        <p v-if="section === 'Overzicht'" class="active section-wide">Actief brein: <code>{{ reg.active_brain }}</code></p>
 
         <!-- Monthly spend vs the hard budget (ADR-027). -->
-        <div v-if="usage" class="budget">
+        <div v-if="usage && (section === 'Verbruik' || section === 'Overzicht')" class="budget">
+          <h3>Verbruik deze maand</h3>
           <div class="brow">
             <span class="k">maandbudget</span>
             <span :class="{ over: usage.over_budget }">
@@ -270,6 +310,8 @@ onMounted(async () => {
             </span>
           </div>
         </div>
+        <div v-if="section === 'Overzicht'" class="resource-group">
+        <h3>Beschikbare AI-resources</h3>
         <ul class="brains">
           <li v-for="b in reg.brains" :key="b.id">
             <span class="dot" :class="b.available ? 'dot-ok' : 'dot-err'"></span>
@@ -278,14 +320,43 @@ onMounted(async () => {
             <span class="muted small note">{{ b.note }}</span>
           </li>
         </ul>
-
-        <div class="host">
-          <span class="k">host</span>
-          {{ reg.host.cpu }} · {{ reg.host.cpu_cores }} cores ·
-          {{ reg.host.mem_total_gb }} GB · {{ reg.host.gpu }}
-          <span class="muted">· {{ reg.host.os }} ({{ reg.host.arch }})</span>
         </div>
 
+        <template v-if="section === 'Verbruik'">
+          <div v-if="usage?.daily?.length" class="resource-group section-wide usage-charts">
+            <div><h3>Kosten per dag</h3><SystemUsageChart :rows="usage.daily" mode="cost" /></div>
+            <div><h3>Tokens per dag</h3><SystemUsageChart :rows="usage.daily" mode="tokens" /></div>
+          </div>
+          <p v-else class="muted section-wide">Nog geen dagstatistieken beschikbaar.</p>
+        </template>
+
+        <div v-if="section === 'Hardware'" class="host">
+          <h3>Hardware &amp; besturingssysteem</h3>
+          <dl class="host-grid">
+            <div><dt>Processor</dt><dd>{{ reg.host.cpu }}</dd></div>
+            <div><dt>Cores</dt><dd>{{ reg.host.cpu_cores }}</dd></div>
+            <div><dt>Geheugen</dt><dd>{{ reg.host.mem_total_gb }} GB</dd></div>
+            <div><dt>GPU</dt><dd>{{ reg.host.gpu }}</dd></div>
+            <div><dt>Besturingssysteem</dt><dd>{{ reg.host.os }}</dd></div>
+            <div><dt>Architectuur</dt><dd>{{ reg.host.arch }}</dd></div>
+          </dl>
+        </div>
+
+        <div v-if="section === 'Hardware'" class="resource-group">
+          <h3>Live Home Node</h3>
+          <template v-if="reg.live_host">
+            <dl class="host-grid">
+              <div><dt>CPU-belasting</dt><dd>{{ reg.live_host.cpu_percent == null ? 'Eerste meting…' : reg.live_host.cpu_percent.toFixed(1) + '%' }}</dd></div>
+              <div><dt>Geheugen in gebruik</dt><dd>{{ gib(reg.live_host.memory_used_bytes) }} / {{ gib(reg.live_host.memory_total_bytes) }}</dd></div>
+              <div><dt>Uptime</dt><dd>{{ Math.floor(reg.live_host.uptime_seconds / 3600) }} uur {{ Math.floor(reg.live_host.uptime_seconds % 3600 / 60) }} min</dd></div>
+              <div><dt>Laatste meting</dt><dd>{{ sampledAt }}</dd></div>
+            </dl>
+            <p class="muted small">Verversing elke 5 seconden zolang dit tabblad zichtbaar is.</p>
+          </template>
+          <p v-else class="muted">Deze Core-versie levert nog geen live hardwaremetingen. De hardwaregegevens zijn een inventarisatie, geen actuele belasting.</p>
+        </div>
+        <div v-if="section === 'Hardware'" class="resource-group section-wide">
+        <h3>Software</h3>
         <div class="sw">
           <span
             v-for="s in reg.software"
@@ -297,10 +368,12 @@ onMounted(async () => {
             {{ s.name }}<span v-if="s.version" class="ver"> {{ s.version }}</span>
           </span>
         </div>
+        </div>
 
         <!-- Model catalog (ADR-028): what Jarvis can pick from, by class. -->
-        <div v-if="reg.models && reg.models.length" class="models">
-          <div class="k">modellen · goedkoopste geschikte per taak</div>
+        <div v-if="section === 'Modellen'" class="models section-wide">
+          <h3>Modellen <span class="hint">{{ reg.models.length }} · goedkoopste geschikte per taak</span></h3>
+          <p v-if="!reg.models.length" class="muted">Geen modellen beschikbaar.</p>
           <ul>
             <li
               v-for="m in reg.models"
@@ -314,17 +387,19 @@ onMounted(async () => {
           </ul>
         </div>
 
+        <div class="section-wide resource-actions">
         <button :disabled="regBusy" @click="loadRegistry(true)">
           {{ regBusy ? "verversen…" : "Ververs resources" }}
         </button>
+        </div>
       </template>
     </div>
 
     <!-- Self-development (ADR-029 4d): Jarvis proposes improvements to itself. -->
-    <div class="panel">
-      <div class="phead">
+    <div v-if="section === 'Overzicht'" class="panel">
+      <h2 class="phead">
         ZELFVERBETERING <span class="hint">Jarvis stelt voor · jij keurt goed</span>
-      </div>
+      </h2>
       <p class="muted small">
         Jarvis bekijkt zijn eigen ecosysteem en doet voorstellen. Hij voert niets
         zelf uit — de Core en <code>Jarvis.md</code> blijven handmatig, alleen door jou.
@@ -701,5 +776,44 @@ button.ghost:hover {
   .thinking .dots span {
     animation: none;
   }
+}
+
+/* Page-local layout; no changes to other client views. */
+.system-view { max-width: 1180px; display: grid; gap: 20px; overflow-wrap: anywhere; }
+.system-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+.system-heading h1 { margin-bottom: 6px; }
+.system-heading p { margin: 0; }
+.system-sections { display: flex; flex-wrap: wrap; gap: 8px; }
+.system-sections button { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+.system-sections button.selected { color: var(--accent); border-color: var(--accent); background: var(--panel); }
+.system-sections button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.panel { max-width: none; min-width: 0; margin-top: 0; padding: 22px; }
+.phead { margin: 0 0 16px; flex-wrap: wrap; gap: 8px; }
+.connection-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.4fr); align-items: center; gap: 20px; }
+.endpoint { min-width: 0; font-size: 13px; }
+.k, .host-grid dt { display: block; color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+.status-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); margin: 0; }
+.status-list li { padding: 12px; border-radius: 10px; background: rgba(255,255,255,.025); }
+.status-list strong { font-size: 13px; color: var(--text); }
+.resources-panel { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 18px; }
+.section-wide { grid-column: 1 / -1; }
+.resource-group, .host, .budget { min-width: 0; margin: 0; border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+h3 { margin: 0 0 16px; font-size: 13px; font-weight: 600; }
+.host-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 18px; margin: 0; }
+.host-grid dd { margin: 0; font-size: 13px; line-height: 1.5; }
+.resource-actions { display: flex; justify-content: flex-end; }
+.usage-charts { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 24px; }
+.usage-charts > div { min-width: 0; }
+.brow { flex-wrap: wrap; gap: 8px; }
+.brains .note { flex-basis: 100%; margin-left: 17px; }
+.models ul { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px 18px; }
+.models li { display: grid; grid-template-columns: auto minmax(0,1fr) auto; padding: 10px; border-radius: 8px; background: rgba(255,255,255,.025); }
+@media (max-width: 760px) {
+  .connection-grid, .resources-panel, .models ul, .usage-charts { grid-template-columns: minmax(0,1fr); }
+  .panel { padding: 16px; }
+}
+@media (max-width: 420px) {
+  .status-list, .host-grid { grid-template-columns: minmax(0,1fr); }
+  .system-heading button { width: 100%; }
 }
 </style>

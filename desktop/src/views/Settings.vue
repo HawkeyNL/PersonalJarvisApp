@@ -45,6 +45,8 @@ async function onEnroll() {
 }
 
 const accent = ref<Accent>(currentAccent());
+const sections = ["Algemeen", "Account & beveiliging", "Stem", "Updates"] as const;
+const section = ref<(typeof sections)[number]>("Algemeen");
 const session = ref<AuthStatus | null>(null);
 const homeNodeOriginInput = ref("");
 const homeNodeSaving = ref(false);
@@ -106,10 +108,14 @@ onMounted(async () => {
 
 <template>
   <section class="view settings">
-    <h1>Settings</h1>
-    <AccountAdministration v-if="session?.authenticated" />
+    <header class="settings-heading"><h1>Instellingen</h1><p class="muted">Verbinding, beveiliging en voorkeuren voor dit apparaat.</p></header>
+    <nav class="settings-sections" aria-label="Instellingenonderdelen">
+      <button v-for="item in sections" :key="item" :aria-pressed="section === item"
+        :class="{ selected: section === item }" @click="section = item">{{ item }}</button>
+    </nav>
+    <AccountAdministration v-if="session?.authenticated && section === 'Account & beveiliging'" class="account-administration" />
 
-    <div class="panel glass">
+    <div v-if="section === 'Algemeen'" class="panel glass">
       <div class="panel-head">HOME NODE <span class="hint">apparaatconfiguratie</span></div>
       <p class="muted small">
         Dit credential-vrije adres wordt lokaal bewaard en gebruikt voor alle API-aanvragen en updater-discovery.
@@ -131,7 +137,7 @@ onMounted(async () => {
       <p v-if="homeNodeMessage" class="small muted" role="status">{{ homeNodeMessage }}</p>
     </div>
 
-    <div class="panel glass">
+    <div v-if="section === 'Algemeen'" class="panel glass">
       <div class="panel-head">WEERGAVE <span class="hint">accentkleur</span></div>
       <div class="swatches">
         <button
@@ -149,7 +155,7 @@ onMounted(async () => {
       <p class="muted small">Groen is de standaardkleur van Jarvis.</p>
     </div>
 
-    <div class="panel glass">
+    <div v-if="section === 'Account & beveiliging'" class="panel glass">
       <div class="panel-head">ACCOUNT <span class="hint">device-bound</span></div>
       <ul class="kv">
         <li>
@@ -177,7 +183,7 @@ onMounted(async () => {
       </button>
     </div>
 
-    <div class="panel glass">
+    <div v-if="section === 'Account & beveiliging'" class="panel glass">
       <div class="panel-head">BEVEILIGING <span class="hint">app-vergrendeling</span></div>
       <label class="toggle" :class="{ off: !isDesktop }">
         <span class="tl">
@@ -200,7 +206,7 @@ onMounted(async () => {
       </p>
     </div>
 
-    <div class="panel glass">
+    <div v-if="section === 'Stem'" class="panel glass full-width">
       <div class="panel-head">STEM <span class="hint">server-side · centraal</span></div>
       <ul class="kv">
         <li>
@@ -280,7 +286,7 @@ onMounted(async () => {
       </p>
     </div>
 
-    <div class="panel glass">
+    <div v-if="section === 'Updates'" class="panel glass full-width">
       <div class="panel-head">JARVIS APP <span class="hint">private updates</span></div>
       <ul class="kv">
         <li><span class="k">Versie</span><span class="v mono">v{{ currentAppVersion }}</span></li>
@@ -328,7 +334,7 @@ onMounted(async () => {
       </p>
     </div>
 
-    <div class="panel glass">
+    <div v-if="section === 'Algemeen'" class="panel glass full-width">
       <div class="panel-head">SYSTEEM <span class="hint">info</span></div>
       <ul class="kv">
         <li><span class="k">Backend</span><span class="v mono">{{ homeNodeConfig.origin ?? "niet geconfigureerd" }}</span></li>
@@ -362,13 +368,21 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.settings { max-width: 640px; }
+.settings { max-width: 1180px; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; align-items: start; overflow-wrap: anywhere; }
+.settings-heading, .settings-sections, .full-width, .account-administration { grid-column: 1 / -1; }
+.settings-heading p { margin: 0; }
+.settings-sections { display: flex; flex-wrap: wrap; gap: 8px; }
+.settings-sections button { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+.settings-sections button.selected { color: var(--accent); border-color: var(--accent); background: var(--panel); }
+.settings-sections button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 760px) { .settings { grid-template-columns: minmax(0,1fr); } }
 .panel {
+  min-width: 0;
   position: relative;
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 14px 16px 16px;
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 .glass {
   background: rgba(14, 30, 22, 0.5);
