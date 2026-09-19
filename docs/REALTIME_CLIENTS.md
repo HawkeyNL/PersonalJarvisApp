@@ -25,6 +25,13 @@ Desktop bounds connection setup to 15 seconds, waiting for incoming frames to
 the socket loop, drops the speech worker, and follows the same reconnect path;
 it cannot retain playback indefinitely while awaiting a network write. Native
 tests exercise a permanently pending sink as well as a writable sink.
+Android configures the OkHttp engine's own 30-second ping interval, rather
+than Ktor's generic WebSockets ping setting (which does not apply to that engine).
+Missing pongs cause the native transport to fail and enter the existing bounded
+reconnect loop even when there are no application events. Both ordinary and
+cross-scheme redirects are disabled on the native engine to keep authentication
+bound to the enrolled origin. This is foreground transport, not a background
+keepalive service.
 Mobile clients stop sockets/speech on background or lock and reconnect after
 foreground authentication. No permanent mobile foreground service, APNs, or
 background socket guarantee is introduced.
