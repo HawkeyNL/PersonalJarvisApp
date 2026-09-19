@@ -4,9 +4,25 @@ import SwiftUI
 import UIKit
 @testable import Jarvis
 
+// Unsigned CI cannot access Apple's entitled Keychain. Exercise the same
+// identity/auth logic with fixture-only storage; production has no fallback.
+private final class FixtureSecureStorage: SecureValueStorage, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: Data] = [:]
+    func read(account: String) throws -> Data? {
+        lock.lock(); defer { lock.unlock() }; return values[account]
+    }
+    func save(_ data: Data, account: String) throws {
+        lock.lock(); defer { lock.unlock() }; values[account] = data
+    }
+    func delete(account: String) throws {
+        lock.lock(); defer { lock.unlock() }; values.removeValue(forKey: account)
+    }
+}
+
 final class DeviceLoginRecoveryTests: XCTestCase {
     func testMissingSigningKeyIsNotRegenerated() async throws {
-        let store = KeychainStore(service: "jarvis.fixture.\(UUID())")
+        let store = FixtureSecureStorage()
         let identity = DeviceIdentityStore(keychain: store)
         do {
             _ = try await identity.signChallenge(hex: String(repeating: "00", count: 32))
@@ -16,7 +32,7 @@ final class DeviceLoginRecoveryTests: XCTestCase {
     }
 
     func testRecreatedStoresKeepIdentityAndSettings() async throws {
-        let store = KeychainStore(service: "jarvis.fixture.\(UUID())")
+        let store = FixtureSecureStorage()
         defer { try? store.delete(account: "device-ed25519-seed-v1") }
         let first = DeviceIdentityStore(keychain: store)
         let publicKey = try await first.publicKeyHex()
@@ -32,7 +48,7 @@ final class DeviceLoginRecoveryTests: XCTestCase {
 
     func testLoginFailuresKeepBindingAndSuccessfulRetryRestoresSession() async throws {
         for host in ["challenge.example.com", "login.example.com", "success.example.com"] {
-            let store = KeychainStore(service: "jarvis.fixture.\(UUID())")
+            let store = FixtureSecureStorage()
             let credentials = SecureCredentialStore(keychain: store)
             let identity = DeviceIdentityStore(keychain: store)
             defer {
@@ -69,7 +85,7 @@ final class DeviceLoginRecoveryTests: XCTestCase {
 
     func testPairingDecisionsNeverAuthenticateWithoutPassword() async throws {
         for decision in ["pending", "approved", "denied", "expired"] {
-            let store = KeychainStore(service: "jarvis.fixture.\(UUID())")
+            let store = FixtureSecureStorage()
             let credentials = SecureCredentialStore(keychain: store)
             defer {
                 for account in ["registered-device-id-v1", "pending-pairing-v1"] {

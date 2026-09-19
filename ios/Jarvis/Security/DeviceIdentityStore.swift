@@ -16,10 +16,10 @@ enum DeviceIdentityError: LocalizedError {
 }
 
 actor DeviceIdentityStore {
-    private let keychain: KeychainStore
+    private let keychain: any SecureValueStorage
     private let account = "device-ed25519-seed-v1"
 
-    init(keychain: KeychainStore = KeychainStore()) { self.keychain = keychain }
+    init(keychain: any SecureValueStorage = KeychainStore()) { self.keychain = keychain }
 
     func publicKeyHex() throws -> String {
         let key = try signingKey()
