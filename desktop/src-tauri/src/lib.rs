@@ -202,25 +202,20 @@ fn load_secure_auth_unlocked(app: &AppHandle) -> Result<SecureAuth, String> {
     })
 }
 
-fn load_private_key(app: &AppHandle) -> Result<Option<String>, String> {
-    Ok(load_secure_auth(app)?.private_key)
-}
-
-fn save_private_key(app: &AppHandle, key_hex: &str) -> Result<(), String> {
-    let _guard = auth_storage()?;
-    save_credential(KEY_ACCOUNT, key_hex)?;
-    save_metadata(app, &load_metadata(app)?)
-}
-
-/// Load the device signing key, generating and persisting one on first use.
-fn get_or_create_signing_key(app: &AppHandle) -> Result<SigningKey, String> {
-    let key_hex = match load_private_key(app)? {
+/// Caller holds AUTH_STORAGE. Signing must never manufacture a replacement
+/// identity, nor recursively acquire the same non-reentrant mutex.
+fn signing_key_unlocked(app: &AppHandle, allow_create: bool) -> Result<SigningKey, String> {
+    let auth = load_secure_auth_unlocked(app)?;
+    let key_hex = match auth.private_key {
         Some(key) => key,
         None => {
+            if !allow_create || load_metadata(app)?.device_id.is_some() {
+                return Err("Original device key unavailable; restore the original OS credential store or explicitly re-enroll this device".into());
+            }
             let mut seed = [0u8; 32];
             OsRng.fill_bytes(&mut seed);
             let key_hex = hex::encode(seed);
-            save_private_key(app, &key_hex)?;
+            save_credential(KEY_ACCOUNT, &key_hex)?;
             key_hex
         }
     };
@@ -250,14 +245,16 @@ fn device_info() -> serde_json::Value {
 /// Return the device public key (hex), generating a keypair on first call.
 #[tauri::command]
 fn auth_public_key(app: AppHandle) -> Result<String, String> {
-    let key = get_or_create_signing_key(&app)?;
+    let _guard = auth_storage()?;
+    let key = signing_key_unlocked(&app, true)?;
     Ok(hex::encode(key.verifying_key().to_bytes()))
 }
 
 /// Sign a hex-encoded challenge nonce; returns the hex signature.
 #[tauri::command]
 fn auth_sign(app: AppHandle, nonce_hex: String) -> Result<String, String> {
-    let key = get_or_create_signing_key(&app)?;
+    let _guard = auth_storage()?;
+    let key = signing_key_unlocked(&app, false)?;
     let nonce = hex::decode(nonce_hex).map_err(|e| e.to_string())?;
     if nonce.len() != 32 {
         return Err("invalid challenge".to_string());
@@ -315,7 +312,14 @@ fn auth_sign_pairing_approval(
         expires_at,
     )
     .map_err(|_| "invalid pairing payload".to_string())?;
-    let key = get_or_create_signing_key(&app)?;
+    let _guard = auth_storage()?;
+    if expires_at <= time::OffsetDateTime::now_utc()
+        || load_metadata(&app)?.device_id.as_deref()
+            != Some(approver_device_id.to_string().as_str())
+    {
+        return Err("pairing approval expired or device changed".into());
+    }
+    let key = signing_key_unlocked(&app, false)?;
     Ok(hex::encode(key.sign(&message).to_bytes()))
 }
 
@@ -360,7 +364,7 @@ fn auth_sign_account_approval(
         return Err("account approval expired".into());
     }
     Ok(hex::encode(
-        get_or_create_signing_key(&app)?.sign(&message).to_bytes(),
+        signing_key_unlocked(&app, false)?.sign(&message).to_bytes(),
     ))
 }
 

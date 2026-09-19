@@ -9,6 +9,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class KeystoreBackedEd25519IdentityTest {
+    @Test(expected = IllegalStateException::class)
+    fun `signing never creates a missing device key`() {
+        KeystoreBackedEd25519Identity(InMemorySecureValueStore()).signHex("00".repeat(32))
+    }
+
     @Test
     fun `creates stable raw key and valid signature without exposing private key`() {
         val secureValues = InMemorySecureValueStore()

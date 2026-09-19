@@ -4,11 +4,13 @@ import Foundation
 enum DeviceIdentityError: LocalizedError {
     case invalidChallenge
     case invalidStoredKey
+    case missingStoredKey
 
     var errorDescription: String? {
         switch self {
         case .invalidChallenge: "The Home Node supplied an invalid signing challenge."
         case .invalidStoredKey: "The secure device identity is damaged and must be reset."
+        case .missingStoredKey: "This installation cannot access the original device key. Use the same signing team and app identity as before, or explicitly reset and re-enroll this device. Your password alone cannot replace the device key."
         }
     }
 }
@@ -28,16 +30,18 @@ actor DeviceIdentityStore {
         guard let data = Data(hexEncoded: nonce), data.count == 32 else {
             throw DeviceIdentityError.invalidChallenge
         }
-        return try signingKey().signature(for: data).hexEncodedString()
+        // Login must never create a replacement key for an existing registration.
+        return try signingKey(createIfMissing: false).signature(for: data).hexEncodedString()
     }
 
     func reset() throws { try keychain.delete(account: account) }
 
-    private func signingKey() throws -> Curve25519.Signing.PrivateKey {
+    private func signingKey(createIfMissing: Bool = true) throws -> Curve25519.Signing.PrivateKey {
         if let stored = try keychain.read(account: account) {
             do { return try Curve25519.Signing.PrivateKey(rawRepresentation: stored) }
             catch { throw DeviceIdentityError.invalidStoredKey }
         }
+        guard createIfMissing else { throw DeviceIdentityError.missingStoredKey }
         let key = Curve25519.Signing.PrivateKey()
         try keychain.save(key.rawRepresentation, account: account)
         return key
