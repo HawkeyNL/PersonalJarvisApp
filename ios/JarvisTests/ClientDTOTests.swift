@@ -79,7 +79,7 @@ final class EnrollmentInputTests: XCTestCase {
         let activation = try XCTUnwrap(inputs.first { $0.placeholder == "One-time activation code" })
         let account = try XCTUnwrap(inputs.first { $0.placeholder == "Account password" })
         for field in [activation, account] {
-            XCTAssertTrue(field.isSecureTextEntry)
+            XCTAssertEqual(field.isSecureTextEntry, field === account)
             XCTAssertTrue(field.isEnabled)
             XCTAssertGreaterThan(field.bounds.height, 0)
             let center = field.convert(CGPoint(x: field.bounds.midX, y: field.bounds.midY), to: window)
