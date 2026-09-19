@@ -5,6 +5,7 @@ import { currentAuthStatus, login, clearSession, listDevices, PairingPending, Ac
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
 import ReactorCore from "../components/ReactorCore.vue";
 import JarvisConsole from "../components/JarvisConsole.vue";
+import { accountFailure } from "../accountFailure";
 
 // The homepage is pure Jarvis: a living backdrop + a hover-reveal console.
 // Backend health and device-bound login run silently in the background so the
@@ -42,7 +43,7 @@ async function submitAccount() {
       accountMode.value = null;
       auth.value = "wachten";
     } else {
-      accountError.value = "Aanmelden of activeren mislukt. Controleer je gegevens en probeer opnieuw.";
+      accountError.value = accountFailure(error);
     }
   } finally {
     accountBusy.value = false;

@@ -156,7 +156,24 @@ final class JarvisAppModel: ObservableObject {
             apply(awaitResult: result)
             if result == .authenticated { await restoreAuthentication() }
         }
-        catch { if presentation.accepts(generation) { handle(error) } }
+        catch {
+            guard presentation.accepts(generation) else { return }
+            if activationCode != nil {
+                // Bootstrap may have succeeded before login failed. Restore a
+                // saved device binding instead of attempting bootstrap twice.
+                let recovery = try? await auth.restore()
+                guard presentation.accepts(generation) else { return }
+                applyActivationFailure(error, recovery: recovery)
+                if recovery == .authenticated { await restoreAuthentication() }
+            } else {
+                handle(error)
+            }
+        }
+    }
+
+    func applyActivationFailure(_ error: Error, recovery: AuthServiceOutcome?) {
+        apply(awaitResult: recovery ?? .needsActivation)
+        notice = safeMessage(error)
     }
 
     func refreshEnrollment() async {
