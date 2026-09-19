@@ -21,6 +21,19 @@ use tokio_tungstenite::{
     },
 };
 
+// Bound the write side too: a peer/network that stops reading must not keep
+// the socket and its speech worker alive indefinitely during heartbeat reply.
+async fn send_pong<S: futures_util::Sink<Message> + Unpin>(
+    socket: &mut S,
+    bytes: impl Into<tokio_tungstenite::tungstenite::Bytes>,
+    deadline: Duration,
+) -> bool {
+    matches!(
+        tokio::time::timeout(deadline, socket.send(Message::Pong(bytes.into()))).await,
+        Ok(Ok(()))
+    )
+}
+
 #[derive(Default)]
 pub(crate) struct Runtime {
     task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
@@ -37,6 +50,22 @@ mod tests {
         realtime::{Event, RunIdentity},
         speech::SpeechAction,
     };
+
+    #[tokio::test]
+    async fn heartbeat_write_is_bounded_when_peer_stops_reading() {
+        let mut stalled = Box::pin(futures_util::sink::unfold((), |(), _: Message| {
+            std::future::pending::<Result<(), std::io::Error>>()
+        }));
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            send_pong(&mut stalled, Vec::new(), Duration::from_millis(10)),
+        )
+        .await
+        .expect("heartbeat timeout must return control to the reconnect loop");
+        assert!(!result);
+        let mut writable = futures_util::sink::drain();
+        assert!(send_pong(&mut writable, Vec::new(), Duration::from_secs(1)).await);
+    }
 
     #[test]
     fn stop_discards_late_speech_without_muting_next_run() {
@@ -288,7 +317,7 @@ async fn run(
                         }
                     }
                     Ok(Some(Ok(Message::Ping(bytes)))) => {
-                        if socket.send(Message::Pong(bytes)).await.is_err() {
+                        if !send_pong(&mut socket, bytes, Duration::from_secs(5)).await {
                             break;
                         }
                     }
