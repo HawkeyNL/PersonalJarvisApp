@@ -76,7 +76,7 @@ actor AuthService {
     }
 
     func activateFirstDevice(deviceName: String, code: String, password: String) async throws -> AuthServiceOutcome {
-        guard password.count >= 15, password.utf8.count <= 1024 else { throw JarvisAPIError.invalidConfiguration }
+        guard password.count >= 15, password.utf8.count <= 1024 else { throw JarvisAPIError.invalidAccountPassword }
         let response = try await api.activateFirstDevice(EnrollmentRequest(name: String(deviceName.prefix(128)),
             platform: "ios", publicKey: try await identity.publicKeyHex(), password: password), code: code)
         try await credentials.save(deviceId: response.deviceId)

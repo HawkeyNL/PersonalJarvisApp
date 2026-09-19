@@ -10,7 +10,7 @@ import { homeNodeOrigin } from "./homeNode";
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
-    path: string,
+    public readonly path: string,
   ) {
     super(`HTTP ${status} (${path})`);
     this.name = "ApiError";

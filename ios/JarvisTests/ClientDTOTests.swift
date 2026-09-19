@@ -5,6 +5,53 @@ import UIKit
 @testable import Jarvis
 
 final class EnrollmentInputTests: XCTestCase {
+    func testActivationAcceptsNewAndLegacyCodesAndRejectsHeaderInjection() {
+        XCTAssertTrue(JarvisAPIClient.validActivationCode("ABCD2345EFGH"))
+        XCTAssertTrue(JarvisAPIClient.validActivationCode(String(repeating: "a1B2", count: 16)))
+        for invalid in ["", "abcd2345efgh", "ABCD2345EFG", "ABCD2345EFGHI", "ABCD0123EFGH",
+                        "ABCD2345EFGH\r\n", " ABCD2345EFGH", String(repeating: "é", count: 12),
+                        String(repeating: "z", count: 64)] {
+            XCTAssertFalse(JarvisAPIClient.validActivationCode(invalid))
+        }
+    }
+
+    @MainActor
+    func testActivationFailureKeepsActivationFormAndRecoversSavedDevice() {
+        let model = JarvisAppModel()
+        for error in [JarvisAPIError.invalidActivationCode, .invalidAccountPassword, .timedOut,
+                      .rejected(status: 403, message: "bootstrap unavailable")] {
+            model.applyActivationFailure(error, recovery: nil)
+            XCTAssertEqual(model.enrollmentState, .needsActivation)
+            XCTAssertEqual(model.notice, error.localizedDescription)
+        }
+        model.applyActivationFailure(JarvisAPIError.unauthorized, recovery: .needsPassword)
+        XCTAssertEqual(model.enrollmentState, .needsPassword)
+        XCTAssertNotEqual(JarvisAPIError.invalidActivationCode.localizedDescription,
+                          JarvisAPIError.invalidConfiguration.localizedDescription)
+        XCTAssertNotEqual(JarvisAPIError.invalidAccountPassword.localizedDescription,
+                          JarvisAPIError.invalidConfiguration.localizedDescription)
+    }
+
+    func testValidActivationCodesReachBootstrapWithoutEnteringURL() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ActivationProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let api = JarvisAPIClient(baseURL: URL(string: "https://jarvis.example.com")!, session: session)
+        let request = EnrollmentRequest(name: "Fixture iPhone", platform: "ios",
+                                       publicKey: String(repeating: "a", count: 64), password: "fixture-password-only")
+        for code in ["ABCD2345EFGH", String(repeating: "a1B2", count: 16)] {
+            let response = try await api.activateFirstDevice(request, code: code)
+            XCTAssertEqual(response.deviceId.uuidString, "00000000-0000-0000-0000-000000000002")
+        }
+        do {
+            _ = try await api.activateFirstDevice(request, code: "bad")
+            XCTFail("Invalid code accepted")
+        } catch let error as JarvisAPIError {
+            XCTAssertEqual(error, .invalidActivationCode)
+        }
+    }
+
     @MainActor
     func testActivationAndPasswordAcceptFocusAndTyping() async throws {
         var code = ""
@@ -59,6 +106,22 @@ final class EnrollmentInputTests: XCTestCase {
         let primary = try XCTUnwrap(icons["CFBundlePrimaryIcon"] as? [String: Any])
         XCTAssertEqual(primary["CFBundleIconName"] as? String, "AppIcon")
     }
+}
+
+private final class ActivationProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        XCTAssertEqual(request.url?.absoluteString, "https://jarvis.example.com/v1/auth/bootstrap")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertTrue(JarvisAPIClient.validActivationCode(request.value(forHTTPHeaderField: "X-Jarvis-Bootstrap-Secret") ?? ""))
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                       headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"user_id":"00000000-0000-0000-0000-000000000001","device_id":"00000000-0000-0000-0000-000000000002"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
 
 private final class NoNetworkProtocol: URLProtocol {
