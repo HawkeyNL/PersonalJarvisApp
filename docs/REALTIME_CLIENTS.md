@@ -20,6 +20,11 @@ ingress carries WebSocket upgrades; no new public port is required.
 Reconnect uses bounded exponential backoff with jitter. A ready event triggers
 authoritative conversation-list/selected-history reconciliation. Events for a
 different conversation update metadata without changing the selected screen.
+Desktop bounds connection setup to 15 seconds, waiting for incoming frames to
+80 seconds, and heartbeat pong writes to five seconds. A stuck writer exits
+the socket loop, drops the speech worker, and follows the same reconnect path;
+it cannot retain playback indefinitely while awaiting a network write. Native
+tests exercise a permanently pending sink as well as a writable sink.
 Mobile clients stop sockets/speech on background or lock and reconnect after
 foreground authentication. No permanent mobile foreground service, APNs, or
 background socket guarantee is introduced.
