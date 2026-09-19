@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import { getJson, ApiError } from "../api";
 import { currentAuthStatus, login, clearSession, listDevices, PairingPending, AccountPasswordRequired, AccountActivationRequired, bootstrapFirstDevice } from "../auth";
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
@@ -22,6 +22,11 @@ const configBusy = ref(false);
 const configError = ref<string | null>(null);
 const accountMode = ref<"login" | "activate" | null>(null);
 const password = ref("");
+const passwordVisible = ref(false);
+watch(accountMode, () => { passwordVisible.value = false; });
+function hidePasswordOnBackground() {
+  if (document.hidden) passwordVisible.value = false;
+}
 const activationCode = ref("");
 const accountError = ref<string | null>(null);
 const accountBusy = ref(false);
@@ -32,6 +37,7 @@ async function submitAccount() {
   const suppliedPassword = password.value;
   const suppliedCode = activationCode.value;
   password.value = "";
+  passwordVisible.value = false;
   activationCode.value = "";
   try {
     if (accountMode.value === "activate") await bootstrapFirstDevice(suppliedCode, suppliedPassword);
@@ -140,7 +146,10 @@ onMounted(async () => {
     backend.value = "unconfigured";
   }
 });
+onMounted(() => document.addEventListener("visibilitychange", hidePasswordOnBackground));
 onBeforeUnmount(() => {
+  document.removeEventListener("visibilitychange", hidePasswordOnBackground);
+  passwordVisible.value = false;
   clearInterval(pollTimer);
   password.value = "";
   activationCode.value = "";
@@ -176,9 +185,14 @@ onBeforeUnmount(() => {
       <h2>{{ accountMode === "activate" ? "Activeer je eerste apparaat" : "Aanmelden bij Jarvis" }}</h2>
       <p v-if="accountMode === 'activate'">Gebruik de eenmalige activatiecode van je Home Node en kies een accountwachtwoord van minimaal 15 tekens.</p>
       <label v-if="accountMode === 'activate'" for="activation-code">Activatiecode</label>
-      <input v-if="accountMode === 'activate'" id="activation-code" v-model="activationCode" type="password" autocomplete="off" maxlength="256" required />
+      <input v-if="accountMode === 'activate'" id="activation-code" v-model="activationCode" type="text" autocomplete="off" autocapitalize="off" :spellcheck="false" maxlength="256" required />
       <label for="account-password">Accountwachtwoord</label>
-      <input id="account-password" v-model="password" type="password" :autocomplete="accountMode === 'activate' ? 'new-password' : 'current-password'" :minlength="accountMode === 'activate' ? 15 : undefined" maxlength="1024" required />
+      <div class="password-input">
+        <input id="account-password" v-model="password" :type="passwordVisible ? 'text' : 'password'" :autocomplete="accountMode === 'activate' ? 'new-password' : 'current-password'" autocapitalize="off" :spellcheck="false" :minlength="accountMode === 'activate' ? 15 : undefined" maxlength="1024" required />
+        <button type="button" class="password-toggle" :aria-label="passwordVisible ? 'Wachtwoord verbergen' : 'Wachtwoord tonen'" :aria-pressed="passwordVisible" aria-controls="account-password" @click="passwordVisible = !passwordVisible">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path v-if="passwordVisible" d="m3 3 18 18"/></svg>
+        </button>
+      </div>
       <button type="submit" :disabled="accountBusy">{{ accountBusy ? "Bezig…" : "Doorgaan" }}</button>
       <p v-if="accountError" class="config-error" role="alert">{{ accountError }}</p>
     </form>
@@ -228,6 +242,9 @@ onBeforeUnmount(() => {
 .connection-setup h2 { margin-top: 0; }
 .connection-setup label { display: block; margin: 1rem 0 0.4rem; }
 .connection-setup input { width: 100%; box-sizing: border-box; margin-bottom: 0.8rem; }
+.password-input { display: flex; align-items: stretch; gap: 8px; margin-bottom: .8rem; }
+.password-input input { flex: 1; min-width: 0; margin-bottom: 0; }
+.password-toggle { min-width: 44px; min-height: 44px; display: grid; place-items: center; }
 .config-error { color: #fecaca; }
 .setup-hint { color: var(--muted); font-size: 0.82rem; }
 

@@ -106,6 +106,8 @@ struct EnrollmentView: View {
 // This independently hostable form lets simulator tests exercise real UIKit
 // hit testing, keyboard focus and text entry without credentials or networking.
 struct EnrollmentCredentialsForm: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var passwordVisible = false
     let requiresActivation: Bool
     @Binding var password: String
     @Binding var activationCode: String
@@ -121,7 +123,7 @@ struct EnrollmentCredentialsForm: View {
         VStack(alignment: .leading, spacing: 16) {
             if requiresActivation {
                 Text("One-time activation code").font(.headline)
-                SecureField("One-time activation code", text: $activationCode)
+                TextField("One-time activation code", text: $activationCode)
                     .textContentType(.oneTimeCode)
                     .keyboardType(.asciiCapable)
                     .textInputAutocapitalization(.never)
@@ -133,21 +135,43 @@ struct EnrollmentCredentialsForm: View {
                     .privacySensitive()
             }
             Text("Account password").font(.headline)
-            SecureField("Account password", text: $password)
+            HStack {
+                Group {
+                    if passwordVisible {
+                        TextField("Account password", text: $password)
+                    } else {
+                        SecureField("Account password", text: $password)
+                    }
+                }
                 .textContentType(requiresActivation ? .newPassword : .password)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .focused($focused, equals: .password)
                 .submitLabel(.go)
-                .onSubmit { if canSubmit { focused = nil; submit() } }
+                .onSubmit { if canSubmit { passwordVisible = false; focused = nil; submit() } }
                 .accessibilityIdentifier("account-password")
                 .privacySensitive()
-            Button("Continue") { focused = nil; submit() }
+                Button {
+                    passwordVisible.toggle()
+                    focused = .password
+                } label: {
+                    Image(systemName: passwordVisible ? "eye.slash" : "eye")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(passwordVisible ? "Hide password" : "Show password")
+                .accessibilityIdentifier("password-visibility")
+            }
+            Button("Continue") { passwordVisible = false; focused = nil; submit() }
                 .disabled(!canSubmit)
                 .buttonStyle(.borderedProminent)
                 .tint(JarvisTheme.accent)
                 .foregroundStyle(JarvisTheme.background)
         }
         .textFieldStyle(.roundedBorder)
+        .onChange(of: scenePhase) { _, phase in if phase != .active { passwordVisible = false } }
+        .onChange(of: requiresActivation) { _, _ in passwordVisible = false }
+        .onChange(of: password) { _, value in if value.isEmpty { passwordVisible = false } }
+        .onDisappear { passwordVisible = false }
     }
 }
