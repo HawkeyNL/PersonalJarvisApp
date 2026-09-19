@@ -4,11 +4,11 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-val releaseVersionName = providers.environmentVariable("JARVIS_APP_VERSION").orNull ?: "0.1.3"
+val releaseVersionName = providers.environmentVariable("JARVIS_APP_VERSION").orNull ?: "0.1.4"
 require(Regex("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$").matches(releaseVersionName)) {
     "JARVIS_APP_VERSION must be a semantic version"
 }
-val releaseVersionCode = providers.environmentVariable("JARVIS_ANDROID_VERSION_CODE").orNull?.toIntOrNull() ?: 4
+val releaseVersionCode = providers.environmentVariable("JARVIS_ANDROID_VERSION_CODE").orNull?.toIntOrNull() ?: 5
 require(releaseVersionCode in 1..2_100_000_000) {
     "JARVIS_ANDROID_VERSION_CODE must be between 1 and 2100000000"
 }
