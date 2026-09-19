@@ -22,7 +22,7 @@ class KeystoreBackedEd25519Identity(
     @Synchronized
     override fun signHex(messageHex: String): String {
         val message = Hex.decode(messageHex)
-        return withPrivateKey { key ->
+        return withPrivateKey(createIfMissing = false) { key ->
             val signer = Ed25519Signer()
             signer.init(true, key)
             signer.update(message, 0, message.size)
@@ -33,8 +33,9 @@ class KeystoreBackedEd25519Identity(
     @Synchronized
     override fun reset() = secureStore.remove(SEED_KEY)
 
-    private fun <T> withPrivateKey(block: (Ed25519PrivateKeyParameters) -> T): T {
+    private fun <T> withPrivateKey(createIfMissing: Boolean = true, block: (Ed25519PrivateKeyParameters) -> T): T {
         val seed = secureStore.read(SEED_KEY) ?: ByteArray(Ed25519PrivateKeyParameters.KEY_SIZE).also {
+            check(createIfMissing) { "Original device key unavailable; explicitly re-enroll this device." }
             random.nextBytes(it)
             secureStore.write(SEED_KEY, it)
         }

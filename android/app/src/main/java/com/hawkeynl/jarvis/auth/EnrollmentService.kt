@@ -141,6 +141,8 @@ class EnrollmentService(
         }
         val challenge = when (val result = api.challenge(endpoint, ChallengeRequest(deviceId))) {
             is ApiResult.Success -> result.value
+            ApiResult.Unauthorized -> return EnrollmentOutcome.Rejected(401,
+                "Apparaatchallenge geweigerd. Controleer in Core Admin of dit apparaat nog goedgekeurd is; opnieuw koppelen vereist expliciete goedkeuring.")
             else -> return result.toEnrollmentFailure()
         }
         if (challenge.nonce.length != 64) {
@@ -156,6 +158,8 @@ class EnrollmentService(
                 sessions.saveLogin(deviceId, result.value.token, result.value.expires_at)
                 EnrollmentOutcome.Authenticated(result.value.expires_at)
             }
+            ApiResult.Unauthorized -> EnrollmentOutcome.Rejected(401,
+                "Wachtwoord/apparaathandtekening geweigerd. Controleer je wachtwoord en oorspronkelijke apparaatidentiteit. Er zijn geen instellingen of sleutels gewist.")
             else -> result.toEnrollmentFailure()
         }
     }

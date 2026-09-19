@@ -15,7 +15,13 @@ enum KeychainError: LocalizedError {
     }
 }
 
-struct KeychainStore {
+protocol SecureValueStorage: Sendable {
+    func read(account: String) throws -> Data?
+    func save(_ data: Data, account: String) throws
+    func delete(account: String) throws
+}
+
+struct KeychainStore: SecureValueStorage {
     private let service: String
 
     init(service: String = "com.hawkeynl.jarvis") { self.service = service }

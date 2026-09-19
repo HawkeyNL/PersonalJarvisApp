@@ -1,5 +1,19 @@
 import Foundation
 
+enum DeviceLoginError: LocalizedError, Equatable {
+    case deviceRejected
+    case loginRejected
+
+    var errorDescription: String? {
+        switch self {
+        case .deviceRejected:
+            "Device challenge refused (HTTP 401). Check whether this iPhone is still approved in Core Admin. If revoked, explicitly reset its local binding and request approval again."
+        case .loginRejected:
+            "Password/device login refused (HTTP 401). Check the account password. If correct, this installation's key may not match the approved device. No settings or keys were erased."
+        }
+    }
+}
+
 enum AuthServiceOutcome: Equatable {
     case needsEnrollment
     case needsPassword
@@ -146,20 +160,27 @@ actor AuthService {
     }
 
     private func login(deviceId: UUID, password: String? = nil) async throws {
-        let challenge: ChallengeResponse = try await api.post(
-            "/v1/auth/challenge",
-            body: ChallengeRequest(deviceId: deviceId)
-        )
+        let challenge: ChallengeResponse
+        do {
+            challenge = try await api.post("/v1/auth/challenge", body: ChallengeRequest(deviceId: deviceId))
+        } catch JarvisAPIError.unauthorized {
+            throw DeviceLoginError.deviceRejected
+        }
         let signature = try await identity.signChallenge(hex: challenge.nonce)
-        let response: LoginResponse = try await api.post(
-            "/v1/auth/login",
-            body: LoginRequest(
-                deviceId: deviceId,
-                challengeId: challenge.challengeId,
-                signature: signature,
-                password: password
+        let response: LoginResponse
+        do {
+            response = try await api.post(
+                "/v1/auth/login",
+                body: LoginRequest(
+                    deviceId: deviceId,
+                    challengeId: challenge.challengeId,
+                    signature: signature,
+                    password: password
+                )
             )
-        )
+        } catch JarvisAPIError.unauthorized {
+            throw DeviceLoginError.loginRejected
+        }
         try await credentials.save(session: SecureSession(token: response.token, expiresAt: response.expiresAt))
     }
 }

@@ -64,6 +64,10 @@ export async function login(enrolledDeviceId?: string, password?: string, boundO
       );
       if (status.status === "approved" && status.device_id) {
         deviceId = status.device_id;
+        // Approval is already authoritative even if the following login fails
+        // or the owner closes the app before entering the password again.
+        await invoke("auth_remember_enrolled_device", { deviceId, expectedOrigin });
+        sessionStorage.removeItem(PAIRING_WAIT_KEY);
       } else if (status.status === "pending") {
         throw new PairingPending();
       } else {

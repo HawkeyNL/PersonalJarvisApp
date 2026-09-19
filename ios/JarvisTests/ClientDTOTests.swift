@@ -4,6 +4,151 @@ import SwiftUI
 import UIKit
 @testable import Jarvis
 
+// Unsigned CI cannot access Apple's entitled Keychain. Exercise the same
+// identity/auth logic with fixture-only storage; production has no fallback.
+private final class FixtureSecureStorage: SecureValueStorage, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: Data] = [:]
+    func read(account: String) throws -> Data? {
+        lock.lock(); defer { lock.unlock() }; return values[account]
+    }
+    func save(_ data: Data, account: String) throws {
+        lock.lock(); defer { lock.unlock() }; values[account] = data
+    }
+    func delete(account: String) throws {
+        lock.lock(); defer { lock.unlock() }; values.removeValue(forKey: account)
+    }
+}
+
+final class DeviceLoginRecoveryTests: XCTestCase {
+    func testMissingSigningKeyIsNotRegenerated() async throws {
+        let store = FixtureSecureStorage()
+        let identity = DeviceIdentityStore(keychain: store)
+        do {
+            _ = try await identity.signChallenge(hex: String(repeating: "00", count: 32))
+            XCTFail("Missing registered identity must fail closed")
+        } catch DeviceIdentityError.missingStoredKey { }
+        XCTAssertNil(try store.read(account: "device-ed25519-seed-v1"))
+    }
+
+    func testRecreatedStoresKeepIdentityAndSettings() async throws {
+        let store = FixtureSecureStorage()
+        defer { try? store.delete(account: "device-ed25519-seed-v1") }
+        let first = DeviceIdentityStore(keychain: store)
+        let publicKey = try await first.publicKeyHex()
+        let restored = try await DeviceIdentityStore(keychain: store).publicKeyHex()
+        XCTAssertEqual(publicKey, restored)
+        let suite = "jarvis.fixture.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let origin = URL(string: "https://jarvis.example.com")!
+        EndpointStore(defaults: defaults).save(origin)
+        XCTAssertEqual(EndpointStore(defaults: defaults).endpoint, origin)
+    }
+
+    func testLoginFailuresKeepBindingAndSuccessfulRetryRestoresSession() async throws {
+        for host in ["challenge.example.com", "login.example.com", "success.example.com"] {
+            let store = FixtureSecureStorage()
+            let credentials = SecureCredentialStore(keychain: store)
+            let identity = DeviceIdentityStore(keychain: store)
+            defer {
+                for account in ["device-ed25519-seed-v1", "registered-device-id-v1", "authenticated-session-v1"] {
+                    try? store.delete(account: account)
+                }
+            }
+            let deviceId = UUID()
+            try await credentials.save(deviceId: deviceId)
+            let key = try await identity.publicKeyHex()
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [LoginRecoveryProtocol.self]
+            let transport = URLSession(configuration: config)
+            defer { transport.invalidateAndCancel() }
+            let api = JarvisAPIClient(baseURL: URL(string: "https://\(host)")!, session: transport)
+            let auth = AuthService(api: api, identity: identity, credentials: credentials)
+            let initial = try await auth.restore()
+            XCTAssertEqual(initial, .needsPassword)
+            do {
+                let outcome = try await auth.restore(password: "fixture-password-only")
+                XCTAssertEqual(host, "success.example.com")
+                XCTAssertEqual(outcome, .authenticated)
+            } catch let error as DeviceLoginError {
+                XCTAssertEqual(error, host == "challenge.example.com" ? .deviceRejected : .loginRejected)
+                let session = try await credentials.session()
+                XCTAssertNil(session)
+            }
+            let storedId = try await credentials.deviceId()
+            let storedKey = try await identity.publicKeyHex()
+            XCTAssertEqual(storedId, deviceId)
+            XCTAssertEqual(storedKey, key)
+        }
+    }
+
+    func testPairingDecisionsNeverAuthenticateWithoutPassword() async throws {
+        for decision in ["pending", "approved", "denied", "expired"] {
+            let store = FixtureSecureStorage()
+            let credentials = SecureCredentialStore(keychain: store)
+            defer {
+                for account in ["registered-device-id-v1", "pending-pairing-v1"] {
+                    try? store.delete(account: account)
+                }
+            }
+            try await credentials.save(pairingTicket: PairingTicket(requestId: UUID(), nonce: "fixture-nonce", expiresAt: 4102444800))
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [LoginRecoveryProtocol.self]
+            let transport = URLSession(configuration: config)
+            defer { transport.invalidateAndCancel() }
+            let api = JarvisAPIClient(baseURL: URL(string: "https://\(decision).example.com")!, session: transport)
+            let auth = AuthService(api: api, credentials: credentials)
+            let outcome = try await auth.refreshEnrollment()
+            switch decision {
+            case "pending":
+                XCTAssertEqual(outcome, .awaitingApproval(expiresAt: Date(timeIntervalSince1970: 4102444800)))
+            case "approved": XCTAssertEqual(outcome, .needsPassword)
+            default: XCTAssertEqual(outcome, .needsEnrollment)
+            }
+            let session = try await credentials.session()
+            XCTAssertNil(session)
+            let ticket = try await credentials.pairingTicket()
+            XCTAssertEqual(ticket != nil, decision == "pending")
+        }
+    }
+}
+
+private final class LoginRecoveryProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url!.path
+        var status = 200
+        let body: String
+        switch path {
+        case "/v1/auth/account/status":
+            body = #"{"protocol":1,"password_required":true,"bootstrap_required":false}"#
+        case "/v1/auth/challenge":
+            status = request.url!.host == "challenge.example.com" ? 401 : 200
+            body = "{\"challenge_id\":\"00000000-0000-0000-0000-000000000001\",\"nonce\":\"\(String(repeating: "00", count: 32))\"}"
+        case "/v1/auth/login":
+            status = request.url!.host == "login.example.com" ? 401 : 200
+            body = #"{"token":"fixture-session-only","expires_at":4102444800}"#
+        default:
+            if path.hasPrefix("/v1/auth/pairing/requests/"), path.hasSuffix("/status") {
+                let decision = request.url!.host!.split(separator: ".")[0]
+                body = "{\"status\":\"\(decision)\",\"device_id\":\"00000000-0000-0000-0000-000000000002\"}"
+            } else {
+                XCTFail("Unexpected auth request")
+                status = 500; body = "{}"
+            }
+        }
+        XCTAssertNil(request.url!.query)
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
+                                       headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
 final class EnrollmentInputTests: XCTestCase {
     func testActivationAcceptsNewAndLegacyCodesAndRejectsHeaderInjection() {
         XCTAssertTrue(JarvisAPIClient.validActivationCode("ABCD2345EFGH"))
