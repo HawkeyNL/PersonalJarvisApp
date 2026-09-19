@@ -10,8 +10,11 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "update-release"))
-from client_release import build, expected_assets, validate_progression, validate_source
+from client_release import build, expected_assets, validate_progression, validate_source, _mobile_versions
 from manifest import validate_manifest
+
+VERSION = json.loads((ROOT / "desktop/package.json").read_text())["version"]
+ANDROID_CODE = _mobile_versions(ROOT, VERSION)[0]
 
 
 class ClientReleaseTests(unittest.TestCase):
@@ -39,7 +42,7 @@ class ClientReleaseTests(unittest.TestCase):
 
     def test_checked_in_versions_and_immutable_git_lock(self):
         self.assertRegex(self.pinned_revision(), r"^[0-9a-f]{40}$")
-        self.assertEqual(validate_source(ROOT, "0.1.1"), self.pinned_revision())
+        self.assertEqual(validate_source(ROOT, VERSION), self.pinned_revision())
 
     def test_mismatched_client_core_lock_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -48,7 +51,7 @@ class ClientReleaseTests(unittest.TestCase):
             lock = root / "desktop/src-tauri/Cargo.lock"
             lock.write_text(lock.read_text().replace(self.pinned_revision(), "0" * 40))
             with self.assertRaisesRegex(ValueError, "immutable pin"):
-                validate_source(root, "0.1.1")
+                validate_source(root, VERSION)
 
     def test_standalone_source_rejects_overrides_and_nested_path_dependencies(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -61,26 +64,26 @@ class ClientReleaseTests(unittest.TestCase):
             ):
                 (root / "desktop/src-tauri/Cargo.toml").write_text(cargo + override)
                 with self.assertRaises(ValueError):
-                    validate_source(root, "0.1.1")
+                    validate_source(root, VERSION)
             (root / "desktop/src-tauri/Cargo.toml").write_text(cargo)
             (root / "desktop/.cargo").mkdir()
             (root / "desktop/.cargo/config.toml").write_text('[source.local]\ndirectory = "../../outside"\n')
             with self.assertRaises(ValueError):
-                validate_source(root, "0.1.1")
+                validate_source(root, VERSION)
 
     def test_ios_generated_project_and_plist_must_share_the_version_contract(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self.source_metadata(root)
             project = root / "ios/project.yml"
-            project.write_text(project.read_text().replace('MARKETING_VERSION: "0.1.1"', 'MARKETING_VERSION: "9.9.9"'))
+            project.write_text(project.read_text().replace(f'MARKETING_VERSION: "{VERSION}"', 'MARKETING_VERSION: "9.9.9"'))
             with self.assertRaisesRegex(ValueError, "project.yml"):
-                validate_source(root, "0.1.1")
+                validate_source(root, VERSION)
             project.write_text((ROOT / "ios/project.yml").read_text())
             plist = root / "ios/Jarvis/Info.plist"
             plist.write_text(plist.read_text().replace("$(MARKETING_VERSION)", "0.1.0"))
             with self.assertRaisesRegex(ValueError, "Info.plist"):
-                validate_source(root, "0.1.1")
+                validate_source(root, VERSION)
 
     def test_npm_root_package_version_cannot_drift(self):
         from unittest.mock import patch
@@ -93,7 +96,7 @@ class ClientReleaseTests(unittest.TestCase):
                 return json.dumps(value)
             return text
         with patch.object(Path, "read_text", read), self.assertRaises(ValueError):
-            validate_source(ROOT, "0.1.1")
+            validate_source(ROOT, VERSION)
 
     def test_complete_client_matrix_and_provenance(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -151,10 +154,10 @@ class ClientReleaseTests(unittest.TestCase):
         self.assertNotIn("home_node_origin", configuration)
 
     def test_one_semver_and_independent_android_build_number(self):
-        self.assertEqual(validate_source(ROOT, "0.1.1", 2), self.pinned_revision())
+        self.assertEqual(validate_source(ROOT, VERSION, ANDROID_CODE), self.pinned_revision())
         for android_code in (0, "01", "1.0"):
             with self.subTest(android_code=android_code), self.assertRaises(ValueError):
-                validate_source(ROOT, "0.1.1", android_code)
+                validate_source(ROOT, VERSION, android_code)
 
     def test_manifest_covers_all_clients_and_progression_is_monotonic(self):
         with tempfile.TemporaryDirectory() as temporary:
