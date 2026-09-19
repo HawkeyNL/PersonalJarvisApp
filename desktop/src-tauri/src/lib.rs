@@ -460,6 +460,32 @@ fn contains_secret_response_field(value: &serde_json::Value) -> bool {
 #[serde(deny_unknown_fields)]
 struct LoginResponse {
     token: String,
+    expires_at: i64,
+}
+
+#[cfg(test)]
+mod login_response_tests {
+    use super::LoginResponse;
+
+    #[test]
+    fn accepts_canonical_core_login_response() {
+        let response: LoginResponse =
+            serde_json::from_str(r#"{"token":"fixture-session-only","expires_at":2000000000}"#)
+                .expect("Core includes expires_at alongside token");
+        assert_eq!(response.token, "fixture-session-only");
+        assert_eq!(response.expires_at, 2000000000);
+    }
+
+    #[test]
+    fn rejects_malformed_or_unexpected_login_metadata() {
+        for body in [
+            r#"{"token":"fixture-session-only"}"#,
+            r#"{"token":"fixture-session-only","expires_at":"later"}"#,
+            r#"{"token":"fixture-session-only","expires_at":2000000000,"private_key":"fixture"}"#,
+        ] {
+            assert!(serde_json::from_str::<LoginResponse>(body).is_err());
+        }
+    }
 }
 
 /// Complete device login and persist the returned bearer without ever
@@ -538,6 +564,7 @@ async fn auth_complete_login(
     if result.token.is_empty()
         || result.token.len() > 4096
         || result.token.chars().any(char::is_whitespace)
+        || result.expires_at <= time::OffsetDateTime::now_utc().unix_timestamp()
     {
         return Err("Home Node login response is invalid".to_string());
     }
