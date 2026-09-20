@@ -205,7 +205,7 @@ final class JarvisAppModel: ObservableObject {
                 realtimeAvailable = available
                 if realtimeAvailable, let origin = endpointStore.endpoint, lockState == .unlocked {
                     speech.enabled = voiceEnabled
-                    realtime.start(origin: origin, auth: auth, speech: speech) { [weak self] event in await self?.receiveRealtime(event) }
+                    realtime.start(origin: origin, auth: auth, speech: speech) { [weak self] event in try await self?.receiveRealtime(event) }
                 }
             }
         } catch { if presentation.accepts(generation) { handle(error) } }
@@ -381,7 +381,7 @@ final class JarvisAppModel: ObservableObject {
         }
     }
 
-    private func receiveRealtime(_ event: RealtimeEvent) async {
+    private func receiveRealtime(_ event: RealtimeEvent) async throws {
         guard isAuthenticated, lockState == .unlocked else { return }
         let generation = presentation.id
         speech.receive(event)
@@ -402,7 +402,10 @@ final class JarvisAppModel: ObservableObject {
                     guard presentation.accepts(generation) else { return }
                     if currentConversationId == selected { messages = snapshot.messages; currentConversationTitle = snapshot.title; isSending = snapshot.assistantRunning == true }
                 }
-            } catch { if presentation.accepts(generation) { notice = "Realtime connected; history reconciliation will retry after reconnect." } }
+            } catch {
+                if presentation.accepts(generation) { notice = "History reconciliation failed; reconnecting to retry." }
+                throw error
+            }
         case "conversation.created", "conversation.updated":
             if let id = payload.id, let title = payload.title, let at = payload.updated_at {
                 conversations.removeAll { $0.id == id }

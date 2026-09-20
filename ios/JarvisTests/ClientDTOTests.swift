@@ -4,6 +4,55 @@ import SwiftUI
 import UIKit
 @testable import Jarvis
 
+final class RealtimeEventDeliveryTests: XCTestCase {
+    private func event(epoch: UUID, sequence: UInt64, type: String, protocolVersion: Int = 1) throws -> RealtimeEvent {
+        let bytes = try JSONSerialization.data(withJSONObject: [
+            "protocol": protocolVersion, "epoch": epoch.uuidString,
+            "sequence": sequence, "event_id": UUID().uuidString,
+            "type": type, "payload": [:]
+        ])
+        return try JSONDecoder().decode(RealtimeEvent.self, from: bytes)
+    }
+
+    @MainActor
+    func testFailedRecoveryPropagatesAndDoesNotConsumeReadyEvent() async throws {
+        let delivery = RealtimeEventDelivery()
+        let ready = try event(epoch: UUID(), sequence: 1, type: "connection.ready")
+        do {
+            try await delivery.deliver(ready) { _ in throw URLError(.timedOut) }
+            XCTFail("Recovery failure must escape to reconnect")
+        } catch { XCTAssertEqual((error as? URLError)?.code, .timedOut) }
+        var delivered = 0
+        try await delivery.deliver(ready) { _ in delivered += 1 }
+        try await delivery.deliver(ready) { _ in delivered += 1 }
+        XCTAssertEqual(delivered, 1)
+    }
+
+    @MainActor
+    func testEpochChangeRequiresReadyAndCancellationPropagates() async throws {
+        let delivery = RealtimeEventDelivery()
+        let epoch = UUID()
+        try await delivery.deliver(event(epoch: epoch, sequence: 10, type: "connection.ready")) { _ in }
+        for bad in [
+            try event(epoch: UUID(), sequence: 11, type: "assistant.delta"),
+            try event(epoch: epoch, sequence: 11, type: "connection.ready", protocolVersion: 2)
+        ] {
+            do {
+                try await delivery.deliver(bad) { _ in XCTFail("Invalid event delivered") }
+                XCTFail("Invalid envelope accepted")
+            } catch { }
+        }
+        let restarted = try event(epoch: UUID(), sequence: 1, type: "connection.ready")
+        do {
+            try await delivery.deliver(restarted) { _ in throw CancellationError() }
+            XCTFail("Cancellation swallowed")
+        } catch { XCTAssertTrue(error is CancellationError) }
+        var delivered = false
+        try await delivery.deliver(restarted) { _ in delivered = true }
+        XCTAssertTrue(delivered)
+    }
+}
+
 final class RealtimeHeartbeatTests: XCTestCase {
     @MainActor
     func testMissingPongClosesWithoutEnqueuingMorePings() {

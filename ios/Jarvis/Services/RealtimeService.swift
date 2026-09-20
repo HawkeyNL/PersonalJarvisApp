@@ -131,6 +131,26 @@ private final class NoRedirect: NSObject, URLSessionTaskDelegate {
 }
 
 @MainActor
+final class RealtimeEventDelivery {
+    private var epoch: UUID?
+    private var sequence: UInt64 = 0
+
+    func deliver(_ event: RealtimeEvent,
+                 receive: @MainActor (RealtimeEvent) async throws -> Void) async throws {
+        guard event.protocol == 1 else { throw JarvisAPIError.invalidResponse }
+        let newEpoch = epoch != event.epoch
+        if newEpoch {
+            guard event.type == "connection.ready" else { throw JarvisAPIError.invalidResponse }
+        }
+        guard event.sequence > (newEpoch ? 0 : sequence) else { return }
+        // In particular, failed REST reconciliation must escape to the socket
+        // reconnect loop. Never acknowledge it or silently consume later deltas.
+        try await receive(event)
+        epoch = event.epoch; sequence = event.sequence
+    }
+}
+
+@MainActor
 final class RealtimeHeartbeat {
     private var pendingSince: TimeInterval?
     private var stopped = false
@@ -168,7 +188,7 @@ final class RealtimeService {
         speech?.setPlaybackHandler(nil); speech = nil
         worker?.cancel(); worker = nil; socket?.cancel(with: .goingAway, reason: nil); socket = nil
     }
-    func start(origin: URL, auth: AuthService, speech: RealtimeSpeech, receive: @escaping @MainActor (RealtimeEvent) async -> Void) {
+    func start(origin: URL, auth: AuthService, speech: RealtimeSpeech, receive: @escaping @MainActor (RealtimeEvent) async throws -> Void) {
         stop()
         self.speech = speech
         let current = generation
@@ -224,7 +244,7 @@ final class RealtimeService {
                         }
                     }
                     defer { heartbeat.stop(); heartbeatTask.cancel() }
-                    var epoch: UUID?; var sequence: UInt64 = 0
+                    let delivery = RealtimeEventDelivery()
                     let connectedAt = Date()
                     while !Task.isCancelled {
                         let message = try await socket.receive()
@@ -236,15 +256,8 @@ final class RealtimeService {
                         }
                         guard data.count <= 256 * 1024 else { throw JarvisAPIError.invalidResponse }
                         let event = try JSONDecoder().decode(RealtimeEvent.self, from: data)
-                        guard event.protocol == 1 else { throw JarvisAPIError.invalidResponse }
-                        if epoch != event.epoch {
-                            guard event.type == "connection.ready" else { throw JarvisAPIError.invalidResponse }
-                            epoch = event.epoch; sequence = 0
-                        }
-                        guard event.sequence > sequence else { continue }
                         guard !Task.isCancelled, self.generation == current else { return }
-                        sequence = event.sequence
-                        await receive(event)
+                        try await delivery.deliver(event, receive: receive)
                         if Date().timeIntervalSince(connectedAt) > 30 { retry = 0 }
                     }
                 } catch { /* Fixed reconnect policy; never log request/token or private content. */ }
