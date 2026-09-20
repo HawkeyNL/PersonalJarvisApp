@@ -2,9 +2,9 @@
 
 The authoritative protocol is `PersonalJarvis/crates/client-core`. Desktop pins
 its exact reviewed Git revision in `desktop/src-tauri/Cargo.toml`; Android and
-iOS decode the same public envelope through native DTOs. This branch requires
-the corresponding Core feature branch to be reachable before a clean remote
-Cargo fetch can succeed. No sibling path or floating branch dependency is used.
+iOS decode the same public envelope through native DTOs. The pinned Core
+revision must remain reachable for clean remote Cargo fetches. No sibling path
+or floating branch dependency is used.
 
 All clients negotiate `/v1/events/capability`, submit new chat runs over HTTP,
 and receive native authenticated WebSocket events through `/v1/events`. Older
@@ -32,6 +32,13 @@ reconnect loop even when there are no application events. Both ordinary and
 cross-scheme redirects are disabled on the native engine to keep authentication
 bound to the enrolled origin. This is foreground transport, not a background
 keepalive service.
+iOS sends a native ping every 30 seconds, with at most one outstanding ping.
+A missing pong at the next interval closes that connection; the existing
+backoff reconnects it. The watchdog is cancelled on every connection exit.
+Both mobile clients propagate failed history reconciliation to that reconnect
+loop instead of silently waiting on a healthy socket forever. Recovery uses
+read-only requests, never prompt resubmission. A selected conversation returning
+404 clears that selection only if it is still selected; transient errors retry.
 Mobile clients stop sockets/speech on background or lock and reconnect after
 foreground authentication. No permanent mobile foreground service, APNs, or
 background socket guarantee is introduced.
@@ -153,6 +160,21 @@ active fake engine, stops it, and immediately starts the next answer without a
 false queue-full failure. The queue remains bounded and cancellation-safe.
 
 ## Validation and remaining acceptance
+
+### Verified CI baseline (2026-09-20)
+
+Client CI run [35514615926](https://github.com/HawkeyNL/PersonalJarvisApp/actions/runs/35514615926)
+passed for commit `9497b4bca57d32f891896bb762b8860eb5af7af3`. It includes Linux,
+Windows and macOS desktop checks, Android debug/release-variant tests and lint,
+and unsigned iOS simulator tests plus device-build packaging validation.
+The log explicitly confirms the heartbeat and event-delivery regression suites,
+alongside the existing DTO, endpoint and authentication test suites.
+This supersedes the historical "pending macOS/SDK execution" notes below for
+automated tests included in those suites. It does not supersede the outstanding
+physical-device audio, real Keychain access, or cross-device acceptance checks.
+No production release or device-test success is implied by this CI result.
+
+### Implementation and platform-test scope
 
 Desktop login and authenticated JSON responses are bounded while reading chunks,
 not only after collecting the complete response. Limits remain 16 KiB for login
