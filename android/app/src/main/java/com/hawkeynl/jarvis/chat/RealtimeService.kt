@@ -49,6 +49,9 @@ internal fun <T> ApiResult<T>.realtimeSnapshot(): T = when (this) {
     else -> throw IllegalStateException("Realtime history recovery failed")
 }
 
+internal fun <T> ApiResult<T>.realtimeSelectedHistory(): T? =
+    if (this is ApiResult.HttpError && status == 404) null else realtimeSnapshot()
+
 @Serializable private data class Capability(val protocol: Int, val asynchronous_chat: Boolean)
 @Serializable private data class Submit(val request_id: String, val conversation_id: String?, val messages: List<ChatTurn>)
 private fun HomeNodeEndpoint.url(path: String): String = "$baseUrl$path"

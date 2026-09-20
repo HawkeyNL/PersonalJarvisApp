@@ -398,9 +398,15 @@ final class JarvisAppModel: ObservableObject {
                 guard presentation.accepts(generation) else { return }
                 conversations = snapshot
                 if let selected = currentConversationId {
-                    let snapshot = try await chat.conversation(id: selected)
+                    let snapshot = try await RealtimeEventDelivery.selectedHistory {
+                        try await chat.conversation(id: selected)
+                    }
                     guard presentation.accepts(generation) else { return }
-                    if currentConversationId == selected { messages = snapshot.messages; currentConversationTitle = snapshot.title; isSending = snapshot.assistantRunning == true }
+                    if currentConversationId == selected {
+                        if let snapshot {
+                            messages = snapshot.messages; currentConversationTitle = snapshot.title; isSending = snapshot.assistantRunning == true
+                        } else { newConversation() }
+                    }
                 }
             } catch {
                 if presentation.accepts(generation) { notice = "History reconciliation failed; reconnecting to retry." }

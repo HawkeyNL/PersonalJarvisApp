@@ -5,6 +5,22 @@ import UIKit
 @testable import Jarvis
 
 final class RealtimeEventDeliveryTests: XCTestCase {
+    @MainActor
+    func testDeletedSelectedConversationIsNotATransientFailure() async throws {
+        let missing: String? = try await RealtimeEventDelivery.selectedHistory {
+            throw JarvisAPIError.rejected(status: 404, message: nil)
+        }
+        XCTAssertNil(missing)
+        let present = try await RealtimeEventDelivery.selectedHistory { "canonical" }
+        XCTAssertEqual(present, "canonical")
+        do {
+            let _: String? = try await RealtimeEventDelivery.selectedHistory {
+                throw JarvisAPIError.rejected(status: 503, message: nil)
+            }
+            XCTFail("Temporary failure must reconnect")
+        } catch { XCTAssertEqual(error as? JarvisAPIError, .rejected(status: 503, message: nil)) }
+    }
+
     private func event(epoch: UUID, sequence: UInt64, type: String, protocolVersion: Int = 1) throws -> RealtimeEvent {
         let bytes = try JSONSerialization.data(withJSONObject: [
             "protocol": protocolVersion, "epoch": epoch.uuidString,

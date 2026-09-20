@@ -29,6 +29,7 @@ import com.hawkeynl.jarvis.chat.RealtimeEvent
 import com.hawkeynl.jarvis.chat.RealtimeSpeech
 import com.hawkeynl.jarvis.chat.SpeechRate
 import com.hawkeynl.jarvis.chat.realtimeSnapshot
+import com.hawkeynl.jarvis.chat.realtimeSelectedHistory
 
 enum class AppTab { CHAT, CONVERSATIONS, SETTINGS }
 
@@ -453,9 +454,13 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 _state.update { it.copy(conversations = conversations.conversations) }
                 val selected = _state.value.conversationId
                 if (selected != null) {
-                    val snapshot = container.conversations.load(endpoint, selected).realtimeSnapshot()
+                    val snapshot = container.conversations.load(endpoint, selected).realtimeSelectedHistory()
                     if (_state.value.endpoint != endpoint || _state.value.locked || !_state.value.authenticated) return@start
-                    _state.update { if (it.conversationId == selected) it.copy(messages = snapshot.messages, busy = snapshot.assistant_running) else it }
+                    _state.update {
+                        if (it.conversationId != selected) it
+                        else if (snapshot == null) it.copy(conversationId = null, messages = emptyList(), busy = false)
+                        else it.copy(messages = snapshot.messages, busy = snapshot.assistant_running)
+                    }
                 }
             } else receiveRealtime(event)
         }

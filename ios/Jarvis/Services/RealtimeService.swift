@@ -135,6 +135,11 @@ final class RealtimeEventDelivery {
     private var epoch: UUID?
     private var sequence: UInt64 = 0
 
+    static func selectedHistory<T>(read: () async throws -> T) async throws -> T? {
+        do { return try await read() }
+        catch JarvisAPIError.rejected(status: 404, message: _) { return nil }
+    }
+
     func deliver(_ event: RealtimeEvent,
                  receive: @MainActor (RealtimeEvent) async throws -> Void) async throws {
         guard event.protocol == 1 else { throw JarvisAPIError.invalidResponse }
