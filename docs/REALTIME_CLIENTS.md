@@ -278,6 +278,14 @@ XCTest coverage is added but has not been executed without Xcode.
 iOS: the unsigned simulator build/test commands in `.github/workflows/ci.yml`
 require a macOS/Xcode runner; no distribution signing credentials are involved.
 
+The September 20 follow-up adds `testDisconnectedSpeechDropsBufferedSuffixAndLateCompletion`
+to the existing iOS XCTest target. It exercises the actual speech controller's
+connection cleanup, late canonical completion, and reconnect without inherited
+voice ownership. The test is added, not executed on this Linux host: Xcode and
+physical-device acceptance remain necessary. The three desktop realtime/speech
+Node test files and deployment-privacy scan passed on the review branch. This
+follow-up performs no merge, release or deployment.
+
 Mocked Core integration tests cover two authenticated sockets, one inference,
 identical canonical final text, voice-owner gating, retry deduplication and
 REST recovery. They do not substitute for actual desktop/iPhone/Android audio,

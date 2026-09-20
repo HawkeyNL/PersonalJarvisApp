@@ -662,6 +662,51 @@ final class ClientDTOTests: XCTestCase {
         XCTAssertFalse(queue.insert(NSObject()))
     }
     @MainActor
+    func testDisconnectedSpeechDropsBufferedSuffixAndLateCompletion() throws {
+        final class FakeSpeech: SpeechOutput {
+            var spoken: [String] = []
+            var stops = 0
+            func speak(_ text: String) { spoken.append(text) }
+            func stop() { stops += 1 }
+        }
+        let id = "00000000-0000-0000-0000-000000000001"
+        let identity = ["run_id": id, "request_id": id, "conversation_id": id]
+        func event(_ type: String, _ payload: [String: Any]) throws -> RealtimeEvent {
+            let bytes = try JSONSerialization.data(withJSONObject: [
+                "protocol": 1, "epoch": id, "sequence": 1, "event_id": id,
+                "type": type, "payload": payload
+            ])
+            return try JSONDecoder().decode(RealtimeEvent.self, from: bytes)
+        }
+        let output = FakeSpeech()
+        let voice = RealtimeSpeech(output: output)
+        voice.enabled = true
+        voice.receive(try event("connection.ready", ["device_id": id]))
+        voice.receive(try event("voice.owner_changed", ["device_id": id, "run_id": id]))
+        voice.receive(try event("assistant.started", identity))
+        voice.receive(try event("assistant.delta", ["run": identity, "text": "Hello. Buffered suffix"]))
+        let beforeDisconnect = output.spoken
+        let stops = output.stops
+
+        // The socket's connection-scoped defer clears this handler on failure.
+        voice.setPlaybackHandler(nil)
+        XCTAssertEqual(output.stops, stops + 1)
+        let completed = try event("assistant.completed", ["run": identity, "message": [
+            "id": id, "conversation_id": id, "role": "assistant",
+            "content": "Hello. Buffered suffix.", "created_at": "2026-01-01T00:00:00Z"
+        ]])
+        voice.receive(completed)
+        XCTAssertEqual(output.spoken, beforeDisconnect)
+
+        // Reconnection does not replay historical audio or inherit voice authority.
+        voice.receive(try event("connection.ready", ["device_id": id]))
+        XCTAssertNil(voice.ownedRun)
+        voice.receive(try event("assistant.started", identity))
+        voice.receive(completed)
+        XCTAssertEqual(output.spoken, beforeDisconnect)
+    }
+
+    @MainActor
     func testFragmentedFencesNeverSpeakEmbeddedCode() throws {
         final class FakeSpeech: SpeechOutput {
             var spoken: [String] = []
