@@ -18,8 +18,10 @@ struct LockView: View {
                 Text("Authenticate on this device to continue.").foregroundStyle(.secondary)
             }
             Button("Unlock") { Task { await model.unlock() } }
+                .disabled(model.isUnlocking)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+            if model.isUnlocking { ProgressView("Unlocking…") }
         }
         .padding(32)
     }

@@ -7,6 +7,8 @@ final class JarvisAppModel: ObservableObject {
     @Published private(set) var connectionState: ConnectionState = .unconfigured
     @Published private(set) var enrollmentState: EnrollmentState = .notStarted
     @Published private(set) var lockState: AppLockState = .unlocked
+    @Published private(set) var isUnlocking = false
+    private var needsForegroundUnlock = false
     @Published private(set) var conversations: [ConversationSummary] = []
     @Published private(set) var messages: [ConversationMessage] = []
     @Published private(set) var currentConversationId: UUID?
@@ -212,6 +214,9 @@ final class JarvisAppModel: ObservableObject {
     }
 
     func unlock() async {
+        guard !isUnlocking else { return }
+        isUnlocking = true
+        defer { isUnlocking = false }
         let generation = presentation.id
         let result = await biometricLock.unlock(reason: "Unlock your Jarvis conversations")
         guard presentation.accepts(generation) else { return }
@@ -228,6 +233,13 @@ final class JarvisAppModel: ObservableObject {
         }
     }
 
+    func unlockOnForeground() async {
+        guard needsForegroundUnlock, !isUnlocking else { return }
+        needsForegroundUnlock = false
+        guard lockState != .unlocked else { return }
+        await unlock()
+    }
+
     func beginSignIn() async {
         do {
             if try await auth.requiresLocalUnlock() {
@@ -240,6 +252,7 @@ final class JarvisAppModel: ObservableObject {
     }
 
     func lockWhenBackgrounded() {
+        needsForegroundUnlock = true
         invalidatePresentation(clearIdentity: false)
         voiceReleaseTask?.cancel()
         realtime.stop(); speech.stop()

@@ -54,11 +54,14 @@ struct ChatView: View {
             Divider()
             HStack(alignment: .bottom, spacing: 10) {
                 TextField("Message Jarvis", text: $draft, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1...6)
+                    .textFieldStyle(.plain)
+                    .lineLimit(3...8)
+                    .padding(14)
+                    .background(JarvisTheme.panel, in: RoundedRectangle(cornerRadius: 18))
+                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(JarvisTheme.accent.opacity(0.25)))
                     .submitLabel(.send)
                     .onSubmit { send() }
-                Button(action: send) { Image(systemName: "arrow.up.circle.fill").font(.title2) }
+                Button(action: send) { Image(systemName: "arrow.up.circle.fill").font(.largeTitle).frame(width: 44, height: 44) }
                     .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isSending)
                     .accessibilityLabel("Send message")
             }
