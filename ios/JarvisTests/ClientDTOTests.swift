@@ -4,6 +4,38 @@ import SwiftUI
 import UIKit
 @testable import Jarvis
 
+final class RealtimeHeartbeatTests: XCTestCase {
+    @MainActor
+    func testMissingPongClosesWithoutEnqueuingMorePings() {
+        let heartbeat = RealtimeHeartbeat()
+        XCTAssertEqual(heartbeat.tick(now: 30), .ping)
+        XCTAssertEqual(heartbeat.tick(now: 59), .wait)
+        XCTAssertEqual(heartbeat.tick(now: 60), .disconnect)
+        heartbeat.pong() // A late completion cannot resurrect a dead connection.
+        XCTAssertEqual(heartbeat.tick(now: 90), .wait)
+    }
+
+    @MainActor
+    func testHealthyConnectionAndCancellationRemainBounded() {
+        let heartbeat = RealtimeHeartbeat()
+        for second in stride(from: 30, through: 3000, by: 30) {
+            XCTAssertEqual(heartbeat.tick(now: Double(second)), .ping)
+            heartbeat.pong()
+        }
+        heartbeat.stop()
+        heartbeat.pong()
+        XCTAssertEqual(heartbeat.tick(now: 3030), .wait)
+        XCTAssertEqual(RealtimeHeartbeat().tick(now: 3060), .ping)
+    }
+
+    @MainActor
+    func testResumeAfterLongSuspensionExpiresOutstandingProbe() {
+        let heartbeat = RealtimeHeartbeat()
+        XCTAssertEqual(heartbeat.tick(now: 30), .ping)
+        XCTAssertEqual(heartbeat.tick(now: 3600), .disconnect)
+    }
+}
+
 // Unsigned CI cannot access Apple's entitled Keychain. Exercise the same
 // identity/auth logic with fixture-only storage; production has no fallback.
 private final class FixtureSecureStorage: SecureValueStorage, @unchecked Sendable {

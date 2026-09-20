@@ -131,6 +131,25 @@ private final class NoRedirect: NSObject, URLSessionTaskDelegate {
 }
 
 @MainActor
+final class RealtimeHeartbeat {
+    private var pendingSince: TimeInterval?
+    private var stopped = false
+    // One outstanding ping, never an accumulating queue on a broken link.
+    func tick(now: TimeInterval) -> Action {
+        guard !stopped else { return .wait }
+        if let since = pendingSince {
+            if now - since >= 30 { stopped = true; return .disconnect }
+            return .wait
+        }
+        pendingSince = now
+        return .ping
+    }
+    enum Action: Equatable { case wait, ping, disconnect }
+    func pong() { guard !stopped else { return }; pendingSince = nil }
+    func stop() { stopped = true; pendingSince = nil }
+}
+
+@MainActor
 final class RealtimeService {
     private var worker: Task<Void, Never>?
     private var socket: URLSessionWebSocketTask?
@@ -179,6 +198,32 @@ final class RealtimeService {
                     defer { socket.cancel(with: .goingAway, reason: nil) }
                     socket.maximumMessageSize = 256 * 1024
                     self.socket = socket; socket.resume()
+                    let heartbeat = RealtimeHeartbeat()
+                    let heartbeatTask = Task { @MainActor in
+                        while !Task.isCancelled {
+                            do { try await Task.sleep(nanoseconds: 30_000_000_000) }
+                            catch { return }
+                            guard !Task.isCancelled else { return }
+                            switch heartbeat.tick(now: ProcessInfo.processInfo.systemUptime) {
+                            case .wait: break
+                            case .disconnect:
+                                socket.cancel(with: .goingAway, reason: nil)
+                                return
+                            case .ping:
+                                socket.sendPing { error in
+                                    let succeeded = error == nil
+                                    Task { @MainActor in
+                                        if succeeded { heartbeat.pong() }
+                                        else {
+                                            heartbeat.stop()
+                                            socket.cancel(with: .goingAway, reason: nil)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    defer { heartbeat.stop(); heartbeatTask.cancel() }
                     var epoch: UUID?; var sequence: UInt64 = 0
                     let connectedAt = Date()
                     while !Task.isCancelled {
