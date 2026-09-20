@@ -4,6 +4,18 @@ import SwiftUI
 import UIKit
 @testable import Jarvis
 
+final class LockLifecycleTests: XCTestCase {
+    func testFaceIDInterruptionDoesNotInvalidateUnlock() {
+        XCTAssertEqual(lockTransition(for: .inactive), .privacyOnly)
+        XCTAssertEqual(lockTransition(for: .active), .unlock)
+    }
+
+    func testRealBackgroundRequiresAuthenticationOnReturn() {
+        XCTAssertEqual(lockTransition(for: .background), .lock)
+        XCTAssertEqual(lockTransition(for: .active), .unlock)
+    }
+}
+
 // Unsigned CI cannot access Apple's entitled Keychain. Exercise the same
 // identity/auth logic with fixture-only storage; production has no fallback.
 private final class FixtureSecureStorage: SecureValueStorage, @unchecked Sendable {
