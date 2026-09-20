@@ -281,10 +281,16 @@ require a macOS/Xcode runner; no distribution signing credentials are involved.
 The September 20 follow-up adds `testDisconnectedSpeechDropsBufferedSuffixAndLateCompletion`
 to the existing iOS XCTest target. It exercises the actual speech controller's
 connection cleanup, late canonical completion, and reconnect without inherited
-voice ownership. The test is added, not executed on this Linux host: Xcode and
-physical-device acceptance remain necessary. The three desktop realtime/speech
-Node test files and deployment-privacy scan passed on the review branch. This
-follow-up performs no merge, release or deployment.
+voice ownership. It passed on the macOS runner in
+[Client CI 35533896399](https://github.com/HawkeyNL/PersonalJarvisApp/actions/runs/35533896399)
+at `8cfac3a23273e63330dc2da6ed485609fe88f6b2`; all 42 iOS simulator tests passed.
+That run also passed Android debug/release validation, native desktop builds on
+Linux/macOS/Windows, frontend tests, and release/privacy validation. The three
+desktop realtime/speech Node test files, deployment-privacy scan and ten Core
+realtime unit tests additionally passed locally. Xcode was not run on this
+Linux host. Physical-device acceptance remains outstanding: none of these tests
+proves simultaneous audible playback behavior or real mobile sleep/network
+transitions. This follow-up performs no merge, release or deployment.
 
 Mocked Core integration tests cover two authenticated sockets, one inference,
 identical canonical final text, voice-owner gating, retry deduplication and
