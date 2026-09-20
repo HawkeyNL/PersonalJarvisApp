@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import com.hawkeynl.jarvis.chat.RealtimeEvent
 import com.hawkeynl.jarvis.chat.RealtimeSpeech
 import com.hawkeynl.jarvis.chat.SpeechRate
+import com.hawkeynl.jarvis.chat.realtimeSnapshot
 
 enum class AppTab { CHAT, CONVERSATIONS, SETTINGS }
 
@@ -447,11 +448,14 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 val recovered = container.realtime.recover(endpoint, pending.requests())
                 if (_state.value.endpoint != endpoint || _state.value.locked || !_state.value.authenticated) return@start
                 for ((request, run) in recovered) pending.reconcile(request, run)
-                loadConversations(endpoint)
+                val conversations = container.conversations.list(endpoint).realtimeSnapshot()
+                if (_state.value.endpoint != endpoint || _state.value.locked || !_state.value.authenticated) return@start
+                _state.update { it.copy(conversations = conversations.conversations) }
                 val selected = _state.value.conversationId
                 if (selected != null) {
-                    val snapshot = container.conversations.load(endpoint, selected)
-                    if (snapshot is ApiResult.Success) _state.update { if (it.conversationId == selected) it.copy(messages = snapshot.value.messages, busy = snapshot.value.assistant_running) else it }
+                    val snapshot = container.conversations.load(endpoint, selected).realtimeSnapshot()
+                    if (_state.value.endpoint != endpoint || _state.value.locked || !_state.value.authenticated) return@start
+                    _state.update { if (it.conversationId == selected) it.copy(messages = snapshot.messages, busy = snapshot.assistant_running) else it }
                 }
             } else receiveRealtime(event)
         }
