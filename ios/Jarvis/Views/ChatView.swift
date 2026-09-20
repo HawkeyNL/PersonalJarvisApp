@@ -3,6 +3,7 @@ import SwiftUI
 struct ChatView: View {
     @ObservedObject var model: JarvisAppModel
     @State private var draft = ""
+    @FocusState private var composerFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -17,6 +18,13 @@ struct ChatView: View {
             .toolbarBackground(JarvisTheme.panel, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done", systemImage: "keyboard.chevron.compact.down") {
+                        composerFocused = false
+                    }
+                    .accessibilityLabel("Dismiss keyboard")
+                }
                 if model.isAuthenticated {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
@@ -32,6 +40,7 @@ struct ChatView: View {
                 }
             }
         }
+        .onDisappear { composerFocused = false }
     }
 
     private var conversation: some View {
@@ -47,6 +56,7 @@ struct ChatView: View {
                     .padding()
                 }
                 .background(JarvisTheme.background)
+                .scrollDismissesKeyboard(.interactively)
                 .onChange(of: model.messages.count) { _, _ in
                     if let last = model.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
@@ -55,7 +65,8 @@ struct ChatView: View {
             HStack(alignment: .bottom, spacing: 10) {
                 TextField("Message Jarvis", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
-                    .lineLimit(3...8)
+                    .lineLimit(1...3)
+                    .focused($composerFocused)
                     .padding(14)
                     .background(JarvisTheme.panel, in: RoundedRectangle(cornerRadius: 18))
                     .overlay(RoundedRectangle(cornerRadius: 18).stroke(JarvisTheme.accent.opacity(0.25)))
