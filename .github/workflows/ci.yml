@@ -112,6 +112,8 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
       - name: Test desktop native core
         run: npm run desktop:test:native
+      - name: Verify isolated realtime acceptance credentials
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib --features realtime-acceptance
       - name: Build actual Tauri release target
         run: npm run desktop:build -- --no-bundle
 
@@ -191,6 +193,15 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             test
+      - name: Build isolated unsigned realtime acceptance app
+        run: |
+          xcodebuild -project Jarvis.xcodeproj -scheme Jarvis \
+            -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/JarvisAcceptance" \
+            PRODUCT_BUNDLE_IDENTIFIER=com.hawkeynl.jarvis.realtime-acceptance \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS='DEBUG JARVIS_REALTIME_ACCEPTANCE' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
       - name: Validate unsigned physical-device IPA packaging
         # setup-python below makes packaging independent of the runner's Python.
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
