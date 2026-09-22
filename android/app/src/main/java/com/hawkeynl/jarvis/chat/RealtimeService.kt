@@ -1,6 +1,7 @@
 package com.hawkeynl.jarvis.chat
 
 import com.hawkeynl.jarvis.network.ChatTurn
+import com.hawkeynl.jarvis.network.ApiResult
 import com.hawkeynl.jarvis.network.HomeNodeEndpoint
 import com.hawkeynl.jarvis.storage.SessionRepository
 import io.ktor.client.HttpClient
@@ -40,6 +41,16 @@ internal fun realtimeSocketEngine(): OkHttpClient = OkHttpClient.Builder()
     .followRedirects(false)
     .followSslRedirects(false)
     .build()
+
+// Recovery is read-only. A failed snapshot must leave the socket attempt so
+// bounded reconnect retries it; never acknowledge recovery or resubmit a prompt.
+internal fun <T> ApiResult<T>.realtimeSnapshot(): T = when (this) {
+    is ApiResult.Success -> value
+    else -> throw IllegalStateException("Realtime history recovery failed")
+}
+
+internal fun <T> ApiResult<T>.realtimeSelectedHistory(): T? =
+    if (this is ApiResult.HttpError && status == 404) null else realtimeSnapshot()
 
 @Serializable private data class Capability(val protocol: Int, val asynchronous_chat: Boolean)
 @Serializable private data class Submit(val request_id: String, val conversation_id: String?, val messages: List<ChatTurn>)

@@ -16,6 +16,119 @@ final class LockLifecycleTests: XCTestCase {
     }
 }
 
+final class CredentialBuildIdentityTests: XCTestCase {
+    func testAcceptanceRequiresSeparateIdentity() throws {
+        let isolated = CredentialBuildIdentity.acceptanceIdentifier
+        XCTAssertNoThrow(try CredentialBuildIdentity.validate(bundleIdentifier: isolated, acceptance: true))
+        XCTAssertThrowsError(try CredentialBuildIdentity.validate(bundleIdentifier: "com.hawkeynl.jarvis", acceptance: true))
+        XCTAssertThrowsError(try CredentialBuildIdentity.validate(bundleIdentifier: nil, acceptance: true))
+        XCTAssertThrowsError(try CredentialBuildIdentity.validate(bundleIdentifier: isolated, acceptance: false))
+    }
+
+    func testProductionResigningKeepsExistingCredentialService() throws {
+        XCTAssertNoThrow(try CredentialBuildIdentity.validate(bundleIdentifier: "com.example.resigned", acceptance: false))
+        XCTAssertEqual(CredentialBuildIdentity.service, CredentialBuildIdentity.acceptance
+            ? CredentialBuildIdentity.acceptanceIdentifier : "com.hawkeynl.jarvis")
+    }
+}
+
+final class RealtimeEventDeliveryTests: XCTestCase {
+    @MainActor
+    func testDeletedSelectedConversationIsNotATransientFailure() async throws {
+        let missing: String? = try await RealtimeEventDelivery.selectedHistory {
+            throw JarvisAPIError.rejected(status: 404, message: nil)
+        }
+        XCTAssertNil(missing)
+        let present = try await RealtimeEventDelivery.selectedHistory { "canonical" }
+        XCTAssertEqual(present, "canonical")
+        do {
+            let _: String? = try await RealtimeEventDelivery.selectedHistory {
+                throw JarvisAPIError.rejected(status: 503, message: nil)
+            }
+            XCTFail("Temporary failure must reconnect")
+        } catch { XCTAssertEqual(error as? JarvisAPIError, .rejected(status: 503, message: nil)) }
+    }
+
+    private func event(epoch: UUID, sequence: UInt64, type: String, protocolVersion: Int = 1) throws -> RealtimeEvent {
+        let bytes = try JSONSerialization.data(withJSONObject: [
+            "protocol": protocolVersion, "epoch": epoch.uuidString,
+            "sequence": sequence, "event_id": UUID().uuidString,
+            "type": type, "payload": [:]
+        ])
+        return try JSONDecoder().decode(RealtimeEvent.self, from: bytes)
+    }
+
+    @MainActor
+    func testFailedRecoveryPropagatesAndDoesNotConsumeReadyEvent() async throws {
+        let delivery = RealtimeEventDelivery()
+        let ready = try event(epoch: UUID(), sequence: 1, type: "connection.ready")
+        do {
+            try await delivery.deliver(ready) { _ in throw URLError(.timedOut) }
+            XCTFail("Recovery failure must escape to reconnect")
+        } catch { XCTAssertEqual((error as? URLError)?.code, .timedOut) }
+        var delivered = 0
+        try await delivery.deliver(ready) { _ in delivered += 1 }
+        try await delivery.deliver(ready) { _ in delivered += 1 }
+        XCTAssertEqual(delivered, 1)
+    }
+
+    @MainActor
+    func testEpochChangeRequiresReadyAndCancellationPropagates() async throws {
+        let delivery = RealtimeEventDelivery()
+        let epoch = UUID()
+        try await delivery.deliver(event(epoch: epoch, sequence: 10, type: "connection.ready")) { _ in }
+        for bad in [
+            try event(epoch: UUID(), sequence: 11, type: "assistant.delta"),
+            try event(epoch: epoch, sequence: 11, type: "connection.ready", protocolVersion: 2)
+        ] {
+            do {
+                try await delivery.deliver(bad) { _ in XCTFail("Invalid event delivered") }
+                XCTFail("Invalid envelope accepted")
+            } catch { }
+        }
+        let restarted = try event(epoch: UUID(), sequence: 1, type: "connection.ready")
+        do {
+            try await delivery.deliver(restarted) { _ in throw CancellationError() }
+            XCTFail("Cancellation swallowed")
+        } catch { XCTAssertTrue(error is CancellationError) }
+        var delivered = false
+        try await delivery.deliver(restarted) { _ in delivered = true }
+        XCTAssertTrue(delivered)
+    }
+}
+
+final class RealtimeHeartbeatTests: XCTestCase {
+    @MainActor
+    func testMissingPongClosesWithoutEnqueuingMorePings() {
+        let heartbeat = RealtimeHeartbeat()
+        XCTAssertEqual(heartbeat.tick(now: 30), .ping)
+        XCTAssertEqual(heartbeat.tick(now: 59), .wait)
+        XCTAssertEqual(heartbeat.tick(now: 60), .disconnect)
+        heartbeat.pong() // A late completion cannot resurrect a dead connection.
+        XCTAssertEqual(heartbeat.tick(now: 90), .wait)
+    }
+
+    @MainActor
+    func testHealthyConnectionAndCancellationRemainBounded() {
+        let heartbeat = RealtimeHeartbeat()
+        for second in stride(from: 30, through: 3000, by: 30) {
+            XCTAssertEqual(heartbeat.tick(now: Double(second)), .ping)
+            heartbeat.pong()
+        }
+        heartbeat.stop()
+        heartbeat.pong()
+        XCTAssertEqual(heartbeat.tick(now: 3030), .wait)
+        XCTAssertEqual(RealtimeHeartbeat().tick(now: 3060), .ping)
+    }
+
+    @MainActor
+    func testResumeAfterLongSuspensionExpiresOutstandingProbe() {
+        let heartbeat = RealtimeHeartbeat()
+        XCTAssertEqual(heartbeat.tick(now: 30), .ping)
+        XCTAssertEqual(heartbeat.tick(now: 3600), .disconnect)
+    }
+}
+
 // Unsigned CI cannot access Apple's entitled Keychain. Exercise the same
 // identity/auth logic with fixture-only storage; production has no fallback.
 private final class FixtureSecureStorage: SecureValueStorage, @unchecked Sendable {
@@ -576,6 +689,51 @@ final class ClientDTOTests: XCTestCase {
         XCTAssertTrue(queue.insert(next))
         XCTAssertFalse(queue.insert(NSObject()))
     }
+    @MainActor
+    func testDisconnectedSpeechDropsBufferedSuffixAndLateCompletion() throws {
+        final class FakeSpeech: SpeechOutput {
+            var spoken: [String] = []
+            var stops = 0
+            func speak(_ text: String) { spoken.append(text) }
+            func stop() { stops += 1 }
+        }
+        let id = "00000000-0000-0000-0000-000000000001"
+        let identity = ["run_id": id, "request_id": id, "conversation_id": id]
+        func event(_ type: String, _ payload: [String: Any]) throws -> RealtimeEvent {
+            let bytes = try JSONSerialization.data(withJSONObject: [
+                "protocol": 1, "epoch": id, "sequence": 1, "event_id": id,
+                "type": type, "payload": payload
+            ])
+            return try JSONDecoder().decode(RealtimeEvent.self, from: bytes)
+        }
+        let output = FakeSpeech()
+        let voice = RealtimeSpeech(output: output)
+        voice.enabled = true
+        voice.receive(try event("connection.ready", ["device_id": id]))
+        voice.receive(try event("voice.owner_changed", ["device_id": id, "run_id": id]))
+        voice.receive(try event("assistant.started", identity))
+        voice.receive(try event("assistant.delta", ["run": identity, "text": "Hello. Buffered suffix"]))
+        let beforeDisconnect = output.spoken
+        let stops = output.stops
+
+        // The socket's connection-scoped defer clears this handler on failure.
+        voice.setPlaybackHandler(nil)
+        XCTAssertEqual(output.stops, stops + 1)
+        let completed = try event("assistant.completed", ["run": identity, "message": [
+            "id": id, "conversation_id": id, "role": "assistant",
+            "content": "Hello. Buffered suffix.", "created_at": "2026-01-01T00:00:00Z"
+        ]])
+        voice.receive(completed)
+        XCTAssertEqual(output.spoken, beforeDisconnect)
+
+        // Reconnection does not replay historical audio or inherit voice authority.
+        voice.receive(try event("connection.ready", ["device_id": id]))
+        XCTAssertNil(voice.ownedRun)
+        voice.receive(try event("assistant.started", identity))
+        voice.receive(completed)
+        XCTAssertEqual(output.spoken, beforeDisconnect)
+    }
+
     @MainActor
     func testFragmentedFencesNeverSpeakEmbeddedCode() throws {
         final class FakeSpeech: SpeechOutput {

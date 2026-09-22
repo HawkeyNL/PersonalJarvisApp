@@ -1,0 +1,9 @@
+{
+  "productName": "Jarvis Realtime Test",
+  "identifier": "com.hawkeynl.jarvis.realtime-acceptance",
+  "app": {
+    "windows": [{ "title": "Jarvis Realtime Test", "width": 1000, "height": 700, "minWidth": 800, "minHeight": 600 }],
+    "security": { "capabilities": ["default", "development"] }
+  },
+  "bundle": { "active": false, "createUpdaterArtifacts": false }
+}

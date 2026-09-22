@@ -127,7 +127,19 @@ fn save_metadata(app: &AppHandle, metadata: &AuthMetadata) -> Result<(), String>
     std::fs::rename(temporary, path).map_err(|e| e.to_string())
 }
 
+#[cfg(not(feature = "realtime-acceptance"))]
 const KEY_SERVICE: &str = "com.hawkeynl.jarvis";
+#[cfg(feature = "realtime-acceptance")]
+const KEY_SERVICE: &str = "com.hawkeynl.jarvis.realtime-acceptance";
+
+fn validate_acceptance_identity(identifier: &str) -> Result<(), &'static str> {
+    if cfg!(feature = "realtime-acceptance")
+        != (identifier == "com.hawkeynl.jarvis.realtime-acceptance")
+    {
+        return Err("acceptance app identity and credential isolation must be enabled together");
+    }
+    Ok(())
+}
 const KEY_ACCOUNT: &str = "device-private-key";
 const TOKEN_ACCOUNT: &str = "session-token";
 
@@ -820,6 +832,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_http::init())
         .setup(|app| {
+            validate_acceptance_identity(&app.config().identifier)
+                .map_err(std::io::Error::other)?;
             app.manage(realtime::Runtime::default());
             #[cfg(desktop)]
             {
@@ -875,6 +889,25 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn acceptance_identity_cannot_share_production_credentials() {
+        let isolated = "com.hawkeynl.jarvis.realtime-acceptance";
+        let production = "com.hawkeynl.jarvis";
+        assert_eq!(
+            super::validate_acceptance_identity(isolated).is_ok(),
+            cfg!(feature = "realtime-acceptance")
+        );
+        assert_eq!(
+            super::validate_acceptance_identity(production).is_ok(),
+            !cfg!(feature = "realtime-acceptance")
+        );
+        if cfg!(feature = "realtime-acceptance") {
+            assert_eq!(super::KEY_SERVICE, isolated);
+            assert!(super::app_updates::updater_public_key().is_none());
+        } else {
+            assert_eq!(super::KEY_SERVICE, production);
+        }
+    }
     #[test]
     fn late_login_cannot_cross_logout_or_origin_round_trip() {
         let origin = "https://jarvis.example.com";
