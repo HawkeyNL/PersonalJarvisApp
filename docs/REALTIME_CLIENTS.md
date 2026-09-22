@@ -357,3 +357,33 @@ xcodebuild -project Jarvis.xcodeproj -scheme Jarvis \
 This compiles the separate credential path; the ordinary simulator XCTest suite
 tests matching/mismatched identity decisions and production re-signing behavior.
 Neither command proves physical-device isolation, voice output or network recovery.
+
+### September 22 acceptance-build verification
+
+[Client CI 35769695337](https://github.com/HawkeyNL/PersonalJarvisApp/actions/runs/35769695337)
+passed at `3b43b83492aec7e75c2f2b8bd0479d17de9350f3`. All desktop native
+jobs (Linux, Windows, macOS), Android debug/release validation, frontend and
+release/privacy jobs succeeded. Desktop jobs tested the acceptance Cargo feature
+as well as the normal build. iOS ran 44 simulator tests with zero failures,
+including both `CredentialBuildIdentityTests`, compiled the isolated acceptance
+variant, and validated unsigned physical-device IPA packaging.
+
+Locally, 59 release-tooling tests passed; two requiring ORAS/minisign were skipped.
+The CI release-contract job installed those tools and passed its checks. The
+local deployment privacy scan and four privacy regression tests also passed.
+These results do not constitute signed installation or physical acceptance.
+
+Outstanding hardware evidence, using isolated enrolled test identities and a
+counting fake provider, is:
+
+1. Mac and iPhone show the same final canonical response for one prompt, with
+   exactly one provider invocation and one active speech device.
+2. Sending from the other device transfers speech ownership; stop and ownership
+   loss stop audible playback without modifying history or invoking the model.
+3. Background/resume and network loss recover canonical history without duplicate
+   messages or speech, and do not change the other device's selected conversation.
+4. Production and test app storage remain separate on the actual devices.
+5. Android physical speech/lifecycle behavior is checked when hardware is available;
+   its green CI and JVM speech mocks are not a claim of audible hardware testing.
+
+No merge, release, tag or production deployment was performed for this review.
