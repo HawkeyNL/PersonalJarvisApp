@@ -296,3 +296,27 @@ Mocked Core integration tests cover two authenticated sockets, one inference,
 identical canonical final text, voice-owner gating, retry deduplication and
 REST recovery. They do not substitute for actual desktop/iPhone/Android audio,
 sleep/wake, background/resume, or network-transition acceptance on devices.
+
+## Isolated desktop acceptance build
+
+Do not replace a production installation merely to test a review branch.
+From `desktop/` on the review checkout:
+
+```sh
+npm ci
+npm run tauri -- dev --config src-tauri/tauri.acceptance.conf.json --features realtime-acceptance
+```
+
+This mode uses app identifier and Keychain service
+`com.hawkeynl.jarvis.realtime-acceptance`, a separate Tauri application-data
+directory, and a visible **Jarvis Realtime Test** window title. Both the config
+override and Cargo feature are required: mismatches fail during setup before
+credential commands become available. The test variant disables the updater
+even if an updater public key is present in the build environment. Production
+builds retain their existing identifier and credential service.
+
+Enroll a separate test identity against an isolated test Core with a counting
+fake provider. Do not copy production auth metadata, bearer tokens or keys.
+This is not yet an iOS test-install procedure: physical iPhone signing and its
+independent identity/storage isolation still need validation on the owner's Mac.
+Local unit tests cannot certify OS Keychain separation on that machine.

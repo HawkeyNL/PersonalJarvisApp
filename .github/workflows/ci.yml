@@ -112,6 +112,8 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
       - name: Test desktop native core
         run: npm run desktop:test:native
+      - name: Verify isolated realtime acceptance credentials
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib --features realtime-acceptance
       - name: Build actual Tauri release target
         run: npm run desktop:build -- --no-bundle
 

@@ -23,6 +23,9 @@ pub(crate) struct UpdateRuntime {
 }
 
 pub(crate) fn updater_public_key() -> Option<&'static str> {
+    if cfg!(feature = "realtime-acceptance") {
+        return None;
+    }
     option_env!("JARVIS_TAURI_UPDATER_PUBKEY").filter(|value| !value.trim().is_empty())
 }
 
