@@ -4,6 +4,22 @@ import SwiftUI
 import UIKit
 @testable import Jarvis
 
+final class CredentialBuildIdentityTests: XCTestCase {
+    func testAcceptanceRequiresSeparateIdentity() throws {
+        let isolated = CredentialBuildIdentity.acceptanceIdentifier
+        XCTAssertNoThrow(try CredentialBuildIdentity.validate(bundleIdentifier: isolated, acceptance: true))
+        XCTAssertThrowsError(try CredentialBuildIdentity.validate(bundleIdentifier: "com.hawkeynl.jarvis", acceptance: true))
+        XCTAssertThrowsError(try CredentialBuildIdentity.validate(bundleIdentifier: nil, acceptance: true))
+        XCTAssertThrowsError(try CredentialBuildIdentity.validate(bundleIdentifier: isolated, acceptance: false))
+    }
+
+    func testProductionResigningKeepsExistingCredentialService() throws {
+        XCTAssertNoThrow(try CredentialBuildIdentity.validate(bundleIdentifier: "com.example.resigned", acceptance: false))
+        XCTAssertEqual(CredentialBuildIdentity.service, CredentialBuildIdentity.acceptance
+            ? CredentialBuildIdentity.acceptanceIdentifier : "com.hawkeynl.jarvis")
+    }
+}
+
 final class RealtimeEventDeliveryTests: XCTestCase {
     @MainActor
     func testDeletedSelectedConversationIsNotATransientFailure() async throws {

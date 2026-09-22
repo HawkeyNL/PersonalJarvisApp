@@ -317,6 +317,43 @@ builds retain their existing identifier and credential service.
 
 Enroll a separate test identity against an isolated test Core with a counting
 fake provider. Do not copy production auth metadata, bearer tokens or keys.
-This is not yet an iOS test-install procedure: physical iPhone signing and its
-independent identity/storage isolation still need validation on the owner's Mac.
-Local unit tests cannot certify OS Keychain separation on that machine.
+Local unit tests cannot certify OS Keychain separation on the owner's machine.
+
+## Isolated iOS acceptance build
+
+Use a separate review checkout on the Mac. Open `ios/Jarvis.xcodeproj` in Xcode.
+For the **Jarvis application target's Debug configuration only**, set:
+
+- Product Bundle Identifier: `com.hawkeynl.jarvis.realtime-acceptance`
+- Swift Active Compilation Conditions: retain `DEBUG` and add `JARVIS_REALTIME_ACCEPTANCE`
+- Display Name: `Jarvis Realtime Test` (local test checkout only)
+- Signing: the owner's local development team; select the connected iPhone.
+
+Both the identifier and compilation condition are required. Before any Keychain
+read/write/delete, a mismatched build fails closed. The test service is
+`com.hawkeynl.jarvis.realtime-acceptance`; production retains
+`com.hawkeynl.jarvis`, including owner re-signing with AltStore. Do not change
+production identifiers or delete existing Keychain items. The separate bundle
+also provides a separate app sandbox. Do not copy production credentials into it.
+
+Build/run locally from Xcode and enroll only against the isolated test Core.
+Do not re-sign this acceptance build to the production bundle ID. This procedure
+still requires physical validation: verify both apps coexist, the test app starts
+without a session, and the original app's session remains untouched.
+
+CI additionally builds the acceptance variant without signing:
+
+```sh
+cd ios
+xcodebuild -project Jarvis.xcodeproj -scheme Jarvis \
+  -configuration Debug -sdk iphonesimulator \
+  -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath /tmp/JarvisAcceptance \
+  PRODUCT_BUNDLE_IDENTIFIER=com.hawkeynl.jarvis.realtime-acceptance \
+  SWIFT_ACTIVE_COMPILATION_CONDITIONS='DEBUG JARVIS_REALTIME_ACCEPTANCE' \
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+```
+
+This compiles the separate credential path; the ordinary simulator XCTest suite
+tests matching/mismatched identity decisions and production re-signing behavior.
+Neither command proves physical-device isolation, voice output or network recovery.
