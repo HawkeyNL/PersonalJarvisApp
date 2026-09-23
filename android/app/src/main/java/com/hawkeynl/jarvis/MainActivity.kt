@@ -18,6 +18,7 @@ import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.withResumed
 import com.hawkeynl.jarvis.ui.JarvisApp
 import com.hawkeynl.jarvis.ui.JarvisTheme
 import com.hawkeynl.jarvis.ui.JarvisViewModel
@@ -34,11 +35,15 @@ class MainActivity : FragmentActivity() {
         val callback = modelCredentialResult
         modelCredentialResult = null
         modelAuthenticationActive = false
+        if (result.resultCode != Activity.RESULT_OK && !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
+            viewModel.lockForBackground()
+        }
         callback?.invoke(result.resultCode == Activity.RESULT_OK)
     }
     private val modelControls by lazy { ModelControlService(container.api, container.sessions, container.settings, container.identity, ::authenticateModelChange) }
 
-    private suspend fun authenticateModelChange(reason: String): Boolean = suspendCancellableCoroutine { continuation ->
+    private suspend fun authenticateModelChange(reason: String): Boolean {
+        val accepted = suspendCancellableCoroutine<Boolean> { continuation ->
         if (biometricPromptActive || modelCredentialResult != null) { continuation.resume(false); return@suspendCancellableCoroutine }
         modelAuthenticationActive = true
         if (Build.VERSION.SDK_INT < 30) {
@@ -70,6 +75,12 @@ class MainActivity : FragmentActivity() {
             prompt.authenticate(BiometricPrompt.PromptInfo.Builder().setTitle("Jarvis-modelbeleid")
                 .setDescription(reason).setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL).build())
         }
+        }
+        // OS credential screens can finish before our Activity resumes. Never
+        // hand the approval back to the signer while the app is backgrounded;
+        // lifecycle destruction/cancellation aborts this wait, and the native
+        // controller checks session binding and expiry afterwards.
+        return accepted && lifecycle.withResumed { !isFinishing && !isDestroyed }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -101,7 +112,7 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun requestBiometricUnlock() {
-        if (biometricPromptActive) return
+        if (biometricPromptActive || modelAuthenticationActive) return
         biometricPromptActive = true
         container.biometricGate.authenticate(
             activity = this,
