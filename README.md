@@ -89,3 +89,17 @@ To update desktop's client-core dependency:
 4. run the complete client CI before releasing.
 
 Never replace the pin with a branch, sibling path, or copied crate.
+
+## Model access controls
+
+Desktop and mobile model controls require an enrolled, approved device and a
+Home Node advertising `device-signed-model-toggle-v1`. Confirming a change
+opens native OS authentication: biometrics with the platform's credential
+fallback where supported. No device password or private signing key is sent
+to the Home Node or exposed to the desktop frontend.
+
+Changing Home Node/session, cancelling authentication, an expired approval,
+or a changed policy requires a new confirmation. The UI refreshes authoritative
+state after a change; it does not optimistically claim success. Older Core
+versions without the capability remain read-only. Core and client product
+versions remain independent.
