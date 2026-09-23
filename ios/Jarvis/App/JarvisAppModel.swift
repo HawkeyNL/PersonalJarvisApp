@@ -84,6 +84,19 @@ final class JarvisAppModel: ObservableObject {
 
     var isAuthenticated: Bool { enrollmentState == .authenticated }
 
+    func loadModelPolicy() async throws -> ModelPolicySnapshot {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        let generation = presentation.id
+        let result = try await auth.modelPolicy()
+        guard presentation.accepts(generation), lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        return result
+    }
+
+    func setModelEnabled(_ entry: ModelAccessEntry, policyHash: String) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        try await auth.setModelEnabled(entry, policyHash: policyHash)
+    }
+
     func start() async {
         guard let endpoint = endpointStore.endpoint else {
             connectionState = .unconfigured

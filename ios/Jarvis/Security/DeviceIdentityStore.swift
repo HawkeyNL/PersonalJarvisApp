@@ -26,6 +26,10 @@ actor DeviceIdentityStore {
         return key.publicKey.rawRepresentation.hexEncodedString()
     }
 
+    func existingPublicKeyHex() throws -> String {
+        try signingKey(createIfMissing: false).publicKey.rawRepresentation.hexEncodedString()
+    }
+
     func signChallenge(hex nonce: String) throws -> String {
         guard let data = Data(hexEncoded: nonce), data.count == 32 else {
             throw DeviceIdentityError.invalidChallenge
@@ -35,6 +39,10 @@ actor DeviceIdentityStore {
     }
 
     func reset() throws { try keychain.delete(account: account) }
+
+    func signModelToggle(_ approval: ModelToggleApproval) throws -> String {
+        try signingKey(createIfMissing: false).signature(for: approval.message()).hexEncodedString()
+    }
 
     private func signingKey(createIfMissing: Bool = true) throws -> Curve25519.Signing.PrivateKey {
         if let stored = try keychain.read(account: account) {

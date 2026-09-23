@@ -17,6 +17,7 @@ mod app_updates;
 mod local_speech;
 mod local_speech_engine;
 mod local_voices;
+mod model_control;
 mod native_response;
 mod realtime;
 mod speech_playback;
@@ -865,6 +866,7 @@ pub fn run() {
             auth_sign,
             auth_sign_pairing_approval,
             auth_sign_account_approval,
+            model_control::set_model_enabled,
             auth_remember_enrolled_device,
             auth_complete_login,
             auth_request,

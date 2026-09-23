@@ -59,6 +59,7 @@ fun JarvisApp(
     actions: JarvisViewModel,
     onRequestBiometric: () -> Unit,
     onInstallUpdate: () -> Unit,
+    modelControls: com.hawkeynl.jarvis.security.ModelControlService? = null,
 ) {
     when {
         state.locked -> AppLockScreen(
@@ -67,7 +68,7 @@ fun JarvisApp(
             onReset = actions::resetDevice,
         )
         state.endpoint == null || !state.authenticated -> OnboardingScreen(state, actions)
-        else -> AuthenticatedShell(state, actions, onInstallUpdate)
+        else -> AuthenticatedShell(state, actions, onInstallUpdate, modelControls)
     }
 }
 
@@ -202,6 +203,7 @@ private fun AuthenticatedShell(
     state: JarvisUiState,
     actions: JarvisViewModel,
     onInstallUpdate: () -> Unit,
+    modelControls: com.hawkeynl.jarvis.security.ModelControlService?,
 ) {
     Scaffold(
         bottomBar = {
@@ -227,7 +229,7 @@ private fun AuthenticatedShell(
             when (state.selectedTab) {
                 AppTab.CHAT -> ChatScreen(state, actions)
                 AppTab.CONVERSATIONS -> ConversationsScreen(state, actions)
-                AppTab.SETTINGS -> SettingsScreen(state, actions, onInstallUpdate)
+                AppTab.SETTINGS -> SettingsScreen(state, actions, onInstallUpdate, modelControls)
             }
         }
     }
@@ -356,6 +358,7 @@ private fun SettingsScreen(
     state: JarvisUiState,
     actions: JarvisViewModel,
     onInstallUpdate: () -> Unit,
+    modelControls: com.hawkeynl.jarvis.security.ModelControlService?,
 ) {
     var voiceMenu by remember { mutableStateOf(false) }
     LazyColumn(
@@ -364,6 +367,7 @@ private fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item { Text("Instellingen", style = MaterialTheme.typography.headlineSmall) }
+        if (modelControls != null) { item { ModelControls(modelControls) } }
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Lokale spraak op actief apparaat")
