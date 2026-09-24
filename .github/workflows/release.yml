@@ -276,7 +276,7 @@ jobs:
               --example verify_update_signature \
               -- "$artifact" "$signature"
           done
-      - uses: oras-project/setup-oras@8d34698a59f5ffe24821f0b48ab62a3de8b64b20 # v1.2.3
+      - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1 (Node 24)
         with:
           version: 1.2.3
       - name: Transfer exact desktop bytes through private GHCR
@@ -323,8 +323,9 @@ jobs:
             android/gradle/libs.versions.toml
             android/gradle/wrapper/gradle-wrapper.properties
             android/app/build.gradle.kts
-      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1 (Node 24)
         with:
+          cmdline-tools-version: '12266719'
           packages: 'platform-tools'
       - name: Install Android SDK
         run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
@@ -365,7 +366,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/android-assets"
           cp "$apk" "$RUNNER_TEMP/android-assets/Jarvis_${APP_VERSION}_android_universal.apk"
           cp "$aab" "$RUNNER_TEMP/android-assets/Jarvis_${APP_VERSION}_android_universal.aab"
-      - uses: oras-project/setup-oras@8d34698a59f5ffe24821f0b48ab62a3de8b64b20 # v1.2.3
+      - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1 (Node 24)
         with:
           version: 1.2.3
       - name: Transfer exact Android bytes through private GHCR
@@ -407,7 +408,7 @@ jobs:
             --output "$RUNNER_TEMP/ios-candidate" --version "$APP_VERSION" --revision "$GITHUB_SHA"
           mkdir "$RUNNER_TEMP/ios-assets"
           cp "$RUNNER_TEMP/ios-candidate/Jarvis_${APP_VERSION}_ios_arm64_unsigned.ipa" "$RUNNER_TEMP/ios-assets/"
-      - uses: oras-project/setup-oras@8d34698a59f5ffe24821f0b48ab62a3de8b64b20 # v1.2.3
+      - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1 (Node 24)
         with:
           version: 1.2.3
       - name: Transfer unsigned iPhone payload privately
@@ -434,7 +435,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - uses: oras-project/setup-oras@8d34698a59f5ffe24821f0b48ab62a3de8b64b20 # v1.2.3
+      - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1 (Node 24)
         with:
           version: 1.2.3
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6

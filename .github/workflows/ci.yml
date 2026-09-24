@@ -33,7 +33,7 @@ jobs:
           python3 update-release/release_identity.py \
             --event push --ref "refs/tags/app-v$app_version"
           python3 -m unittest discover -s update-release/tests -v
-      - uses: oras-project/setup-oras@8d34698a59f5ffe24821f0b48ab62a3de8b64b20 # v1.2.3
+      - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1 (Node 24)
         with:
           version: 1.2.3
       - name: Real private desktop and Android transport format
@@ -136,8 +136,9 @@ jobs:
             android/gradle/libs.versions.toml
             android/gradle/wrapper/gradle-wrapper.properties
             android/app/build.gradle.kts
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1 (Node 24)
         with:
+          cmdline-tools-version: '12266719'
           packages: 'platform-tools'
       - name: Test SDK-independent realtime state
         run: ./gradlew :realtime-core:test --no-daemon
