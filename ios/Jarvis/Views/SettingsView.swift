@@ -8,6 +8,11 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if model.isAuthenticated {
+                    Section("Home Node models") {
+                        NavigationLink("Model access") { ModelsView(model: model) }
+                    }
+                }
                 Section("Local voice") {
                     Toggle("Speak replies on this active device", isOn: $model.voiceEnabled)
                     Picker("System voice", selection: $model.selectedVoice) {

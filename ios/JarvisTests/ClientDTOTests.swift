@@ -2,7 +2,35 @@ import XCTest
 import Network
 import SwiftUI
 import UIKit
+import CryptoKit
 @testable import Jarvis
+
+final class ModelApprovalTests: XCTestCase {
+    func testCanonicalPayloadMatchesSharedRustVector() throws {
+        let approval = ModelToggleApproval(request: UUID(uuidString: "01010101-0101-0101-0101-010101010101")!,
+            nonce: Data(repeating: 2, count: 32), user: UUID(uuidString: "03030303-0303-0303-0303-030303030303")!,
+            device: UUID(uuidString: "04040404-0404-0404-0404-040404040404")!, issued: 1, expires: 121,
+            provider: "huggingface", model: "org/fixture", enabled: true, hash: String(repeating: "05", count: 32))
+        XCTAssertEqual(Data(SHA256.hash(data: try approval.operationBytes())).hexEncodedString(), "db216127795b1015f2c95877514c1e8ecb492775276bbb73412b10a7073c98c0")
+        var expected = Data("jarvis-privileged-config-v1\0".utf8)
+        expected.append(Data([0,17])); expected.append(Data("model.set_enabled".utf8))
+        expected.append(Data(hexEncoded: "db216127795b1015f2c95877514c1e8ecb492775276bbb73412b10a7073c98c0")!)
+        expected.append(Data(repeating: 1, count: 16)); expected.append(Data(repeating: 2, count: 32))
+        expected.append(Data(repeating: 3, count: 16)); expected.append(Data(repeating: 4, count: 16))
+        expected.append(Data(hexEncoded: "00000000000000010000000000000079")!)
+        expected.append(Data(repeating: 5, count: 32))
+        XCTAssertEqual(try approval.message(), expected)
+        XCTAssertThrowsError(try approval.signed("invalid"))
+    }
+
+    func testMissingKeyCannotBeCreatedForModelApproval() async throws {
+        let storage = FixtureSecureStorage()
+        let identity = DeviceIdentityStore(keychain: storage)
+        do { _ = try await identity.existingPublicKeyHex(); XCTFail("Must not create a replacement identity") }
+        catch DeviceIdentityError.missingStoredKey { }
+        XCTAssertNil(try storage.read(account: "device-ed25519-seed-v1"))
+    }
+}
 
 final class LockLifecycleTests: XCTestCase {
     func testFaceIDInterruptionDoesNotInvalidateUnlock() {
@@ -131,7 +159,7 @@ final class RealtimeHeartbeatTests: XCTestCase {
 
 // Unsigned CI cannot access Apple's entitled Keychain. Exercise the same
 // identity/auth logic with fixture-only storage; production has no fallback.
-private final class FixtureSecureStorage: SecureValueStorage, @unchecked Sendable {
+final class FixtureSecureStorage: SecureValueStorage, @unchecked Sendable {
     private let lock = NSLock()
     private var values: [String: Data] = [:]
     func read(account: String) throws -> Data? {

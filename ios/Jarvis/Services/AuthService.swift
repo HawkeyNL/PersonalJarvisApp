@@ -1,4 +1,6 @@
 import Foundation
+import Security
+import CryptoKit
 
 enum DeviceLoginError: LocalizedError, Equatable {
     case deviceRejected
@@ -24,18 +26,23 @@ enum AuthServiceOutcome: Equatable {
 }
 
 actor AuthService {
+    nonisolated let modelAuthorization = ModelAuthorization()
+    private var modelChangeRunning = false
     private let api: JarvisAPIClient
     private let identity: DeviceIdentityStore
     private let credentials: SecureCredentialStore
+    private let authenticateOwner: @Sendable (String) async -> LocalUnlockResult
 
     init(
         api: JarvisAPIClient,
         identity: DeviceIdentityStore = DeviceIdentityStore(),
-        credentials: SecureCredentialStore = SecureCredentialStore()
+        credentials: SecureCredentialStore = SecureCredentialStore(),
+        authenticateOwner: @escaping @Sendable (String) async -> LocalUnlockResult = { await BiometricLock().unlock(reason: $0) }
     ) {
         self.api = api
         self.identity = identity
         self.credentials = credentials
+        self.authenticateOwner = authenticateOwner
     }
 
     func restore(password: String? = nil) async throws -> AuthServiceOutcome {
@@ -99,9 +106,59 @@ actor AuthService {
     }
 
     func sessionToken() async throws -> String? { try await credentials.session()?.token }
+
+    func modelPolicy() async throws -> ModelPolicySnapshot {
+        let binding = await api.binding()
+        guard let token = try await credentials.session()?.token else { throw JarvisAPIError.unauthorized }
+        return try await api.get("/v1/system/models", token: token, expectedBinding: binding)
+    }
+
+    func setModelEnabled(_ entry: ModelAccessEntry, policyHash: String) async throws {
+        guard !modelChangeRunning else { throw JarvisAPIError.rejected(status: 409, message: "Another model change is running.") }
+        modelChangeRunning = true
+        defer { modelChangeRunning = false }
+        let ticket = modelAuthorization.ticket()
+        let binding = await api.binding()
+        guard let token = try await credentials.session()?.token,
+              let device = try await credentials.deviceId() else { throw JarvisAPIError.unauthorized }
+        let snapshot: ModelPolicySnapshot = try await api.get("/v1/system/models", token: token, expectedBinding: binding)
+        let now = Int64(Date().timeIntervalSince1970)
+        guard snapshot.mutable, snapshot.policy_sha256 == policyHash, snapshot.device_id == device,
+              snapshot.server_time >= now - 30, snapshot.server_time <= now + 30,
+              snapshot.models.contains(where: { $0.provider == entry.provider && $0.model == entry.model && $0.enabled == entry.enabled })
+        else { throw JarvisAPIError.rejected(status: 409, message: "Model policy changed. Refresh before approving.") }
+        var bytes = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { throw JarvisAPIError.invalidResponse }
+        let approval = ModelToggleApproval(request: UUID(), nonce: Data(bytes), user: snapshot.user_id, device: device,
+            issued: now, expires: now + 120, provider: entry.provider, model: entry.model, enabled: !entry.enabled, hash: policyHash)
+        _ = try approval.message()
+        let key = try await identity.existingPublicKeyHex()
+        // Hash session binding rather than retain another bearer-token copy.
+        let context = SHA256.hash(data: Data("\(binding)|\(device)|\(key)|\(token)".utf8)).map { String(format: "%02x", $0) }.joined()
+        try Task.checkCancellation()
+        let fresh = !modelAuthorization.valid(context, ticket: ticket)
+        if fresh {
+            guard await authenticateOwner("Authorize Jarvis model changes for five minutes") == .unlocked
+            else {
+                modelAuthorization.invalidate()
+                throw JarvisAPIError.rejected(status: 403, message: "Model change cancelled; device authentication is required.")
+            }
+        }
+        guard await api.binding() == binding, try await credentials.session()?.token == token,
+              try await credentials.deviceId() == device, try await identity.existingPublicKeyHex() == key,
+              Int64(Date().timeIntervalSince1970) < approval.expires else { throw JarvisAPIError.unauthorized }
+        try Task.checkCancellation()
+        guard modelAuthorization.accepts(ticket) else { throw JarvisAPIError.unauthorized }
+        if fresh { guard modelAuthorization.remember(context, ticket: ticket) else { throw JarvisAPIError.unauthorized } }
+        guard modelAuthorization.valid(context, ticket: ticket) else { throw JarvisAPIError.unauthorized }
+        let signature = try await identity.signModelToggle(approval)
+        guard modelAuthorization.accepts(ticket) else { throw JarvisAPIError.unauthorized }
+        let result: StatusResponse = try await api.post("/v1/system/config/privileged", body: approval.signed(signature), token: token, expectedBinding: binding)
+        guard result.status == "active" else { throw JarvisAPIError.rejected(status: 503, message: "Model activation was not confirmed. Refresh its status.") }
+    }
     // Origin changes must clear server-specific state before the new host is
     // configured. No revocation request is sent to the replacement host.
-    func clearLocalBinding() async throws { try await credentials.reset(); try await identity.reset() }
+    func clearLocalBinding() async throws { modelAuthorization.invalidate(); try await credentials.reset(); try await identity.reset() }
 
     func requiresLocalUnlock() async throws -> Bool {
         let hasSession = try await credentials.session() != nil
@@ -110,6 +167,7 @@ actor AuthService {
     }
 
     func logout() async throws -> AuthServiceOutcome {
+        modelAuthorization.invalidate()
         if let token = try await credentials.session()?.token {
             let _: StatusResponse? = try? await api.post(
                 "/v1/auth/logout",
@@ -122,6 +180,7 @@ actor AuthService {
     }
 
     func resetDevice() async throws {
+        modelAuthorization.invalidate()
         let session = try await credentials.session()
         let deviceId = try await credentials.deviceId()
         if let token = session?.token, let deviceId {
@@ -160,6 +219,7 @@ actor AuthService {
     }
 
     private func login(deviceId: UUID, password: String? = nil) async throws {
+        modelAuthorization.invalidate()
         let challenge: ChallengeResponse
         do {
             challenge = try await api.post("/v1/auth/challenge", body: ChallengeRequest(deviceId: deviceId))

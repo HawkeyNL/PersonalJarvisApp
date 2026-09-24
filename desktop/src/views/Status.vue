@@ -4,6 +4,7 @@ import { getJson, getJsonAuth, postJsonAuth } from "../api";
 import { currentAuthStatus } from "../auth";
 import { homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
 import SystemUsageChart from "../components/SystemUsageChart.vue";
+import ModelControls from "../components/ModelControls.vue";
 
 type Health = { status: string; environment?: string };
 type Check = "checking" | "ok" | "fout";
@@ -372,6 +373,7 @@ onUnmounted(() => {
 
         <!-- Model catalog (ADR-028): what Jarvis can pick from, by class. -->
         <div v-if="section === 'Modellen'" class="models section-wide">
+          <ModelControls />
           <h3>Modellen <span class="hint">{{ reg.models.length }} · goedkoopste geschikte per taak</span></h3>
           <p v-if="!reg.models.length" class="muted">Geen modellen beschikbaar.</p>
           <ul>

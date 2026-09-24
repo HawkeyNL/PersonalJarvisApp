@@ -101,6 +101,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     fun editEndpoint(value: String) = _state.update { it.copy(endpointDraft = value, error = null) }
 
     fun saveEndpoint() {
+        container.sessions.modelAuthorization.invalidate()
         viewModelScope.launch {
             val parsed = HomeNodeEndpoint.parse(_state.value.endpointDraft)
             if (parsed is EndpointValidation.Valid && parsed.endpoint != _state.value.endpoint) {
@@ -274,6 +275,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun logout() {
+        container.sessions.modelAuthorization.invalidate()
         pending.clear()
         container.realtime.stop(); speech.stop()
         val endpoint = _state.value.endpoint ?: return
@@ -284,11 +286,13 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun lockForBackground() {
+        container.sessions.modelAuthorization.invalidate()
         container.realtime.stop(); speech.stop()
         if (container.sessions.hasSessionRecord()) _state.update { it.copy(locked = true) }
     }
 
     fun resetDevice() {
+        container.sessions.modelAuthorization.invalidate()
         pending.clear()
         container.realtime.stop(); speech.stop()
         viewModelScope.launch {

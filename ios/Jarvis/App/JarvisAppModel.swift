@@ -6,7 +6,9 @@ import UIKit
 final class JarvisAppModel: ObservableObject {
     @Published private(set) var connectionState: ConnectionState = .unconfigured
     @Published private(set) var enrollmentState: EnrollmentState = .notStarted
-    @Published private(set) var lockState: AppLockState = .unlocked
+    @Published private(set) var lockState: AppLockState = .unlocked {
+        didSet { if lockState != .unlocked { auth.modelAuthorization.invalidate() } }
+    }
     @Published private(set) var isUnlocking = false
     private var needsForegroundUnlock = false
     @Published private(set) var conversations: [ConversationSummary] = []
@@ -45,6 +47,7 @@ final class JarvisAppModel: ObservableObject {
     private var voiceReleaseTask: Task<Void, Never>?
     private var presentation = ChatPresentationLifetime()
     private func invalidatePresentation(clearIdentity: Bool) {
+        auth.modelAuthorization.invalidate()
         presentation.invalidate()
         messages = []; conversations = []; isSending = false; realtimeAvailable = false
         if clearIdentity { pendingRequests.clear(); currentConversationId = nil; currentConversationTitle = "New conversation" }
@@ -83,6 +86,19 @@ final class JarvisAppModel: ObservableObject {
     }
 
     var isAuthenticated: Bool { enrollmentState == .authenticated }
+
+    func loadModelPolicy() async throws -> ModelPolicySnapshot {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        let generation = presentation.id
+        let result = try await auth.modelPolicy()
+        guard presentation.accepts(generation), lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        return result
+    }
+
+    func setModelEnabled(_ entry: ModelAccessEntry, policyHash: String) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        try await auth.setModelEnabled(entry, policyHash: policyHash)
+    }
 
     func start() async {
         guard let endpoint = endpointStore.endpoint else {
