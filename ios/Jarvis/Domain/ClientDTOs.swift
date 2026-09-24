@@ -181,3 +181,49 @@ struct APIErrorBody: Decodable {
     let error: String?
     let hint: String?
 }
+
+// Read-only subset of /v1/system/registry used by the Resources page.
+struct HomeNodeRegistry: Decodable {
+    let host: Host
+    let liveHost: LiveHost?
+    let software: [Software]
+
+    enum CodingKeys: String, CodingKey { case host, software; case liveHost = "live_host" }
+
+    struct Host: Decodable {
+        let os: String
+        let arch: String
+        let cpu: String
+        let cpuCores: Int
+        let memTotalGB: Double
+        let gpu: String
+
+        enum CodingKeys: String, CodingKey {
+            case os, arch, cpu, gpu
+            case cpuCores = "cpu_cores"
+            case memTotalGB = "mem_total_gb"
+        }
+    }
+
+    struct LiveHost: Decodable {
+        let sampledAt: Int64
+        let cpuPercent: Double?
+        let memoryTotalBytes: Int64
+        let memoryUsedBytes: Int64
+        let uptimeSeconds: Int64
+
+        enum CodingKeys: String, CodingKey {
+            case sampledAt = "sampled_at"
+            case cpuPercent = "cpu_percent"
+            case memoryTotalBytes = "memory_total_bytes"
+            case memoryUsedBytes = "memory_used_bytes"
+            case uptimeSeconds = "uptime_seconds"
+        }
+    }
+
+    struct Software: Decodable {
+        let name: String
+        let present: Bool
+        let version: String?
+    }
+}

@@ -871,4 +871,19 @@ final class ClientDTOTests: XCTestCase {
         XCTAssertNil(Data(hexEncoded: "zz"))
         XCTAssertEqual(Data(hexEncoded: "00ff"), Data([0, 255]))
     }
+
+    func testDecodesHomeNodeResourcesWithAndWithoutLiveReadings() throws {
+        let base = #"{"host":{"os":"Linux","arch":"x86_64","cpu":"Mini PC","cpu_cores":8,"mem_total_gb":16,"gpu":"Integrated"},"software":[{"name":"Ollama","present":true,"version":"1.0","detail":null}]}"#
+        let decoder = JSONDecoder()
+        let inventory = try decoder.decode(HomeNodeRegistry.self, from: Data(base.utf8))
+        XCTAssertNil(inventory.liveHost)
+        XCTAssertEqual(inventory.host.cpuCores, 8)
+        XCTAssertEqual(inventory.software.first?.version, "1.0")
+
+        let live = base.replacingOccurrences(of: #""software""#, with: #""live_host":{"sampled_at":1800000000,"cpu_percent":12.5,"memory_total_bytes":17179869184,"memory_used_bytes":4294967296,"uptime_seconds":3720},"software""#)
+        let current = try decoder.decode(HomeNodeRegistry.self, from: Data(live.utf8))
+        XCTAssertEqual(current.liveHost?.cpuPercent, 12.5)
+        XCTAssertEqual(current.liveHost?.memoryUsedBytes, 4_294_967_296)
+        XCTAssertEqual(current.liveHost?.uptimeSeconds, 3_720)
+    }
 }
