@@ -9,8 +9,15 @@ struct ModelsView: View {
     @State private var notice: String?
     @State private var search = ""
     @State private var page = 0
-    private var filtered: [ModelAccessEntry] {
-        (policy?.models ?? []).filter { search.isEmpty || $0.id.localizedCaseInsensitiveContains(search) }
+    @State private var provider = ""
+    @State private var access = "all"
+    @State private var pricing = "all"
+    private var catalog: ModelCatalogPage {
+        ModelCatalogPage(models: policy?.models ?? [], search: search, provider: provider,
+                         access: access, pricing: pricing, requestedPage: page)
+    }
+    private var providers: [String] {
+        Set((policy?.models ?? []).map(\.provider)).sorted()
     }
     var body: some View {
         List {
@@ -19,35 +26,73 @@ struct ModelsView: View {
                     .font(.footnote)
                 if let notice { Text(notice).foregroundStyle(JarvisTheme.accent) }
                 Button("Refresh") { Task { await reload() } }.disabled(busy)
-                if policy != nil && policy?.mutable != true { Text("Model controls are unavailable. Update Core or ask the owner to verify its model policy.") }
+                if let policy, !policy.mutable { Text(policy.unavailableMessage) }
+            }
+            Section("Filters") {
+                Picker("Provider", selection: $provider) {
+                    Text("All providers").tag("")
+                    ForEach(providers, id: \.self) { Text($0).tag($0) }
+                }
+                Picker("Access", selection: $access) {
+                    Text("All models").tag("all")
+                    Text("Enabled").tag("enabled")
+                    Text("Disabled").tag("disabled")
+                }
+                Picker("Pricing", selection: $pricing) {
+                    Text("All prices").tag("all")
+                    Text("Price available").tag("priced")
+                    Text("Unknown price").tag("unknown")
+                }
             }
             Section("Models") {
-                ForEach(Array(filtered.dropFirst(page * 25).prefix(25))) { entry in
+                ForEach(catalog.entries) { entry in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(entry.model).font(.headline)
                         Text(entry.provider).font(.caption).foregroundStyle(.secondary)
+                        if entry.hasPrice {
+                            Text("USD / 1M tokens · \(entry.price_status ?? "known")").font(.caption)
+                            Text("Input \(price(entry.input_per_million_usd)) · Output \(price(entry.output_per_million_usd))")
+                                .font(.caption).foregroundStyle(.secondary)
+                            if entry.cache_read_per_million_usd != nil {
+                                Text("Cached input \(price(entry.cache_read_per_million_usd))").font(.caption)
+                            }
+                            if let notes = entry.pricing_notes { Text(notes).font(.caption).foregroundStyle(.secondary) }
+                            if let long = entry.long_context {
+                                Text("From \(long.from_input_tokens) input tokens: input \(price(long.input_per_million_usd)) · output \(price(long.output_per_million_usd)) per 1M")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            if let date = entry.pricing_updated_at { Text("Pricing updated \(date)").font(.caption).foregroundStyle(.secondary) }
+                        } else {
+                            Text("Price unknown — not free").font(.caption).foregroundStyle(.secondary)
+                        }
                         HStack {
                             Text(entry.enabled ? "Enabled" : "Disabled")
                             Spacer()
                             Button(entry.enabled ? "Disable" : "Enable") { selected = entry; confirming = true }
+                                .buttonStyle(.borderless)
                                 .disabled(busy || policy?.mutable != true)
                         }
                     }
                     .padding(.vertical, 4)
                 }
-                if filtered.isEmpty { Text("No models found.") }
+                if catalog.total == 0 { Text("No models found.") }
                 HStack {
-                    Button("Previous") { page -= 1 }.disabled(page == 0 || busy)
+                    Button("Previous") { page = catalog.index - 1 }.disabled(catalog.index == 0 || busy)
                     Spacer()
-                    Text("\(page + 1) / \(max(1, (filtered.count + 24) / 25))")
+                    Text("\(catalog.index + 1) / \(catalog.count)")
                     Spacer()
-                    Button("Next") { page += 1 }.disabled((page + 1) * 25 >= filtered.count || busy)
+                    Button("Next") { page = catalog.index + 1 }.disabled(catalog.index + 1 >= catalog.count || busy)
                 }
+                .buttonStyle(.borderless)
+                Text("\(catalog.total) models · up to 25 per page").font(.caption).foregroundStyle(.secondary)
             }
         }
         .navigationTitle("Models")
         .searchable(text: $search)
         .onChange(of: search) { _, _ in page = 0 }
+        .onChange(of: provider) { _, _ in page = 0 }
+        .onChange(of: access) { _, _ in page = 0 }
+        .onChange(of: pricing) { _, _ in page = 0 }
         .task { await reload() }
         .confirmationDialog("Change model access?", isPresented: $confirming, titleVisibility: .visible) {
             Button("Confirm model change") { Task { await change() } }
@@ -60,8 +105,17 @@ struct ModelsView: View {
     private func reload() async {
         busy = true
         defer { busy = false }
-        do { policy = try await model.loadModelPolicy(); page = min(page, max(0, (filtered.count - 1) / 25)) }
+        do {
+            policy = try await model.loadModelPolicy()
+            if !provider.isEmpty && !providers.contains(provider) { provider = "" }
+            page = catalog.index
+        }
         catch { notice = error.localizedDescription; policy = nil }
+    }
+
+    private func price(_ value: Double?) -> String {
+        guard let value, value.isFinite, value >= 0 else { return "unknown" }
+        return value.formatted(.currency(code: "USD").precision(.fractionLength(0...6)))
     }
 
     private func change() async {

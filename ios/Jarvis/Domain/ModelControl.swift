@@ -5,7 +5,50 @@ struct ModelAccessEntry: Decodable, Identifiable {
     let provider: String
     let model: String
     let enabled: Bool
+    var price_status: String? = nil
+    var input_per_million_usd: Double? = nil
+    var output_per_million_usd: Double? = nil
+    var cache_read_per_million_usd: Double? = nil
+    var pricing_notes: String? = nil
+    var pricing_updated_at: String? = nil
+    var long_context: ModelLongContextPrice? = nil
     var id: String { provider + "/" + model }
+
+    var hasPrice: Bool {
+        guard let input = input_per_million_usd, let output = output_per_million_usd else { return false }
+        return input.isFinite && output.isFinite && input >= 0 && output >= 0 && price_status != "unknown"
+    }
+}
+
+struct ModelLongContextPrice: Decodable {
+    let from_input_tokens: UInt32
+    let input_per_million_usd: Double
+    let output_per_million_usd: Double
+}
+
+/// Filtering and pagination operate on the same stable snapshot. No credentials
+/// or signed mutation state belongs in this presentation model.
+struct ModelCatalogPage {
+    static let size = 25
+    let entries: [ModelAccessEntry]
+    let index: Int
+    let count: Int
+    let total: Int
+
+    init(models: [ModelAccessEntry], search: String, provider: String,
+         access: String, pricing: String, requestedPage: Int) {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filtered = models.filter {
+            (query.isEmpty || $0.id.localizedCaseInsensitiveContains(query)) &&
+            (provider.isEmpty || $0.provider == provider) &&
+            (access == "all" || $0.enabled == (access == "enabled")) &&
+            (pricing == "all" || $0.hasPrice == (pricing == "priced"))
+        }.sorted { $0.id < $1.id }
+        total = filtered.count
+        count = max(1, (total + Self.size - 1) / Self.size)
+        index = min(max(0, requestedPage), count - 1)
+        entries = Array(filtered.dropFirst(index * Self.size).prefix(Self.size))
+    }
 }
 
 struct ModelPolicySnapshot: Decodable {
@@ -15,7 +58,20 @@ struct ModelPolicySnapshot: Decodable {
     let user_id: UUID
     let device_id: UUID
     let server_time: Int64
+    var mutation_unavailable_reason: String? = nil
     var mutable: Bool { mutation == "device-signed-model-toggle-v1" && policy_sha256 != nil }
+    var unavailableMessage: String {
+        switch mutation_unavailable_reason {
+        case "policy_reload_required":
+            return "Core's loaded catalog differs from the protected model policy. Ask the Home Node owner to reload Core; model changes remain locked for safety."
+        case "broker_unavailable":
+            return "The Home Node model-control broker is unavailable. Ask the owner to check Core health."
+        case "policy_unavailable":
+            return "Core cannot verify the protected model policy. Ask the owner to check Core health."
+        default:
+            return "Model controls are unavailable. Ask the owner to verify Core and its model policy."
+        }
+    }
 }
 
 /// Wire contract matches authoritative client-core model_control v1. No token,
