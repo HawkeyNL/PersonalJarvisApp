@@ -2,6 +2,40 @@ import XCTest
 @testable import Jarvis
 
 final class ModelAuthorizationTests: XCTestCase {
+    func testPaginationReachesEveryPageAndClampsAfterFiltering() {
+        let models = (0..<103).map { ModelAccessEntry(provider: "openai-api", model: String(format: "fixture-%03d", $0), enabled: $0.isMultiple(of: 2)) }
+        var seen: [String] = []
+        for page in 0..<5 {
+            let result = ModelCatalogPage(models: models, search: "", provider: "", access: "all", pricing: "all", requestedPage: page)
+            XCTAssertEqual(result.index, page)
+            XCTAssertEqual(result.count, 5)
+            XCTAssertLessThanOrEqual(result.entries.count, 25)
+            seen += result.entries.map(\.id)
+        }
+        XCTAssertEqual(Set(seen).count, 103)
+        let filtered = ModelCatalogPage(models: models, search: "fixture-100", provider: "openai-api", access: "enabled", pricing: "unknown", requestedPage: 4)
+        XCTAssertEqual(filtered.index, 0)
+        XCTAssertEqual(filtered.total, 1)
+        let empty = ModelCatalogPage(models: models, search: "", provider: "huggingface", access: "all", pricing: "all", requestedPage: -1)
+        XCTAssertEqual(empty.index, 0)
+        XCTAssertEqual(empty.count, 1)
+        XCTAssertTrue(empty.entries.isEmpty)
+    }
+
+    func testLegacyAndPricedModelDecoding() throws {
+        let legacy = try JSONDecoder().decode(ModelAccessEntry.self, from: Data(#"{"provider":"openai-api","model":"fixture","enabled":false}"#.utf8))
+        XCTAssertFalse(legacy.hasPrice)
+        let priced = try JSONDecoder().decode(ModelAccessEntry.self, from: Data(#"{"provider":"openai-api","model":"fixture","enabled":false,"price_status":"conservative","input_per_million_usd":1.25,"output_per_million_usd":3,"cache_read_per_million_usd":0.25}"#.utf8))
+        XCTAssertTrue(priced.hasPrice)
+        XCTAssertEqual(priced.input_per_million_usd, 1.25)
+        XCTAssertEqual(priced.cache_read_per_million_usd, 0.25)
+        let result = ModelCatalogPage(models: [legacy, priced], search: "", provider: "", access: "disabled", pricing: "priced", requestedPage: 0)
+        XCTAssertEqual(result.total, 1)
+        var invalid = priced
+        invalid.input_per_million_usd = -1
+        XCTAssertFalse(invalid.hasPrice)
+    }
+
     func testControllerReusesOnlyOSAuthorizationNotSignedRequests() async throws {
         let store = FixtureSecureStorage()
         let credentials = SecureCredentialStore(keychain: store)
