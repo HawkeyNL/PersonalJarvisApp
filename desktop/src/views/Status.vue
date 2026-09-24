@@ -46,14 +46,8 @@ async function check() {
   }
 }
 
-// --- AI-resource registry ("instant memory", ADR-027 stage 3) ---
-interface Brain {
-  id: string;
-  label: string;
-  cost: "plan" | "metered" | "local";
-  available: boolean;
-  note: string;
-}
+// Host inventory and usage. Model authorization is shown separately from the
+// owner-controlled policy; a configured credential is not an enabled model.
 interface SoftwareItem {
   name: string;
   present: boolean;
@@ -68,20 +62,10 @@ interface HostInfo {
   mem_total_gb: number;
   gpu: string;
 }
-interface ModelEntry {
-  id: string;
-  backend: string;
-  class: "light" | "mid" | "heavy" | "reasoning";
-  cost: "local" | "cheap" | "mid" | "pricey";
-  available: boolean;
-}
 interface Registry {
   live_host?: { sampled_at: number; cpu_percent: number | null; memory_total_bytes: number; memory_used_bytes: number; uptime_seconds: number };
   host: HostInfo;
   software: SoftwareItem[];
-  brains: Brain[];
-  models: ModelEntry[];
-  active_brain: string;
 }
 
 interface Usage {
@@ -125,12 +109,6 @@ const budgetPct = computed(() => {
   if (!u || u.budget_eur <= 0) return 0;
   return Math.min(100, Math.round((u.spent_eur / u.budget_eur) * 100));
 });
-const costLabel: Record<Brain["cost"], string> = {
-  plan: "plan",
-  metered: "per-token",
-  local: "lokaal",
-};
-
 async function loadRegistry(refresh = false) {
   if (regBusy.value) return;
   regBusy.value = true;
@@ -239,7 +217,7 @@ onUnmounted(() => {
     <header class="system-heading">
       <div>
         <h1>Systeem</h1>
-        <p class="muted">Je Home Node, AI-resources en verbruik in één overzicht.</p>
+        <p class="muted">Je Home Node, modeltoegang en verbruik in één overzicht.</p>
       </div>
       <button @click="check">Controleer verbinding</button>
     </header>
@@ -271,16 +249,13 @@ onUnmounted(() => {
       <p v-if="error" class="muted err" role="status">Laatste fout: {{ error }}</p>
     </div>
 
-    <!-- AI-resources: brains Jarvis can route to, and the host it runs on. -->
-    <div class="panel resources-panel" v-if="reg || regError || regBusy">
+    <div class="panel resources-panel" v-if="section !== 'Modellen' && (reg || regError || regBusy)">
       <h2 class="phead section-wide">
-        AI &amp; HOME NODE <span class="hint">router kiest per taak</span>
+        HOME NODE &amp; VERBRUIK
       </h2>
       <p v-if="regError" class="muted err">{{ regError }}</p>
       <p v-if="regBusy && !reg" class="muted section-wide" role="status">Resources laden…</p>
       <template v-else-if="reg">
-        <p v-if="section === 'Overzicht'" class="active section-wide">Actief brein: <code>{{ reg.active_brain }}</code></p>
-
         <!-- Monthly spend vs the hard budget (ADR-027). -->
         <div v-if="usage && (section === 'Verbruik' || section === 'Overzicht')" class="budget">
           <h3>Verbruik deze maand</h3>
@@ -311,18 +286,6 @@ onUnmounted(() => {
             </span>
           </div>
         </div>
-        <div v-if="section === 'Overzicht'" class="resource-group">
-        <h3>Beschikbare AI-resources</h3>
-        <ul class="brains">
-          <li v-for="b in reg.brains" :key="b.id">
-            <span class="dot" :class="b.available ? 'dot-ok' : 'dot-err'"></span>
-            <span class="blabel">{{ b.label }}</span>
-            <span class="cost" :class="'cost-' + b.cost">{{ costLabel[b.cost] }}</span>
-            <span class="muted small note">{{ b.note }}</span>
-          </li>
-        </ul>
-        </div>
-
         <template v-if="section === 'Verbruik'">
           <div v-if="usage?.daily?.length" class="resource-group section-wide usage-charts">
             <div><h3>Kosten per dag</h3><SystemUsageChart :rows="usage.daily" mode="cost" /></div>
@@ -371,30 +334,16 @@ onUnmounted(() => {
         </div>
         </div>
 
-        <!-- Model catalog (ADR-028): what Jarvis can pick from, by class. -->
-        <div v-if="section === 'Modellen'" class="models section-wide">
-          <ModelControls />
-          <h3>Modellen <span class="hint">{{ reg.models.length }} · goedkoopste geschikte per taak</span></h3>
-          <p v-if="!reg.models.length" class="muted">Geen modellen beschikbaar.</p>
-          <ul>
-            <li
-              v-for="m in reg.models"
-              :key="m.backend + '/' + m.id"
-              :class="{ off: !m.available }"
-            >
-              <span class="mclass" :class="'mc-' + m.class">{{ m.class }}</span>
-              <span class="mid">{{ m.id }}</span>
-              <span class="mcost">{{ m.cost }}</span>
-            </li>
-          </ul>
-        </div>
-
         <div class="section-wide resource-actions">
         <button :disabled="regBusy" @click="loadRegistry(true)">
           {{ regBusy ? "verversen…" : "Ververs resources" }}
         </button>
         </div>
       </template>
+    </div>
+
+    <div v-if="section === 'Modellen'" class="panel models-panel">
+      <ModelControls />
     </div>
 
     <!-- Self-development (ADR-029 4d): Jarvis proposes improvements to itself. -->
@@ -419,8 +368,8 @@ onUnmounted(() => {
         </template>
       </div>
       <p v-if="adviceBusy" class="muted small sd-status">
-        raadpleegt <code>{{ reg?.active_brain || "brein" }}</code> · leest het
-        ecosysteem en stelt verbetervoorstellen op
+        raadpleegt de geconfigureerde router · leest het ecosysteem en stelt
+        verbetervoorstellen op
       </p>
       <p v-if="adviceCancelled" class="muted small">Geannuleerd.</p>
       <p v-if="adviceError" class="muted err">{{ adviceError }}</p>
