@@ -107,6 +107,12 @@ actor AuthService {
 
     func sessionToken() async throws -> String? { try await credentials.session()?.token }
 
+    func homeNodeRegistry() async throws -> HomeNodeRegistry {
+        let binding = await api.binding()
+        guard let token = try await credentials.session()?.token else { throw JarvisAPIError.unauthorized }
+        return try await api.get("/v1/system/registry", token: token, expectedBinding: binding)
+    }
+
     func modelPolicy() async throws -> ModelPolicySnapshot {
         let binding = await api.binding()
         guard let token = try await credentials.session()?.token else { throw JarvisAPIError.unauthorized }
