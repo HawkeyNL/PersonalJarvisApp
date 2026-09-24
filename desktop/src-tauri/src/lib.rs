@@ -17,6 +17,8 @@ mod app_updates;
 mod local_speech;
 mod local_speech_engine;
 mod local_voices;
+mod model_authorization;
+mod model_control;
 mod native_response;
 mod realtime;
 mod speech_playback;
@@ -30,6 +32,7 @@ fn auth_storage() -> Result<std::sync::MutexGuard<'static, u64>, String> {
         .map_err(|_| "native auth storage unavailable".to_string())
 }
 fn advance_auth_epoch(epoch: &mut u64) -> Result<(), String> {
+    model_authorization::clear()?;
     *epoch = epoch
         .checked_add(1)
         .ok_or("native auth generation exhausted")?;
@@ -127,7 +130,19 @@ fn save_metadata(app: &AppHandle, metadata: &AuthMetadata) -> Result<(), String>
     std::fs::rename(temporary, path).map_err(|e| e.to_string())
 }
 
+#[cfg(not(feature = "realtime-acceptance"))]
 const KEY_SERVICE: &str = "com.hawkeynl.jarvis";
+#[cfg(feature = "realtime-acceptance")]
+const KEY_SERVICE: &str = "com.hawkeynl.jarvis.realtime-acceptance";
+
+fn validate_acceptance_identity(identifier: &str) -> Result<(), &'static str> {
+    if cfg!(feature = "realtime-acceptance")
+        != (identifier == "com.hawkeynl.jarvis.realtime-acceptance")
+    {
+        return Err("acceptance app identity and credential isolation must be enabled together");
+    }
+    Ok(())
+}
 const KEY_ACCOUNT: &str = "device-private-key";
 const TOKEN_ACCOUNT: &str = "session-token";
 
@@ -202,25 +217,20 @@ fn load_secure_auth_unlocked(app: &AppHandle) -> Result<SecureAuth, String> {
     })
 }
 
-fn load_private_key(app: &AppHandle) -> Result<Option<String>, String> {
-    Ok(load_secure_auth(app)?.private_key)
-}
-
-fn save_private_key(app: &AppHandle, key_hex: &str) -> Result<(), String> {
-    let _guard = auth_storage()?;
-    save_credential(KEY_ACCOUNT, key_hex)?;
-    save_metadata(app, &load_metadata(app)?)
-}
-
-/// Load the device signing key, generating and persisting one on first use.
-fn get_or_create_signing_key(app: &AppHandle) -> Result<SigningKey, String> {
-    let key_hex = match load_private_key(app)? {
+/// Caller holds AUTH_STORAGE. Signing must never manufacture a replacement
+/// identity, nor recursively acquire the same non-reentrant mutex.
+fn signing_key_unlocked(app: &AppHandle, allow_create: bool) -> Result<SigningKey, String> {
+    let auth = load_secure_auth_unlocked(app)?;
+    let key_hex = match auth.private_key {
         Some(key) => key,
         None => {
+            if !allow_create || load_metadata(app)?.device_id.is_some() {
+                return Err("Original device key unavailable; restore the original OS credential store or explicitly re-enroll this device".into());
+            }
             let mut seed = [0u8; 32];
             OsRng.fill_bytes(&mut seed);
             let key_hex = hex::encode(seed);
-            save_private_key(app, &key_hex)?;
+            save_credential(KEY_ACCOUNT, &key_hex)?;
             key_hex
         }
     };
@@ -250,14 +260,16 @@ fn device_info() -> serde_json::Value {
 /// Return the device public key (hex), generating a keypair on first call.
 #[tauri::command]
 fn auth_public_key(app: AppHandle) -> Result<String, String> {
-    let key = get_or_create_signing_key(&app)?;
+    let _guard = auth_storage()?;
+    let key = signing_key_unlocked(&app, true)?;
     Ok(hex::encode(key.verifying_key().to_bytes()))
 }
 
 /// Sign a hex-encoded challenge nonce; returns the hex signature.
 #[tauri::command]
 fn auth_sign(app: AppHandle, nonce_hex: String) -> Result<String, String> {
-    let key = get_or_create_signing_key(&app)?;
+    let _guard = auth_storage()?;
+    let key = signing_key_unlocked(&app, false)?;
     let nonce = hex::decode(nonce_hex).map_err(|e| e.to_string())?;
     if nonce.len() != 32 {
         return Err("invalid challenge".to_string());
@@ -315,8 +327,60 @@ fn auth_sign_pairing_approval(
         expires_at,
     )
     .map_err(|_| "invalid pairing payload".to_string())?;
-    let key = get_or_create_signing_key(&app)?;
+    let _guard = auth_storage()?;
+    if expires_at <= time::OffsetDateTime::now_utc()
+        || load_metadata(&app)?.device_id.as_deref()
+            != Some(approver_device_id.to_string().as_str())
+    {
+        return Err("pairing approval expired or device changed".into());
+    }
+    let key = signing_key_unlocked(&app, false)?;
     Ok(hex::encode(key.sign(&message).to_bytes()))
+}
+
+/// Account administration is always explicitly owner-approved, action-bound,
+/// expiring, and signed natively. A password/session alone is insufficient.
+#[tauri::command]
+fn auth_sign_account_approval(
+    app: AppHandle,
+    approval: jarvis_client_core::account::AccountApproval,
+) -> Result<String, String> {
+    use jarvis_client_core::account::{account_approval_message, AccountAction};
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    if approval.expires_at <= now || approval.expires_at > now + 300 {
+        return Err("account approval expired or invalid".into());
+    }
+    let (origin, epoch) = {
+        let guard = auth_storage()?;
+        let metadata = load_metadata(&app)?;
+        if metadata.device_id.as_deref() != Some(approval.device_id.to_string().as_str()) {
+            return Err("account approver does not match this device".into());
+        }
+        (
+            metadata
+                .home_node_origin
+                .ok_or("Home Node is not configured")?,
+            *guard,
+        )
+    };
+    let reason = match approval.action {
+        AccountAction::PasswordSet if approval.target == approval.user_id => {
+            "Jarvis-accountwachtwoord wijzigen".to_string()
+        }
+        AccountAction::PasswordSet => return Err("invalid password approval target".into()),
+        AccountAction::DeviceRevoke => format!("Jarvis-apparaat {} intrekken", approval.target),
+    };
+    let message = account_approval_message(&approval).map_err(str::to_string)?;
+    authenticate_owner(&reason, true)?;
+    let guard = auth_storage()?;
+    let current = load_metadata(&app)?;
+    validate_login_binding(*guard, epoch, current.home_node_origin.as_deref(), &origin)?;
+    if approval.expires_at <= time::OffsetDateTime::now_utc().unix_timestamp() {
+        return Err("account approval expired".into());
+    }
+    Ok(hex::encode(
+        signing_key_unlocked(&app, false)?.sign(&message).to_bytes(),
+    ))
 }
 
 /// Persist the device id and session token after a successful login.
@@ -373,6 +437,8 @@ fn authenticated_api_path(path: &str) -> bool {
         "/v1/auth/logout",
         "/v1/auth/me",
         "/v1/auth/pairing/requests",
+        "/v1/auth/account/password/requests",
+        "/v1/auth/account/requests",
         "/v1/auth/unlock",
         "/v1/system",
         "/v1/holdings",
@@ -413,17 +479,72 @@ fn contains_secret_response_field(value: &serde_json::Value) -> bool {
 #[serde(deny_unknown_fields)]
 struct LoginResponse {
     token: String,
+    expires_at: i64,
+}
+
+#[cfg(test)]
+mod login_response_tests {
+    use super::LoginResponse;
+
+    #[test]
+    fn accepts_canonical_core_login_response() {
+        let response: LoginResponse =
+            serde_json::from_str(r#"{"token":"fixture-session-only","expires_at":2000000000}"#)
+                .expect("Core includes expires_at alongside token");
+        assert_eq!(response.token, "fixture-session-only");
+        assert_eq!(response.expires_at, 2000000000);
+    }
+
+    #[test]
+    fn rejects_malformed_or_unexpected_login_metadata() {
+        for body in [
+            r#"{"token":"fixture-session-only"}"#,
+            r#"{"token":"fixture-session-only","expires_at":"later"}"#,
+            r#"{"token":"fixture-session-only","expires_at":2000000000,"private_key":"fixture"}"#,
+        ] {
+            assert!(serde_json::from_str::<LoginResponse>(body).is_err());
+        }
+    }
 }
 
 /// Complete device login and persist the returned bearer without ever
 /// serializing it through Tauri IPC or the webview.
+#[tauri::command]
+fn auth_remember_enrolled_device(
+    app: AppHandle,
+    device_id: String,
+    expected_origin: String,
+) -> Result<(), String> {
+    uuid::Uuid::parse_str(&device_id).map_err(|_| "invalid device id".to_string())?;
+    let _guard = auth_storage()?;
+    let mut metadata = load_metadata(&app)?;
+    if metadata.home_node_origin.as_deref() != Some(expected_origin.as_str())
+        || metadata.device_id.is_some()
+    {
+        return Err("Home Node or device binding changed".into());
+    }
+    // Metadata only, never authentication. Login still requires this device's
+    // private-key signature and the account password. Keep the ID if a network
+    // failure occurs after the one-use activation has already committed.
+    metadata.device_id = Some(device_id);
+    save_metadata(&app, &metadata)
+}
+
 #[tauri::command]
 async fn auth_complete_login(
     app: AppHandle,
     device_id: String,
     challenge_id: String,
     signature: String,
+    password: Option<String>,
+    expected_origin: String,
 ) -> Result<(), String> {
+    if password
+        .as_ref()
+        .is_some_and(|value| value.len() > 1024 || value.chars().any(char::is_control))
+    {
+        return Err("account password is invalid".to_string());
+    }
     uuid::Uuid::parse_str(&device_id).map_err(|_| "login device id is invalid".to_string())?;
     uuid::Uuid::parse_str(&challenge_id)
         .map_err(|_| "login challenge id is invalid".to_string())?;
@@ -435,6 +556,9 @@ async fn auth_complete_login(
         let origin = load_metadata(&app)?
             .home_node_origin
             .ok_or_else(|| "Home Node is not configured".to_string())?;
+        if origin != expected_origin {
+            return Err("Home Node changed; sign in again".into());
+        }
         (origin, *guard)
     };
     let response = native_http_client()?
@@ -443,6 +567,7 @@ async fn auth_complete_login(
             "device_id": device_id,
             "challenge_id": challenge_id,
             "signature": signature,
+            "password": password,
         }))
         .send()
         .await
@@ -458,6 +583,7 @@ async fn auth_complete_login(
     if result.token.is_empty()
         || result.token.len() > 4096
         || result.token.chars().any(char::is_whitespace)
+        || result.expires_at <= time::OffsetDateTime::now_utc().unix_timestamp()
     {
         return Err("Home Node login response is invalid".to_string());
     }
@@ -661,6 +787,13 @@ fn biometric_unlock(reason: String, allow_password: bool) -> Result<(), String> 
     authenticate_owner(&reason, allow_password)
 }
 
+/// Revocation only: the webview cannot mint or extend an authorization lease.
+#[tauri::command]
+fn revoke_model_authorization() -> Result<(), String> {
+    let mut guard = auth_storage()?;
+    advance_auth_epoch(&mut guard)
+}
+
 fn authenticate_owner(reason: &str, allow_password: bool) -> Result<(), String> {
     use std::sync::mpsc;
     use std::time::Duration;
@@ -709,6 +842,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_http::init())
         .setup(|app| {
+            validate_acceptance_identity(&app.config().identifier)
+                .map_err(std::io::Error::other)?;
             app.manage(realtime::Runtime::default());
             #[cfg(desktop)]
             {
@@ -739,6 +874,9 @@ pub fn run() {
             auth_public_key,
             auth_sign,
             auth_sign_pairing_approval,
+            auth_sign_account_approval,
+            model_control::set_model_enabled,
+            auth_remember_enrolled_device,
             auth_complete_login,
             auth_request,
             auth_status,
@@ -747,6 +885,7 @@ pub fn run() {
             home_node_config,
             home_node_configure,
             biometric_unlock,
+            revoke_model_authorization,
             #[cfg(desktop)]
             app_updates::app_update_status,
             #[cfg(desktop)]
@@ -762,6 +901,25 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn acceptance_identity_cannot_share_production_credentials() {
+        let isolated = "com.hawkeynl.jarvis.realtime-acceptance";
+        let production = "com.hawkeynl.jarvis";
+        assert_eq!(
+            super::validate_acceptance_identity(isolated).is_ok(),
+            cfg!(feature = "realtime-acceptance")
+        );
+        assert_eq!(
+            super::validate_acceptance_identity(production).is_ok(),
+            !cfg!(feature = "realtime-acceptance")
+        );
+        if cfg!(feature = "realtime-acceptance") {
+            assert_eq!(super::KEY_SERVICE, isolated);
+            assert!(super::app_updates::updater_public_key().is_none());
+        } else {
+            assert_eq!(super::KEY_SERVICE, production);
+        }
+    }
     #[test]
     fn late_login_cannot_cross_logout_or_origin_round_trip() {
         let origin = "https://jarvis.example.com";
@@ -881,6 +1039,11 @@ mod tests {
     fn native_authenticated_proxy_is_bounded_and_excludes_updater_routes() {
         assert!(authenticated_api_path("/v1/conversations"));
         assert!(authenticated_api_path("/v1/auth/unlock/pending?wait=20"));
+        assert!(authenticated_api_path("/v1/auth/account/password/requests"));
+        assert!(authenticated_api_path(
+            "/v1/auth/account/requests/fixture/approve"
+        ));
+        assert!(!authenticated_api_path("/v1/auth/bootstrap"));
         assert!(!authenticated_api_path("/v1/auth/login"));
         assert!(!authenticated_api_path("/v1/app-updates/capability"));
         assert!(!authenticated_api_path("https://other.example/v1/devices"));

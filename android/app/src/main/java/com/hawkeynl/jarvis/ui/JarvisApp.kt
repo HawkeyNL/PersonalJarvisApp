@@ -15,6 +15,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -27,6 +29,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +38,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.hawkeynl.jarvis.R
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -47,6 +59,7 @@ fun JarvisApp(
     actions: JarvisViewModel,
     onRequestBiometric: () -> Unit,
     onInstallUpdate: () -> Unit,
+    modelControls: com.hawkeynl.jarvis.security.ModelControlService? = null,
 ) {
     when {
         state.locked -> AppLockScreen(
@@ -55,7 +68,7 @@ fun JarvisApp(
             onReset = actions::resetDevice,
         )
         state.endpoint == null || !state.authenticated -> OnboardingScreen(state, actions)
-        else -> AuthenticatedShell(state, actions, onInstallUpdate)
+        else -> AuthenticatedShell(state, actions, onInstallUpdate, modelControls)
     }
 }
 
@@ -82,6 +95,23 @@ private fun AppLockScreen(message: String?, onRetry: () -> Unit, onReset: () -> 
 
 @Composable
 private fun OnboardingScreen(state: JarvisUiState, actions: JarvisViewModel) {
+    // Deliberately not rememberSaveable: never serialize passwords into activity state.
+    var password by remember { mutableStateOf("") }
+    var activationCode by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(state.activationRequired) { passwordVisible = false }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                passwordVisible = false
+                password = ""
+                activationCode = ""
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize().imePadding().testTag("onboarding"),
         contentPadding = PaddingValues(24.dp),
@@ -128,8 +158,34 @@ private fun OnboardingScreen(state: JarvisUiState, actions: JarvisViewModel) {
                             )
                             CircularProgressIndicator()
                         } else {
-                            Button(onClick = actions::beginEnrollment, enabled = !state.busy) {
-                                Text(if (state.busy) "Bezig…" else "Koppel deze telefoon")
+                            if (state.activationRequired) {
+                                Text("Gebruik de eenmalige code van je Home Node en kies een wachtwoord van minimaal 15 tekens.")
+                                OutlinedTextField(value = activationCode, onValueChange = { activationCode = it.take(256) },
+                                    label = { Text("Activatiecode") }, singleLine = true,
+                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                        autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii),
+                                    visualTransformation = VisualTransformation.None)
+                            }
+                            OutlinedTextField(value = password, onValueChange = { password = it.take(1024) },
+                                label = { Text("Accountwachtwoord") }, singleLine = true,
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                    autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
+                                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                                trailingIcon = {
+                                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                        Icon(painterResource(if (passwordVisible) R.drawable.ic_visibility_off else R.drawable.ic_visibility),
+                                            contentDescription = if (passwordVisible) "Wachtwoord verbergen" else "Wachtwoord tonen")
+                                    }
+                                })
+                            Button(onClick = {
+                                val suppliedPassword = password.ifEmpty { null }
+                                val suppliedCode = if (state.activationRequired) activationCode else null
+                                password = ""
+                                passwordVisible = false
+                                activationCode = ""
+                                actions.beginEnrollment(suppliedPassword, suppliedCode)
+                            }, enabled = !state.busy) {
+                                Text(if (state.busy) "Bezig…" else "Doorgaan")
                             }
                         }
                     }
@@ -147,6 +203,7 @@ private fun AuthenticatedShell(
     state: JarvisUiState,
     actions: JarvisViewModel,
     onInstallUpdate: () -> Unit,
+    modelControls: com.hawkeynl.jarvis.security.ModelControlService?,
 ) {
     Scaffold(
         bottomBar = {
@@ -172,7 +229,7 @@ private fun AuthenticatedShell(
             when (state.selectedTab) {
                 AppTab.CHAT -> ChatScreen(state, actions)
                 AppTab.CONVERSATIONS -> ConversationsScreen(state, actions)
-                AppTab.SETTINGS -> SettingsScreen(state, actions, onInstallUpdate)
+                AppTab.SETTINGS -> SettingsScreen(state, actions, onInstallUpdate, modelControls)
             }
         }
     }
@@ -301,6 +358,7 @@ private fun SettingsScreen(
     state: JarvisUiState,
     actions: JarvisViewModel,
     onInstallUpdate: () -> Unit,
+    modelControls: com.hawkeynl.jarvis.security.ModelControlService?,
 ) {
     var voiceMenu by remember { mutableStateOf(false) }
     LazyColumn(
@@ -309,6 +367,7 @@ private fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item { Text("Instellingen", style = MaterialTheme.typography.headlineSmall) }
+        if (modelControls != null) { item { ModelControls(modelControls) } }
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Lokale spraak op actief apparaat")

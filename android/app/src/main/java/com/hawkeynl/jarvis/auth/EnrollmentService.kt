@@ -13,6 +13,8 @@ import com.hawkeynl.jarvis.storage.ProtectedSession
 import com.hawkeynl.jarvis.storage.SessionRepository
 
 sealed interface EnrollmentOutcome {
+    data object PasswordRequired : EnrollmentOutcome
+    data object ActivationRequired : EnrollmentOutcome
     data class Pending(val ticket: PairingTicket) : EnrollmentOutcome
     data class Authenticated(val expiresAt: Long) : EnrollmentOutcome
     data object Denied : EnrollmentOutcome
@@ -34,8 +36,19 @@ class EnrollmentService(
         endpoint: HomeNodeEndpoint,
         deviceName: String,
         nowEpochSeconds: Long,
+        password: String? = null,
+        activationCode: String? = null,
     ): EnrollmentOutcome {
-        sessions.session().deviceId?.let { return login(endpoint, it) }
+        if (activationCode != null) {
+            return when (val result = api.activateFirstDevice(endpoint, PairingCreateRequest(deviceName.take(80), "android", identity.publicKeyHex(), password), activationCode)) {
+                is ApiResult.Success -> {
+                    sessions.saveDeviceId(result.value.device_id)
+                    login(endpoint, result.value.device_id, password)
+                }
+                else -> result.toEnrollmentFailure()
+            }
+        }
+        sessions.session().deviceId?.let { return login(endpoint, it, password) }
 
         val existing = sessions.pairingTicket()
         if (existing != null) {
@@ -46,12 +59,20 @@ class EnrollmentService(
             return poll(endpoint, existing)
         }
 
+        when (val status = api.accountStatus(endpoint)) {
+            is ApiResult.Success -> {
+                if (status.value.bootstrap_required) return EnrollmentOutcome.ActivationRequired
+                if (status.value.password_required && password == null) return EnrollmentOutcome.PasswordRequired
+            }
+            else -> return status.toEnrollmentFailure()
+        }
         return when (val result = api.createPairing(
             endpoint,
             PairingCreateRequest(
                 name = deviceName.take(80),
                 platform = "android",
                 public_key = identity.publicKeyHex(),
+                password = password,
             ),
         )) {
             is ApiResult.Success -> {
@@ -113,9 +134,15 @@ class EnrollmentService(
         }
     }
 
-    private suspend fun login(endpoint: HomeNodeEndpoint, deviceId: String): EnrollmentOutcome {
+    private suspend fun login(endpoint: HomeNodeEndpoint, deviceId: String, password: String? = null): EnrollmentOutcome {
+        when (val status = api.accountStatus(endpoint)) {
+            is ApiResult.Success -> if (status.value.password_required && password == null) return EnrollmentOutcome.PasswordRequired
+            else -> return status.toEnrollmentFailure()
+        }
         val challenge = when (val result = api.challenge(endpoint, ChallengeRequest(deviceId))) {
             is ApiResult.Success -> result.value
+            ApiResult.Unauthorized -> return EnrollmentOutcome.Rejected(401,
+                "Apparaatchallenge geweigerd. Controleer in Core Admin of dit apparaat nog goedgekeurd is; opnieuw koppelen vereist expliciete goedkeuring.")
             else -> return result.toEnrollmentFailure()
         }
         if (challenge.nonce.length != 64) {
@@ -125,12 +152,14 @@ class EnrollmentService(
             .getOrElse { return EnrollmentOutcome.InvalidResponse("Device-identiteit kan niet ondertekenen.") }
         return when (val result = api.login(
             endpoint,
-            LoginRequest(deviceId, challenge.challenge_id, signature),
+            LoginRequest(deviceId, challenge.challenge_id, signature, password),
         )) {
             is ApiResult.Success -> {
                 sessions.saveLogin(deviceId, result.value.token, result.value.expires_at)
                 EnrollmentOutcome.Authenticated(result.value.expires_at)
             }
+            ApiResult.Unauthorized -> EnrollmentOutcome.Rejected(401,
+                "Wachtwoord/apparaathandtekening geweigerd. Controleer je wachtwoord en oorspronkelijke apparaatidentiteit. Er zijn geen instellingen of sleutels gewist.")
             else -> result.toEnrollmentFailure()
         }
     }

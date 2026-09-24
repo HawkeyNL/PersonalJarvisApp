@@ -1,6 +1,6 @@
 [package]
 name = "client"
-version = "0.1.0"
+version = "0.1.11"
 description = "Jarvis — persoonlijke AI-OS desktop client"
 authors = ["Gus Theunissen <gus.theunissen@proton.me>"]
 edition = "2021"
@@ -13,6 +13,9 @@ edition = "2021"
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "client_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+realtime-acceptance = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -33,7 +36,7 @@ time = "0.3"
 url = "2"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
-jarvis-client-core = { git = "https://github.com/HawkeyNL/PersonalJarvis.git", rev = "47450264c3fd0149c6d5636cd60b669127e09ffc" }
+jarvis-client-core = { git = "https://github.com/HawkeyNL/PersonalJarvis.git", rev = "9a2e19c6afbba484fbe33bb28c19e8a4df4db0c2" }
 tokio = { version = "1", features = ["time", "sync", "process", "io-util"] }
 tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"

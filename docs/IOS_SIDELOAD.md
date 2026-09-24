@@ -40,6 +40,28 @@ Before production promotion, test on a real iPhone:
 - Verify session/Keychain and local settings survive; do not uninstall first.
 - Test expiration/renewal and explicitly document the chosen tool's limits.
 
+## Updating without losing the local configuration
+
+Install the newer IPA over the existing Jarvis installation; do not delete the
+app first. Use the same signing account/team and the same effective bundle ID
+and Keychain access group in the sideload tool. Keep these stable across versions.
+The runtime Home Node address and preferences live in the app's UserDefaults;
+the registered device ID, private key and session live in the device-only Keychain.
+None of these storage names depend on the application version.
+
+Changing the signing identity/access group is not a normal app update: iOS can
+deny access to the old Keychain. Jarvis cannot and must not bypass that isolation.
+A missing key must not be silently regenerated for an already registered device.
+If the original identity cannot be recovered, explicitly reset and re-enroll,
+then approve the new device from the trusted Home Node administration interface.
+Check/revoke any obsolete registration separately. Resetting local data while
+offline does not prove the remote registration was revoked.
+
+A refused device challenge and a refused password/signature login are different
+failures. Retry a corrected password without resetting the identity. A revoked
+device requires new owner approval, not merely a new password. Never include
+passwords, activation codes, signatures or session tokens in bug reports.
+
 Re-signing may change application identifiers/entitlements; preservation of
 Keychain data is not guaranteed until this test passes. No live-device result
 is claimed by simulator or packaging tests. macOS Developer ID signing and

@@ -15,6 +15,7 @@ class SessionRepository(
     private val secureStore: SecureValueStore,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
+    val modelAuthorization = com.hawkeynl.jarvis.security.ModelAuthorization()
     fun hasSessionRecord(): Boolean = secureStore.exists(SESSION)
 
     fun session(): ProtectedSession = secureStore.read(SESSION)?.let {
@@ -45,11 +46,13 @@ class SessionRepository(
     fun clearPairingTicket() = secureStore.remove(PAIRING)
 
     fun reset() {
+        modelAuthorization.invalidate()
         secureStore.remove(PAIRING)
         secureStore.remove(SESSION)
     }
 
     private fun saveSession(session: ProtectedSession) {
+        modelAuthorization.invalidate()
         secureStore.write(SESSION, json.encodeToString(ProtectedSession.serializer(), session).encodeToByteArray())
     }
 

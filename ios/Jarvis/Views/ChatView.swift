@@ -3,6 +3,7 @@ import SwiftUI
 struct ChatView: View {
     @ObservedObject var model: JarvisAppModel
     @State private var draft = ""
+    @FocusState private var composerFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -14,7 +15,16 @@ struct ChatView: View {
                 }
             }
             .navigationTitle(model.currentConversationTitle)
+            .toolbarBackground(JarvisTheme.panel, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done", systemImage: "keyboard.chevron.compact.down") {
+                        composerFocused = false
+                    }
+                    .accessibilityLabel("Dismiss keyboard")
+                }
                 if model.isAuthenticated {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
@@ -30,6 +40,7 @@ struct ChatView: View {
                 }
             }
         }
+        .onDisappear { composerFocused = false }
     }
 
     private var conversation: some View {
@@ -44,6 +55,8 @@ struct ChatView: View {
                     }
                     .padding()
                 }
+                .background(JarvisTheme.background)
+                .scrollDismissesKeyboard(.interactively)
                 .onChange(of: model.messages.count) { _, _ in
                     if let last = model.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
@@ -51,11 +64,15 @@ struct ChatView: View {
             Divider()
             HStack(alignment: .bottom, spacing: 10) {
                 TextField("Message Jarvis", text: $draft, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1...6)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...3)
+                    .focused($composerFocused)
+                    .padding(14)
+                    .background(JarvisTheme.panel, in: RoundedRectangle(cornerRadius: 18))
+                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(JarvisTheme.accent.opacity(0.25)))
                     .submitLabel(.send)
                     .onSubmit { send() }
-                Button(action: send) { Image(systemName: "arrow.up.circle.fill").font(.title2) }
+                Button(action: send) { Image(systemName: "arrow.up.circle.fill").font(.largeTitle).frame(width: 44, height: 44) }
                     .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isSending)
                     .accessibilityLabel("Send message")
             }
@@ -80,7 +97,7 @@ private struct MessageBubble: View {
             Text(message.content)
                 .textSelection(.enabled)
                 .padding(12)
-                .background(message.isAssistant ? Color.secondary.opacity(0.13) : Color.accentColor.opacity(0.18))
+                .background(message.isAssistant ? JarvisTheme.panel : JarvisTheme.accent.opacity(0.18))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
             if message.isAssistant { Spacer(minLength: 48) }
         }

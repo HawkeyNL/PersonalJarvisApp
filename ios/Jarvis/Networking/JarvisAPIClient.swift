@@ -11,6 +11,8 @@ private final class RejectAPIRedirects: NSObject, URLSessionTaskDelegate {
 
 enum JarvisAPIError: LocalizedError, Equatable {
     case invalidConfiguration
+    case invalidActivationCode
+    case invalidAccountPassword
     case unreachable
     case timedOut
     case unauthorized
@@ -21,6 +23,8 @@ enum JarvisAPIError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .invalidConfiguration: "The Home Node address is not configured."
+        case .invalidActivationCode: "Enter the case-sensitive 12-character activation code from your Home Node (legacy 64-character codes are also supported)."
+        case .invalidAccountPassword: "Choose an account password of at least 15 characters and at most 1024 UTF-8 bytes."
         case .unreachable: "The Home Node could not be reached. Check its address and your network."
         case .timedOut: "The Home Node did not respond in time."
         case .unauthorized: "This session is no longer authorized."
@@ -194,6 +198,20 @@ actor JarvisAPIClient {
         response: Response.Type = Response.self
     ) async throws -> Response {
         try await request(path: path, method: "POST", body: body, token: token, expectedBinding: expectedBinding, response: response)
+    }
+
+    func activateFirstDevice(_ body: EnrollmentRequest, code: String) async throws -> FirstDeviceResponse {
+        guard Self.validActivationCode(code) else { throw JarvisAPIError.invalidActivationCode }
+        return try await request(path: "/v1/auth/bootstrap", method: "POST", body: body,
+            headers: ["X-Jarvis-Bootstrap-Secret": code], expectedBinding: bindingID, response: FirstDeviceResponse.self)
+    }
+
+    static func validActivationCode(_ code: String) -> Bool {
+        let bytes = Array(code.utf8)
+        let alphabet = Set("ABCDEFGHJKLMNPQRSTUVWXYZ23456789".utf8)
+        let hex = Set("0123456789abcdefABCDEF".utf8)
+        return (bytes.count == 12 && bytes.allSatisfy { alphabet.contains($0) }) ||
+            (bytes.count == 64 && bytes.allSatisfy { hex.contains($0) })
     }
 
     func post<Response: Decodable>(

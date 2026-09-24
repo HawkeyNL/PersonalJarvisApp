@@ -36,6 +36,49 @@ import kotlinx.serialization.json.Json
 class KtorJarvisApi(
     private val client: HttpClient = defaultHttpClient(),
 ) : JarvisApi {
+    override suspend fun modelPolicy(endpoint: HomeNodeEndpoint, token: String) = boundedModelRequest<com.hawkeynl.jarvis.security.ModelPolicySnapshot> {
+        client.get(endpoint.url("/v1/system/models")) { bearerAuth(token) }
+    }
+    override suspend fun modelToggle(endpoint: HomeNodeEndpoint, token: String, body: kotlinx.serialization.json.JsonObject) = boundedModelRequest<kotlinx.serialization.json.JsonObject> {
+        client.post(endpoint.url("/v1/system/config/privileged")) {
+            bearerAuth(token); contentType(ContentType.Application.Json); setBody(body)
+        }
+    }
+
+    private suspend inline fun <reified T> boundedModelRequest(crossinline block: suspend () -> io.ktor.client.statement.HttpResponse): ApiResult<T> {
+        return try {
+            val response = block()
+            if (response.status.value !in 200..299) return ApiResult.HttpError(response.status.value, "Modelwijziging niet bevestigd; ververs de status.")
+            val raw = withContext(Dispatchers.IO) {
+                response.bodyAsChannel().toInputStream().use { input ->
+                    val output = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        check(output.size() + read <= 8 * 1024 * 1024)
+                        output.write(buffer, 0, read)
+                    }
+                    output.toByteArray()
+                }
+            }
+            ApiResult.Success(Json { ignoreUnknownKeys = true }.decodeFromString<T>(raw.decodeToString()))
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { ApiResult.InvalidResponse("Modelbediening niet bereikbaar of ongeldig antwoord") }
+    }
+    override suspend fun accountStatus(endpoint: HomeNodeEndpoint) = request<AccountStatus> {
+        client.get(endpoint.url("/v1/auth/account/status"))
+    }
+    override suspend fun activateFirstDevice(endpoint: HomeNodeEndpoint, request: PairingCreateRequest, code: String): ApiResult<FirstDeviceResponse> {
+        if (!code.matches(Regex("[a-fA-F0-9]{64}"))) return ApiResult.InvalidResponse("Ongeldige activatiecode.")
+        return request<FirstDeviceResponse> {
+            client.post(endpoint.url("/v1/auth/bootstrap")) {
+                contentType(ContentType.Application.Json)
+                header("X-Jarvis-Bootstrap-Secret", code)
+                setBody(request)
+            }
+        }
+    }
     override suspend fun ready(endpoint: HomeNodeEndpoint) = request<HealthResponse> {
         client.get(endpoint.url("/readyz"))
     }

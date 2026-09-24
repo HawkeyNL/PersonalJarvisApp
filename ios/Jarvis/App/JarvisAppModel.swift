@@ -6,7 +6,11 @@ import UIKit
 final class JarvisAppModel: ObservableObject {
     @Published private(set) var connectionState: ConnectionState = .unconfigured
     @Published private(set) var enrollmentState: EnrollmentState = .notStarted
-    @Published private(set) var lockState: AppLockState = .unlocked
+    @Published private(set) var lockState: AppLockState = .unlocked {
+        didSet { if lockState != .unlocked { auth.modelAuthorization.invalidate() } }
+    }
+    @Published private(set) var isUnlocking = false
+    private var needsForegroundUnlock = false
     @Published private(set) var conversations: [ConversationSummary] = []
     @Published private(set) var messages: [ConversationMessage] = []
     @Published private(set) var currentConversationId: UUID?
@@ -43,6 +47,7 @@ final class JarvisAppModel: ObservableObject {
     private var voiceReleaseTask: Task<Void, Never>?
     private var presentation = ChatPresentationLifetime()
     private func invalidatePresentation(clearIdentity: Bool) {
+        auth.modelAuthorization.invalidate()
         presentation.invalidate()
         messages = []; conversations = []; isSending = false; realtimeAvailable = false
         if clearIdentity { pendingRequests.clear(); currentConversationId = nil; currentConversationTitle = "New conversation" }
@@ -81,6 +86,19 @@ final class JarvisAppModel: ObservableObject {
     }
 
     var isAuthenticated: Bool { enrollmentState == .authenticated }
+
+    func loadModelPolicy() async throws -> ModelPolicySnapshot {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        let generation = presentation.id
+        let result = try await auth.modelPolicy()
+        guard presentation.accepts(generation), lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        return result
+    }
+
+    func setModelEnabled(_ entry: ModelAccessEntry, policyHash: String) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        try await auth.setModelEnabled(entry, policyHash: policyHash)
+    }
 
     func start() async {
         guard let endpoint = endpointStore.endpoint else {
@@ -142,15 +160,38 @@ final class JarvisAppModel: ObservableObject {
         }
     }
 
-    func requestEnrollment() async {
+    func requestEnrollment(password: String? = nil, activationCode: String? = nil) async {
         let generation = presentation.id
         enrollmentState = .requesting
         do {
-            let result = try await auth.requestEnrollment(deviceName: UIDevice.current.name)
+            let result: AuthServiceOutcome
+            if let activationCode, let password {
+                result = try await auth.activateFirstDevice(deviceName: UIDevice.current.name, code: activationCode, password: password)
+            } else {
+                result = try await auth.requestEnrollment(deviceName: UIDevice.current.name, password: password)
+            }
             guard presentation.accepts(generation) else { return }
             apply(awaitResult: result)
+            if result == .authenticated { await restoreAuthentication() }
         }
-        catch { if presentation.accepts(generation) { handle(error) } }
+        catch {
+            guard presentation.accepts(generation) else { return }
+            if activationCode != nil {
+                // Bootstrap may have succeeded before login failed. Restore a
+                // saved device binding instead of attempting bootstrap twice.
+                let recovery = try? await auth.restore()
+                guard presentation.accepts(generation) else { return }
+                applyActivationFailure(error, recovery: recovery)
+                if recovery == .authenticated { await restoreAuthentication() }
+            } else {
+                handle(error)
+            }
+        }
+    }
+
+    func applyActivationFailure(_ error: Error, recovery: AuthServiceOutcome?) {
+        apply(awaitResult: recovery ?? .needsActivation)
+        notice = safeMessage(error)
     }
 
     func refreshEnrollment() async {
@@ -182,13 +223,16 @@ final class JarvisAppModel: ObservableObject {
                 realtimeAvailable = available
                 if realtimeAvailable, let origin = endpointStore.endpoint, lockState == .unlocked {
                     speech.enabled = voiceEnabled
-                    realtime.start(origin: origin, auth: auth, speech: speech) { [weak self] event in await self?.receiveRealtime(event) }
+                    realtime.start(origin: origin, auth: auth, speech: speech) { [weak self] event in try await self?.receiveRealtime(event) }
                 }
             }
         } catch { if presentation.accepts(generation) { handle(error) } }
     }
 
     func unlock() async {
+        guard !isUnlocking else { return }
+        isUnlocking = true
+        defer { isUnlocking = false }
         let generation = presentation.id
         let result = await biometricLock.unlock(reason: "Unlock your Jarvis conversations")
         guard presentation.accepts(generation) else { return }
@@ -205,6 +249,13 @@ final class JarvisAppModel: ObservableObject {
         }
     }
 
+    func unlockOnForeground() async {
+        guard needsForegroundUnlock, !isUnlocking else { return }
+        needsForegroundUnlock = false
+        guard lockState != .unlocked else { return }
+        await unlock()
+    }
+
     func beginSignIn() async {
         do {
             if try await auth.requiresLocalUnlock() {
@@ -217,6 +268,7 @@ final class JarvisAppModel: ObservableObject {
     }
 
     func lockWhenBackgrounded() {
+        needsForegroundUnlock = true
         invalidatePresentation(clearIdentity: false)
         voiceReleaseTask?.cancel()
         realtime.stop(); speech.stop()
@@ -350,13 +402,15 @@ final class JarvisAppModel: ObservableObject {
     private func apply(awaitResult result: AuthServiceOutcome) {
         switch result {
         case .needsEnrollment: enrollmentState = .notStarted
+        case .needsPassword: enrollmentState = .needsPassword
+        case .needsActivation: enrollmentState = .needsActivation
         case let .awaitingApproval(expiresAt): enrollmentState = .awaitingApproval(expiresAt: expiresAt)
         case .authenticated: enrollmentState = .authenticated
         case .signedOut: enrollmentState = .signedOut
         }
     }
 
-    private func receiveRealtime(_ event: RealtimeEvent) async {
+    private func receiveRealtime(_ event: RealtimeEvent) async throws {
         guard isAuthenticated, lockState == .unlocked else { return }
         let generation = presentation.id
         speech.receive(event)
@@ -373,11 +427,20 @@ final class JarvisAppModel: ObservableObject {
                 guard presentation.accepts(generation) else { return }
                 conversations = snapshot
                 if let selected = currentConversationId {
-                    let snapshot = try await chat.conversation(id: selected)
+                    let snapshot = try await RealtimeEventDelivery.selectedHistory {
+                        try await chat.conversation(id: selected)
+                    }
                     guard presentation.accepts(generation) else { return }
-                    if currentConversationId == selected { messages = snapshot.messages; currentConversationTitle = snapshot.title; isSending = snapshot.assistantRunning == true }
+                    if currentConversationId == selected {
+                        if let snapshot {
+                            messages = snapshot.messages; currentConversationTitle = snapshot.title; isSending = snapshot.assistantRunning == true
+                        } else { newConversation() }
+                    }
                 }
-            } catch { if presentation.accepts(generation) { notice = "Realtime connected; history reconciliation will retry after reconnect." } }
+            } catch {
+                if presentation.accepts(generation) { notice = "History reconciliation failed; reconnecting to retry." }
+                throw error
+            }
         case "conversation.created", "conversation.updated":
             if let id = payload.id, let title = payload.title, let at = payload.updated_at {
                 conversations.removeAll { $0.id == id }

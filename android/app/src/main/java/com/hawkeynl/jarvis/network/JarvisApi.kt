@@ -3,6 +3,12 @@ package com.hawkeynl.jarvis.network
 import java.io.File
 
 interface JarvisApi {
+    suspend fun modelPolicy(endpoint: HomeNodeEndpoint, token: String): ApiResult<com.hawkeynl.jarvis.security.ModelPolicySnapshot> =
+        ApiResult.InvalidResponse("Modelbediening niet beschikbaar")
+    suspend fun modelToggle(endpoint: HomeNodeEndpoint, token: String, body: kotlinx.serialization.json.JsonObject): ApiResult<kotlinx.serialization.json.JsonObject> =
+        ApiResult.InvalidResponse("Modelbediening niet beschikbaar")
+    suspend fun accountStatus(endpoint: HomeNodeEndpoint): ApiResult<AccountStatus>
+    suspend fun activateFirstDevice(endpoint: HomeNodeEndpoint, request: PairingCreateRequest, code: String): ApiResult<FirstDeviceResponse>
     suspend fun ready(endpoint: HomeNodeEndpoint): ApiResult<HealthResponse>
     suspend fun createPairing(
         endpoint: HomeNodeEndpoint,

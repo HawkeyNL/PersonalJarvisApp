@@ -4,7 +4,13 @@ struct RootView: View {
     @ObservedObject var model: JarvisAppModel
 
     var body: some View {
-        ZStack {
+        Group {
+            if model.lockState != .unlocked {
+                LockView(model: model)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(JarvisTheme.background)
+                    .ignoresSafeArea()
+            } else {
             TabView {
                 ChatView(model: model)
                     .tabItem { Label("Chat", systemImage: "message.fill") }
@@ -21,11 +27,8 @@ struct RootView: View {
                 SettingsView(model: model)
                     .tabItem { Label("Settings", systemImage: "gearshape") }
             }
-
-            if model.lockState != .unlocked {
-                LockView(model: model)
-                    .background(.regularMaterial)
-                    .ignoresSafeArea()
+            .toolbarBackground(JarvisTheme.panel, for: .tabBar)
+            .toolbarBackground(.visible, for: .tabBar)
             }
         }
     }

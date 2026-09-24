@@ -4,6 +4,7 @@ import Security
 enum KeychainError: LocalizedError {
     case status(OSStatus)
     case invalidData
+    case unsafeAcceptanceIdentity
 
     var errorDescription: String? {
         switch self {
@@ -11,17 +12,42 @@ enum KeychainError: LocalizedError {
             (SecCopyErrorMessageString(status, nil) as String?) ?? "Keychain operation failed."
         case .invalidData:
             "Secure data could not be decoded."
+        case .unsafeAcceptanceIdentity:
+            "Realtime test build requires its separate application identity."
         }
     }
 }
 
-struct KeychainStore {
+enum CredentialBuildIdentity {
+    static let acceptanceIdentifier = "com.hawkeynl.jarvis.realtime-acceptance"
+    #if JARVIS_REALTIME_ACCEPTANCE
+    static let acceptance = true
+    #else
+    static let acceptance = false
+    #endif
+    // Keep the production service stable across owner re-signing/AltStore updates.
+    static let service = acceptance ? acceptanceIdentifier : "com.hawkeynl.jarvis"
+
+    static func validate(bundleIdentifier: String?, acceptance: Bool) throws {
+        guard acceptance == (bundleIdentifier == acceptanceIdentifier) else {
+            throw KeychainError.unsafeAcceptanceIdentity
+        }
+    }
+}
+
+protocol SecureValueStorage: Sendable {
+    func read(account: String) throws -> Data?
+    func save(_ data: Data, account: String) throws
+    func delete(account: String) throws
+}
+
+struct KeychainStore: SecureValueStorage {
     private let service: String
 
-    init(service: String = "com.hawkeynl.jarvis") { self.service = service }
+    init(service: String = CredentialBuildIdentity.service) { self.service = service }
 
     func read(account: String) throws -> Data? {
-        var query = baseQuery(account: account)
+        var query = try baseQuery(account: account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
@@ -33,7 +59,7 @@ struct KeychainStore {
     }
 
     func save(_ data: Data, account: String) throws {
-        let query = baseQuery(account: account)
+        let query = try baseQuery(account: account)
         let updates = [kSecValueData as String: data]
         let updateStatus = SecItemUpdate(query as CFDictionary, updates as CFDictionary)
         if updateStatus == errSecSuccess { return }
@@ -48,14 +74,18 @@ struct KeychainStore {
     }
 
     func delete(account: String) throws {
-        let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
+        let status = SecItemDelete(try baseQuery(account: account) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError.status(status)
         }
     }
 
-    private func baseQuery(account: String) -> [String: Any] {
-        [
+    private func baseQuery(account: String) throws -> [String: Any] {
+        try CredentialBuildIdentity.validate(
+            bundleIdentifier: Bundle.main.bundleIdentifier,
+            acceptance: CredentialBuildIdentity.acceptance
+        )
+        return [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,

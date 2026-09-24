@@ -8,7 +8,7 @@
 //
 // The lock is opt-in via a Settings toggle (off by default) so day-to-day
 // development isn't interrupted by prompts.
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { currentAuthStatus } from "./auth";
 import { getJsonAuth, postJsonAuth } from "./api";
@@ -19,6 +19,12 @@ import {
 } from "./platform";
 
 export const locked = ref(false); // resolved by initLock()
+watch(locked, (value) => {
+  if (value) void invoke("revoke_model_authorization").catch(() => {
+    // Fail closed if native revocation cannot be acknowledged.
+    window.location.reload();
+  });
+}, { flush: "sync" });
 export const unlocking = ref(false);
 export const lockError = ref<string | null>(null);
 export { isDesktop };

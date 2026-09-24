@@ -1,6 +1,7 @@
 package com.hawkeynl.jarvis.chat
 
 import com.hawkeynl.jarvis.network.ChatTurn
+import com.hawkeynl.jarvis.network.ApiResult
 import com.hawkeynl.jarvis.network.HomeNodeEndpoint
 import com.hawkeynl.jarvis.storage.SessionRepository
 import io.ktor.client.HttpClient
@@ -30,6 +31,26 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlin.random.Random
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
+
+// Ktor's generic WebSockets ping setting does not apply to OkHttp. Let the
+// native engine detect missing pongs even while no chat messages are arriving.
+internal fun realtimeSocketEngine(): OkHttpClient = OkHttpClient.Builder()
+    .pingInterval(30, TimeUnit.SECONDS)
+    .followRedirects(false)
+    .followSslRedirects(false)
+    .build()
+
+// Recovery is read-only. A failed snapshot must leave the socket attempt so
+// bounded reconnect retries it; never acknowledge recovery or resubmit a prompt.
+internal fun <T> ApiResult<T>.realtimeSnapshot(): T = when (this) {
+    is ApiResult.Success -> value
+    else -> throw IllegalStateException("Realtime history recovery failed")
+}
+
+internal fun <T> ApiResult<T>.realtimeSelectedHistory(): T? =
+    if (this is ApiResult.HttpError && status == 404) null else realtimeSnapshot()
 
 @Serializable private data class Capability(val protocol: Int, val asynchronous_chat: Boolean)
 @Serializable private data class Submit(val request_id: String, val conversation_id: String?, val messages: List<ChatTurn>)
@@ -44,6 +65,7 @@ private sealed interface VoiceCommand {
 class RealtimeService(private val sessions: SessionRepository) {
     private val json = Json { ignoreUnknownKeys = true }
     private val client = HttpClient(OkHttp) {
+        engine { preconfigured = realtimeSocketEngine() }
         followRedirects = false
         install(ContentNegotiation) { json(json) }
         install(HttpTimeout) { requestTimeoutMillis = 20_000; connectTimeoutMillis = 15_000 }

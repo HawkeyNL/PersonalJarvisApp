@@ -1,7 +1,7 @@
 {
   "name": "jarvis-app",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.11",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -20,6 +20,7 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-http": "^2.5.9",
     "@tauri-apps/plugin-opener": "^2",
+    "chart.js": "^4.5.1",
     "markdown-it": "^14.3.0",
     "onnxruntime-web": "^1.27.0",
     "pinia": "^2.2.0",

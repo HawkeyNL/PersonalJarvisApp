@@ -28,6 +28,8 @@ import kotlinx.coroutines.launch
 import com.hawkeynl.jarvis.chat.RealtimeEvent
 import com.hawkeynl.jarvis.chat.RealtimeSpeech
 import com.hawkeynl.jarvis.chat.SpeechRate
+import com.hawkeynl.jarvis.chat.realtimeSnapshot
+import com.hawkeynl.jarvis.chat.realtimeSelectedHistory
 
 enum class AppTab { CHAT, CONVERSATIONS, SETTINGS }
 
@@ -43,6 +45,7 @@ sealed interface AndroidUpdateUiState {
 }
 
 data class JarvisUiState(
+    val activationRequired: Boolean = false,
     val voiceEnabled: Boolean = false,
     val voiceRate: Float = 1f,
     val selectedVoice: String = "",
@@ -98,6 +101,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     fun editEndpoint(value: String) = _state.update { it.copy(endpointDraft = value, error = null) }
 
     fun saveEndpoint() {
+        container.sessions.modelAuthorization.invalidate()
         viewModelScope.launch {
             val parsed = HomeNodeEndpoint.parse(_state.value.endpointDraft)
             if (parsed is EndpointValidation.Valid && parsed.endpoint != _state.value.endpoint) {
@@ -154,7 +158,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun beginEnrollment() {
+    fun beginEnrollment(password: String? = null, activationCode: String? = null) {
         val endpoint = _state.value.endpoint ?: return
         viewModelScope.launch {
             _state.update { it.copy(busy = true, error = null) }
@@ -162,6 +166,8 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 endpoint,
                 "Jarvis Android (${Build.MODEL.take(40)})",
                 Instant.now().epochSecond,
+                password,
+                activationCode,
             )
             handleEnrollment(result)
             if (result is EnrollmentOutcome.Pending) pollPairingUntilResolved(endpoint)
@@ -269,6 +275,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun logout() {
+        container.sessions.modelAuthorization.invalidate()
         pending.clear()
         container.realtime.stop(); speech.stop()
         val endpoint = _state.value.endpoint ?: return
@@ -279,11 +286,13 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun lockForBackground() {
+        container.sessions.modelAuthorization.invalidate()
         container.realtime.stop(); speech.stop()
         if (container.sessions.hasSessionRecord()) _state.update { it.copy(locked = true) }
     }
 
     fun resetDevice() {
+        container.sessions.modelAuthorization.invalidate()
         pending.clear()
         container.realtime.stop(); speech.stop()
         viewModelScope.launch {
@@ -350,6 +359,11 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 
     private suspend fun handleEnrollment(result: EnrollmentOutcome) {
         when (result) {
+            EnrollmentOutcome.PasswordRequired -> _state.update {
+                it.copy(busy = false, pairingPending = false, authenticated = false, locked = false,
+                    activationRequired = false, error = "Voer je accountwachtwoord in om aan te melden.")
+            }
+            EnrollmentOutcome.ActivationRequired -> _state.update { it.copy(busy = false, pairingPending = false, activationRequired = true, error = null) }
             is EnrollmentOutcome.Pending -> _state.update {
                 it.copy(
                     busy = false,
@@ -364,6 +378,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                         busy = false,
                         pairingPending = false,
                         authenticated = true,
+                        activationRequired = false,
                         locked = true,
                         error = null,
                     )
@@ -438,11 +453,18 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 val recovered = container.realtime.recover(endpoint, pending.requests())
                 if (_state.value.endpoint != endpoint || _state.value.locked || !_state.value.authenticated) return@start
                 for ((request, run) in recovered) pending.reconcile(request, run)
-                loadConversations(endpoint)
+                val conversations = container.conversations.list(endpoint).realtimeSnapshot()
+                if (_state.value.endpoint != endpoint || _state.value.locked || !_state.value.authenticated) return@start
+                _state.update { it.copy(conversations = conversations.conversations) }
                 val selected = _state.value.conversationId
                 if (selected != null) {
-                    val snapshot = container.conversations.load(endpoint, selected)
-                    if (snapshot is ApiResult.Success) _state.update { if (it.conversationId == selected) it.copy(messages = snapshot.value.messages, busy = snapshot.value.assistant_running) else it }
+                    val snapshot = container.conversations.load(endpoint, selected).realtimeSelectedHistory()
+                    if (_state.value.endpoint != endpoint || _state.value.locked || !_state.value.authenticated) return@start
+                    _state.update {
+                        if (it.conversationId != selected) it
+                        else if (snapshot == null) it.copy(conversationId = null, messages = emptyList(), busy = false)
+                        else it.copy(messages = snapshot.messages, busy = snapshot.assistant_running)
+                    }
                 }
             } else receiveRealtime(event)
         }

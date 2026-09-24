@@ -3,10 +3,16 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var model: JarvisAppModel
     @State private var showResetConfirmation = false
+    @State private var showLogoutConfirmation = false
 
     var body: some View {
         NavigationStack {
             Form {
+                if model.isAuthenticated {
+                    Section("Home Node models") {
+                        NavigationLink("Model access") { ModelsView(model: model) }
+                    }
+                }
                 Section("Local voice") {
                     Toggle("Speak replies on this active device", isOn: $model.voiceEnabled)
                     Picker("System voice", selection: $model.selectedVoice) {
@@ -35,7 +41,7 @@ struct SettingsView: View {
                         .font(.footnote)
                     if model.isAuthenticated {
                         Button("Lock now") { model.lockWhenBackgrounded() }
-                        Button("Log out") { Task { await model.logout() } }
+                        Button("Log out") { showLogoutConfirmation = true }
                     }
                     Button("Reset this device", role: .destructive) { showResetConfirmation = true }
                 }
@@ -44,7 +50,21 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .scrollContentBackground(.hidden)
+            .background(JarvisTheme.background)
+            .toolbarBackground(JarvisTheme.panel, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .task { model.refreshLocalVoices() }
+            .confirmationDialog(
+                "Log out of Jarvis?",
+                isPresented: $showLogoutConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Log out", role: .destructive) { Task { await model.logout() } }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This ends your session. Your Home Node address and device identity are kept so you can sign in again without resetting this device.")
+            }
             .confirmationDialog(
                 "Remove this device identity?",
                 isPresented: $showResetConfirmation,
@@ -53,6 +73,7 @@ struct SettingsView: View {
                 Button("Reset and require re-enrollment", role: .destructive) {
                     Task { await model.resetDevice() }
                 }
+                Button("Cancel", role: .cancel) { }
             } message: {
                 Text("Jarvis will attempt to revoke this device, then remove its local key and session even if the Home Node is offline.")
             }

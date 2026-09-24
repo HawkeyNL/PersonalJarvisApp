@@ -2,9 +2,9 @@
 
 The authoritative protocol is `PersonalJarvis/crates/client-core`. Desktop pins
 its exact reviewed Git revision in `desktop/src-tauri/Cargo.toml`; Android and
-iOS decode the same public envelope through native DTOs. This branch requires
-the corresponding Core feature branch to be reachable before a clean remote
-Cargo fetch can succeed. No sibling path or floating branch dependency is used.
+iOS decode the same public envelope through native DTOs. The pinned Core
+revision must remain reachable for clean remote Cargo fetches. No sibling path
+or floating branch dependency is used.
 
 All clients negotiate `/v1/events/capability`, submit new chat runs over HTTP,
 and receive native authenticated WebSocket events through `/v1/events`. Older
@@ -20,6 +20,25 @@ ingress carries WebSocket upgrades; no new public port is required.
 Reconnect uses bounded exponential backoff with jitter. A ready event triggers
 authoritative conversation-list/selected-history reconciliation. Events for a
 different conversation update metadata without changing the selected screen.
+Desktop bounds connection setup to 15 seconds, waiting for incoming frames to
+80 seconds, and heartbeat pong writes to five seconds. A stuck writer exits
+the socket loop, drops the speech worker, and follows the same reconnect path;
+it cannot retain playback indefinitely while awaiting a network write. Native
+tests exercise a permanently pending sink as well as a writable sink.
+Android configures the OkHttp engine's own 30-second ping interval, rather
+than Ktor's generic WebSockets ping setting (which does not apply to that engine).
+Missing pongs cause the native transport to fail and enter the existing bounded
+reconnect loop even when there are no application events. Both ordinary and
+cross-scheme redirects are disabled on the native engine to keep authentication
+bound to the enrolled origin. This is foreground transport, not a background
+keepalive service.
+iOS sends a native ping every 30 seconds, with at most one outstanding ping.
+A missing pong at the next interval closes that connection; the existing
+backoff reconnects it. The watchdog is cancelled on every connection exit.
+Both mobile clients propagate failed history reconciliation to that reconnect
+loop instead of silently waiting on a healthy socket forever. Recovery uses
+read-only requests, never prompt resubmission. A selected conversation returning
+404 clears that selection only if it is still selected; transient errors retry.
 Mobile clients stop sockets/speech on background or lock and reconnect after
 foreground authentication. No permanent mobile foreground service, APNs, or
 background socket guarantee is introduced.
@@ -142,6 +161,21 @@ false queue-full failure. The queue remains bounded and cancellation-safe.
 
 ## Validation and remaining acceptance
 
+### Verified CI baseline (2026-09-20)
+
+Client CI run [35514615926](https://github.com/HawkeyNL/PersonalJarvisApp/actions/runs/35514615926)
+passed for commit `9497b4bca57d32f891896bb762b8860eb5af7af3`. It includes Linux,
+Windows and macOS desktop checks, Android debug/release-variant tests and lint,
+and unsigned iOS simulator tests plus device-build packaging validation.
+The log explicitly confirms the heartbeat and event-delivery regression suites,
+alongside the existing DTO, endpoint and authentication test suites.
+This supersedes the historical "pending macOS/SDK execution" notes below for
+automated tests included in those suites. It does not supersede the outstanding
+physical-device audio, real Keychain access, or cross-device acceptance checks.
+No production release or device-test success is implied by this CI result.
+
+### Implementation and platform-test scope
+
 Desktop login and authenticated JSON responses are bounded while reading chunks,
 not only after collecting the complete response. Limits remain 16 KiB for login
 and 16 MiB for the authenticated proxy. Oversized advertised lengths fail before
@@ -244,7 +278,112 @@ XCTest coverage is added but has not been executed without Xcode.
 iOS: the unsigned simulator build/test commands in `.github/workflows/ci.yml`
 require a macOS/Xcode runner; no distribution signing credentials are involved.
 
+The September 20 follow-up adds `testDisconnectedSpeechDropsBufferedSuffixAndLateCompletion`
+to the existing iOS XCTest target. It exercises the actual speech controller's
+connection cleanup, late canonical completion, and reconnect without inherited
+voice ownership. It passed on the macOS runner in
+[Client CI 35533896399](https://github.com/HawkeyNL/PersonalJarvisApp/actions/runs/35533896399)
+at `8cfac3a23273e63330dc2da6ed485609fe88f6b2`; all 42 iOS simulator tests passed.
+That run also passed Android debug/release validation, native desktop builds on
+Linux/macOS/Windows, frontend tests, and release/privacy validation. The three
+desktop realtime/speech Node test files, deployment-privacy scan and ten Core
+realtime unit tests additionally passed locally. Xcode was not run on this
+Linux host. Physical-device acceptance remains outstanding: none of these tests
+proves simultaneous audible playback behavior or real mobile sleep/network
+transitions. This follow-up performs no merge, release or deployment.
+
 Mocked Core integration tests cover two authenticated sockets, one inference,
 identical canonical final text, voice-owner gating, retry deduplication and
 REST recovery. They do not substitute for actual desktop/iPhone/Android audio,
 sleep/wake, background/resume, or network-transition acceptance on devices.
+
+## Isolated desktop acceptance build
+
+Do not replace a production installation merely to test a review branch.
+From `desktop/` on the review checkout:
+
+```sh
+npm ci
+npm run tauri -- dev --config src-tauri/tauri.acceptance.conf.json --features realtime-acceptance
+```
+
+This mode uses app identifier and Keychain service
+`com.hawkeynl.jarvis.realtime-acceptance`, a separate Tauri application-data
+directory, and a visible **Jarvis Realtime Test** window title. Both the config
+override and Cargo feature are required: mismatches fail during setup before
+credential commands become available. The test variant disables the updater
+even if an updater public key is present in the build environment. Production
+builds retain their existing identifier and credential service.
+
+Enroll a separate test identity against an isolated test Core with a counting
+fake provider. Do not copy production auth metadata, bearer tokens or keys.
+Local unit tests cannot certify OS Keychain separation on the owner's machine.
+
+## Isolated iOS acceptance build
+
+Use a separate review checkout on the Mac. Open `ios/Jarvis.xcodeproj` in Xcode.
+For the **Jarvis application target's Debug configuration only**, set:
+
+- Product Bundle Identifier: `com.hawkeynl.jarvis.realtime-acceptance`
+- Swift Active Compilation Conditions: retain `DEBUG` and add `JARVIS_REALTIME_ACCEPTANCE`
+- Display Name: `Jarvis Realtime Test` (local test checkout only)
+- Signing: the owner's local development team; select the connected iPhone.
+
+Both the identifier and compilation condition are required. Before any Keychain
+read/write/delete, a mismatched build fails closed. The test service is
+`com.hawkeynl.jarvis.realtime-acceptance`; production retains
+`com.hawkeynl.jarvis`, including owner re-signing with AltStore. Do not change
+production identifiers or delete existing Keychain items. The separate bundle
+also provides a separate app sandbox. Do not copy production credentials into it.
+
+Build/run locally from Xcode and enroll only against the isolated test Core.
+Do not re-sign this acceptance build to the production bundle ID. This procedure
+still requires physical validation: verify both apps coexist, the test app starts
+without a session, and the original app's session remains untouched.
+
+CI additionally builds the acceptance variant without signing:
+
+```sh
+cd ios
+xcodebuild -project Jarvis.xcodeproj -scheme Jarvis \
+  -configuration Debug -sdk iphonesimulator \
+  -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath /tmp/JarvisAcceptance \
+  PRODUCT_BUNDLE_IDENTIFIER=com.hawkeynl.jarvis.realtime-acceptance \
+  SWIFT_ACTIVE_COMPILATION_CONDITIONS='DEBUG JARVIS_REALTIME_ACCEPTANCE' \
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+```
+
+This compiles the separate credential path; the ordinary simulator XCTest suite
+tests matching/mismatched identity decisions and production re-signing behavior.
+Neither command proves physical-device isolation, voice output or network recovery.
+
+### September 22 acceptance-build verification
+
+[Client CI 35769695337](https://github.com/HawkeyNL/PersonalJarvisApp/actions/runs/35769695337)
+passed at `3b43b83492aec7e75c2f2b8bd0479d17de9350f3`. All desktop native
+jobs (Linux, Windows, macOS), Android debug/release validation, frontend and
+release/privacy jobs succeeded. Desktop jobs tested the acceptance Cargo feature
+as well as the normal build. iOS ran 44 simulator tests with zero failures,
+including both `CredentialBuildIdentityTests`, compiled the isolated acceptance
+variant, and validated unsigned physical-device IPA packaging.
+
+Locally, 59 release-tooling tests passed; two requiring ORAS/minisign were skipped.
+The CI release-contract job installed those tools and passed its checks. The
+local deployment privacy scan and four privacy regression tests also passed.
+These results do not constitute signed installation or physical acceptance.
+
+Outstanding hardware evidence, using isolated enrolled test identities and a
+counting fake provider, is:
+
+1. Mac and iPhone show the same final canonical response for one prompt, with
+   exactly one provider invocation and one active speech device.
+2. Sending from the other device transfers speech ownership; stop and ownership
+   loss stop audible playback without modifying history or invoking the model.
+3. Background/resume and network loss recover canonical history without duplicate
+   messages or speech, and do not change the other device's selected conversation.
+4. Production and test app storage remain separate on the actual devices.
+5. Android physical speech/lifecycle behavior is checked when hardware is available;
+   its green CI and JVM speech mocks are not a claim of audible hardware testing.
+
+No merge, release, tag or production deployment was performed for this review.

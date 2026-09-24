@@ -1,14 +1,14 @@
 import Foundation
 
 actor SecureCredentialStore {
-    private let keychain: KeychainStore
+    private let keychain: any SecureValueStorage
     private let deviceAccount = "registered-device-id-v1"
     private let sessionAccount = "authenticated-session-v1"
     private let pairingAccount = "pending-pairing-v1"
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    init(keychain: KeychainStore = KeychainStore()) { self.keychain = keychain }
+    init(keychain: any SecureValueStorage = KeychainStore()) { self.keychain = keychain }
 
     func session() throws -> SecureSession? {
         guard let data = try keychain.read(account: sessionAccount) else { return nil }
