@@ -159,7 +159,7 @@ final class RealtimeHeartbeatTests: XCTestCase {
 
 // Unsigned CI cannot access Apple's entitled Keychain. Exercise the same
 // identity/auth logic with fixture-only storage; production has no fallback.
-private final class FixtureSecureStorage: SecureValueStorage, @unchecked Sendable {
+final class FixtureSecureStorage: SecureValueStorage, @unchecked Sendable {
     private let lock = NSLock()
     private var values: [String: Data] = [:]
     func read(account: String) throws -> Data? {
