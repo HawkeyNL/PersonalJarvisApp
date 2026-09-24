@@ -95,7 +95,13 @@ Never replace the pin with a branch, sibling path, or copied crate.
 Desktop and mobile model controls require an enrolled, approved device and a
 Home Node advertising `device-signed-model-toggle-v1`. Confirming a change
 opens native OS authentication: biometrics with the platform's credential
-fallback where supported. No device password or private signing key is sent
+fallback where supported. Successful model authorization is remembered only in
+native memory for a fixed five minutes (not extended by subsequent changes).
+Each change still requires confirmation and its own fresh, action-bound signed
+approval. Lock, logout, device reset and Home Node/session changes revoke the
+window, including pending authentication. App restart also clears it. Wall-clock
+changes cannot extend the monotonic limit; suspend beyond five minutes expires it.
+No device password or private signing key is sent
 to the Home Node or exposed to the desktop frontend.
 
 Changing Home Node/session, cancelling authentication, an expired approval,

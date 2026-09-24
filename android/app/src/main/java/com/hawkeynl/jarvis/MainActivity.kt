@@ -40,7 +40,8 @@ class MainActivity : FragmentActivity() {
         }
         callback?.invoke(result.resultCode == Activity.RESULT_OK)
     }
-    private val modelControls by lazy { ModelControlService(container.api, container.sessions, container.settings, container.identity, ::authenticateModelChange) }
+    private val modelControls by lazy { ModelControlService(container.api, container.sessions, container.settings, container.identity, ::authenticateModelChange,
+        { !viewModel.state.value.locked && viewModel.state.value.authenticated }) }
 
     private suspend fun authenticateModelChange(reason: String): Boolean {
         val accepted = suspendCancellableCoroutine<Boolean> { continuation ->

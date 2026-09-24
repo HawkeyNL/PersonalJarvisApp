@@ -44,7 +44,7 @@ onMounted(reload);
 <template>
   <section class="model-controls">
     <h3>Modeltoegang</h3>
-    <p>Inschakelen staat gebruik toe binnen het bestaande budget. Iedere wijziging vereist bevestiging via het besturingssysteem.</p>
+    <p>Inschakelen staat gebruik toe binnen het bestaande budget. OS-authenticatie geldt vijf minuten, tot vergrendelen of uitloggen. Iedere wijziging blijft apart bevestigd.</p>
     <div class="model-toolbar">
       <input v-model="search" aria-label="Zoek modellen" placeholder="Zoek provider of model" @input="page = 0" />
       <button :disabled="busy" @click="reload">Ververs</button>
@@ -70,7 +70,7 @@ onMounted(reload);
         <p>{{ selected.provider }} / {{ selected.model }}</p>
         <p>Dit wijzigt de gedeelde Home Node-policy voor alle apparaten. Lopende requests worden niet geannuleerd.</p>
         <button autofocus @click="selected = null">Annuleren</button>
-        <button @click="confirm">Bevestigen met OS-authenticatie</button>
+        <button @click="confirm">Wijziging bevestigen</button>
       </div>
     </div>
   </section>

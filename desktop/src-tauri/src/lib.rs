@@ -17,6 +17,7 @@ mod app_updates;
 mod local_speech;
 mod local_speech_engine;
 mod local_voices;
+mod model_authorization;
 mod model_control;
 mod native_response;
 mod realtime;
@@ -31,6 +32,7 @@ fn auth_storage() -> Result<std::sync::MutexGuard<'static, u64>, String> {
         .map_err(|_| "native auth storage unavailable".to_string())
 }
 fn advance_auth_epoch(epoch: &mut u64) -> Result<(), String> {
+    model_authorization::clear()?;
     *epoch = epoch
         .checked_add(1)
         .ok_or("native auth generation exhausted")?;
@@ -785,6 +787,13 @@ fn biometric_unlock(reason: String, allow_password: bool) -> Result<(), String> 
     authenticate_owner(&reason, allow_password)
 }
 
+/// Revocation only: the webview cannot mint or extend an authorization lease.
+#[tauri::command]
+fn revoke_model_authorization() -> Result<(), String> {
+    let mut guard = auth_storage()?;
+    advance_auth_epoch(&mut guard)
+}
+
 fn authenticate_owner(reason: &str, allow_password: bool) -> Result<(), String> {
     use std::sync::mpsc;
     use std::time::Duration;
@@ -876,6 +885,7 @@ pub fn run() {
             home_node_config,
             home_node_configure,
             biometric_unlock,
+            revoke_model_authorization,
             #[cfg(desktop)]
             app_updates::app_update_status,
             #[cfg(desktop)]

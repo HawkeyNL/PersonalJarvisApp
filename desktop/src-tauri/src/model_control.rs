@@ -104,19 +104,25 @@ pub(super) async fn set_model_enabled(
     let signing_origin = origin.clone();
     let body =
         tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
-            authenticate_owner(
-                &format!(
-                    "Jarvis: {}/{} {}",
-                    approval.provider,
-                    approval.model,
-                    if approval.enabled {
-                        "inschakelen"
-                    } else {
-                        "uitschakelen"
-                    }
-                ),
-                true,
-            )?;
+            let _prompt = model_authorization::PROMPT
+                .lock()
+                .map_err(|_| "Model authorization unavailable")?;
+            let fresh = !model_authorization::valid(epoch)?;
+            if fresh {
+                authenticate_owner(
+                    &format!(
+                        "Jarvis: {}/{} {}; modelwijzigingen vijf minuten toestaan",
+                        approval.provider,
+                        approval.model,
+                        if approval.enabled {
+                            "inschakelen"
+                        } else {
+                            "uitschakelen"
+                        }
+                    ),
+                    true,
+                )?;
+            }
             let guard = auth_storage()?;
             let current = load_metadata(&signing_app)?;
             validate_login_binding(
@@ -129,6 +135,14 @@ pub(super) async fn set_model_enabled(
                 || time::OffsetDateTime::now_utc().unix_timestamp() >= approval.expires_at
             {
                 return Err("Goedkeuring verlopen of apparaat gewijzigd".into());
+            }
+            // Only a real OS prompt grants a new fixed window, after binding
+            // revalidation. Reused grants never slide the deadline forward.
+            if fresh {
+                model_authorization::remember(epoch)?;
+            }
+            if !model_authorization::valid(epoch)? {
+                return Err("Modelautorisatie verlopen; probeer opnieuw".into());
             }
             let signature = hex::encode(
                 signing_key_unlocked(&signing_app, false)?

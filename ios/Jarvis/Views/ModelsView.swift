@@ -15,7 +15,7 @@ struct ModelsView: View {
     var body: some View {
         List {
             Section {
-                Text("Changes apply to the Home Node and every device. Each change requires Face ID, Touch ID or your device passcode. Existing budget limits remain in effect.")
+                Text("Changes apply to every device. Face ID, Touch ID or your passcode authorizes model changes for five minutes, until lock or logout. Each change still needs confirmation. Budget limits remain in effect.")
                     .font(.footnote)
                 if let notice { Text(notice).foregroundStyle(JarvisTheme.accent) }
                 Button("Refresh") { Task { await reload() } }.disabled(busy)
@@ -50,10 +50,10 @@ struct ModelsView: View {
         .onChange(of: search) { _, _ in page = 0 }
         .task { await reload() }
         .confirmationDialog("Change model access?", isPresented: $confirming, titleVisibility: .visible) {
-            Button("Confirm with device authentication") { Task { await change() } }
+            Button("Confirm model change") { Task { await change() } }
             Button("Cancel", role: .cancel) { selected = nil }
         } message: {
-            if let selected { Text("\(selected.enabled ? "Disable" : "Enable") \(selected.provider)/\(selected.model)? Running requests will not be cancelled.") }
+            if let selected { Text("\(selected.enabled ? "Disable" : "Enable") \(selected.provider)/\(selected.model)? Device authentication is remembered for five minutes, until lock or logout. Running requests will not be cancelled.") }
         }
     }
 

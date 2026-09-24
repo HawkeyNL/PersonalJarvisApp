@@ -31,7 +31,7 @@ fun ModelControls(controller: ModelControlService) {
     if (open) AlertDialog(onDismissRequest = { if (!busy) open = false }, title = { Text("Modellen") },
         text = {
             Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
-                Text("Elke wijziging vereist OS-authenticatie en geldt voor alle apparaten. Budgetgrenzen blijven actief.")
+                Text("OS-authenticatie geldt vijf minuten, tot vergrendelen of uitloggen. Elke wijziging blijft apart bevestigd en geldt voor alle apparaten. Budgetgrenzen blijven actief.")
                 OutlinedTextField(value = search, onValueChange = { search = it; page = 0 }, label = { Text("Zoeken") })
                 Text(notice)
                 val entries = policy?.models?.filter { "${it.provider}/${it.model}".contains(search, ignoreCase = true) }.orEmpty()
@@ -67,6 +67,6 @@ fun ModelControls(controller: ModelControlService) {
                         busy = false
                     }
                 }
-            }) { Text("Bevestigen met OS-authenticatie") } })
+            }) { Text("Wijziging bevestigen") } })
     }
 }
