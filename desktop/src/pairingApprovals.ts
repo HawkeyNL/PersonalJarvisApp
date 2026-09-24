@@ -4,6 +4,7 @@ import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { currentAuthStatus } from "./auth";
 import { getJsonAuth, postJsonAuth } from "./api";
+import { createSerialPoller } from "./serialPoller";
 
 export type PairingRequest = {
   id: string;
@@ -17,8 +18,9 @@ export type PairingRequest = {
 };
 export const pairingRequests = ref<PairingRequest[]>([]);
 export const pairingError = ref<string | null>(null);
-let polling = false;
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+// Core allows five pairing-list reads per source IP per minute. Leave room for
+// manual/other-device requests and never overlap requests across app restarts.
+const pairingPoller = createSerialPoller(refresh, 60_000);
 
 async function refresh(): Promise<boolean> {
   const status = await currentAuthStatus();
@@ -61,7 +63,6 @@ export async function denyPairing(request: PairingRequest): Promise<void> {
 }
 
 export function startPairingPolling(): void {
-  if (polling) return; polling = true;
-  (async () => { while (polling) { await refresh(); await sleep(10_000); } })();
+  pairingPoller.start();
 }
-export function stopPairingPolling(): void { polling = false; }
+export function stopPairingPolling(): void { pairingPoller.stop(); }
