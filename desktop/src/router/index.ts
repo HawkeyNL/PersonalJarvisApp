@@ -5,13 +5,14 @@ import Health from "../views/Health.vue";
 import Settings from "../views/Settings.vue";
 import NodeStub from "../views/NodeStub.vue";
 import Context from "../views/Context.vue";
+import Conversations from "../views/Conversations.vue";
 
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
     // Core hub + module pages
     { path: "/", name: "home", component: Home },
-    { path: "/conversations", name: "conversations", component: NodeStub },
+    { path: "/conversations", name: "conversations", component: Conversations },
     { path: "/agents", name: "agents", component: NodeStub },
     { path: "/tasks", name: "tasks", component: NodeStub },
     { path: "/integrations", name: "integrations", component: NodeStub },

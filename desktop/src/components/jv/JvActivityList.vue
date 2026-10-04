@@ -2,7 +2,8 @@
 import NavIcon, { type IconName } from "../NavIcon.vue";
 import type { Tone } from "../../hubModel";
 
-// Recent items next to the tile grid. Each row: icon, title, detail, time, status.
+// Recent items next to the tile grid. Each row: icon, title, detail, time,
+// optional row actions (slot "actions"), status.
 export type ActivityItem = { id: string; icon: IconName; title: string; detail?: string; time?: string; tone: Tone; toneLabel: string };
 defineProps<{ title: string; items: ActivityItem[]; empty: string }>();
 </script>
@@ -21,6 +22,7 @@ defineProps<{ title: string; items: ActivityItem[]; empty: string }>();
           <span v-if="item.detail" class="detail">{{ item.detail }}</span>
         </span>
         <span v-if="item.time" class="time">{{ item.time }}</span>
+        <span v-if="$slots.actions" class="actions"><slot name="actions" :item="item" /></span>
         <span class="dot" :class="item.tone" role="img" :aria-label="item.toneLabel" :title="item.toneLabel"></span>
       </li>
     </ul>
@@ -47,6 +49,7 @@ li + li { border-top: 1px solid var(--line-a18); }
 .title { font-size: 12px; font-weight: 500; color: #f1faf6; }
 .detail { margin-top: 2px; font-size: 11px; color: var(--text-5); }
 .time { flex: none; font-size: 11px; color: var(--text-5); }
+.actions { flex: none; display: flex; gap: 8px; }
 .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--idle); }
 .dot.ok { background: var(--accent); box-shadow: var(--glow-sm); }
 .dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
