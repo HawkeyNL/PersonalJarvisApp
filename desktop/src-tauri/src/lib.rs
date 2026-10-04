@@ -487,6 +487,11 @@ fn authenticated_api_path(path: &str) -> bool {
         return false;
     }
     let route = path.split('?').next().unwrap_or(path);
+    // Owner read models used by the Agents and Tasks pages. Exact routes only:
+    // coding session lifecycle and agent actions stay outside this proxy.
+    if ["/v1/agents", "/v1/coding/sessions", "/v1/agent/audit"].contains(&route) {
+        return true;
+    }
     [
         "/v1/assistant",
         "/v1/events/capability",
@@ -501,6 +506,7 @@ fn authenticated_api_path(path: &str) -> bool {
         "/v1/system",
         "/v1/holdings",
         "/v1/broker",
+        "/v1/agent/pending",
         "/v1/voice",
     ]
     .iter()
@@ -1138,6 +1144,19 @@ mod tests {
         assert!(!authenticated_api_path("/v1/app-updates/capability"));
         assert!(!authenticated_api_path("https://other.example/v1/devices"));
         assert!(!authenticated_api_path("/v1/devices/../auth/login"));
+    }
+
+    #[test]
+    fn native_authenticated_proxy_allows_agent_and_task_read_models() {
+        assert!(authenticated_api_path("/v1/agents"));
+        assert!(authenticated_api_path("/v1/coding/sessions"));
+        assert!(authenticated_api_path("/v1/agent/audit"));
+        assert!(authenticated_api_path("/v1/agent/pending"));
+        assert!(authenticated_api_path("/v1/agent/pending/fixture/approve"));
+        assert!(authenticated_api_path("/v1/agent/pending/fixture/deny"));
+        assert!(!authenticated_api_path("/v1/agent/action"));
+        assert!(!authenticated_api_path("/v1/coding/sessions/fixture/start"));
+        assert!(!authenticated_api_path("/v1/agents/fixture"));
     }
 
     #[test]

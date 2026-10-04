@@ -7,19 +7,38 @@ export type Tone = "ok" | "idle" | "warn" | "error";
 /** What the orb shows. */
 export type Mood = "idle" | "listening" | "thinking";
 
+/** Why an optional Core read failed. */
+export type LoadFailure = "signin" | "forbidden" | "network" | "failed";
+
 /** Result of an optional Core read. "unsupported" = the route does not exist
  *  on this Core (older version); it is shown as "Requires newer Core". */
 export type Availability<T> =
   | { state: "loading" }
   | { state: "ok"; value: T }
   | { state: "unsupported" }
-  | { state: "error" };
+  | { state: "error"; reason: LoadFailure };
 
-/** Classify a failed read: 404/405 from an ApiError means an older Core. */
-export function availabilityFromError(error: unknown): { state: "unsupported" } | { state: "error" } {
+/** Classify a failed read: 404/405 means an older Core, 401 a session to
+ *  renew, 403 a feature Core refuses (e.g. the agent kill switch); only a
+ *  request that never got an answer is a connection problem. */
+export function availabilityFromError(error: unknown): { state: "unsupported" } | { state: "error"; reason: LoadFailure } {
   const e = error as { name?: string; status?: number } | null;
-  if (e?.name === "ApiError" && (e.status === 404 || e.status === 405)) return { state: "unsupported" };
-  return { state: "error" };
+  if (e?.name === "NetworkError") return { state: "error", reason: "network" };
+  if (e?.name !== "ApiError") return { state: "error", reason: "failed" };
+  if (e.status === 404 || e.status === 405) return { state: "unsupported" };
+  if (e.status === 401) return { state: "error", reason: "signin" };
+  return { state: "error", reason: e.status === 403 ? "forbidden" : "failed" };
+}
+
+/** One-line explanation of a failed read; `forbidden` lets a page name what
+ *  Core turned off. */
+export function failureText(reason: LoadFailure, forbidden = "Turned off in Core."): string {
+  switch (reason) {
+    case "signin": return "Sign in again on the Core page.";
+    case "forbidden": return forbidden;
+    case "network": return "Check the connection to your Home Node.";
+    case "failed": return "Core returned an error. Try again later.";
+  }
 }
 
 /** Animation-duration multiplier per mood (export: x1 / x0.7 / x0.4). */
@@ -73,12 +92,16 @@ export function formatUptime(seconds: number): string {
 /** What a hub card shows: two short lines and a status tone. */
 export type CardSummary = { lines: [string, string]; tone: Tone };
 
+const CARD_HINT: Record<LoadFailure, string> = {
+  signin: "Sign in again", forbidden: "Turned off in Core", network: "Check the connection", failed: "Core error",
+};
+
 /** Shared handling of loading / older Core / failed reads for a card. */
 export function summarize<T>(source: Availability<T>, ok: (value: T) => CardSummary): CardSummary {
   switch (source.state) {
     case "loading": return { lines: ["Loading…", ""], tone: "idle" };
     case "unsupported": return { lines: ["Requires newer Core", ""], tone: "idle" };
-    case "error": return { lines: ["Unavailable", "Check the connection"], tone: "warn" };
+    case "error": return { lines: ["Unavailable", CARD_HINT[source.reason]], tone: "warn" };
     case "ok": return ok(source.value);
   }
 }

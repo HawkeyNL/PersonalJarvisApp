@@ -19,7 +19,7 @@ import { agentCount, loadOptional } from "../coreStatus";
 import { createSerialPoller } from "../serialPoller";
 import { useAppStore } from "../stores/app";
 import {
-  agentsCard, contextCard, conversationsCard, deriveMood, healthCard, integrationsCard, originHost,
+  agentsCard, availabilityFromError, contextCard, conversationsCard, deriveMood, healthCard, integrationsCard, originHost,
   statusPill, tasksCard,
   type Availability, type CardSummary, type CodingSession, type LiveHost, type SoftwareItem,
 } from "../hubModel";
@@ -169,7 +169,7 @@ async function refreshHub() {
     loadOptional<{ software: SoftwareItem[]; live_host?: LiveHost }>("/v1/system/registry"),
     loadConversations()
       .then(() => { conversationsState.value = { state: "ok", value: conversations.value }; })
-      .catch(() => { conversationsState.value = { state: "error" }; }),
+      .catch((error) => { conversationsState.value = availabilityFromError(error); }),
   ]);
   devices.value = d; pending.value = p; sessions.value = c; registry.value = r;
   now.value = Date.now();

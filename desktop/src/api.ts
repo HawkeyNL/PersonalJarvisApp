@@ -116,7 +116,10 @@ async function authenticatedRequest<T>(
           }),
         ])
       : await pending;
-  } catch {
+  } catch (error) {
+    // The native command rejects with a fixed message; only a failed send is a
+    // connection problem (a refused path or invalid response is not).
+    if (typeof error === "string" && error !== "Home Node is unreachable") throw new Error(error);
     throw new NetworkError("unreachable", path);
   }
   if (response.status < 200 || response.status >= 300) {

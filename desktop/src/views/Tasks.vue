@@ -8,7 +8,7 @@ import JvActivityList, { type ActivityItem } from "../components/jv/JvActivityLi
 import JvUnavailable from "../components/jv/JvUnavailable.vue";
 import { loadOptional } from "../coreStatus";
 import { approveAction, denyAction, type PendingAction } from "../agentApprovals";
-import { relativeTime, type Availability, type Tone } from "../hubModel";
+import { failureText, relativeTime, type Availability, type Tone } from "../hubModel";
 import { canSignApproval, outcomeTone, sessionState, splitSessions, type CodingSessionRow } from "../nodeModels";
 
 // Tasks: coding sessions, agent actions waiting for the owner, and the agent
@@ -34,6 +34,8 @@ const split = computed(() => splitSessions(sessions.value.state === "ok" ? sessi
 const running = computed(() => split.value.open.filter((s) => s.state === "active").length);
 const waiting = computed(() => (pending.value.state === "ok" ? pending.value.value.pending : []));
 
+/** Why a failed read failed, for the empty state. */
+const why = (source: Availability<unknown>) => (source.state === "error" ? failureText(source.reason, "Agent is turned off in Core.") : undefined);
 function status<T>(source: Availability<T>, ok: () => [Tone, string]): [Tone, string] {
   if (source.state === "ok") return ok();
   if (source.state === "loading") return ["idle", "Loading…"];
@@ -121,7 +123,7 @@ async function decide(id: string, approve: boolean) {
       <!-- Active -->
       <template v-if="current.id === 'active'">
         <JvUnavailable v-if="sessions.state === 'unsupported' || sessions.state === 'error'" title="Coding sessions"
-          :kind="sessions.state === 'unsupported' ? 'core-update' : 'error'" icon="code" />
+          :kind="sessions.state === 'unsupported' ? 'core-update' : 'error'" :detail="why(sessions)" icon="code" />
         <p v-else-if="sessions.state === 'loading'" class="muted" role="status">Loading sessions…</p>
         <div v-else class="node-split">
           <section class="node-tiles" aria-label="Task counts">
@@ -143,7 +145,7 @@ async function decide(id: string, approve: boolean) {
       <!-- Waiting on you -->
       <template v-else-if="current.id === 'waiting'">
         <JvUnavailable v-if="pending.state === 'unsupported' || pending.state === 'error'" title="Approvals"
-          :kind="pending.state === 'unsupported' ? 'core-update' : 'error'" icon="alert" />
+          :kind="pending.state === 'unsupported' ? 'core-update' : 'error'" :detail="why(pending)" icon="alert" />
         <p v-else-if="pending.state === 'loading'" class="muted" role="status">Loading approvals…</p>
         <template v-else>
           <p class="muted small">Read the full preview first. Approving asks this device to confirm it is you, then signs this exact action with its device key.</p>
@@ -167,13 +169,13 @@ async function decide(id: string, approve: boolean) {
         <JvSegmented v-model="sub" :items="SUB_TABS" :label="`${current.title} sections`" />
         <template v-if="sub === 'overview'">
           <JvUnavailable v-if="sessions.state === 'unsupported' || sessions.state === 'error'" title="Coding sessions"
-            :kind="sessions.state === 'unsupported' ? 'core-update' : 'error'" icon="code" />
+            :kind="sessions.state === 'unsupported' ? 'core-update' : 'error'" :detail="why(sessions)" icon="code" />
           <JvActivityList v-else title="Finished sessions" :items="sessionRows(split.finished)"
             :empty="sessions.state === 'loading' ? 'Loading…' : 'No finished sessions yet.'" />
         </template>
         <template v-else>
           <JvUnavailable v-if="audit.state === 'unsupported' || audit.state === 'error'" title="Agent history"
-            :kind="audit.state === 'unsupported' ? 'core-update' : 'error'" icon="shield" />
+            :kind="audit.state === 'unsupported' ? 'core-update' : 'error'" :detail="why(audit)" icon="shield" />
           <JvActivityList v-else title="Agent actions" :items="auditRows"
             :empty="audit.state === 'loading' ? 'Loading…' : 'No agent actions recorded.'" />
         </template>
