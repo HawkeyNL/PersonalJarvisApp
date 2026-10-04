@@ -37,7 +37,7 @@ fn validate_snapshot(
             .iter()
             .any(|entry| entry.provider == provider && entry.model == model)
     {
-        return Err("Modelpolicy, apparaat of klok gewijzigd; ververs en probeer opnieuw.".into());
+        return Err("Model policy, device or clock changed; refresh and try again.".into());
     }
     Ok(())
 }
@@ -57,23 +57,23 @@ pub(super) async fn set_model_enabled(
     let origin = auth
         .metadata
         .home_node_origin
-        .ok_or("Home Node ontbreekt")?;
-    let device = auth.metadata.device_id.ok_or("Apparaat niet gekoppeld")?;
-    let token = auth.token.ok_or("Sessie ontbreekt")?;
+        .ok_or("Home Node not configured")?;
+    let device = auth.metadata.device_id.ok_or("Device not paired")?;
+    let token = auth.token.ok_or("Not signed in")?;
     let client = native_http_client()?;
     let response = client
         .get(api_url(Some(&origin), "/v1/system/models")?)
         .bearer_auth(&token)
         .send()
         .await
-        .map_err(|_| "Modelpolicy niet bereikbaar")?;
+        .map_err(|_| "Model policy unreachable")?;
     if !response.status().is_success() {
-        return Err("Modelpolicy ophalen geweigerd".into());
+        return Err("Model policy request refused".into());
     }
     let bytes = native_response::bounded(response, 8 * 1024 * 1024)
         .await
-        .map_err(|_| "Ongeldige modelpolicy")?;
-    let snapshot: Snapshot = serde_json::from_slice(&bytes).map_err(|_| "Ongeldige modelpolicy")?;
+        .map_err(|_| "Invalid model policy")?;
+    let snapshot: Snapshot = serde_json::from_slice(&bytes).map_err(|_| "Invalid model policy")?;
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     validate_snapshot(&snapshot, &provider, &model, &policy_sha256, &device, now)?;
     if snapshot
@@ -81,7 +81,7 @@ pub(super) async fn set_model_enabled(
         .iter()
         .any(|entry| entry.provider == provider && entry.model == model && entry.enabled == enabled)
     {
-        return Err("Modelstatus is al gewijzigd; ververs de lijst".into());
+        return Err("Model status already changed; refresh the list".into());
     }
     let mut nonce = [0; 32];
     let mut request_id = [0; 16];
@@ -111,14 +111,14 @@ pub(super) async fn set_model_enabled(
             if fresh {
                 authenticate_owner(
                     &format!(
-                        "Jarvis: {}/{} {}; modelwijzigingen vijf minuten toestaan",
+                        "Jarvis: {} {}/{}; allow model changes for five minutes",
+                        if approval.enabled {
+                            "enable"
+                        } else {
+                            "disable"
+                        },
                         approval.provider,
                         approval.model,
-                        if approval.enabled {
-                            "inschakelen"
-                        } else {
-                            "uitschakelen"
-                        }
                     ),
                     true,
                 )?;
@@ -134,7 +134,7 @@ pub(super) async fn set_model_enabled(
             if current.device_id.as_deref() != Some(device.as_str())
                 || time::OffsetDateTime::now_utc().unix_timestamp() >= approval.expires_at
             {
-                return Err("Goedkeuring verlopen of apparaat gewijzigd".into());
+                return Err("Approval expired or device changed".into());
             }
             // Only a real OS prompt grants a new fixed window, after binding
             // revalidation. Reused grants never slide the deadline forward.
@@ -142,7 +142,7 @@ pub(super) async fn set_model_enabled(
                 model_authorization::remember(epoch)?;
             }
             if !model_authorization::valid(epoch)? {
-                return Err("Modelautorisatie verlopen; probeer opnieuw".into());
+                return Err("Model authorization expired; try again".into());
             }
             let signature = hex::encode(
                 signing_key_unlocked(&signing_app, false)?
@@ -152,7 +152,7 @@ pub(super) async fn set_model_enabled(
             approval.signed_request(&signature).map_err(str::to_string)
         })
         .await
-        .map_err(|_| "OS-authenticatie mislukt")??;
+        .map_err(|_| "OS authentication failed")??;
     {
         let guard = auth_storage()?;
         let current = load_metadata(&app)?;
@@ -166,17 +166,17 @@ pub(super) async fn set_model_enabled(
         .json(&body)
         .send()
         .await
-        .map_err(|_| "Uitkomst onbekend; ververs de modelstatus")?;
+        .map_err(|_| "Outcome unknown; refresh the model status")?;
     if !response.status().is_success() {
-        return Err("Modelwijziging geweigerd of niet geactiveerd; ververs de lijst".into());
+        return Err("Model change refused or not activated; refresh the list".into());
     }
     let bytes = native_response::bounded(response, 4096)
         .await
-        .map_err(|_| "Activatie niet bevestigd")?;
+        .map_err(|_| "Activation not confirmed")?;
     let result: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|_| "Activatie niet bevestigd")?;
+        serde_json::from_slice(&bytes).map_err(|_| "Activation not confirmed")?;
     if result.get("status").and_then(|v| v.as_str()) != Some("active") {
-        return Err("Activatie niet bevestigd".into());
+        return Err("Activation not confirmed".into());
     }
     Ok(())
 }

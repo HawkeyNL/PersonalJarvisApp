@@ -315,7 +315,7 @@ fn auth_sign_pairing_approval(
     if local_device_id != approver_device_id.to_string() {
         return Err("pairing approver does not match this device".to_string());
     }
-    authenticate_owner(&format!("{} koppelen", candidate_name.trim()), true)?;
+    authenticate_owner(&format!("Pair {}", candidate_name.trim()), true)?;
     let expires_at = time::OffsetDateTime::from_unix_timestamp(expires_at)
         .map_err(|_| "invalid pairing expiry".to_string())?;
     let message = jarvis_client_core::pairing_approval_message(
@@ -423,10 +423,10 @@ fn auth_sign_account_approval(
     };
     let reason = match approval.action {
         AccountAction::PasswordSet if approval.target == approval.user_id => {
-            "Jarvis-accountwachtwoord wijzigen".to_string()
+            "Change Jarvis account password".to_string()
         }
         AccountAction::PasswordSet => return Err("invalid password approval target".into()),
-        AccountAction::DeviceRevoke => format!("Jarvis-apparaat {} intrekken", approval.target),
+        AccountAction::DeviceRevoke => format!("Revoke Jarvis device {}", approval.target),
     };
     let message = account_approval_message(&approval).map_err(str::to_string)?;
     authenticate_owner(&reason, true)?;
@@ -795,7 +795,7 @@ fn origin_changed(current: Option<&str>, requested: &str) -> bool {
 
 fn normalize_home_node_origin(value: &str, allow_local_http: bool) -> Result<String, String> {
     let parsed =
-        url::Url::parse(value.trim()).map_err(|_| "Home Node origin is ongeldig".to_string())?;
+        url::Url::parse(value.trim()).map_err(|_| "Home Node origin is invalid".to_string())?;
     let is_loopback = match parsed.host() {
         Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
         Some(url::Host::Ipv4(address)) => address.is_loopback(),
@@ -813,7 +813,7 @@ fn normalize_home_node_origin(value: &str, allow_local_http: bool) -> Result<Str
         || !matches!(parsed.path(), "" | "/")
     {
         return Err(
-            "Home Node vereist een credential-vrije HTTPS-origin (lokale HTTP alleen in development)"
+            "Home Node requires an HTTPS origin without credentials (local HTTP only in development)"
                 .to_string(),
         );
     }

@@ -5,6 +5,6 @@
 	<!-- macOS: without this string WKWebView won't expose navigator.mediaDevices,
 	     so mic capture (voice enroll/verify + "Hey Jarvis") is unavailable. -->
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Jarvis gebruikt de microfoon voor spraakbediening en "Hey Jarvis".</string>
+	<string>Jarvis uses the microphone for voice control and "Hey Jarvis".</string>
 </dict>
 </plist>

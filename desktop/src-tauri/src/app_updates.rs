@@ -160,14 +160,14 @@ async fn discover_endpoint(
             status_with_notes(
                 app,
                 UpdateState::Unavailable,
-                "Updateservice niet bereikbaar".into(),
+                "Update service unreachable".into(),
             )
         })?;
     if !response.status().is_success() {
         return Err(status_with_notes(
             app,
             UpdateState::Unavailable,
-            "Updateservice niet beschikbaar".into(),
+            "Update service unavailable".into(),
         ));
     }
     if response
@@ -191,7 +191,7 @@ async fn discover_endpoint(
             app,
             UpdateState::Incompatible,
             format!(
-                "Deze release vereist een nieuwer updateprotocol dan versie {}",
+                "This release requires an updater protocol newer than version {}",
                 CURRENT_DESKTOP_UPDATE_PROTOCOL
             ),
         )),
@@ -262,7 +262,7 @@ pub(crate) async fn app_update_check(
         return Ok(status_with_notes(
             &app,
             UpdateState::Unsupported,
-            "Update-downloadadres hoort niet bij de gekoppelde Home Node".into(),
+            "Update download address does not belong to the paired Home Node".into(),
         ));
     }
     let result = UpdateStatus {
