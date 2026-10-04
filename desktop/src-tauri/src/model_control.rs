@@ -3,7 +3,7 @@
 //! the typed routing document, never bytes to sign.
 use super::*;
 use jarvis_client_core::model_control::{
-    ModelRoutingApproval, ModelToggleApproval, RoutingDocument,
+    ModelRoutingApproval, ModelToggleApproval, PaidApi, RoutingDocument,
 };
 
 #[derive(Deserialize)]
@@ -13,6 +13,9 @@ struct Snapshot {
     // Absent on a Core without signed routing.
     routing_mutation: Option<String>,
     routing_sha256: Option<String>,
+    // Kept untyped so a newer routing shape never breaks model toggles.
+    routing: Option<serde_json::Value>,
+    routing_unavailable_reason: Option<String>,
     user_id: uuid::Uuid,
     device_id: uuid::Uuid,
     server_time: i64,
@@ -130,6 +133,100 @@ fn validate_routing_snapshot(
     Ok(())
 }
 
+/// Ways a routing change lets Jarvis spend more than the routing it replaces.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Relaxation {
+    paid_api: bool,
+    paid_fallback: bool,
+    paid_models: bool,
+}
+
+impl Relaxation {
+    fn any(&self) -> bool {
+        self.paid_api || self.paid_fallback || self.paid_models
+    }
+
+    fn prompt(&self) -> String {
+        let mut prompt = String::from("Jarvis: replace model routing");
+        if !self.any() {
+            prompt.push_str("; allow model changes for five minutes");
+        }
+        for (relaxed, text) in [
+            (self.paid_api, "; allow paid APIs"),
+            (
+                self.paid_fallback,
+                "; allow paid fallback after subscription",
+            ),
+            (self.paid_models, "; add paid API models"),
+        ] {
+            if relaxed {
+                prompt.push_str(text);
+            }
+        }
+        prompt
+    }
+}
+
+/// The routing Core currently runs. `None` when it cannot be known or Core
+/// failed closed (paid APIs off): every paid permission then counts as new.
+fn current_routing(snapshot: &Snapshot) -> Option<RoutingDocument> {
+    if snapshot.routing_unavailable_reason.is_some() {
+        return None;
+    }
+    match &snapshot.routing {
+        // No routing file: built-in order with paid APIs allowed.
+        None | Some(serde_json::Value::Null) => serde_json::from_str(r#"{"version":1}"#).ok(),
+        Some(value) => serde_json::from_value(value.clone()).ok(),
+    }
+}
+
+fn relaxation(current: Option<&RoutingDocument>, next: &RoutingDocument) -> Relaxation {
+    if next.paid_api == PaidApi::Off {
+        // No metered backend can run at all.
+        return Relaxation::default();
+    }
+    let mut result = Relaxation {
+        paid_api: current.is_none_or(|current| current.paid_api == PaidApi::Off),
+        ..Relaxation::default()
+    };
+    let tier = |routing: &RoutingDocument, index: usize| {
+        let tiers = &routing.tiers;
+        [&tiers.cheap, &tiers.default, &tiers.hard][index].clone()
+    };
+    for index in 0..3 {
+        let Some(next) = tier(next, index) else {
+            continue;
+        };
+        // A built-in (absent) tier counts as no paid fallback and no pinned
+        // paid models, so opting in is always treated as new.
+        let before = current.and_then(|current| tier(current, index));
+        if next.metered_after_subscription
+            && !before
+                .as_ref()
+                .is_some_and(|before| before.metered_after_subscription)
+        {
+            result.paid_fallback = true;
+        }
+        if next.chain.iter().any(|entry| {
+            !matches!(
+                entry.provider.as_str(),
+                "ollama" | "claude-cli" | "codex-cli"
+            ) && !before
+                .as_ref()
+                .is_some_and(|before| before.chain.contains(entry))
+        }) {
+            result.paid_models = true;
+        }
+    }
+    result
+}
+
+/// Approval lifetime: covers the OS prompt (up to 120 s) and the post, within
+/// Core's 300 s maximum.
+const ROUTING_APPROVAL_SECONDS: i64 = 240;
+/// Broker frame limit; the broker counts the trailing newline.
+const BROKER_FRAME_BYTES: usize = 16 * 1024;
+
 /// Login binding captured before any network call; revalidated before signing
 /// and before posting.
 struct Session {
@@ -178,11 +275,12 @@ impl Session {
     }
 
     /// Require fresh OS authentication (or the current five-minute model
-    /// window), revalidate the login binding, sign the fixed approval and post
-    /// it to the fixed privileged route.
+    /// window unless `always_prompt`), revalidate the login binding, sign the
+    /// fixed approval and post it to the fixed privileged route.
     async fn approve<F>(
         self,
         prompt: String,
+        always_prompt: bool,
         message: Vec<u8>,
         expires_at: i64,
         signed_request: F,
@@ -206,7 +304,7 @@ impl Session {
                 let _prompt = model_authorization::PROMPT
                     .lock()
                     .map_err(|_| "Model authorization unavailable")?;
-                let fresh = !model_authorization::valid(epoch)?;
+                let fresh = always_prompt || !model_authorization::valid(epoch)?;
                 if fresh {
                     authenticate_owner(&prompt, true)?;
                 }
@@ -225,11 +323,14 @@ impl Session {
                 }
                 // Only a real OS prompt grants a new fixed window, after binding
                 // revalidation. Reused grants never slide the deadline forward.
-                if fresh {
-                    model_authorization::remember(epoch)?;
-                }
-                if !model_authorization::valid(epoch)? {
-                    return Err("Model authorization expired; try again".into());
+                // A cost-relaxing prompt is single-use and grants no window.
+                if !always_prompt {
+                    if fresh {
+                        model_authorization::remember(epoch)?;
+                    }
+                    if !model_authorization::valid(epoch)? {
+                        return Err("Model authorization expired; try again".into());
+                    }
                 }
                 let signature = hex::encode(
                     signing_key_unlocked(&signing_app, false)?
@@ -333,6 +434,7 @@ pub(super) async fn set_model_enabled(
     session
         .approve(
             prompt,
+            false,
             message,
             approval.expires_at,
             move |signature| approval.signed_request(signature),
@@ -355,6 +457,7 @@ pub(super) async fn set_model_routing(
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     validate_routing_snapshot(&snapshot, &routing_sha256, &session.device, now)?;
     validate_routing(&routing, &snapshot.models)?;
+    let relaxed = relaxation(current_routing(&snapshot).as_ref(), &routing);
     let (request_id, nonce_hex) = fresh_ids();
     let approval = ModelRoutingApproval {
         request_id,
@@ -362,7 +465,7 @@ pub(super) async fn set_model_routing(
         user_id: snapshot.user_id,
         device_id: snapshot.device_id,
         issued_at: now,
-        expires_at: now + 120,
+        expires_at: now + ROUTING_APPROVAL_SECONDS,
         routing,
         expected_routing_sha256: routing_sha256,
     };
@@ -374,13 +477,14 @@ pub(super) async fn set_model_routing(
     if serde_json::to_vec(&serde_json::json!({ "request": sized }))
         .map_err(|_| "Invalid routing")?
         .len()
-        > 16 * 1024
+        >= BROKER_FRAME_BYTES
     {
         return Err("Routing is too large to send".into());
     }
     session
         .approve(
-            "Jarvis: replace model routing; allow model changes for five minutes".into(),
+            relaxed.prompt(),
+            relaxed.any(),
             message,
             approval.expires_at,
             move |signature| approval.signed_request(signature),
@@ -410,6 +514,8 @@ mod tests {
             policy_sha256: Some("ab".repeat(32)),
             routing_mutation: None,
             routing_sha256: None,
+            routing: None,
+            routing_unavailable_reason: None,
             user_id: device,
             device_id: device,
             server_time: 100,
@@ -597,6 +703,8 @@ mod tests {
             policy_sha256: None,
             routing_mutation: Some("device-signed-model-route-v1".into()),
             routing_sha256: Some("ab".repeat(32)),
+            routing: None,
+            routing_unavailable_reason: None,
             user_id: device,
             device_id: device,
             server_time: 100,
@@ -612,5 +720,131 @@ mod tests {
         assert!(validate_routing_snapshot(&snapshot, &hash, &id, 100).is_err());
         snapshot.routing_mutation = None;
         assert!(validate_routing_snapshot(&snapshot, &hash, &id, 100).is_err());
+    }
+
+    fn doc(json: serde_json::Value) -> RoutingDocument {
+        serde_json::from_value(json).unwrap()
+    }
+
+    #[test]
+    fn cost_relaxing_routing_is_classified_for_a_fresh_prompt() {
+        let sub = serde_json::json!({"provider": "claude-cli", "model": "claude-opus-5"});
+        let paid = serde_json::json!({"provider": "anthropic-api", "model": "claude-opus-5"});
+        let local = serde_json::json!({"provider": "ollama", "model": "llama3.2"});
+        let routed = |paid_api: &str, chain: serde_json::Value, fallback: bool| {
+            doc(
+                serde_json::json!({"version": 1, "paid_api": paid_api, "tiers": {"hard": {
+                "chain": chain, "metered_after_subscription": fallback}}}),
+            )
+        };
+        let off = doc(serde_json::json!({"version": 1, "paid_api": "off"}));
+        let allowed = doc(serde_json::json!({"version": 1}));
+        let with_paid = routed("allowed", serde_json::json!([sub, paid]), true);
+        let relaxed = |paid_api, paid_fallback, paid_models| Relaxation {
+            paid_api,
+            paid_fallback,
+            paid_models,
+        };
+
+        // Relaxing: paid API back on (also from an unknown or failed-closed state).
+        assert_eq!(
+            relaxation(Some(&off), &allowed),
+            relaxed(true, false, false)
+        );
+        assert_eq!(relaxation(None, &allowed), relaxed(true, false, false));
+        // Relaxing: paid fallback switched on, paid model added.
+        let no_fallback = routed("allowed", serde_json::json!([paid, sub]), false);
+        assert_eq!(
+            relaxation(Some(&no_fallback), &with_paid),
+            relaxed(false, true, false)
+        );
+        let only_sub = routed("allowed", serde_json::json!([sub]), false);
+        assert_eq!(
+            relaxation(
+                Some(&only_sub),
+                &routed("allowed", serde_json::json!([sub, local, paid]), true)
+            ),
+            relaxed(false, true, true)
+        );
+        assert_eq!(
+            relaxation(
+                Some(&allowed),
+                &routed("allowed", serde_json::json!([paid]), false)
+            ),
+            relaxed(false, false, true)
+        );
+
+        // Tightening or neutral: may reuse the window.
+        for (current, next) in [
+            (&with_paid, &off),
+            (&with_paid, &only_sub),
+            (&with_paid, &with_paid),
+            (
+                &with_paid,
+                &routed("allowed", serde_json::json!([paid, sub]), true),
+            ),
+            (
+                &allowed,
+                &routed("allowed", serde_json::json!([sub, local]), false),
+            ),
+        ] {
+            assert!(!relaxation(Some(current), next).any(), "{next:?}");
+        }
+        assert!(!relaxation(None, &off).any());
+
+        assert_eq!(
+            relaxed(false, false, false).prompt(),
+            "Jarvis: replace model routing; allow model changes for five minutes"
+        );
+        let prompt = relaxed(true, true, true).prompt();
+        assert!(prompt.contains("allow paid APIs"));
+        assert!(prompt.contains("allow paid fallback after subscription"));
+        assert!(!prompt.contains("five minutes"));
+    }
+
+    #[test]
+    fn current_routing_fails_closed() {
+        let device = uuid::Uuid::from_bytes([1; 16]);
+        let mut snapshot = Snapshot {
+            mutation: "unavailable".into(),
+            policy_sha256: None,
+            routing_mutation: Some("device-signed-model-route-v1".into()),
+            routing_sha256: Some("ab".repeat(32)),
+            routing: None,
+            routing_unavailable_reason: None,
+            user_id: device,
+            device_id: device,
+            server_time: 100,
+            models: vec![],
+        };
+        // No file: built-in order, paid APIs allowed.
+        assert_eq!(
+            current_routing(&snapshot).unwrap().paid_api,
+            PaidApi::Allowed
+        );
+        snapshot.routing = Some(serde_json::json!({"version": 1, "paid_api": "off"}));
+        assert_eq!(current_routing(&snapshot).unwrap().paid_api, PaidApi::Off);
+        snapshot.routing = Some(serde_json::json!({"version": 1, "future": true}));
+        assert!(current_routing(&snapshot).is_none());
+        snapshot.routing = None;
+        snapshot.routing_unavailable_reason = Some("routing_invalid".into());
+        assert!(current_routing(&snapshot).is_none());
+    }
+
+    #[test]
+    fn approval_outlives_the_os_prompt_within_core_limits() {
+        // authenticate_owner waits up to 120 s; Core accepts at most 300 s.
+        const _: () = assert!(ROUTING_APPROVAL_SECONDS > 120 + 60);
+        let approval = ModelRoutingApproval {
+            request_id: uuid::Uuid::from_bytes([1; 16]),
+            nonce_hex: "02".repeat(32),
+            user_id: uuid::Uuid::from_bytes([3; 16]),
+            device_id: uuid::Uuid::from_bytes([4; 16]),
+            issued_at: 1,
+            expires_at: 1 + ROUTING_APPROVAL_SECONDS,
+            routing: vector_routing(),
+            expected_routing_sha256: "00".repeat(32),
+        };
+        assert!(approval.message().is_ok());
     }
 }
