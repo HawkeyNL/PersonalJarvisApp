@@ -32,7 +32,10 @@ import {
   refreshRoute,
 } from "../voice";
 
+// `forceOpen`: the hub shows the console as an overlay and keeps it revealed.
+const props = defineProps<{ forceOpen?: boolean }>();
 const text = ref("");
+const inputEl = ref<HTMLInputElement | null>(null);
 const hovered = ref(false);
 const focused = ref(false);
 const woke = ref(false);
@@ -50,6 +53,7 @@ const mic = useMic((said) => send(said));
 // a "Hey Jarvis" wake. Everything tucks away again when you leave.
 const revealed = computed(
   () =>
+    !!props.forceOpen ||
     hovered.value ||
     focused.value ||
     woke.value ||
@@ -94,7 +98,7 @@ const micStyle = computed(() =>
   mic.listening.value
     ? {
         borderColor: "var(--accent)",
-        boxShadow: `0 0 ${(8 + mic.level.value * 26).toFixed(0)}px rgba(52,245,160,${(0.3 + mic.level.value * 0.55).toFixed(2)})`,
+        boxShadow: `0 0 ${(8 + mic.level.value * 26).toFixed(0)}px rgba(var(--accent-rgb),${(0.3 + mic.level.value * 0.55).toFixed(2)})`,
       }
     : {},
 );
@@ -119,6 +123,13 @@ async function removeChat(id: string) {
   if (next) await openConversation(next);
   else startNewConversation();
 }
+
+// The hub reads the mic state for the orb mood and drives the overlay.
+defineExpose({
+  listening: mic.listening,
+  startListening: () => { if (!mic.listening.value) mic.toggle(); },
+  focusInput: () => inputEl.value?.focus(),
+});
 
 onMounted(async () => {
   try {
@@ -230,6 +241,7 @@ onMounted(async () => {
             <NavIcon name="mic" />
           </button>
           <input
+            ref="inputEl"
             v-model="text"
             placeholder="Typ of spreek tegen Jarvis…"
             aria-label="bericht"
@@ -329,10 +341,8 @@ onMounted(async () => {
   padding: 4px 10px;
   border-radius: 999px;
   cursor: pointer;
-  background: rgba(6, 14, 10, 0.55);
+  background: rgba(6, 22, 18, 0.9);
   border: 1px solid var(--border);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   color: var(--muted);
   font-size: 11px;
   line-height: 1.6;
@@ -344,7 +354,7 @@ onMounted(async () => {
 .tab.active {
   color: var(--accent);
   border-color: var(--accent);
-  box-shadow: 0 0 10px rgba(52, 245, 160, 0.25);
+  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.25);
 }
 .tab-title {
   overflow: hidden;
@@ -365,7 +375,7 @@ onMounted(async () => {
   font-weight: 600;
   color: var(--accent);
   border-color: var(--accent);
-  background: rgba(52, 245, 160, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
 }
 
 .transcript {
@@ -413,8 +423,6 @@ onMounted(async () => {
     rgba(2, 10, 7, 0.18) 82%,
     rgba(2, 10, 7, 0) 100%
   );
-  backdrop-filter: blur(6px) saturate(115%);
-  -webkit-backdrop-filter: blur(6px) saturate(115%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
@@ -623,10 +631,8 @@ onMounted(async () => {
   margin-bottom: 9px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(6, 14, 10, 0.55);
+  background: rgba(6, 22, 18, 0.9);
   border: 1px solid var(--border);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.03em;
@@ -652,10 +658,8 @@ onMounted(async () => {
   gap: 7px;
   padding: 8px;
   border-radius: 16px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03));
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  background: rgba(8, 26, 22, 0.92);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
   box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 .row input {
@@ -698,7 +702,7 @@ onMounted(async () => {
 .ic.on {
   color: var(--accent);
   border-color: var(--accent);
-  box-shadow: 0 0 8px rgba(52, 245, 160, 0.35);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.35);
 }
 .ic.mic.live {
   border-color: var(--accent);

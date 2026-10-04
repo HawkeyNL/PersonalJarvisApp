@@ -3,16 +3,18 @@ import NavIcon from "../NavIcon.vue";
 
 // "Ask Jarvis anything…": the main bar opens the console; the waveform button
 // opens it and starts listening.
+// Disabled until the device is signed in (the chat needs a session).
+defineProps<{ disabled?: boolean }>();
 defineEmits<{ open: []; mic: [] }>();
 const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 </script>
 
 <template>
-  <div class="jv-command">
-    <button type="button" class="mic" aria-label="Talk to Jarvis" @click="$emit('mic')">
+  <div class="jv-command" :class="{ disabled }">
+    <button type="button" class="mic" aria-label="Talk to Jarvis" :disabled="disabled" @click="$emit('mic')">
       <NavIcon name="wave" />
     </button>
-    <button type="button" class="ask" aria-keyshortcuts="Control+K Meta+K" @click="$emit('open')">
+    <button type="button" class="ask" :disabled="disabled" aria-keyshortcuts="Control+K Meta+K" @click="$emit('open')">
       <span class="placeholder">Ask Jarvis anything…</span>
       <kbd>{{ mac ? "⌘ K" : "Ctrl K" }}</kbd>
     </button>
@@ -25,7 +27,9 @@ const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator
   border-radius: var(--r-16); border: 1px solid rgba(160, 255, 215, 0.14);
   background: var(--field-bg);
 }
-.jv-command:hover, .jv-command:focus-within { border-color: rgba(var(--accent-rgb), 0.45); }
+.disabled { opacity: 0.55; }
+button:disabled { cursor: default; }
+.jv-command:not(.disabled):hover, .jv-command:focus-within { border-color: rgba(var(--accent-rgb), 0.45); }
 button { background: transparent; border: none; color: inherit; font: inherit; cursor: pointer; padding: 0; }
 button:hover { filter: none; }
 .mic {

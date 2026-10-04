@@ -26,7 +26,7 @@ const selected = computed({ get: () => props.modelValue, set: (id: string) => em
     <JvTopBar variant="node" :title="title" :subtitle="subtitle" />
 
     <div class="stage">
-      <svg class="wires" viewBox="0 0 981 363" aria-hidden="true">
+      <svg v-if="items.length" class="wires" viewBox="0 0 981 363" aria-hidden="true">
         <g transform="translate(-234 -97)">
           <circle cx="725" cy="288" r="168" fill="none" stroke="rgba(150,255,210,.55)" stroke-width="1.5" />
           <circle cx="725" cy="288" r="180" fill="none" class="a20" stroke-width="1" />
@@ -60,7 +60,7 @@ const selected = computed({ get: () => props.modelValue, set: (id: string) => em
     </div>
 
     <div class="detail">
-      <JvSegmented v-model="selected" class="tabbar" variant="tabs" :items="tabs" :label="title" />
+      <JvSegmented v-if="items.length" v-model="selected" class="tabbar" variant="tabs" :items="tabs" :label="title" />
       <slot />
     </div>
   </div>
@@ -70,7 +70,7 @@ const selected = computed({ get: () => props.modelValue, set: (id: string) => em
 .node-page { position: relative; min-height: 100%; padding-bottom: 120px; box-sizing: border-box; }
 .node-page > :not(.jv-backdrop) { position: relative; z-index: 1; }
 
-.stage { width: 981px; height: 363px; margin: 0 auto; position: relative; top: -2px; }
+.stage { width: 981px; height: 363px; margin: 18px auto 0; position: relative; }
 .wires { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .a20 { stroke: rgba(var(--accent-rgb), 0.2); }
 .a22 { stroke: rgba(var(--accent-rgb), 0.22); }

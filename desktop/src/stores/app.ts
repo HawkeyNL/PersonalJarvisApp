@@ -5,5 +5,7 @@ import { defineStore } from "pinia";
 export const useAppStore = defineStore("app", () => {
   const name = ref("Jarvis");
   const tagline = ref("Persoonlijk AI-besturingssysteem");
-  return { name, tagline };
+  /** The chat overlay on the hub (Ctrl/⌘K, command bar, "Hey Jarvis"). */
+  const consoleOpen = ref(false);
+  return { name, tagline, consoleOpen };
 });

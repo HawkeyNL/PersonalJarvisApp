@@ -3,20 +3,29 @@ import Home from "../views/Home.vue";
 import Trading from "../views/Trading.vue";
 import Status from "../views/Status.vue";
 import Settings from "../views/Settings.vue";
+import NodeStub from "../views/NodeStub.vue";
+import Context from "../views/Context.vue";
 
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
-    // SYSTEM (Jarvis) world
+    // Core hub + module pages
     { path: "/", name: "home", component: Home },
-    { path: "/status", name: "status", component: Status },
+    { path: "/conversations", name: "conversations", component: NodeStub },
+    { path: "/agents", name: "agents", component: NodeStub },
+    { path: "/tasks", name: "tasks", component: NodeStub },
+    { path: "/integrations", name: "integrations", component: NodeStub },
+    { path: "/health", name: "health", component: Status },
+    { path: "/memory", name: "memory", component: NodeStub },
+    { path: "/context", name: "context", component: Context },
     { path: "/settings", name: "settings", component: Settings },
 
-    // TRADING world — one component, sub-tab driven by the path
+    // Trading desk — one component, sub-tab driven by the path
     { path: "/trading", name: "trading", component: Trading },
     { path: "/trading/ibkr", name: "trading-ibkr", component: Trading },
 
     // Legacy paths → new structure
+    { path: "/status", redirect: "/health" },
     { path: "/portfolio", redirect: "/trading" },
     { path: "/broker", redirect: "/trading/ibkr" },
   ],

@@ -40,14 +40,3 @@ export function applyAccent(a: Accent): void {
 export function initAccent(): void {
   applyAccent(currentAccent());
 }
-
-/** Parse the live `--accent-2` value into [r,g,b] for canvas drawing. */
-export function accentRgb(): [number, number, number] {
-  const raw = getComputedStyle(document.documentElement)
-    .getPropertyValue("--accent-2")
-    .trim();
-  const m = /^#?([0-9a-f]{6})$/i.exec(raw);
-  if (!m) return [155, 255, 214];
-  const n = parseInt(m[1], 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}

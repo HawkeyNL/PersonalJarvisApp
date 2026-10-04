@@ -8,6 +8,8 @@ import {
   type Holding,
 } from "../portfolio";
 import { ibkrStatus, ibkrPositions, type IbkrPosition } from "../ibkr";
+import JvBackdrop from "../components/jv/JvBackdrop.vue";
+import JvTopBar from "../components/jv/JvTopBar.vue";
 
 // Sub-tab is driven by the route (/trading vs /trading/ibkr).
 const route = useRoute();
@@ -98,6 +100,9 @@ onMounted(() => {
 </script>
 
 <template>
+  <div class="trading-page">
+  <JvBackdrop glow-y="20%" horizon="80px" />
+  <JvTopBar variant="node" title="TRADING" subtitle="YOUR POSITIONS ON ONE DESK" />
   <section class="view trading">
     <header class="desk-top">
       <div>
@@ -127,6 +132,11 @@ onMounted(() => {
         </span>
       </div>
     </div>
+
+    <nav class="seg" aria-label="Trading">
+      <RouterLink to="/trading" :class="{ on: seg === 'manual' }">Portfolio</RouterLink>
+      <RouterLink to="/trading/ibkr" :class="{ on: seg === 'ibkr' }">IBKR</RouterLink>
+    </nav>
 
     <!-- MANUAL -->
     <div v-show="seg === 'manual'" class="panel glass">
@@ -189,18 +199,18 @@ onMounted(() => {
       </ul>
     </div>
   </section>
+  </div>
 </template>
 
 <style scoped>
-.trading { width: 100%; }
+.trading-page { position: relative; min-height: 100%; padding-bottom: 96px; }
+.trading { position: relative; z-index: 1; width: auto; max-width: 980px; margin: 0 auto; padding: 28px 24px 0; }
 .desk-top { margin-bottom: 18px; }
 .sub { margin: 6px 0 0; font-size: 13px; }
 
 .glass {
-  background: rgba(14, 30, 22, 0.5);
-  backdrop-filter: blur(14px) saturate(1.25);
-  -webkit-backdrop-filter: blur(14px) saturate(1.25);
-  border: 1px solid var(--border);
+  background: var(--panel-bg);
+  border: 1px solid var(--line-a30);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
@@ -217,20 +227,18 @@ onMounted(() => {
 .seg {
   display: inline-flex; gap: 4px; padding: 4px; margin-bottom: 16px;
   border-radius: 14px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(16px) saturate(1.4);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  background: rgba(3, 24, 19, 0.8);
+  border: 1px solid var(--line-a30);
 }
-.seg button {
-  background: transparent; color: var(--muted); border: none;
+.seg a {
+  text-decoration: none; color: var(--muted);
   padding: 8px 18px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer;
 }
-.seg button:hover { color: var(--text); }
-.seg button.on {
+.seg a:hover { color: var(--text); }
+.seg a.on {
   color: var(--accent);
-  background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.05));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 8px rgba(0,0,0,0.25);
+  background: rgba(var(--accent-rgb), 0.1);
+  box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 14px rgba(var(--accent-rgb), 0.35);
 }
 
 .panel { border-radius: 14px; padding: 16px 18px 18px; }

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import AccountAdministration from "../components/AccountAdministration.vue";
+import JvBackdrop from "../components/jv/JvBackdrop.vue";
+import JvTopBar from "../components/jv/JvTopBar.vue";
 import { ACCENTS, PRESETS, currentAccent, applyAccent, type Accent } from "../theme";
 import { currentAuthStatus, deregisterDevice, type AuthStatus } from "../auth";
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
@@ -107,6 +109,9 @@ onMounted(async () => {
 </script>
 
 <template>
+  <div class="settings-page">
+  <JvBackdrop glow-y="20%" horizon="80px" />
+  <JvTopBar variant="node" title="SETTINGS" subtitle="THIS DEVICE AND YOUR ACCOUNT" />
   <section class="view settings">
     <header class="settings-heading"><h1>Instellingen</h1><p class="muted">Verbinding, beveiliging en voorkeuren voor dit apparaat.</p></header>
     <nav class="settings-sections" aria-label="Instellingenonderdelen">
@@ -365,9 +370,12 @@ onMounted(async () => {
       </div>
     </Transition>
   </section>
+  </div>
 </template>
 
 <style scoped>
+.settings-page { position: relative; min-height: 100%; padding-bottom: 96px; }
+.settings-page > .settings { position: relative; z-index: 1; margin: 0 auto; padding: 28px 24px 0; }
 .settings { max-width: 1180px; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; align-items: start; overflow-wrap: anywhere; }
 .settings-heading, .settings-sections, .full-width, .account-administration { grid-column: 1 / -1; }
 .settings-heading p { margin: 0; }

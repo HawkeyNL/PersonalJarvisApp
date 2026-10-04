@@ -29,7 +29,7 @@ const core = computed(() =>
 </script>
 
 <template>
-  <header class="jv-topbar" :class="variant">
+  <header class="jv-topbar" :class="`is-${variant}`">
     <div class="left">
       <RouterLink v-if="variant === 'hub'" to="/" class="brand" aria-label="Jarvis home">
         <span class="ring" aria-hidden="true"></span>
@@ -136,11 +136,11 @@ const core = computed(() =>
 .profile :deep(svg) { width: 20px; height: 20px; }
 .pdot { position: absolute; right: 1px; bottom: 1px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: var(--glow-sm); }
 
-.hub .center { width: min(584px, 44vw); }
+.is-hub .center { width: min(584px, 44vw); }
 
 @media (max-width: 1099px), (max-height: 759px) {
   .jv-topbar { padding: 16px 16px 0; gap: 12px; grid-template-columns: auto minmax(0, 1fr) auto; }
-  .hub .center { width: auto; }
+  .is-hub .center { width: auto; }
   .tag, .cluster .item, .cluster .sep, .title::before, .title::after { display: none; }
   .ring { width: 28px; height: 28px; }
   .name { font-size: 18px; letter-spacing: 0.42em; }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
-import { useRoute } from "vue-router";
-import NavIcon from "./components/NavIcon.vue";
+import { onMounted, onBeforeUnmount } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { useAppStore } from "./stores/app";
 import AppLock from "./components/AppLock.vue";
 import UnlockApprovals from "./components/UnlockApprovals.vue";
 import PairingApprovals from "./components/PairingApprovals.vue";
@@ -11,42 +11,22 @@ import { startPairingPolling, stopPairingPolling } from "./pairingApprovals";
 import { maybeStartWake, stopWake } from "./voicewake";
 import { currentAuthStatus } from "./auth";
 import { loadHomeNodeConfig } from "./homeNode";
-import { availableAppVersion, scheduleAutomaticUpdateCheck, updateState } from "./updates";
+import { scheduleAutomaticUpdateCheck } from "./updates";
 
 const route = useRoute();
-const mode = computed<"system" | "trading">(() =>
-  route.path.startsWith("/trading") ? "trading" : "system",
-);
+const router = useRouter();
+const app = useAppStore();
 
-// Primary modes — top bar.
-const modes = [
-  { key: "system", label: "SYSTEM", to: "/" },
-  { key: "trading", label: "TRADING", to: "/trading" },
-];
-
-// Contextual sub-tabs — bottom dock, per mode.
-const systemTabs = [
-  { to: "/", label: "Jarvis", icon: "core" as const },
-  { to: "/status", label: "System", icon: "pulse" as const },
-  { to: "/settings", label: "Settings", icon: "gear" as const },
-];
-const tradingTabs = [
-  { to: "/trading", label: "Portfolio", icon: "chart" as const },
-  { to: "/trading/ibkr", label: "IBKR", icon: "link" as const },
-];
-const subTabs = computed(() => (mode.value === "trading" ? tradingTabs : systemTabs));
-
-// Global clock in the top bar.
-const clock = ref("--:--:--");
-let timer: number | undefined;
-function tick() {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  clock.value = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+// Ctrl/⌘K opens the chat overlay from anywhere; it lives on the hub.
+function onShortcut(event: KeyboardEvent) {
+  if (event.key.toLowerCase() !== "k" || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+  event.preventDefault();
+  app.consoleOpen = true;
+  if (route.path !== "/") void router.push("/");
 }
+
 onMounted(async () => {
-  tick();
-  timer = window.setInterval(tick, 1000);
+  window.addEventListener("keydown", onShortcut);
   // Configuration/auth reads are local, and the delayed network update check
   // is deliberately detached so startup and ordinary Jarvis use never wait.
   void (async () => {
@@ -66,7 +46,7 @@ onMounted(async () => {
   window.addEventListener("keydown", noteActivity);
 });
 onBeforeUnmount(() => {
-  clearInterval(timer);
+  window.removeEventListener("keydown", onShortcut);
   stopApprovalPolling();
   stopPairingPolling();
   stopWake();
@@ -77,40 +57,9 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app">
-    <header class="topbar">
-      <nav class="modeswitch">
-        <RouterLink
-          v-for="m in modes"
-          :key="m.key"
-          :to="m.to"
-          class="mode"
-          :class="{ on: mode === m.key }"
-        >
-          {{ m.label }}
-        </RouterLink>
-      </nav>
-      <RouterLink
-        v-if="updateState === 'available'"
-        to="/settings"
-        class="update-badge"
-        aria-label="Jarvis app-update beschikbaar"
-      >
-        Update v{{ availableAppVersion }}
-      </RouterLink>
-      <span class="topclock">{{ clock }}</span>
-    </header>
-
     <main class="content">
       <RouterView />
     </main>
-
-    <!-- Contextual sub-tabs (liquid glass), bottom-centre. -->
-    <nav class="subdock">
-      <RouterLink v-for="t in subTabs" :key="t.to" :to="t.to" class="subtab">
-        <NavIcon :name="t.icon" />
-        <span>{{ t.label }}</span>
-      </RouterLink>
-    </nav>
 
     <!-- Incoming unlock approvals for other devices (phone side). -->
     <UnlockApprovals />
