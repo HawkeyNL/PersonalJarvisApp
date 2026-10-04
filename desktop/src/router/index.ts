@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 import Home from "../views/Home.vue";
 import Trading from "../views/Trading.vue";
-import Status from "../views/Status.vue";
+import Health from "../views/Health.vue";
 import Settings from "../views/Settings.vue";
 import NodeStub from "../views/NodeStub.vue";
 import Context from "../views/Context.vue";
@@ -15,7 +15,7 @@ export const router = createRouter({
     { path: "/agents", name: "agents", component: NodeStub },
     { path: "/tasks", name: "tasks", component: NodeStub },
     { path: "/integrations", name: "integrations", component: NodeStub },
-    { path: "/health", name: "health", component: Status },
+    { path: "/health", name: "health", component: Health },
     { path: "/memory", name: "memory", component: NodeStub },
     { path: "/context", name: "context", component: Context },
     { path: "/settings", name: "settings", component: Settings },

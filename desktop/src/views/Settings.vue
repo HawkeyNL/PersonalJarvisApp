@@ -113,7 +113,6 @@ onMounted(async () => {
   <JvBackdrop glow-y="20%" horizon="80px" />
   <JvTopBar variant="node" title="SETTINGS" subtitle="THIS DEVICE AND YOUR ACCOUNT" />
   <section class="view settings">
-    <header class="settings-heading"><h1>Instellingen</h1><p class="muted">Verbinding, beveiliging en voorkeuren voor dit apparaat.</p></header>
     <nav class="settings-sections" aria-label="Instellingenonderdelen">
       <button v-for="item in sections" :key="item" :aria-pressed="section === item"
         :class="{ selected: section === item }" @click="section = item">{{ item }}</button>
@@ -377,30 +376,28 @@ onMounted(async () => {
 .settings-page { position: relative; min-height: 100%; padding-bottom: 96px; }
 .settings-page > .settings { position: relative; z-index: 1; margin: 0 auto; padding: 28px 24px 0; }
 .settings { max-width: 1180px; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; align-items: start; overflow-wrap: anywhere; }
-.settings-heading, .settings-sections, .full-width, .account-administration { grid-column: 1 / -1; }
-.settings-heading p { margin: 0; }
+.settings-sections, .full-width, .account-administration { grid-column: 1 / -1; }
 .settings-sections { display: flex; flex-wrap: wrap; gap: 8px; }
-.settings-sections button { background: transparent; border: 1px solid var(--border); color: var(--muted); }
-.settings-sections button.selected { color: var(--accent); border-color: var(--accent); background: var(--panel); }
+.settings-sections button { background: rgba(3, 24, 19, 0.8); border: 1px solid var(--line-a30); color: var(--text-3); font-weight: 400; border-radius: var(--r-12); }
+.settings-sections button.selected { color: #f8fffb; border-color: var(--accent); background: rgba(var(--accent-rgb), 0.1); box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.35); }
 .settings-sections button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media (max-width: 760px) { .settings { grid-template-columns: minmax(0,1fr); } }
 .panel {
   min-width: 0;
   position: relative;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 14px 16px 16px;
+  border: 1px solid var(--line-a45);
+  border-radius: var(--r-22);
+  padding: 18px 20px 20px;
   margin-bottom: 0;
 }
 .glass {
-  background: rgba(14, 30, 22, 0.5);
-  backdrop-filter: blur(14px) saturate(1.3);
-  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  background: var(--panel-bg);
+  box-shadow: 0 0 22px rgba(var(--accent-rgb), 0.12);
 }
 .panel-head {
   display: flex; align-items: center; justify-content: space-between;
-  font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em;
-  color: var(--accent); margin-bottom: 12px;
+  font-size: 11px; letter-spacing: 0.3em;
+  color: var(--text-5); margin-bottom: 14px;
 }
 .hint { font-size: 9px; color: var(--muted); letter-spacing: 0.1em; }
 
@@ -429,7 +426,7 @@ onMounted(async () => {
 .mono { font-family: var(--mono); font-size: 12px; }
 .ghost {
   margin-top: 14px; background: transparent; border: 1px solid var(--border);
-  color: var(--muted); font-family: var(--mono); font-size: 12px;
+  color: var(--text-3); font-size: 12px; font-weight: 400;
 }
 .ghost:hover { color: var(--accent-2); border-color: var(--accent-2); filter: none; }
 .ghost.danger { color: #f87171; border-color: rgba(248, 113, 113, 0.4); }
@@ -440,8 +437,7 @@ onMounted(async () => {
 .modal-overlay {
   position: fixed; inset: 0; z-index: 50;
   display: flex; align-items: center; justify-content: center; padding: 20px;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  background: rgba(1, 9, 10, 0.82);
 }
 .modal {
   width: min(420px, 100%);
@@ -475,7 +471,7 @@ onMounted(async () => {
   width: 21px; height: 21px; border-radius: 50%;
   background: var(--muted); transition: transform 0.2s ease, background 0.2s ease;
 }
-.toggle input:checked ~ .sw { background: rgba(52, 245, 160, 0.25); border-color: var(--accent); }
+.toggle input:checked ~ .sw { background: rgba(var(--accent-rgb), 0.25); border-color: var(--accent); }
 .toggle input:checked ~ .sw::after { transform: translateX(19px); background: var(--accent); }
 .toggle input:disabled ~ .sw { opacity: 0.5; }
 
