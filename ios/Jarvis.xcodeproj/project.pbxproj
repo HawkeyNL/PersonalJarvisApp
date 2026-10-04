@@ -6,6 +6,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        A00000000000000000000054 /* HubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000054 /* HubModel.swift */; };
+        A00000000000000000000055 /* HubModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000055 /* HubModelTests.swift */; };
         A00000000000000000000042 /* ModelAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000042; };
         A00000000000000000000043 /* ModelAuthorizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000043; };
         A00000000000000000000040 /* ModelControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000040; };
@@ -45,6 +47,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+        B00000000000000000000054 /* HubModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/HubModel.swift; sourceTree = "<group>"; };
+        B00000000000000000000055 /* HubModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubModelTests.swift; sourceTree = "<group>"; };
         B00000000000000000000042 /* ModelAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/ModelAuthorization.swift; sourceTree = "<group>"; };
         B00000000000000000000043 /* ModelAuthorizationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAuthorizationTests.swift; sourceTree = "<group>"; };
         B00000000000000000000040 /* ModelControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Jarvis/Domain/ModelControl.swift; sourceTree = SOURCE_ROOT; };
@@ -115,6 +119,7 @@
 				B0000000000000000000000F /* ChatView.swift */,
 				B00000000000000000000010 /* EnrollmentView.swift */,
 				B00000000000000000000011 /* SettingsView.swift */,
+                B00000000000000000000054 /* HubModel.swift */,
 				B00000000000000000000012 /* Assets.xcassets */,
 				B00000000000000000000013 /* Info.plist */,
 				B00000000000000000000016 /* PrivacyInfo.xcprivacy */,
@@ -128,6 +133,7 @@
 				B00000000000000000000014 /* EndpointNormalizerTests.swift */,
                 B00000000000000000000043 /* ModelAuthorizationTests.swift */,
 				B00000000000000000000015 /* ClientDTOTests.swift */,
+                B00000000000000000000055 /* HubModelTests.swift */,
 			);
 			path = JarvisTests;
 			sourceTree = "<group>";
@@ -232,10 +238,11 @@
 				A0000000000000000000000F /* ChatView.swift in Sources */,
 				A00000000000000000000010 /* EnrollmentView.swift in Sources */,
 				A00000000000000000000011 /* SettingsView.swift in Sources */,
+                A00000000000000000000054 /* HubModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		D00000000000000000000003 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000013 /* EndpointNormalizerTests.swift in Sources */, A00000000000000000000014 /* ClientDTOTests.swift in Sources */, A00000000000000000000043 /* ModelAuthorizationTests.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
+		D00000000000000000000003 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000013 /* EndpointNormalizerTests.swift in Sources */, A00000000000000000000014 /* ClientDTOTests.swift in Sources */, A00000000000000000000043 /* ModelAuthorizationTests.swift in Sources */, A00000000000000000000055 /* HubModelTests.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */

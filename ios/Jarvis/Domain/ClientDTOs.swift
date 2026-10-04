@@ -182,13 +182,23 @@ struct APIErrorBody: Decodable {
     let hint: String?
 }
 
-// Read-only subset of /v1/system/registry used by the Resources page.
+// Read-only subset of /v1/system/registry used by the Resources, Health and
+// Integrations pages. Older Cores omit brains.
 struct HomeNodeRegistry: Decodable {
     let host: Host
     let liveHost: LiveHost?
     let software: [Software]
+    let brains: [Brain]?
 
-    enum CodingKeys: String, CodingKey { case host, software; case liveHost = "live_host" }
+    enum CodingKeys: String, CodingKey { case host, software, brains; case liveHost = "live_host" }
+
+    struct Brain: Decodable {
+        let id: String
+        let label: String
+        let cost: String
+        let available: Bool
+        let note: String?
+    }
 
     struct Host: Decodable {
         let os: String
@@ -225,5 +235,137 @@ struct HomeNodeRegistry: Decodable {
         let name: String
         let present: Bool
         let version: String?
+        let detail: String?
     }
+}
+
+// Owner-only reads for the hub and node pages (same routes as the desktop
+// app). Fields the UI can live without are optional so that one missing value
+// does not hide a whole page.
+
+struct DeviceListResponse: Decodable { let devices: [LinkedDevice] }
+
+struct LinkedDevice: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let platform: String
+    let status: String
+    let created_at: Double?
+}
+
+struct PendingActionList: Decodable { let pending: [PendingAction] }
+
+/// An agent action waiting for the owner. iOS can only deny; approving needs
+/// the desktop's native agent-approval-v1 signature.
+struct PendingAction: Decodable, Identifiable {
+    let pending_id: String
+    let action: String
+    let preview: String?
+    let created_at: String
+    var id: String { pending_id }
+}
+
+struct CodingSessionList: Decodable { let sessions: [CodingSession] }
+
+struct CodingSession: Decodable, Identifiable {
+    let id: String
+    let repository: String?
+    let objective: String?
+    let state: String
+    let updated_at: String?
+}
+
+struct AgentAuditResponse: Decodable { let entries: [AgentAuditEntry] }
+
+struct AgentAuditEntry: Decodable {
+    let action: String
+    let risk: String?
+    let outcome: String
+    let note: String?
+    let ts: String
+}
+
+struct SystemAuditResponse: Decodable { let entries: [SystemAuditEntry] }
+
+struct SystemAuditEntry: Decodable {
+    let event: String
+    let outcome: String
+    let ts: String
+}
+
+/// GET /v1/agents: metadata and this month's usage; never agent instructions.
+struct AgentsResponse: Decodable {
+    let agent_count: Int?
+    let unavailable_reason: String?
+    let usage_unavailable_reason: String?
+    let agents: [AgentInfo]
+}
+
+struct AgentInfo: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let group: String?
+    let description: String?
+    let model_policy: String?
+    let allowed_tools: [String]?
+    let usage: AgentUsage?
+}
+
+/// `nil` measurements mean Core does not measure that yet (never a zero).
+struct AgentUsage: Decodable {
+    let requests: Int
+    let total_tokens: Int?
+    let spent_eur: Double?
+    let failures: Int?
+    let latency_p95_ms: Double?
+    let last_used: String?
+}
+
+struct UsageSummary: Decodable {
+    let budget_eur: Double
+    let spent_eur: Double
+    let remaining_eur: Double?
+    let over_budget: Bool
+    let requests: Int?
+    let total_tokens: Int?
+    let failures: Int?
+    let latency_p95_ms: Double?
+    let by_backend: [BackendUsage]?
+}
+
+struct BackendUsage: Decodable {
+    let backend: String
+    let spent_eur: Double
+    let total_tokens: Int?
+}
+
+struct ServicesResponse: Decodable {
+    let services: [ServiceStatus]
+    let disks: [DiskStatus]
+}
+
+struct ServiceStatus: Decodable {
+    let label: String
+    let unit: String
+    let state: String
+}
+
+struct DiskStatus: Decodable {
+    let label: String
+    let state: String
+    let total_bytes: Int64?
+    let free_bytes: Int64?
+    let used_percent: Double?
+}
+
+struct IbkrStatus: Decodable {
+    let reachable: Bool
+    let authenticated: Bool
+    let connected: Bool?
+}
+
+/// Public /livez and /readyz bodies.
+struct HealthProbe: Decodable {
+    let status: String?
+    let environment: String?
 }

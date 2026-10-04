@@ -108,6 +108,58 @@ final class JarvisAppModel: ObservableObject {
         try await auth.setModelEnabled(entry, policyHash: policyHash)
     }
 
+    /// Orb mood from what the app knows: a reply in progress means thinking.
+    /// iOS has no microphone input yet, so it never listens.
+    var mood: Mood { isSending ? .thinking : .idle }
+
+    /// Optional owner read for the hub and node pages. An older Core (404/405)
+    /// becomes `.unsupported`; a 401 signs out like every other session read;
+    /// results from before a lock, logout or origin change are dropped.
+    func coreRead<Response: Decodable>(_ path: String, as type: Response.Type = Response.self) async -> Availability<Response> {
+        guard isAuthenticated, lockState == .unlocked else { return .error(.signin) }
+        let generation = presentation.id
+        do {
+            let value: Response = try await auth.ownerGet(path)
+            guard presentation.accepts(generation), lockState == .unlocked else { return .error(.signin) }
+            return .ok(value)
+        } catch {
+            if (error as? JarvisAPIError) == .unauthorized, presentation.accepts(generation) { handle(error) }
+            return Availability(error: error)
+        }
+    }
+
+    /// Public liveness/readiness probe; `nil` when the Home Node did not answer OK.
+    func probe(_ path: String) async -> HealthProbe? {
+        try? await api.get(path, response: HealthProbe.self)
+    }
+
+    /// Deny (cancel) an agent action. Approval needs the desktop's signature.
+    func denyAgentAction(_ id: String) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        guard isSafePathSegment(id) else { throw JarvisAPIError.invalidResponse }
+        try await auth.ownerPost("/v1/agent/pending/\(id)/deny")
+    }
+
+    func registeredDeviceID() async -> UUID? {
+        guard isAuthenticated, lockState == .unlocked else { return nil }
+        return await auth.registeredDeviceID()
+    }
+
+    /// Refresh only the thread list; unlike loadConversations it never changes
+    /// the open conversation.
+    func refreshConversationList() async {
+        guard isAuthenticated, lockState == .unlocked else { return }
+        let generation = presentation.id
+        do {
+            let snapshot = try await chat.conversations()
+            guard presentation.accepts(generation) else { return }
+            conversations = snapshot
+        } catch {
+            guard presentation.accepts(generation) else { return }
+            if (error as? JarvisAPIError) == .unauthorized { handle(error) } else { notice = safeMessage(error) }
+        }
+    }
+
     func start() async {
         guard let endpoint = endpointStore.endpoint else {
             connectionState = .unconfigured
