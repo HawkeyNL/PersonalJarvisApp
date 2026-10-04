@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { countOf, filterConversations, ibkrState, outcomeTone, sessionState, splitSessions } from "../src/nodeModels.ts";
+import {
+  agentStatus, countOf, filterConversations, formatMs, groupAgents, ibkrState, isTrader, outcomeTone, sessionState, splitSessions,
+} from "../src/nodeModels.ts";
 
 const NOW = Date.parse("2026-10-04T12:00:00Z");
 const ago = (days) => new Date(NOW - days * 86_400_000).toISOString();
@@ -45,4 +47,32 @@ test("IBKR gateway state is labelled without guessing", () => {
   assert.deepEqual(ibkrState({ reachable: true, authenticated: true }), ["ok", "Connected"]);
   assert.equal(countOf([{ a: true }, { a: false }, { a: true }], (x) => x.a), "2 of 3");
   assert.equal(countOf([], () => true), "0 of 0");
+});
+
+test("agents group alphabetically with ungrouped agents last", () => {
+  const groups = groupAgents([
+    { name: "Trader", group: "Markets" },
+    { name: "Coder", group: null },
+    { name: "Researcher", group: "Knowledge" },
+    { name: "Clipper", group: "Knowledge" },
+    { name: "Voice", group: "  " },
+  ]);
+  assert.deepEqual(groups.map((g) => [g.group, g.agents.map((a) => a.name)]), [
+    ["Knowledge", ["Clipper", "Researcher"]],
+    ["Markets", ["Trader"]],
+    ["Other", ["Coder", "Voice"]],
+  ]);
+});
+
+test("agent status reports usage, never a fake live state", () => {
+  assert.deepEqual(agentStatus(null), ["idle", "Usage unavailable"]);
+  assert.deepEqual(agentStatus({ requests: 0 }), ["idle", "Not used this month"]);
+  assert.deepEqual(agentStatus({ requests: 1 }), ["ok", "1 request this month"]);
+  assert.deepEqual(agentStatus({ requests: 12 }), ["ok", "12 requests this month"]);
+  assert.equal(isTrader({ id: "trader", name: "Markets" }), true);
+  assert.equal(isTrader({ id: "x", name: "Trading Desk" }), true);
+  assert.equal(isTrader({ id: "researcher", name: "Research Agent" }), false);
+  assert.equal(formatMs(null), "—");
+  assert.equal(formatMs(850.4), "850 ms");
+  assert.equal(formatMs(1234), "1.2 s");
 });

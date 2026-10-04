@@ -8,6 +8,7 @@ import Context from "../views/Context.vue";
 import Conversations from "../views/Conversations.vue";
 import Tasks from "../views/Tasks.vue";
 import Integrations from "../views/Integrations.vue";
+import Agents from "../views/Agents.vue";
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -15,7 +16,7 @@ export const router = createRouter({
     // Core hub + module pages
     { path: "/", name: "home", component: Home },
     { path: "/conversations", name: "conversations", component: Conversations },
-    { path: "/agents", name: "agents", component: NodeStub },
+    { path: "/agents", name: "agents", component: Agents },
     { path: "/tasks", name: "tasks", component: Tasks },
     { path: "/integrations", name: "integrations", component: Integrations },
     { path: "/health", name: "health", component: Health },

@@ -53,3 +53,49 @@ export function ibkrState(status: IbkrState): [Tone, string] {
 export function countOf<T>(list: T[], flag: (item: T) => boolean): string {
   return `${list.filter(flag).length} of ${list.length}`;
 }
+
+// --- Agents ----------------------------------------------------------------------
+
+export type AgentUsage = {
+  requests: number; input_tokens: number; output_tokens: number; total_tokens: number; spent_eur: number;
+  failures?: number; fallbacks?: number; latency_p50_ms?: number | null; latency_p95_ms?: number | null; last_used?: string | null;
+};
+export type AgentInfo = {
+  id: string; name: string; group: string | null; description: string; model_policy: string; allowed_tools: string[];
+  limits: { max_runtime_seconds: number; max_context_chars: number; max_output_chars: number; max_parallel_runs: number };
+  usage: AgentUsage | null;
+};
+export type AgentsResponse = {
+  bundle_id: string | null; agent_count: number; unavailable_reason: string | null; usage_unavailable_reason?: string | null; agents: AgentInfo[];
+};
+
+/** Agents grouped by `group` (alphabetical, ungrouped last), names sorted. */
+export function groupAgents<T extends { name: string; group: string | null }>(agents: T[]): { group: string; agents: T[] }[] {
+  const groups = new Map<string, T[]>();
+  for (const agent of [...agents].sort((a, b) => a.name.localeCompare(b.name))) {
+    const key = agent.group?.trim() || "";
+    groups.set(key, [...(groups.get(key) ?? []), agent]);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)))
+    .map(([group, list]) => ({ group: group || "Other", agents: list }));
+}
+
+/** What an agent's status line may honestly say: its usage this month, not a
+ *  live Active/Idle state (Core does not report one). */
+export function agentStatus(usage: AgentUsage | null): [Tone, string] {
+  if (!usage) return ["idle", "Usage unavailable"];
+  if (!usage.requests) return ["idle", "Not used this month"];
+  return ["ok", `${usage.requests} ${usage.requests === 1 ? "request" : "requests"} this month`];
+}
+
+/** The trading agent gets the "Open Trading" button. */
+export function isTrader(agent: { id: string; name: string }): boolean {
+  return /trad(er|ing)/i.test(agent.id) || /trad(er|ing)/i.test(agent.name);
+}
+
+/** "850 ms", "1.2 s"; "—" when Core has no measurement. */
+export function formatMs(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms)) return "—";
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
+}

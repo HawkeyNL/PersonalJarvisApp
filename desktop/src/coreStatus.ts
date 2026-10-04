@@ -22,12 +22,10 @@ export async function loadOptional<T>(path: string): Promise<Availability<T>> {
   }
 }
 
-export type AgentSummary = { name: string; group?: string; description?: string };
-
 async function refreshAgents(): Promise<void> {
-  const result = await loadOptional<{ agents: AgentSummary[] }>("/v1/agents");
+  const result = await loadOptional<{ agent_count?: number; agents?: unknown[] }>("/v1/agents");
   agentCount.value = result.state === "ok"
-    ? { state: "ok", value: result.value.agents?.length ?? 0 }
+    ? { state: "ok", value: result.value.agent_count ?? result.value.agents?.length ?? 0 }
     : result;
 }
 
