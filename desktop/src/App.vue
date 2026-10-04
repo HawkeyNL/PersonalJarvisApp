@@ -11,7 +11,8 @@ import { startPairingPolling, stopPairingPolling } from "./pairingApprovals";
 import { maybeStartWake, stopWake } from "./voicewake";
 import { currentAuthStatus } from "./auth";
 import { loadHomeNodeConfig } from "./homeNode";
-import { scheduleAutomaticUpdateCheck } from "./updates";
+import { scheduleAutomaticUpdateCheck, startUpdateSync } from "./updates";
+import { thinking } from "./assistant";
 
 const route = useRoute();
 const router = useRouter();
@@ -27,6 +28,7 @@ function onShortcut(event: KeyboardEvent) {
 
 onMounted(async () => {
   window.addEventListener("keydown", onShortcut);
+  startUpdateSync(thinking);
   // Configuration/auth reads are local, and the delayed network update check
   // is deliberately detached so startup and ordinary Jarvis use never wait.
   void (async () => {

@@ -22,6 +22,8 @@ mod model_control;
 mod native_response;
 mod realtime;
 mod speech_playback;
+#[cfg(desktop)]
+mod tray;
 mod voice_control;
 
 // Serialize metadata/token transitions. Never hold this guard across an await.
@@ -911,9 +913,7 @@ pub fn run() {
             app.manage(realtime::Runtime::default());
             #[cfg(desktop)]
             {
-                use std::sync::Mutex;
-
-                app.manage(app_updates::PendingUpdate(Mutex::new(None)));
+                app.manage(app_updates::Updates::default());
                 let enabled = app_updates::updater_public_key().is_some();
                 app.manage(app_updates::UpdateRuntime { enabled });
                 if let Some(public_key) = app_updates::updater_public_key() {
@@ -922,7 +922,9 @@ pub fn run() {
                             .pubkey(public_key)
                             .build(),
                     )?;
+                    app_updates::spawn_periodic_check(app.handle());
                 }
+                tray::init(app.handle());
             }
             Ok(())
         })
@@ -959,6 +961,8 @@ pub fn run() {
             app_updates::app_update_install,
             #[cfg(desktop)]
             app_updates::app_update_restart,
+            #[cfg(desktop)]
+            app_updates::app_update_set_session_active,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

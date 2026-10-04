@@ -39,3 +39,13 @@ test("session bearer is never exposed through the desktop JavaScript API", async
   assert.match(native, /auth_complete_login/);
   assert.match(native, /async fn auth_request/);
 });
+
+test("webview listens to the native update status event and reports session activity", async () => {
+  const web = await readFile(new URL("../src/updates.ts", import.meta.url), "utf8");
+  const native = await readFile(new URL("../src-tauri/src/app_updates.rs", import.meta.url), "utf8");
+  const event = native.match(/STATUS_EVENT: &str = "([^"]+)"/)?.[1];
+  assert.ok(event);
+  assert.match(web, new RegExp(`listen<NativeUpdateStatus>\\("${event}"`));
+  assert.match(web, /invoke\("app_update_set_session_active", \{ active \}\)/);
+  assert.match(native, /fn app_update_set_session_active\(\s*app: AppHandle,\s*active: bool,/);
+});

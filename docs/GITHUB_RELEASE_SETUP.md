@@ -85,6 +85,26 @@ and enter them through GitHub's secret UI. Put only the public key in
 `TAURI_SIGNING_PUBLIC_KEY`. Losing this private key breaks updater continuity;
 rotation requires a migration trusted by already-installed clients.
 
+## Desktop update tray and restart
+
+The desktop app shows a system tray icon with the update status, "Check for
+updates" and "Install update and restart". It checks on startup (after sign-in)
+and every six hours, through the same authenticated Home Node path as Settings.
+"Install" downloads the package and verifies its Tauri signature, then installs
+and relaunches right away, or waits until no reply or mic session is active
+(the tray and Settings offer "Restart now" to end the session instead).
+
+- Linux (AppImage): the AppImage is replaced in place, then Jarvis relaunches.
+  The tray uses libayatana-appindicator (bundled into the AppImage by the Tauri
+  CLI; CI installs `libayatana-appindicator3-dev`). GNOME needs the
+  AppIndicator extension (on by default on Ubuntu). Without a tray host or
+  library Jarvis runs without a tray.
+- macOS: the `.app` bundle is replaced, then Jarvis relaunches.
+- Windows (NSIS): the updater starts the installer in update mode and exits;
+  the installer relaunches Jarvis when it finishes.
+
+Closing the main window still quits Jarvis; the tray does not keep it running.
+
 ## First release: `app-v0.1.0`
 
 1. Merge the reviewed Core cleanup and client-monorepo changes with CI green.

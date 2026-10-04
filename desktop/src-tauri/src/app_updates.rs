@@ -4,19 +4,20 @@
 //! download signature verification and installation; the Home Node is only an
 //! authenticated mirror.
 
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::{ipc::Channel, AppHandle, State};
+use tauri::{ipc::Channel, AppHandle, Emitter, Manager, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 use super::{load_secure_auth, normalize_home_node_origin};
 
 pub(crate) const CURRENT_DESKTOP_UPDATE_PROTOCOL: u32 = 1;
 const MAX_CAPABILITY_BYTES: usize = 64 * 1024;
-
-pub(crate) struct PendingUpdate(pub Mutex<Option<Update>>);
 
 pub(crate) struct UpdateRuntime {
     pub enabled: bool,
@@ -29,7 +30,7 @@ pub(crate) fn updater_public_key() -> Option<&'static str> {
     option_env!("JARVIS_TAURI_UPDATER_PUBKEY").filter(|value| !value.trim().is_empty())
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum UpdateState {
     Ready,
@@ -40,15 +41,19 @@ pub(crate) enum UpdateState {
     Unavailable,
     UpToDate,
     Available,
-    Installed,
+    Checking,
+    Downloading,
+    /// Verified package downloaded; installs together with the restart.
+    ReadyToRestart,
+    Error,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub(crate) struct UpdateStatus {
-    state: UpdateState,
-    current_version: String,
-    version: Option<String>,
-    notes: Option<String>,
+    pub(crate) state: UpdateState,
+    pub(crate) current_version: String,
+    pub(crate) version: Option<String>,
+    pub(crate) notes: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -199,33 +204,87 @@ async fn discover_endpoint(
     }
 }
 
-#[tauri::command]
-pub(crate) fn app_update_status(app: AppHandle, runtime: State<'_, UpdateRuntime>) -> UpdateStatus {
-    if !runtime.enabled {
-        return status(&app, UpdateState::Unsupported);
-    }
-    match origin_and_token(&app) {
-        Ok(_) => status(&app, UpdateState::Ready),
-        Err(state) => state,
+/// Update state shared by Settings and the tray, so both always show the same
+/// step and only one check or download runs at a time.
+#[derive(Default)]
+pub(crate) struct Updates {
+    inner: Mutex<Inner>,
+    session_active: AtomicBool,
+}
+
+#[derive(Default)]
+struct Inner {
+    status: Option<UpdateStatus>,
+    pending: Option<Update>,
+    /// Downloaded package whose signature `Update::download` already verified.
+    ready: Option<(Update, Vec<u8>)>,
+}
+
+pub(crate) const STATUS_EVENT: &str = "app-update-status";
+pub(crate) const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+const STATE_UNAVAILABLE: &str = "update state is unavailable";
+
+fn updates(app: &AppHandle) -> &Updates {
+    app.state::<Updates>().inner()
+}
+
+fn lock(app: &AppHandle) -> Result<std::sync::MutexGuard<'_, Inner>, String> {
+    updates(app)
+        .inner
+        .lock()
+        .map_err(|_| STATE_UNAVAILABLE.to_string())
+}
+
+pub(crate) fn session_active(app: &AppHandle) -> bool {
+    updates(app).session_active.load(Ordering::SeqCst)
+}
+
+pub(crate) fn stored(app: &AppHandle) -> UpdateStatus {
+    let current = lock(app).ok().and_then(|inner| inner.status.clone());
+    current.unwrap_or_else(|| {
+        let enabled = app.state::<UpdateRuntime>().enabled;
+        status(
+            app,
+            if enabled {
+                UpdateState::Ready
+            } else {
+                UpdateState::Unsupported
+            },
+        )
+    })
+}
+
+fn update_status(update: &Update, state: UpdateState) -> UpdateStatus {
+    UpdateStatus {
+        state,
+        current_version: update.current_version.clone(),
+        version: Some(update.version.clone()),
+        notes: update.body.clone(),
     }
 }
 
-#[tauri::command]
-pub(crate) async fn app_update_check(
-    app: AppHandle,
-    runtime: State<'_, UpdateRuntime>,
-    pending: State<'_, PendingUpdate>,
-) -> Result<UpdateStatus, String> {
-    if !runtime.enabled {
-        return Ok(status(&app, UpdateState::Unsupported));
+fn notify(app: &AppHandle, current: &UpdateStatus) {
+    #[cfg(desktop)]
+    crate::tray::refresh(app, current, session_active(app));
+    let _ = app.emit(STATUS_EVENT, current);
+}
+
+fn finish(app: &AppHandle, next: UpdateStatus, pending: Option<Update>) {
+    if let Ok(mut inner) = lock(app) {
+        inner.status = Some(next.clone());
+        inner.pending = pending;
     }
-    let (origin, token) = match origin_and_token(&app) {
+    notify(app, &next);
+}
+
+async fn find_update(app: &AppHandle) -> Result<(UpdateStatus, Option<Update>), String> {
+    let (origin, token) = match origin_and_token(app) {
         Ok(values) => values,
-        Err(state) => return Ok(state),
+        Err(state) => return Ok((state, None)),
     };
-    let endpoint = match discover_endpoint(&app, &origin, &token).await {
+    let endpoint = match discover_endpoint(app, &origin, &token).await {
         Ok(endpoint) => endpoint,
-        Err(state) => return Ok(state),
+        Err(state) => return Ok((state, None)),
     };
     let endpoint =
         url::Url::parse(&endpoint).map_err(|_| "stored update endpoint is invalid".to_string())?;
@@ -246,11 +305,7 @@ pub(crate) async fn app_update_check(
         .await
         .map_err(|_| "update check failed".to_string())?;
     let Some(update) = update else {
-        *pending
-            .0
-            .lock()
-            .map_err(|_| "update state is unavailable".to_string())? = None;
-        return Ok(status(&app, UpdateState::UpToDate));
+        return Ok((status(app, UpdateState::UpToDate), None));
     };
     let download_origin = update.download_url.origin().ascii_serialization();
     let download_origin = normalize_home_node_origin(&download_origin, cfg!(debug_assertions))
@@ -259,59 +314,199 @@ pub(crate) async fn app_update_check(
         || !update.download_url.username().is_empty()
         || update.download_url.password().is_some()
     {
-        return Ok(status_with_notes(
-            &app,
-            UpdateState::Unsupported,
-            "Update download address does not belong to the paired Home Node".into(),
+        return Ok((
+            status_with_notes(
+                app,
+                UpdateState::Unsupported,
+                "Update download address does not belong to the paired Home Node".into(),
+            ),
+            None,
         ));
     }
-    let result = UpdateStatus {
-        state: UpdateState::Available,
-        current_version: update.current_version.clone(),
-        version: Some(update.version.clone()),
-        notes: update.body.clone(),
+    Ok((update_status(&update, UpdateState::Available), Some(update)))
+}
+
+pub(crate) async fn check(app: &AppHandle) -> Result<UpdateStatus, String> {
+    if !app.state::<UpdateRuntime>().enabled {
+        return Ok(status(app, UpdateState::Unsupported));
+    }
+    let checking = status(app, UpdateState::Checking);
+    {
+        let mut inner = lock(app)?;
+        if inner.status.as_ref().is_some_and(|current| {
+            matches!(
+                current.state,
+                UpdateState::Checking | UpdateState::Downloading | UpdateState::ReadyToRestart
+            )
+        }) {
+            return Err("an update action is already running".into());
+        }
+        inner.status = Some(checking.clone());
+    }
+    notify(app, &checking);
+    match find_update(app).await {
+        Ok((next, pending)) => {
+            finish(app, next.clone(), pending);
+            Ok(next)
+        }
+        Err(error) => {
+            finish(app, status(app, UpdateState::Error), None);
+            Err(error)
+        }
+    }
+}
+
+/// Downloads and verifies the pending update, then installs and relaunches
+/// right away when no voice or chat session is active. Otherwise the verified
+/// package waits until the webview reports idle or the owner confirms.
+pub(crate) async fn install(
+    app: &AppHandle,
+    on_event: impl Fn(DownloadEvent),
+) -> Result<UpdateStatus, String> {
+    let update = {
+        let mut inner = lock(app)?;
+        let available = inner
+            .status
+            .as_ref()
+            .is_some_and(|current| current.state == UpdateState::Available);
+        let update = inner
+            .pending
+            .take()
+            .filter(|_| available)
+            .ok_or_else(|| "there is no verified pending update".to_string())?;
+        let downloading = update_status(&update, UpdateState::Downloading);
+        inner.status = Some(downloading.clone());
+        drop(inner);
+        notify(app, &downloading);
+        update
     };
-    *pending
-        .0
-        .lock()
-        .map_err(|_| "update state is unavailable".to_string())? = Some(update);
-    Ok(result)
+    let started = AtomicBool::new(false);
+    let downloaded = update
+        .download(
+            |chunk_length, content_length| {
+                if !started.swap(true, Ordering::Relaxed) {
+                    on_event(DownloadEvent::Started { content_length });
+                }
+                on_event(DownloadEvent::Progress { chunk_length });
+            },
+            || on_event(DownloadEvent::Finished),
+        )
+        .await;
+    let Ok(bytes) = downloaded else {
+        finish(app, status(app, UpdateState::Error), None);
+        return Err("update download or signature verification failed".into());
+    };
+    let ready = update_status(&update, UpdateState::ReadyToRestart);
+    {
+        let mut inner = lock(app)?;
+        inner.ready = Some((update, bytes));
+        inner.status = Some(ready.clone());
+    }
+    notify(app, &ready);
+    if !session_active(app) {
+        apply_and_restart(app).await?;
+    }
+    Ok(ready)
+}
+
+/// Installs the verified package and relaunches Jarvis. On Windows the
+/// updater hands over to the NSIS installer, which exits this process and
+/// starts the new version itself.
+pub(crate) async fn apply_and_restart(app: &AppHandle) -> Result<(), String> {
+    let (update, bytes) = lock(app)?
+        .ready
+        .take()
+        .ok_or_else(|| "there is no verified update ready to install".to_string())?;
+    let installed = tauri::async_runtime::spawn_blocking(move || update.install(bytes)).await;
+    if !matches!(installed, Ok(Ok(()))) {
+        finish(app, status(app, UpdateState::Error), None);
+        return Err("update installation failed".into());
+    }
+    app.request_restart();
+    Ok(())
+}
+
+/// Tray action: install the available update, or confirm a restart that is
+/// waiting for an active session to end.
+pub(crate) fn install_from_tray(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = if stored(&app).state == UpdateState::ReadyToRestart {
+            apply_and_restart(&app).await
+        } else {
+            install(&app, |_| {}).await.map(|_| ())
+        };
+    });
+}
+
+pub(crate) fn spawn_periodic_check(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(CHECK_INTERVAL).await;
+            // Keep an offered update; a transient error must not replace it.
+            if stored(&app).state != UpdateState::Available {
+                let _ = check(&app).await;
+            }
+        }
+    });
+}
+
+#[tauri::command]
+pub(crate) fn app_update_status(app: AppHandle, runtime: State<'_, UpdateRuntime>) -> UpdateStatus {
+    if !runtime.enabled {
+        return status(&app, UpdateState::Unsupported);
+    }
+    if let Err(state) = origin_and_token(&app) {
+        return state;
+    }
+    let current = stored(&app);
+    match current.state {
+        UpdateState::Checking
+        | UpdateState::Downloading
+        | UpdateState::Available
+        | UpdateState::ReadyToRestart
+        | UpdateState::UpToDate => current,
+        _ => status(&app, UpdateState::Ready),
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn app_update_check(app: AppHandle) -> Result<UpdateStatus, String> {
+    check(&app).await
 }
 
 #[tauri::command]
 pub(crate) async fn app_update_install(
     app: AppHandle,
-    pending: State<'_, PendingUpdate>,
     on_event: Channel<DownloadEvent>,
 ) -> Result<UpdateStatus, String> {
-    let update = pending
-        .0
-        .lock()
-        .map_err(|_| "update state is unavailable".to_string())?
-        .take()
-        .ok_or_else(|| "there is no verified pending update".to_string())?;
-    let mut started = false;
-    update
-        .download_and_install(
-            |chunk_length, content_length| {
-                if !started {
-                    let _ = on_event.send(DownloadEvent::Started { content_length });
-                    started = true;
-                }
-                let _ = on_event.send(DownloadEvent::Progress { chunk_length });
-            },
-            || {
-                let _ = on_event.send(DownloadEvent::Finished);
-            },
-        )
-        .await
-        .map_err(|_| "update download, verification, or installation failed".to_string())?;
-    Ok(status(&app, UpdateState::Installed))
+    install(&app, |event| {
+        let _ = on_event.send(event);
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn app_update_restart(app: AppHandle) {
-    app.restart();
+pub(crate) async fn app_update_restart(app: AppHandle) -> Result<(), String> {
+    apply_and_restart(&app).await
+}
+
+/// The webview reports whether a reply is streaming or the mic is listening.
+/// A verified update that waited for this moment is applied once it is idle.
+#[tauri::command]
+pub(crate) async fn app_update_set_session_active(
+    app: AppHandle,
+    active: bool,
+) -> Result<(), String> {
+    updates(&app).session_active.store(active, Ordering::SeqCst);
+    let current = stored(&app);
+    #[cfg(desktop)]
+    crate::tray::refresh(&app, &current, active);
+    if !active && current.state == UpdateState::ReadyToRestart {
+        apply_and_restart(&app).await?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -15,6 +15,7 @@ import { conversations, currentId, deleteConversation } from "../conversations";
 import { renderMarkdown, handleMarkdownClick } from "../markdown";
 import { useMic } from "../useMic";
 import { wakePulse } from "../voicewake";
+import { micListening } from "../updates";
 import {
   voiceEnabled,
   voiceRate,
@@ -47,6 +48,8 @@ let disposed = false;
 onUnmounted(() => { disposed = true; speechUnlisten?.(); });
 
 const mic = useMic((said) => send(said));
+// Sync so the reset from useMic's unmount cleanup still reaches the updater.
+watch(mic.listening, (value) => (micListening.value = value), { flush: "sync" });
 
 // "Chat active" = the input dock lifts in and the memory tabs appear: on hover
 // (the input zone or the chat stack), focus, typing, while listening, and after
