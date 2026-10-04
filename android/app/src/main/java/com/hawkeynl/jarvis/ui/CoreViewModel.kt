@@ -58,7 +58,7 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
     private val _state = MutableStateFlow(CoreData())
     val state: StateFlow<CoreData> = _state.asStateFlow()
     private var scope = childScope()
-    private val inFlight = mutableSetOf<String>()
+    private var inFlight = mutableSetOf<String>()
 
     private fun childScope() = CoroutineScope(viewModelScope.coroutineContext + SupervisorJob(viewModelScope.coroutineContext[Job]))
 
@@ -88,14 +88,16 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
     fun refreshContext() = refresh("context", devices)
 
     private fun refresh(page: String, vararg loads: suspend (HomeNodeEndpoint) -> Unit) {
-        if (!inFlight.add(page)) return
+        // A run cancelled by clear() releases its key in the old set only.
+        val flight = inFlight
+        if (!flight.add(page)) return
         scope.launch {
             try {
                 val endpoint = container.settings.endpoint.first() ?: return@launch
                 coroutineScope { loads.forEach { load -> launch { load(endpoint) } } }
                 _state.update { it.copy(loadedAt = System.currentTimeMillis()) }
             } finally {
-                inFlight.remove(page)
+                flight.remove(page)
             }
         }
     }
@@ -117,7 +119,7 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
     fun clear() {
         scope.cancel()
         scope = childScope()
-        inFlight.clear()
+        inFlight = mutableSetOf()
         _state.value = CoreData()
     }
 
