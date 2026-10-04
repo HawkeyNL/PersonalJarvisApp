@@ -5,6 +5,7 @@ import {
   agentsCard,
   availabilityFromError,
   failureText,
+  fitScale,
   contextCard,
   conversationsCard,
   countSince,
@@ -114,4 +115,14 @@ test("footer shows only the origin host", () => {
   assert.equal(originHost("https://jarvis.home.example:8443"), "jarvis.home.example:8443");
   assert.equal(originHost(null), "");
   assert.equal(originHost("not a url"), "");
+});
+
+test("fit scale: the stage fits the room on both axes, within bounds", () => {
+  const design = { width: 1060, height: 740 };
+  assert.equal(fitScale({ width: 1060, height: 740 }, design, 1.75), 1);
+  assert.equal(fitScale({ width: 2000, height: 370 }, design, 1.75), 0.5); // height limits
+  assert.equal(fitScale({ width: 530, height: 2000 }, design, 1.75), 0.5); // width limits
+  assert.equal(fitScale({ width: 5000, height: 5000 }, design, 1.75), 1.75); // grows, capped
+  assert.equal(fitScale({ width: 100, height: 100 }, design, 1.75), 0.4); // never collapses
+  assert.equal(fitScale({ width: 0, height: 0 }, design, 1.75), 1); // not laid out yet
 });

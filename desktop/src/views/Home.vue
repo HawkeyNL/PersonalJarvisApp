@@ -18,6 +18,7 @@ import { wakePulse } from "../voicewake";
 import { agentCount, loadOptional } from "../coreStatus";
 import { createSerialPoller } from "../serialPoller";
 import { useAppStore } from "../stores/app";
+import { useFitScale } from "../fitScale";
 import {
   agentsCard, availabilityFromError, contextCard, conversationsCard, deriveMood, healthCard, integrationsCard, originHost,
   statusPill, tasksCard,
@@ -229,6 +230,11 @@ const compactQuery = window.matchMedia("(max-width: 1099px), (max-height: 759px)
 const compact = ref(compactQuery.matches);
 const onCompact = (event: MediaQueryListEvent) => { compact.value = event.matches; };
 compactQuery.addEventListener("change", onCompact);
+// The hub always fills the window: the stage scales into the room between
+// the top bar and the footer (grows on large screens, shrinks on small ones).
+const fitRoom = ref<HTMLElement | null>(null);
+const fitContent = ref<HTMLElement | null>(null);
+const scale = useFitScale(fitRoom, fitContent, () => (compact.value ? 1 : 1.75));
 const footerHost = computed(() => originHost(homeNodeConfig.value.origin));
 // Round satellites around the compact orb (offsets from the export).
 const ORBIT: Record<string, [number, number]> = {
@@ -261,7 +267,7 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="hub" :class="{ compact }">
-    <JvBackdrop glow-y="43%" horizon="max(64px, calc(50vh - 400px))" />
+    <JvBackdrop glow-y="43%" horizon="max(64px, 9vh)" />
 
     <JvTopBar variant="hub">
       <JvCommandBar :disabled="auth !== 'in'" @open="openConsole()" @mic="openConsole(true)" />
@@ -306,7 +312,7 @@ onBeforeUnmount(() => {
       </form>
     </div>
 
-    <div v-else class="body">
+    <div v-else ref="fitRoom" class="body" :style="{ '--fit': scale }">
       <p v-if="auth === 'wachten'" class="pairing-wait" role="status">
         Waiting for approval from a trusted Jarvis device.
       </p>
@@ -315,7 +321,7 @@ onBeforeUnmount(() => {
       </p>
 
       <!-- Desktop hub: orb in the middle, seven modules around it. -->
-      <div v-if="!compact" class="stage">
+      <div v-if="!compact" ref="fitContent" class="stage">
         <svg class="wires" viewBox="0 0 1060 740" aria-hidden="true">
           <defs>
             <radialGradient id="hubPlanet" cx="35%" cy="30%" r="70%">
@@ -348,7 +354,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Compact hub (core-mobile): small orb with round links + a card grid. -->
-      <div v-else class="compact-body">
+      <div v-else ref="fitContent" class="compact-body">
         <div class="compact-orb">
           <JvOrb :size="182" :mood="mood" />
           <RouterLink v-for="card in shownCards" :key="card.key" :to="card.to" class="orbit-link"
@@ -409,13 +415,15 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.hub { position: relative; min-height: 100%; display: flex; flex-direction: column; }
+.hub { position: relative; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
 .body, .gate { position: relative; z-index: 1; }
 .tagline { z-index: 1; }
 
 /* --- Desktop stage (export coordinates, offset by 199/125) --- */
-.body { flex: 1; display: grid; place-items: center; padding: 8px 0 76px; }
-.stage { position: relative; width: 1060px; height: 740px; }
+/* The room for the stage: the space between top bar and footer. Its size
+   sets --fit (see useFitScale); the stage keeps its design coordinates. */
+.body { flex: 1; min-height: 0; margin: 8px 0 76px; }
+.stage { position: absolute; left: 50%; top: 50%; width: 1060px; height: 740px; transform: translate(-50%, -50%) scale(var(--fit, 1)); }
 .wires { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .a22 { stroke: rgba(var(--accent-rgb), 0.22); }
 .a30 { stroke: rgba(var(--accent-rgb), 0.3); }
@@ -455,7 +463,11 @@ onBeforeUnmount(() => {
 .connection-error { border: 1px solid rgba(248, 113, 113, 0.45); background: rgba(30, 8, 8, 0.85); color: #fecaca; }
 
 /* --- Onboarding gate --- */
-.gate { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 24px 16px 96px; }
+/* A tall sign-in form scrolls inside the gate; `safe` keeps its top reachable. */
+.gate {
+  flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; justify-content: safe center; gap: 28px; padding: 24px 16px 96px;
+}
 .connection-setup {
   width: min(32rem, 100%); box-sizing: border-box; padding: 22px 24px;
   border-radius: var(--r-22); border: 1.5px solid var(--line-a55); background: var(--panel-bg);
@@ -497,8 +509,11 @@ onBeforeUnmount(() => {
 @media (max-width: 1299px) { .tagline { display: none; } }
 
 /* --- Compact hub --- */
-.compact .body { display: block; padding: 20px 16px 40px; }
-.compact-body { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 24px 48px; }
+.compact .body { margin: 0; }
+.compact-body {
+  width: 100%; box-sizing: border-box; padding: 16px 16px 20px; transform: scale(var(--fit, 1)); transform-origin: top center;
+  display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 16px 48px;
+}
 .compact-orb { position: relative; width: 320px; height: 320px; display: grid; place-items: center; flex: none; }
 .compact-orb::before {
   content: ""; position: absolute; inset: 36px; border-radius: 50%;

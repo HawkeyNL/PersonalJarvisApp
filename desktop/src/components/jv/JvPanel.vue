@@ -4,7 +4,8 @@ import JvStatusDot from "./JvStatusDot.vue";
 import type { Tone } from "../../hubModel";
 
 // Detail panel of a node page: header (icon, title, status, description,
-// italic detail line, optional action) and the body slot below it.
+// italic detail line, optional action) and the body slot below it, which
+// scrolls when the panel is given less height than it needs.
 defineProps<{ icon: IconName; title: string; tone: Tone; status: string; description?: string; quote?: string }>();
 </script>
 
@@ -22,7 +23,7 @@ defineProps<{ icon: IconName; title: string; tone: Tone; status: string; descrip
       </div>
       <div v-if="$slots.action" class="action"><slot name="action" /></div>
     </header>
-    <slot />
+    <div class="body"><slot /></div>
   </section>
 </template>
 
@@ -32,8 +33,14 @@ defineProps<{ icon: IconName; title: string; tone: Tone; status: string; descrip
   padding: 15px 31px 23px; border-radius: var(--r-26);
   border: 1.5px solid var(--line-a55); background: var(--panel-bg);
   box-shadow: 0 0 30px rgba(var(--accent-rgb), 0.18), inset 0 0 40px rgba(var(--accent-rgb), 0.05);
-  display: flex; flex-direction: column; gap: 15px;
+  display: flex; flex-direction: column; gap: 15px; overflow: hidden;
 }
+/* The header stays; a long body scrolls inside the panel, never the page. */
+.body {
+  min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 15px;
+  scrollbar-width: thin; scrollbar-color: rgba(var(--accent-rgb), 0.35) transparent;
+}
+.body > :deep(*) { flex-shrink: 0; }
 .head { display: flex; align-items: center; gap: 24px; min-height: 80px; }
 .icon {
   width: 78px; height: 78px; flex: none; box-sizing: border-box; display: grid; place-items: center;

@@ -180,3 +180,12 @@ export function originHost(origin: string | null): string {
   if (!origin) return "";
   try { return new URL(origin).host; } catch { return ""; }
 }
+
+/** Scale factor that fits a box laid out at `design` size into `room`,
+ *  clamped to [min, max]; 1 while either size is unknown (not laid out). */
+export function fitScale(
+  room: { width: number; height: number }, design: { width: number; height: number }, max = 1, min = 0.4,
+): number {
+  if (!(room.width > 0 && room.height > 0 && design.width > 0 && design.height > 0)) return 1;
+  return Math.min(max, Math.max(min, Math.min(room.width / design.width, room.height / design.height)));
+}
