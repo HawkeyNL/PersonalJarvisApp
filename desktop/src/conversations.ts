@@ -49,7 +49,7 @@ export async function deleteConversation(id: string): Promise<string | null> {
   const epoch=chatSession.capture();
   const status = await currentAuthStatus();
   if (!status.authenticated || !chatSession.current(epoch)) return currentId.value;
-  await deleteAuth(`/v1/conversations/${id}`);
+  await deleteAuth(`/v1/conversations/${encodeURIComponent(id)}`);
   if(!chatSession.current(epoch)) return currentId.value;
   conversations.value = conversations.value.filter((c) => c.id !== id);
   if (currentId.value === id) {

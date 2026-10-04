@@ -186,7 +186,7 @@ async function reloadConversation(id:string):Promise<void> {
     title: string;
     messages: { id?:string; role: string; content: string; model: string | null; at: string }[];
     assistant_running?:boolean;
-  }>(`/v1/conversations/${id}`);
+  }>(`/v1/conversations/${encodeURIComponent(id)}`);
   if(currentId.value!==id || !chatSession.current(epoch)) return;
   thinking.value=res.assistant_running===true;
   messages.value = res.messages.map((m) => ({
