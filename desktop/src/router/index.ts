@@ -3,12 +3,12 @@ import Home from "../views/Home.vue";
 import Trading from "../views/Trading.vue";
 import Health from "../views/Health.vue";
 import Settings from "../views/Settings.vue";
-import NodeStub from "../views/NodeStub.vue";
 import Context from "../views/Context.vue";
 import Conversations from "../views/Conversations.vue";
 import Tasks from "../views/Tasks.vue";
 import Integrations from "../views/Integrations.vue";
 import Agents from "../views/Agents.vue";
+import Memory from "../views/Memory.vue";
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -20,7 +20,7 @@ export const router = createRouter({
     { path: "/tasks", name: "tasks", component: Tasks },
     { path: "/integrations", name: "integrations", component: Integrations },
     { path: "/health", name: "health", component: Health },
-    { path: "/memory", name: "memory", component: NodeStub },
+    { path: "/memory", name: "memory", component: Memory },
     { path: "/context", name: "context", component: Context },
     { path: "/settings", name: "settings", component: Settings },
 
