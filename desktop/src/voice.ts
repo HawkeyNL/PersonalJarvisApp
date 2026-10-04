@@ -20,13 +20,13 @@ export const voiceChoiceError=ref("");
 const voiceChoiceReady=ref(voiceChoice.value==="");
 export async function refreshLocalVoices():Promise<void> {
   try { localVoices.value=await invoke("realtime_voice_catalog");voiceChoiceError.value=""; }
-  catch {localVoices.value=[];voiceChoiceError.value="Lokale stemkeuze niet beschikbaar. De systeemstandaard blijft beschikbaar als een spraakengine is geïnstalleerd.";}
+  catch {localVoices.value=[];voiceChoiceError.value="Local voice choice unavailable. The system default still works if a speech engine is installed.";}
 }
 export async function setVoiceChoice(id:string):Promise<void> {
   try {
     await invoke("realtime_voice_select",{id});
     voiceChoice.value=id;localStorage.setItem(CKEY,id);voiceChoiceReady.value=true;voiceChoiceError.value="";
-  } catch {voiceChoiceReady.value=false;voiceChoiceError.value="Gekozen lokale stem is niet beschikbaar; spraak blijft uit.";}
+  } catch {voiceChoiceReady.value=false;voiceChoiceError.value="The chosen local voice is unavailable; speech stays off.";}
   syncNativeVoice();
 }
 export async function restoreVoiceChoice():Promise<void> {await setVoiceChoice(voiceChoice.value);}
@@ -85,11 +85,11 @@ function isPrivateRoute(): boolean {
 
 /** The policy: may Jarvis speak right now, and why? */
 export function canSpeak(): { allowed: boolean; reason: string } {
-  if (!voiceEnabled.value) return { allowed: false, reason: "spraak uit" };
-  if (!voiceChoiceReady.value) return {allowed:false,reason:"gekozen stem niet beschikbaar"};
-  if (isPrivateRoute()) return { allowed: true, reason: "oortje verbonden" };
-  if (allowSpeaker.value) return { allowed: true, reason: "luidspreker toegestaan" };
-  return { allowed: false, reason: "geen oortje — stil" };
+  if (!voiceEnabled.value) return { allowed: false, reason: "speech off" };
+  if (!voiceChoiceReady.value) return {allowed:false,reason:"chosen voice unavailable"};
+  if (isPrivateRoute()) return { allowed: true, reason: "earphones connected" };
+  if (allowSpeaker.value) return { allowed: true, reason: "speaker allowed" };
+  return { allowed: false, reason: "no earphones — silent" };
 }
 
 /** Speak text if the policy allows. Returns whether it spoke. */

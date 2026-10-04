@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import AccountAdministration from "../components/AccountAdministration.vue";
+import JvBackdrop from "../components/jv/JvBackdrop.vue";
+import JvTopBar from "../components/jv/JvTopBar.vue";
 import { ACCENTS, PRESETS, currentAccent, applyAccent, type Accent } from "../theme";
 import { currentAuthStatus, deregisterDevice, type AuthStatus } from "../auth";
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
@@ -45,16 +47,16 @@ async function onEnroll() {
 }
 
 const accent = ref<Accent>(currentAccent());
-const sections = ["Algemeen", "Account & beveiliging", "Stem", "Updates"] as const;
-const section = ref<(typeof sections)[number]>("Algemeen");
+const sections = ["General", "Account & security", "Voice", "Updates"] as const;
+const section = ref<(typeof sections)[number]>("General");
 const session = ref<AuthStatus | null>(null);
 const homeNodeOriginInput = ref("");
 const homeNodeSaving = ref(false);
 const homeNodeMessage = ref<string | null>(null);
 
 const labels: Record<Accent, string> = {
-  green: "Jarvis-groen",
-  cyan: "Cyaan",
+  green: "Jarvis green",
+  cyan: "Cyan",
   amber: "Amber",
   violet: "Violet",
 };
@@ -73,7 +75,7 @@ async function doUnlink() {
     await deregisterDevice();
     session.value = await currentAuthStatus();
   } catch {
-    homeNodeMessage.value = "Loskoppelen niet voltooid. Bevestig met je apparaat en probeer opnieuw.";
+    homeNodeMessage.value = "Unlinking did not finish. Confirm on your device and try again.";
   } finally {
     unlinking.value = false;
     confirmUnlink.value = false;
@@ -86,7 +88,7 @@ async function saveHomeNodeOrigin() {
   try {
     const value = await configureHomeNode(homeNodeOriginInput.value);
     homeNodeOriginInput.value = value.origin ?? "";
-    homeNodeMessage.value = "Home Node-origin opgeslagen.";
+    homeNodeMessage.value = "Home Node origin saved.";
     await loadUpdateStatus();
   } catch (error) {
     homeNodeMessage.value = error instanceof Error ? error.message : String(error);
@@ -107,20 +109,22 @@ onMounted(async () => {
 </script>
 
 <template>
+  <div class="settings-page">
+  <JvBackdrop glow-y="20%" horizon="80px" />
+  <JvTopBar variant="node" title="SETTINGS" subtitle="THIS DEVICE AND YOUR ACCOUNT" />
   <section class="view settings">
-    <header class="settings-heading"><h1>Instellingen</h1><p class="muted">Verbinding, beveiliging en voorkeuren voor dit apparaat.</p></header>
-    <nav class="settings-sections" aria-label="Instellingenonderdelen">
+    <nav class="settings-sections" aria-label="Settings sections">
       <button v-for="item in sections" :key="item" :aria-pressed="section === item"
         :class="{ selected: section === item }" @click="section = item">{{ item }}</button>
     </nav>
-    <AccountAdministration v-if="session?.authenticated && section === 'Account & beveiliging'" class="account-administration" />
+    <AccountAdministration v-if="session?.authenticated && section === 'Account & security'" class="account-administration" />
 
-    <div v-if="section === 'Algemeen'" class="panel glass">
-      <div class="panel-head">HOME NODE <span class="hint">apparaatconfiguratie</span></div>
+    <div v-if="section === 'General'" class="panel glass">
+      <div class="panel-head">HOME NODE <span class="hint">device configuration</span></div>
       <p class="muted small">
-        Dit credential-vrije adres wordt lokaal bewaard en gebruikt voor alle API-aanvragen en updater-discovery.
+        This credential-free address is stored locally and used for all API requests and update discovery.
       </p>
-      <label class="field-label" for="settings-home-node-origin">HTTPS-origin</label>
+      <label class="field-label" for="settings-home-node-origin">HTTPS origin</label>
       <div class="origin-row">
         <input
           id="settings-home-node-origin"
@@ -131,14 +135,14 @@ onMounted(async () => {
           placeholder="https://jarvis.home.example"
         />
         <button class="ghost" :disabled="homeNodeSaving" @click="saveHomeNodeOrigin">
-          {{ homeNodeSaving ? "Opslaan…" : "Opslaan" }}
+          {{ homeNodeSaving ? "Saving…" : "Save" }}
         </button>
       </div>
       <p v-if="homeNodeMessage" class="small muted" role="status">{{ homeNodeMessage }}</p>
     </div>
 
-    <div v-if="section === 'Algemeen'" class="panel glass">
-      <div class="panel-head">WEERGAVE <span class="hint">accentkleur</span></div>
+    <div v-if="section === 'General'" class="panel glass">
+      <div class="panel-head">APPEARANCE <span class="hint">accent colour</span></div>
       <div class="swatches">
         <button
           v-for="a in ACCENTS"
@@ -152,26 +156,26 @@ onMounted(async () => {
           {{ labels[a] }}
         </button>
       </div>
-      <p class="muted small">Groen is de standaardkleur van Jarvis.</p>
+      <p class="muted small">Green is the Jarvis default.</p>
     </div>
 
-    <div v-if="section === 'Account & beveiliging'" class="panel glass">
+    <div v-if="section === 'Account & security'" class="panel glass">
       <div class="panel-head">ACCOUNT <span class="hint">device-bound</span></div>
       <ul class="kv">
         <li>
           <span class="k">Status</span>
           <span class="v">
             <span class="dot" :class="session?.authenticated ? 'dot-ok' : 'dot-todo'"></span>
-            {{ session?.authenticated ? "ingelogd" : "uitgelogd" }}
+            {{ session?.authenticated ? "signed in" : "signed out" }}
           </span>
         </li>
         <li>
-          <span class="k">Apparaat-ID</span>
+          <span class="k">Device ID</span>
           <span class="v mono">{{ session?.device_id ?? "—" }}</span>
         </li>
         <li>
-          <span class="k">Sleutel</span>
-          <span class="v">{{ session?.has_key ? "in keychain" : "geen" }}</span>
+          <span class="k">Key</span>
+          <span class="v">{{ session?.has_key ? "in keychain" : "none" }}</span>
         </li>
       </ul>
       <button
@@ -179,18 +183,18 @@ onMounted(async () => {
         class="ghost danger"
         @click="confirmUnlink = true"
       >
-        Dit apparaat loskoppelen
+        Unlink this device
       </button>
     </div>
 
-    <div v-if="section === 'Account & beveiliging'" class="panel glass">
-      <div class="panel-head">BEVEILIGING <span class="hint">app-vergrendeling</span></div>
+    <div v-if="section === 'Account & security'" class="panel glass">
+      <div class="panel-head">SECURITY <span class="hint">app lock</span></div>
       <label class="toggle" :class="{ off: !isDesktop }">
         <span class="tl">
-          <span class="tt">Vergrendel bij openen</span>
+          <span class="tt">Lock on open</span>
           <span class="td">
-            Touch ID / Face ID bij het openen. Faalt de biometrie, dan keur je
-            goed via je telefoon.
+            Touch ID / Face ID when Jarvis opens. If biometrics fail, you
+            approve from your phone.
           </span>
         </span>
         <input
@@ -202,18 +206,18 @@ onMounted(async () => {
         <span class="sw"></span>
       </label>
       <p v-if="!isDesktop" class="muted small">
-        Dit toestel keurt ontgrendelingen goed voor je desktop — geen eigen slot nodig.
+        This device approves unlocks for your desktop, so it needs no lock of its own.
       </p>
     </div>
 
-    <div v-if="section === 'Stem'" class="panel glass full-width">
-      <div class="panel-head">STEM <span class="hint">server-side · centraal</span></div>
+    <div v-if="section === 'Voice'" class="panel glass full-width">
+      <div class="panel-head">VOICE <span class="hint">server-side · central</span></div>
       <ul class="kv">
         <li>
-          <span class="k">Stemprofiel</span>
+          <span class="k">Voice profile</span>
           <span class="v">
             <span class="dot" :class="enrolled ? 'dot-ok' : 'dot-todo'"></span>
-            {{ enrolled ? "ingeschreven" : "nog niet" }}
+            {{ enrolled ? "enrolled" : "not yet" }}
           </span>
         </li>
         <li v-if="engine">
@@ -223,20 +227,20 @@ onMounted(async () => {
       </ul>
 
       <label class="miclabel">
-        <span class="fl">Microfoon</span>
+        <span class="fl">Microphone</span>
         <select
           class="micsel"
           :value="selectedMic"
           @change="setMic(($event.target as HTMLSelectElement).value)"
         >
-          <option value="">Systeemstandaard</option>
+          <option value="">System default</option>
           <option v-for="m in mics" :key="m.deviceId" :value="m.deviceId">{{ m.label }}</option>
         </select>
       </label>
 
       <div class="enroll">
         <button class="ghost" :disabled="!voiceSupported || busy" @click="onEnroll">
-          {{ enrolled ? "Stem opnieuw opnemen" : "Neem je stem op" }}
+          {{ enrolled ? "Record voice again" : "Record your voice" }}
         </button>
         <button
           v-if="enrolled"
@@ -244,12 +248,12 @@ onMounted(async () => {
           :disabled="!voiceSupported || busy"
           @click="verify()"
         >
-          Test verificatie
+          Test verification
         </button>
       </div>
 
       <p v-if="!voiceSupported" class="small errc">
-        Microfoon niet beschikbaar op dit toestel.
+        Microphone unavailable on this device.
       </p>
       <p v-else-if="voiceStatus" class="small" :class="busy ? 'muted' : 'okc'">
         {{ voiceStatus }}
@@ -257,15 +261,15 @@ onMounted(async () => {
       <p v-if="voiceError" class="small errc">{{ voiceError }}</p>
 
       <p v-if="lastVerify && lastVerify.enrolled && lastVerify.transcript" class="small muted">
-        Gehoord: "{{ lastVerify.transcript }}"
+        Heard: "{{ lastVerify.transcript }}"
       </p>
 
       <label class="toggle" :class="{ off: !wakeReady }" style="margin-top: 14px">
         <span class="tl">
-          <span class="tt">Luister naar "Hey Jarvis"</span>
+          <span class="tt">Listen for "Hey Jarvis"</span>
           <span class="td">
-            Werkt op elk toestel (in de app zelf). Alleen jouw stem wekt Jarvis.
-            Tot de auto-detectie er is: ⌘⇧J als test-trigger.
+            Works on every device (inside the app). Only your voice wakes Jarvis.
+            Until auto-detection exists: ⌘⇧J as a test trigger.
           </span>
         </span>
         <input
@@ -281,33 +285,33 @@ onMounted(async () => {
       </p>
 
       <p class="muted small">
-        Je stem staat centraal op je eigen server en geldt op al je toestellen.
-        Stem is gemak — Touch ID / je telefoon blijft het slot.
+        Your voice lives centrally on your own server and works on all your devices.
+        Voice is convenience; Touch ID or your phone stays the lock.
       </p>
     </div>
 
     <div v-if="section === 'Updates'" class="panel glass full-width">
       <div class="panel-head">JARVIS APP <span class="hint">private updates</span></div>
       <ul class="kv">
-        <li><span class="k">Versie</span><span class="v mono">v{{ currentAppVersion }}</span></li>
+        <li><span class="k">Version</span><span class="v mono">v{{ currentAppVersion }}</span></li>
         <li>
           <span class="k">Status</span>
           <span class="v">
             <span class="dot" :class="updateState === 'error' ? 'dot-err' : updateState === 'available' ? 'dot-todo' : 'dot-ok'"></span>
-            <template v-if="updateState === 'checking'">controleren…</template>
-            <template v-else-if="updateState === 'downloading'">downloaden{{ updateProgress === null ? '…' : ` · ${updateProgress}%` }}</template>
-            <template v-else-if="updateState === 'installing'">installeren…</template>
-            <template v-else-if="updateState === 'available'">v{{ availableAppVersion }} beschikbaar</template>
-            <template v-else-if="updateState === 'installed'">installatie gereed</template>
+            <template v-if="updateState === 'checking'">checking…</template>
+            <template v-else-if="updateState === 'downloading'">downloading{{ updateProgress === null ? '…' : ` · ${updateProgress}%` }}</template>
+            <template v-else-if="updateState === 'installing'">installing…</template>
+            <template v-else-if="updateState === 'available'">v{{ availableAppVersion }} available</template>
+            <template v-else-if="updateState === 'installed'">installation ready</template>
             <template v-else-if="updateState === 'up_to_date'">up-to-date</template>
-            <template v-else-if="updateState === 'ready'">gereed om te controleren</template>
-            <template v-else-if="updateState === 'unauthenticated'">log in om te controleren</template>
-            <template v-else-if="updateState === 'unconfigured'">Home Node niet geconfigureerd</template>
-            <template v-else-if="updateState === 'unsupported'">niet beschikbaar in deze build</template>
-            <template v-else-if="updateState === 'incompatible'">updateprotocol niet compatibel</template>
-            <template v-else-if="updateState === 'unavailable'">updateservice niet bereikbaar</template>
-            <template v-else-if="updateState === 'error'">controle mislukt</template>
-            <template v-else>gereed</template>
+            <template v-else-if="updateState === 'ready'">ready to check</template>
+            <template v-else-if="updateState === 'unauthenticated'">sign in to check</template>
+            <template v-else-if="updateState === 'unconfigured'">Home Node not configured</template>
+            <template v-else-if="updateState === 'unsupported'">not available in this build</template>
+            <template v-else-if="updateState === 'incompatible'">update protocol not compatible</template>
+            <template v-else-if="updateState === 'unavailable'">update service unreachable</template>
+            <template v-else-if="updateState === 'error'">check failed</template>
+            <template v-else>ready</template>
           </span>
         </li>
       </ul>
@@ -316,13 +320,13 @@ onMounted(async () => {
       </div>
       <div class="update-actions">
         <button v-if="updateState === 'available'" class="ghost" :disabled="updateBusy" @click="installAvailableUpdate">
-          Update nu
+          Update now
         </button>
         <button v-else-if="updateState === 'installed'" class="ghost" @click="restartAfterUpdate">
-          Herstart Jarvis
+          Restart Jarvis
         </button>
         <button v-else class="ghost" :disabled="updateBusy || updateState === 'unsupported'" @click="checkForUpdate">
-          Controleer op updates
+          Check for updates
         </button>
       </div>
       <p v-if="updateError" class="small errc">{{ updateError }}</p>
@@ -330,14 +334,14 @@ onMounted(async () => {
         {{ updateNotes }}
       </p>
       <p v-else class="muted small">
-        Updates komen via je gekoppelde Home Node en worden vóór installatie cryptografisch gecontroleerd.
+        Updates come through your paired Home Node and are verified cryptographically before installation.
       </p>
     </div>
 
-    <div v-if="section === 'Algemeen'" class="panel glass full-width">
-      <div class="panel-head">SYSTEEM <span class="hint">info</span></div>
+    <div v-if="section === 'General'" class="panel glass full-width">
+      <div class="panel-head">SYSTEM <span class="hint">info</span></div>
       <ul class="kv">
-        <li><span class="k">Backend</span><span class="v mono">{{ homeNodeConfig.origin ?? "niet geconfigureerd" }}</span></li>
+        <li><span class="k">Backend</span><span class="v mono">{{ homeNodeConfig.origin ?? "not configured" }}</span></li>
         <li><span class="k">Client</span><span class="v mono">Jarvis MK I · v{{ currentAppVersion || "…" }}</span></li>
         <li><span class="k">Broker</span><span class="v">IBKR read-only</span></li>
       </ul>
@@ -347,52 +351,53 @@ onMounted(async () => {
     <Transition name="modal">
       <div v-if="confirmUnlink" class="modal-overlay" @click.self="confirmUnlink = false">
         <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="unlink-title">
-          <h2 id="unlink-title">Dit apparaat loskoppelen?</h2>
+          <h2 id="unlink-title">Unlink this device?</h2>
           <p>
-            Dit trekt dit toestel serverside in en wist de device-sleutel hier.
-            Je moet dit apparaat daarna opnieuw koppelen (enrollen) om weer in te
-            loggen. Je gegevens op de server blijven bestaan.
+            This revokes the device on the server and erases its device key here.
+            You then have to pair (enroll) this device again to sign in.
+            Your data on the server stays.
           </p>
           <div class="modal-actions">
             <button class="ghost" :disabled="unlinking" @click="confirmUnlink = false">
-              Annuleren
+              Cancel
             </button>
             <button class="ghost danger" :disabled="unlinking" @click="doUnlink">
-              {{ unlinking ? "Loskoppelen…" : "Loskoppelen" }}
+              {{ unlinking ? "Unlinking…" : "Unlink" }}
             </button>
           </div>
         </div>
       </div>
     </Transition>
   </section>
+  </div>
 </template>
 
 <style scoped>
+.settings-page { position: relative; min-height: 100%; padding-bottom: 96px; }
+.settings-page > .settings { position: relative; z-index: 1; margin: 0 auto; padding: 28px 24px 0; }
 .settings { max-width: 1180px; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; align-items: start; overflow-wrap: anywhere; }
-.settings-heading, .settings-sections, .full-width, .account-administration { grid-column: 1 / -1; }
-.settings-heading p { margin: 0; }
+.settings-sections, .full-width, .account-administration { grid-column: 1 / -1; }
 .settings-sections { display: flex; flex-wrap: wrap; gap: 8px; }
-.settings-sections button { background: transparent; border: 1px solid var(--border); color: var(--muted); }
-.settings-sections button.selected { color: var(--accent); border-color: var(--accent); background: var(--panel); }
+.settings-sections button { background: rgba(3, 24, 19, 0.8); border: 1px solid var(--line-a30); color: var(--text-3); font-weight: 400; border-radius: var(--r-12); }
+.settings-sections button.selected { color: #f8fffb; border-color: var(--accent); background: rgba(var(--accent-rgb), 0.1); box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.35); }
 .settings-sections button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media (max-width: 760px) { .settings { grid-template-columns: minmax(0,1fr); } }
 .panel {
   min-width: 0;
   position: relative;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 14px 16px 16px;
+  border: 1px solid var(--line-a45);
+  border-radius: var(--r-22);
+  padding: 18px 20px 20px;
   margin-bottom: 0;
 }
 .glass {
-  background: rgba(14, 30, 22, 0.5);
-  backdrop-filter: blur(14px) saturate(1.3);
-  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  background: var(--panel-bg);
+  box-shadow: 0 0 22px rgba(var(--accent-rgb), 0.12);
 }
 .panel-head {
   display: flex; align-items: center; justify-content: space-between;
-  font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em;
-  color: var(--accent); margin-bottom: 12px;
+  font-size: 11px; letter-spacing: 0.3em;
+  color: var(--text-5); margin-bottom: 14px;
 }
 .hint { font-size: 9px; color: var(--muted); letter-spacing: 0.1em; }
 
@@ -421,7 +426,7 @@ onMounted(async () => {
 .mono { font-family: var(--mono); font-size: 12px; }
 .ghost {
   margin-top: 14px; background: transparent; border: 1px solid var(--border);
-  color: var(--muted); font-family: var(--mono); font-size: 12px;
+  color: var(--text-3); font-size: 12px; font-weight: 400;
 }
 .ghost:hover { color: var(--accent-2); border-color: var(--accent-2); filter: none; }
 .ghost.danger { color: #f87171; border-color: rgba(248, 113, 113, 0.4); }
@@ -432,8 +437,7 @@ onMounted(async () => {
 .modal-overlay {
   position: fixed; inset: 0; z-index: 50;
   display: flex; align-items: center; justify-content: center; padding: 20px;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  background: rgba(1, 9, 10, 0.82);
 }
 .modal {
   width: min(420px, 100%);
@@ -467,7 +471,7 @@ onMounted(async () => {
   width: 21px; height: 21px; border-radius: 50%;
   background: var(--muted); transition: transform 0.2s ease, background 0.2s ease;
 }
-.toggle input:checked ~ .sw { background: rgba(52, 245, 160, 0.25); border-color: var(--accent); }
+.toggle input:checked ~ .sw { background: rgba(var(--accent-rgb), 0.25); border-color: var(--accent); }
 .toggle input:checked ~ .sw::after { transform: translateX(19px); background: var(--accent); }
 .toggle input:disabled ~ .sw { opacity: 0.5; }
 

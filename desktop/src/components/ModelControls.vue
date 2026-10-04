@@ -25,7 +25,7 @@ async function refresh() {
 async function reload() {
   busy.value = true;
   try { await refresh(); notice.value = ""; }
-  catch { notice.value = "Modelpolicy niet bereikbaar. Controleer de verbinding en sessie."; policy.value = null; }
+  catch { notice.value = "Model policy unreachable. Check the connection and session."; policy.value = null; }
   finally { busy.value = false; }
 }
 async function confirm() {
@@ -36,10 +36,10 @@ async function confirm() {
   busy.value = true;
   try {
     await invoke("set_model_enabled", { provider: model.provider, model: model.model, enabled: !model.enabled, policySha256: hash });
-    notice.value = "Modeltoegang geverifieerd en bijgewerkt.";
+    notice.value = "Model access verified and updated.";
   } catch (error) { notice.value = String(error); }
   finally {
-    try { await refresh(); } catch { policy.value = null; notice.value += " Status opnieuw ophalen mislukt."; }
+    try { await refresh(); } catch { policy.value = null; notice.value += " Reloading the status failed."; }
     busy.value = false;
   }
 }
@@ -48,40 +48,40 @@ onMounted(reload);
 
 <template>
   <section class="model-controls">
-    <h3>Modeltoegang</h3>
-    <p>"Toegestaan" betekent dat Jarvis dit model mag kiezen, niet dat het nu een aanvraag verwerkt. Een werkende provider en het bestaande budget blijven vereist. OS-authenticatie geldt vijf minuten, tot vergrendelen of uitloggen; iedere wijziging bevestig je apart.</p>
-    <p v-if="policy" class="model-summary">{{ enabledCount }} toegestaan · {{ policy.models.length - enabledCount }} geblokkeerd</p>
+    <h3>Model access</h3>
+    <p>"Allowed" means Jarvis may choose this model, not that it is handling a request right now. A working provider and the existing budget are still required. OS authentication lasts five minutes, until you lock or sign out; you confirm every change separately.</p>
+    <p v-if="policy" class="model-summary">{{ enabledCount }} allowed · {{ policy.models.length - enabledCount }} blocked</p>
     <div class="model-toolbar">
-      <input v-model="search" aria-label="Zoek modellen" placeholder="Zoek provider of model" @input="page = 0" />
-      <select v-model="accessFilter" aria-label="Filter modeltoegang" @change="page = 0">
-        <option value="all">Alle modellen</option>
-        <option value="enabled">Toegestaan</option>
-        <option value="disabled">Geblokkeerd</option>
+      <input v-model="search" aria-label="Search models" placeholder="Search provider or model" @input="page = 0" />
+      <select v-model="accessFilter" aria-label="Filter model access" @change="page = 0">
+        <option value="all">All models</option>
+        <option value="enabled">Allowed</option>
+        <option value="disabled">Blocked</option>
       </select>
-      <button :disabled="busy" @click="reload">Ververs</button>
+      <button :disabled="busy" @click="reload">Refresh</button>
     </div>
     <p role="status">{{ notice }}</p>
-    <p v-if="policy && !mutable">Modelbediening is niet beschikbaar op deze Core of de actieve policy wijkt af. Gebruik de vertrouwde CLI voor herstel.</p>
+    <p v-if="policy && !mutable">Model control is unavailable on this Core, or the active policy differs. Use the trusted CLI to repair it.</p>
     <ul>
       <li v-for="model in rows" :key="model.provider + '/' + model.model">
         <div><strong>{{ model.model }}</strong><small>{{ model.provider }}<template v-if="model.route"> · route {{ model.route }}</template></small></div>
-        <span class="access-badge" :class="model.enabled ? 'access-enabled' : 'access-disabled'">{{ model.enabled ? "Toegestaan" : "Geblokkeerd" }}</span>
-        <button :disabled="busy || !mutable" @click="selected = model">{{ model.enabled ? "Uitschakelen" : "Inschakelen" }}</button>
+        <span class="access-badge" :class="model.enabled ? 'access-enabled' : 'access-disabled'">{{ model.enabled ? "Allowed" : "Blocked" }}</span>
+        <button :disabled="busy || !mutable" @click="selected = model">{{ model.enabled ? "Disable" : "Enable" }}</button>
       </li>
     </ul>
-    <p v-if="policy && !matches.length">Geen modellen gevonden voor deze zoekopdracht of filter.</p>
+    <p v-if="policy && !matches.length">No models match this search or filter.</p>
     <div class="model-toolbar">
-      <button :disabled="page === 0 || busy" @click="page--">Vorige</button>
+      <button :disabled="page === 0 || busy" @click="page--">Previous</button>
       <span>{{ page + 1 }} / {{ Math.max(1, Math.ceil(matches.length / 25)) }}</span>
-      <button :disabled="(page + 1) * 25 >= matches.length || busy" @click="page++">Volgende</button>
+      <button :disabled="(page + 1) * 25 >= matches.length || busy" @click="page++">Next</button>
     </div>
-    <div v-if="selected" class="model-confirm" role="dialog" aria-modal="true" aria-label="Modelwijziging bevestigen" @keydown.esc="selected = null">
+    <div v-if="selected" class="model-confirm" role="dialog" aria-modal="true" aria-label="Confirm model change" @keydown.esc="selected = null">
       <div>
-        <h3>{{ selected.enabled ? "Modeltoegang intrekken?" : "Modeltoegang toestaan?" }}</h3>
+        <h3>{{ selected.enabled ? "Revoke model access?" : "Allow model access?" }}</h3>
         <p>{{ selected.provider }} / {{ selected.model }}</p>
-        <p>Dit wijzigt de gedeelde Home Node-policy voor alle apparaten. Het kiest geen actief model voor lopende aanvragen; die worden niet geannuleerd.</p>
-        <button autofocus @click="selected = null">Annuleren</button>
-        <button @click="confirm">Wijziging bevestigen</button>
+        <p>This changes the shared Home Node policy for all devices. It does not pick an active model for running requests, and those are not cancelled.</p>
+        <button autofocus @click="selected = null">Cancel</button>
+        <button @click="confirm">Confirm change</button>
       </div>
     </div>
   </section>

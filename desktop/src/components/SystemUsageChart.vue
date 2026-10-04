@@ -7,8 +7,8 @@ const props = defineProps<{ rows: DailyUsage[]; mode: "cost" | "tokens" }>();
 const canvas = ref<HTMLCanvasElement | null>(null);
 let chart: Chart<"bar", number[], string> | undefined;
 Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip, Legend);
-const euro = new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", maximumFractionDigits: 4 });
-const integer = new Intl.NumberFormat("nl-NL");
+const euro = new Intl.NumberFormat("en", { style: "currency", currency: "EUR", maximumFractionDigits: 4 });
+const integer = new Intl.NumberFormat("en");
 
 function render() {
   chart?.destroy();
@@ -17,12 +17,12 @@ function render() {
   const cost = props.mode === "cost";
   const split = props.rows.every(row => row.input_tokens != null && row.output_tokens != null && row.cache_read_tokens != null && row.cache_write_tokens != null);
   const datasets = cost
-    ? [{ label: "Kosten", data: props.rows.map(row => row.spent_eur), backgroundColor: "#34f5a0" }]
+    ? [{ label: "Cost", data: props.rows.map(row => row.spent_eur), backgroundColor: "#34f5a0" }]
     : split ? [
       { label: "Input", data: props.rows.map(row => row.input_tokens!), backgroundColor: "#34f5a0" },
       { label: "Output", data: props.rows.map(row => row.output_tokens!), backgroundColor: "#7dffc0" },
-      { label: "Cache lezen", data: props.rows.map(row => row.cache_read_tokens!), backgroundColor: "#277b59" },
-      { label: "Cache schrijven", data: props.rows.map(row => row.cache_write_tokens!), backgroundColor: "#f4c76b" },
+      { label: "Cache read", data: props.rows.map(row => row.cache_read_tokens!), backgroundColor: "#277b59" },
+      { label: "Cache write", data: props.rows.map(row => row.cache_write_tokens!), backgroundColor: "#f4c76b" },
     ] : [{ label: "Tokens", data: props.rows.map(row => row.total_tokens), backgroundColor: "#34f5a0" }];
   chart = new Chart(canvas.value, {
     type: "bar",
@@ -47,7 +47,7 @@ onBeforeUnmount(() => chart?.destroy());
 </script>
 
 <template>
-  <div class="usage-chart"><canvas ref="canvas" role="img" :aria-label="mode === 'cost' ? 'Kosten per dag' : 'Tokens per dag'" /></div>
+  <div class="usage-chart"><canvas ref="canvas" role="img" :aria-label="mode === 'cost' ? 'Cost per day' : 'Tokens per day'" /></div>
   <details>
     <summary>Dagwaarden bekijken</summary>
     <ul><li v-for="row in rows" :key="row.day">{{ row.day }} · {{ mode === 'cost' ? euro.format(row.spent_eur) : integer.format(row.total_tokens) + ' tokens' }}</li></ul>

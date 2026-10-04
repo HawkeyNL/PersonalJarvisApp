@@ -34,7 +34,7 @@ async function refresh(): Promise<boolean> {
 
 export async function approvePairing(request: PairingRequest): Promise<void> {
   const status = await currentAuthStatus();
-  if (!status.authenticated || !status.device_id) throw new Error("niet ingelogd");
+  if (!status.authenticated || !status.device_id) throw new Error("not signed in");
   pairingError.value = null;
   try {
     const signature = await invoke<string>("auth_sign_pairing_approval", {
@@ -57,7 +57,7 @@ async function ownerId(): Promise<string> {
 
 export async function denyPairing(request: PairingRequest): Promise<void> {
   const status = await currentAuthStatus();
-  if (!status.authenticated) throw new Error("niet ingelogd");
+  if (!status.authenticated) throw new Error("not signed in");
   await postJsonAuth(`/v1/auth/pairing/requests/${request.id}/deny`, {});
   pairingRequests.value = pairingRequests.value.filter((item) => item.id !== request.id);
 }

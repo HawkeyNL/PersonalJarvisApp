@@ -8,6 +8,8 @@ import {
   type Holding,
 } from "../portfolio";
 import { ibkrStatus, ibkrPositions, type IbkrPosition } from "../ibkr";
+import JvBackdrop from "../components/jv/JvBackdrop.vue";
+import JvTopBar from "../components/jv/JvTopBar.vue";
 
 // Sub-tab is driven by the route (/trading vs /trading/ibkr).
 const route = useRoute();
@@ -83,7 +85,7 @@ async function refreshIbkr() {
       positions.value = p.positions;
     } else {
       ibStatus.value = "disconnected";
-      ibHint.value = s.hint ?? "IBKR-gateway niet verbonden (start de Client Portal Gateway en log in).";
+      ibHint.value = "IBKR gateway not connected. Start the Client Portal Gateway and log in.";
     }
   } catch (e) {
     ibStatus.value = "disconnected";
@@ -98,13 +100,16 @@ onMounted(() => {
 </script>
 
 <template>
+  <div class="trading-page">
+  <JvBackdrop glow-y="20%" horizon="80px" />
+  <JvTopBar variant="node" title="TRADING" subtitle="YOUR POSITIONS ON ONE DESK" />
   <section class="view trading">
     <header class="desk-top">
       <div>
         <h1>Trading</h1>
         <p class="muted sub">
-          Je posities op één desk — handmatig en live via IBKR (read-only).
-          Traden (orders) volgt later, met risk-checks en bevestiging.
+          Your positions on one desk: manual, and live through IBKR (read-only).
+          Trading (orders) comes later, with risk checks and confirmation.
         </p>
       </div>
     </header>
@@ -112,50 +117,55 @@ onMounted(() => {
     <!-- summary tiles -->
     <div class="tiles">
       <div class="tile glass">
-        <span class="t-k">POSITIES</span>
+        <span class="t-k">POSITIONS</span>
         <span class="t-v">{{ holdings.length }}</span>
       </div>
       <div class="tile glass">
-        <span class="t-k">KOSTENBASIS</span>
+        <span class="t-k">COST BASIS</span>
         <span class="t-v mono">{{ total }}</span>
       </div>
       <div class="tile glass">
         <span class="t-k">IBKR</span>
         <span class="t-v small">
           <span class="dot" :class="ibStatus === 'connected' ? 'dot-ok' : ibStatus === 'disconnected' ? 'dot-err' : 'dot-todo'"></span>
-          {{ ibStatus === "connected" ? "verbonden" : ibStatus === "disconnected" ? "offline" : "…" }}
+          {{ ibStatus === "connected" ? "connected" : ibStatus === "disconnected" ? "offline" : "…" }}
         </span>
       </div>
     </div>
 
+    <nav class="seg" aria-label="Trading">
+      <RouterLink to="/trading" :class="{ on: seg === 'manual' }">Portfolio</RouterLink>
+      <RouterLink to="/trading/ibkr" :class="{ on: seg === 'ibkr' }">IBKR</RouterLink>
+    </nav>
+
     <!-- MANUAL -->
     <div v-show="seg === 'manual'" class="panel glass">
       <form class="holding-form" @submit.prevent="add">
-        <input v-model="symbol" placeholder="Symbool (AAPL)" aria-label="symbool" />
-        <input v-model="quantity" placeholder="Aantal" inputmode="decimal" aria-label="aantal" />
-        <input v-model="avgCost" placeholder="Gem. kostprijs" inputmode="decimal" aria-label="kostprijs" />
-        <button type="submit">Toevoegen</button>
+        <input v-model="symbol" placeholder="Symbol (AAPL)" aria-label="Symbol" />
+        <input v-model="quantity" placeholder="Quantity" inputmode="decimal" aria-label="Quantity" />
+        <input v-model="avgCost" placeholder="Avg. cost" inputmode="decimal" aria-label="Average cost" />
+        <button type="submit">Add</button>
       </form>
 
       <p v-if="hError" class="muted err">{{ hError }}</p>
-      <p v-if="loading" class="muted">Laden…</p>
+      <p v-if="loading" class="muted">Loading…</p>
 
       <div v-else-if="holdings.length" class="holdings">
-        <div class="total">Totale kostenbasis: <strong>{{ total }}</strong></div>
+        <div class="total">Total cost basis: <strong>{{ total }}</strong></div>
         <ul class="holding-list">
           <li v-for="h in holdings" :key="h.id" class="holding">
             <div class="holding-head">
               <span class="sym">{{ h.symbol }}</span>
               <span class="muted">{{ h.quantity }} × {{ h.avg_cost }} {{ h.currency }}</span>
               <span class="cost mono">{{ h.cost_basis }}</span>
-              <button class="del" @click="remove(h.id)" aria-label="verwijderen">✕</button>
+              <button class="del" @click="remove(h.id)" aria-label="Remove">✕</button>
             </div>
             <div class="bar"><div class="bar-fill" :style="{ width: h.weight_pct + '%' }"></div></div>
             <div class="weight muted">{{ h.weight_pct }}%</div>
           </li>
         </ul>
       </div>
-      <p v-else-if="!loading" class="muted">Nog geen posities. Voeg er hierboven één toe.</p>
+      <p v-else-if="!loading" class="muted">No positions yet. Add one above.</p>
     </div>
 
     <!-- IBKR -->
@@ -165,18 +175,18 @@ onMounted(() => {
           <span class="dot" :class="ibStatus === 'connected' ? 'dot-ok' : ibStatus === 'disconnected' ? 'dot-err' : 'dot-todo'"></span>
           {{
             ibStatus === "connected"
-              ? `verbonden — account ${account}`
+              ? `connected — account ${account}`
               : ibStatus === "disconnected"
-                ? "niet verbonden"
-                : "controleren…"
+                ? "not connected"
+                : "checking…"
           }}
         </div>
-        <button class="ghost" @click="refreshIbkr">Opnieuw verbinden</button>
+        <button class="ghost" @click="refreshIbkr">Reconnect</button>
       </div>
 
       <p class="muted sub">
-        Read-only via de Client Portal Gateway (paper of live). De login met
-        SSO + 2FA doe je in de gateway; Jarvis leest alleen.
+        Read-only through the Client Portal Gateway (paper or live). You log in
+        with SSO + 2FA in the gateway; Jarvis only reads.
       </p>
       <p v-if="ibHint" class="muted">{{ ibHint }}</p>
 
@@ -189,18 +199,18 @@ onMounted(() => {
       </ul>
     </div>
   </section>
+  </div>
 </template>
 
 <style scoped>
-.trading { width: 100%; }
+.trading-page { position: relative; min-height: 100%; padding-bottom: 96px; }
+.trading { position: relative; z-index: 1; width: auto; max-width: 980px; margin: 0 auto; padding: 28px 24px 0; }
 .desk-top { margin-bottom: 18px; }
 .sub { margin: 6px 0 0; font-size: 13px; }
 
 .glass {
-  background: rgba(14, 30, 22, 0.5);
-  backdrop-filter: blur(14px) saturate(1.25);
-  -webkit-backdrop-filter: blur(14px) saturate(1.25);
-  border: 1px solid var(--border);
+  background: var(--panel-bg);
+  border: 1px solid var(--line-a30);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
@@ -217,20 +227,18 @@ onMounted(() => {
 .seg {
   display: inline-flex; gap: 4px; padding: 4px; margin-bottom: 16px;
   border-radius: 14px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(16px) saturate(1.4);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  background: rgba(3, 24, 19, 0.8);
+  border: 1px solid var(--line-a30);
 }
-.seg button {
-  background: transparent; color: var(--muted); border: none;
+.seg a {
+  text-decoration: none; color: var(--muted);
   padding: 8px 18px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer;
 }
-.seg button:hover { color: var(--text); }
-.seg button.on {
+.seg a:hover { color: var(--text); }
+.seg a.on {
   color: var(--accent);
-  background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.05));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 8px rgba(0,0,0,0.25);
+  background: rgba(var(--accent-rgb), 0.1);
+  box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 14px rgba(var(--accent-rgb), 0.35);
 }
 
 .panel { border-radius: 14px; padding: 16px 18px 18px; }

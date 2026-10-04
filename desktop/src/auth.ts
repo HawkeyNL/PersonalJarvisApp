@@ -29,7 +29,7 @@ export function currentAuthStatus(): Promise<AuthStatus> {
 const PAIRING_WAIT_KEY = "jarvis.pairing.wait";
 type PairingWait = { request_id: string; nonce: string; expires_at: number };
 export class PairingPending extends Error {
-  constructor() { super("Wacht op goedkeuring vanaf een vertrouwd Jarvis-apparaat."); }
+  constructor() { super("Waiting for approval from a trusted Jarvis device."); }
 }
 
 export type AccountStatus = { protocol: number; password_required: boolean; bootstrap_required: boolean };
@@ -72,7 +72,7 @@ export async function login(enrolledDeviceId?: string, password?: string, boundO
         throw new PairingPending();
       } else {
         sessionStorage.removeItem(PAIRING_WAIT_KEY);
-        throw new Error("pairing request is verlopen of afgewezen");
+        throw new Error("pairing request expired or was denied");
       }
     } else {
       const pairing = await postJson<PairingWait>("/v1/auth/pairing/requests", {
@@ -154,7 +154,7 @@ async function approveAccount(approval: AccountApproval): Promise<void> {
 
 export async function revokeDevice(deviceId: string): Promise<void> {
   const approval = await postJsonAuth<AccountApproval>(`/v1/devices/${deviceId}/revoke-request`, {});
-  if (approval.action !== "device-revoke" || approval.target !== deviceId) throw new Error("Ongeldig intrekkingsverzoek");
+  if (approval.action !== "device-revoke" || approval.target !== deviceId) throw new Error("Invalid revocation request");
   await approveAccount(approval);
 }
 
@@ -162,7 +162,7 @@ export async function setAccountPassword(password: string, currentPassword?: str
   const approval = await postJsonAuth<AccountApproval>("/v1/auth/account/password/requests", {
     password, current_password: currentPassword,
   });
-  if (approval.action !== "password-set" || approval.target !== approval.user_id) throw new Error("Ongeldig wachtwoordverzoek");
+  if (approval.action !== "password-set" || approval.target !== approval.user_id) throw new Error("Invalid password request");
   await approveAccount(approval);
   await clearSession();
 }
@@ -175,7 +175,7 @@ export async function deregisterDevice(): Promise<void> {
   if (status.authenticated && status.device_id) {
     await revokeDevice(status.device_id);
   } else {
-    throw new Error("Meld je aan om dit apparaat veilig in te trekken.");
+    throw new Error("Sign in to revoke this device safely.");
   }
   await invoke("auth_reset");
 }

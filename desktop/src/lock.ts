@@ -89,7 +89,7 @@ export async function biometricUnlock(): Promise<boolean> {
   unlocking.value = true;
   lockError.value = null;
   try {
-    await invoke("biometric_unlock", { reason: "Jarvis ontgrendelen", allowPassword: false });
+    await invoke("biometric_unlock", { reason: "Unlock Jarvis", allowPassword: false });
     unlockApp();
     return true;
   } catch (e) {
@@ -105,7 +105,7 @@ export async function requestPhoneApproval(): Promise<void> {
   phoneError.value = null;
   const status = await currentAuthStatus();
   if (!status.authenticated) {
-    phoneError.value = "niet ingelogd";
+    phoneError.value = "not signed in";
     return;
   }
   try {
@@ -130,12 +130,12 @@ export async function requestPhoneApproval(): Promise<void> {
         }
         if (status === "denied") {
           stopPhonePoll();
-          phoneError.value = "geweigerd op je telefoon";
+          phoneError.value = "denied on your phone";
           return;
         }
         if (status === "expired") {
           stopPhonePoll();
-          phoneError.value = "verzoek verlopen — probeer opnieuw";
+          phoneError.value = "request expired — try again";
           return;
         }
         // still pending → loop immediately (the server already waited)
@@ -146,7 +146,7 @@ export async function requestPhoneApproval(): Promise<void> {
     }
     if (pollActive) {
       stopPhonePoll();
-      phoneError.value = "verzoek verlopen — probeer opnieuw";
+      phoneError.value = "request expired — try again";
     }
   } catch (e) {
     stopPhonePoll();

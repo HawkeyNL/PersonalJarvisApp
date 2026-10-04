@@ -21,7 +21,7 @@ export type Holdings = {
 async function requireAuth(): Promise<void> {
   const status = await currentAuthStatus();
   if (!status.authenticated) {
-    throw new Error("niet ingelogd");
+    throw new Error("not signed in");
   }
 }
 

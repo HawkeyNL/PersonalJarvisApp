@@ -7,22 +7,22 @@ import { pending, approve, deny, approving, approvalError } from "../unlockAppro
   <Transition name="sheet">
     <div v-if="pending.length" class="wrap">
       <div class="sheet">
-        <div class="lead"><NavIcon name="link" /> Ontgrendelverzoek</div>
+        <div class="lead"><NavIcon name="link" /> Unlock request</div>
         <div v-for="r in pending" :key="r.id" class="req">
           <div class="who">
             <strong>{{ r.device_name }}</strong>
             <span class="plat">{{ r.platform }}</span>
-            wil ontgrendelen
+            wants to unlock
           </div>
           <div class="actions">
-            <button class="deny" :disabled="approving === r.id" @click="deny(r)">Weiger</button>
+            <button class="deny" :disabled="approving === r.id" @click="deny(r)">Deny</button>
             <button class="approve" :disabled="approving === r.id" @click="approve(r)">
-              {{ approving === r.id ? "Verifiëren…" : "Goedkeuren" }}
+              {{ approving === r.id ? "Verifying…" : "Approve" }}
             </button>
           </div>
         </div>
         <p v-if="approvalError" class="err">{{ approvalError }}</p>
-        <p class="hint">Bevestig met Face ID / Touch ID op dit toestel.</p>
+        <p class="hint">Confirm with Face ID / Touch ID on this device.</p>
       </div>
     </div>
   </Transition>

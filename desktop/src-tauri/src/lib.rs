@@ -315,7 +315,7 @@ fn auth_sign_pairing_approval(
     if local_device_id != approver_device_id.to_string() {
         return Err("pairing approver does not match this device".to_string());
     }
-    authenticate_owner(&format!("{} koppelen", candidate_name.trim()), true)?;
+    authenticate_owner(&format!("Pair {}", candidate_name.trim()), true)?;
     let expires_at = time::OffsetDateTime::from_unix_timestamp(expires_at)
         .map_err(|_| "invalid pairing expiry".to_string())?;
     let message = jarvis_client_core::pairing_approval_message(
@@ -333,6 +333,64 @@ fn auth_sign_pairing_approval(
             != Some(approver_device_id.to_string().as_str())
     {
         return Err("pairing approval expired or device changed".into());
+    }
+    let key = signing_key_unlocked(&app, false)?;
+    Ok(hex::encode(key.sign(&message).to_bytes()))
+}
+
+/// Validate a pending agent action from `GET /v1/agent/pending` and return the
+/// OS prompt text plus the canonical agent-approval-v1 message for this device.
+/// The action type is shown in the OS prompt, so it must be a short identifier.
+fn agent_approval(
+    pending_id: &str,
+    action: &str,
+    nonce_hex: &str,
+    action_sha256_hex: &str,
+    device_id: &str,
+) -> Result<(String, Vec<u8>), String> {
+    if action.is_empty()
+        || action.len() > 64
+        || !action
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+    {
+        return Err("invalid agent action".to_string());
+    }
+    let pending_id = uuid::Uuid::parse_str(pending_id).map_err(|e| e.to_string())?;
+    let device_id = uuid::Uuid::parse_str(device_id).map_err(|e| e.to_string())?;
+    let nonce = hex::decode(nonce_hex).map_err(|e| e.to_string())?;
+    let action_sha256 = hex::decode(action_sha256_hex).map_err(|e| e.to_string())?;
+    let message =
+        jarvis_client_core::agent_approval_message(pending_id, &nonce, &action_sha256, device_id)
+            .map_err(|_| "invalid agent approval payload".to_string())?;
+    Ok((format!("Approve agent action: {action}"), message))
+}
+
+/// Sign only the canonical agent-approval-v1 message, after OS authentication
+/// in Rust. A raw nonce signature would also be a login/unlock proof, so agent
+/// approvals never go through `auth_sign`.
+#[tauri::command]
+fn auth_sign_agent_approval(
+    app: AppHandle,
+    pending_id: String,
+    action: String,
+    nonce_hex: String,
+    action_sha256_hex: String,
+) -> Result<String, String> {
+    let device_id = load_metadata(&app)?
+        .device_id
+        .ok_or_else(|| "device is not enrolled".to_string())?;
+    let (reason, message) = agent_approval(
+        &pending_id,
+        &action,
+        &nonce_hex,
+        &action_sha256_hex,
+        &device_id,
+    )?;
+    authenticate_owner(&reason, true)?;
+    let _guard = auth_storage()?;
+    if load_metadata(&app)?.device_id.as_deref() != Some(device_id.as_str()) {
+        return Err("agent approval device changed".into());
     }
     let key = signing_key_unlocked(&app, false)?;
     Ok(hex::encode(key.sign(&message).to_bytes()))
@@ -365,10 +423,10 @@ fn auth_sign_account_approval(
     };
     let reason = match approval.action {
         AccountAction::PasswordSet if approval.target == approval.user_id => {
-            "Jarvis-accountwachtwoord wijzigen".to_string()
+            "Change Jarvis account password".to_string()
         }
         AccountAction::PasswordSet => return Err("invalid password approval target".into()),
-        AccountAction::DeviceRevoke => format!("Jarvis-apparaat {} intrekken", approval.target),
+        AccountAction::DeviceRevoke => format!("Revoke Jarvis device {}", approval.target),
     };
     let message = account_approval_message(&approval).map_err(str::to_string)?;
     authenticate_owner(&reason, true)?;
@@ -737,7 +795,7 @@ fn origin_changed(current: Option<&str>, requested: &str) -> bool {
 
 fn normalize_home_node_origin(value: &str, allow_local_http: bool) -> Result<String, String> {
     let parsed =
-        url::Url::parse(value.trim()).map_err(|_| "Home Node origin is ongeldig".to_string())?;
+        url::Url::parse(value.trim()).map_err(|_| "Home Node origin is invalid".to_string())?;
     let is_loopback = match parsed.host() {
         Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
         Some(url::Host::Ipv4(address)) => address.is_loopback(),
@@ -755,7 +813,7 @@ fn normalize_home_node_origin(value: &str, allow_local_http: bool) -> Result<Str
         || !matches!(parsed.path(), "" | "/")
     {
         return Err(
-            "Home Node vereist een credential-vrije HTTPS-origin (lokale HTTP alleen in development)"
+            "Home Node requires an HTTPS origin without credentials (local HTTP only in development)"
                 .to_string(),
         );
     }
@@ -874,6 +932,7 @@ pub fn run() {
             auth_public_key,
             auth_sign,
             auth_sign_pairing_approval,
+            auth_sign_agent_approval,
             auth_sign_account_approval,
             model_control::set_model_enabled,
             auth_remember_enrolled_device,
@@ -946,6 +1005,37 @@ mod tests {
         assert!(super::api_url(None, "/v1/conversations").is_err());
     }
     use super::*;
+
+    #[test]
+    fn agent_approval_signs_the_golden_v1_message_only() {
+        let pending_id = "00112233-4455-6677-8899-aabbccddeeff";
+        let device_id = "ffeeddcc-bbaa-9988-7766-554433221100";
+        let nonce = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+        let hash = "8d2dd02e0f1e485d0be7f748f2fdd0d2160dd245b000ca1bff1ca15cd043dbe5";
+        let (reason, message) =
+            agent_approval(pending_id, "write_file", nonce, hash, device_id).unwrap();
+        assert_eq!(reason, "Approve agent action: write_file");
+        assert_eq!(
+            hex::encode(&message),
+            concat!(
+                "6a61727669732f6167656e742d617070726f76616c2f763100",
+                "00112233445566778899aabbccddeeff",
+                "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+                "8d2dd02e0f1e485d0be7f748f2fdd0d2160dd245b000ca1bff1ca15cd043dbe5",
+                "ffeeddccbbaa99887766554433221100"
+            )
+        );
+        for (pending_id, action, nonce, hash, device_id) in [
+            ("not-a-uuid", "write_file", nonce, hash, device_id),
+            (pending_id, "", nonce, hash, device_id),
+            (pending_id, "write file\nApprove", nonce, hash, device_id),
+            (pending_id, "write_file", &nonce[..62], hash, device_id),
+            (pending_id, "write_file", nonce, "", device_id),
+            (pending_id, "write_file", nonce, hash, "device"),
+        ] {
+            assert!(agent_approval(pending_id, action, nonce, hash, device_id).is_err());
+        }
+    }
 
     #[test]
     fn metadata_serialization_never_contains_legacy_secrets() {

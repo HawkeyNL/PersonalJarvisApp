@@ -35,7 +35,7 @@ export const lastVerify = ref<VerifyResult | null>(null);
 
 async function requireAuth(): Promise<void> {
   const status = await currentAuthStatus();
-  if (!status.authenticated) throw new Error("niet ingelogd");
+  if (!status.authenticated) throw new Error("not signed in");
 }
 
 /** i16 PCM → plain number[] so JSON.stringify emits a real array. */
@@ -61,13 +61,13 @@ export async function refreshVoiceStatus(): Promise<void> {
 export async function enroll(seconds = 4): Promise<void> {
   if (busy.value) return;
   if (!voiceSupported) {
-    voiceError.value = "microfoon niet beschikbaar";
+    voiceError.value = "microphone unavailable";
     return;
   }
   busy.value = true;
   voiceError.value = null;
   lastVerify.value = null;
-  voiceStatus.value = `opnemen… praat rustig (${seconds}s)`;
+  voiceStatus.value = `recording… speak calmly (${seconds}s)`;
   try {
     const rec = await recordPcm(seconds * 1000);
     voiceStatus.value = "versturen…";
@@ -76,7 +76,7 @@ export async function enroll(seconds = 4): Promise<void> {
       "/v1/voice/enroll",
       { sample_rate: rec.sampleRate, pcm: pcmArray(rec.pcm) },
     );
-    voiceStatus.value = `stemprofiel opgeslagen ✓ (${res.dims}-dim)`;
+    voiceStatus.value = `voice profile saved ✓ (${res.dims}-dim)`;
     await refreshVoiceStatus();
   } catch (e) {
     voiceError.value = e instanceof Error ? e.message : String(e);
@@ -94,13 +94,13 @@ export async function enroll(seconds = 4): Promise<void> {
 export async function verify(seconds = 3): Promise<VerifyResult | null> {
   if (busy.value) return null;
   if (!voiceSupported) {
-    voiceError.value = "microfoon niet beschikbaar";
+    voiceError.value = "microphone unavailable";
     return null;
   }
   busy.value = true;
   voiceError.value = null;
   lastVerify.value = null;
-  voiceStatus.value = `opnemen… (${seconds}s)`;
+  voiceStatus.value = `recording… (${seconds}s)`;
   try {
     const rec = await recordPcm(seconds * 1000);
     voiceStatus.value = "controleren…";
@@ -111,10 +111,10 @@ export async function verify(seconds = 3): Promise<VerifyResult | null> {
     });
     lastVerify.value = res;
     voiceStatus.value = !res.enrolled
-      ? "geen profiel — schrijf je eerst in"
+      ? "no profile — enroll first"
       : res.is_you
-        ? `herkend ✓ (${res.score.toFixed(2)})`
-        : `niet herkend (${res.score.toFixed(2)})`;
+        ? `recognized ✓ (${res.score.toFixed(2)})`
+        : `not recognized (${res.score.toFixed(2)})`;
     return res;
   } catch (e) {
     voiceError.value = e instanceof Error ? e.message : String(e);

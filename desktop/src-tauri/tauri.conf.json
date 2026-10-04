@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "Jarvis",
-        "width": 1000,
-        "height": 700,
-        "minWidth": 800,
-        "minHeight": 600
+        "width": 1440,
+        "height": 1000,
+        "minWidth": 1024,
+        "minHeight": 700
       }
     ],
     "security": {

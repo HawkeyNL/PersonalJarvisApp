@@ -32,7 +32,10 @@ import {
   refreshRoute,
 } from "../voice";
 
+// `forceOpen`: the hub shows the console as an overlay and keeps it revealed.
+const props = defineProps<{ forceOpen?: boolean }>();
 const text = ref("");
+const inputEl = ref<HTMLInputElement | null>(null);
 const hovered = ref(false);
 const focused = ref(false);
 const woke = ref(false);
@@ -50,6 +53,7 @@ const mic = useMic((said) => send(said));
 // a "Hey Jarvis" wake. Everything tucks away again when you leave.
 const revealed = computed(
   () =>
+    !!props.forceOpen ||
     hovered.value ||
     focused.value ||
     woke.value ||
@@ -94,7 +98,7 @@ const micStyle = computed(() =>
   mic.listening.value
     ? {
         borderColor: "var(--accent)",
-        boxShadow: `0 0 ${(8 + mic.level.value * 26).toFixed(0)}px rgba(52,245,160,${(0.3 + mic.level.value * 0.55).toFixed(2)})`,
+        boxShadow: `0 0 ${(8 + mic.level.value * 26).toFixed(0)}px rgba(var(--accent-rgb),${(0.3 + mic.level.value * 0.55).toFixed(2)})`,
       }
     : {},
 );
@@ -119,6 +123,13 @@ async function removeChat(id: string) {
   if (next) await openConversation(next);
   else startNewConversation();
 }
+
+// The hub reads the mic state for the orb mood and drives the overlay.
+defineExpose({
+  listening: mic.listening,
+  startListening: () => { if (!mic.listening.value) mic.toggle(); },
+  focusInput: () => inputEl.value?.focus(),
+});
 
 onMounted(async () => {
   try {
@@ -148,7 +159,7 @@ onMounted(async () => {
            (ADR-030). Hidden until the chat is active; never wider than the chat. -->
       <Transition name="tabsfade">
         <div v-show="revealed" class="tabs">
-          <button class="tab new" title="Nieuw gesprek" @click="newChat">+ nieuw</button>
+          <button class="tab new" title="New conversation" @click="newChat">+ new</button>
         <button
           v-for="c in conversations"
           :key="c.id"
@@ -161,7 +172,7 @@ onMounted(async () => {
             <span
               v-if="c.id === currentId"
               class="tab-x"
-              title="Gesprek verwijderen"
+              title="Delete conversation"
               @click.stop="removeChat(c.id)"
               >×</span
             >
@@ -181,7 +192,7 @@ onMounted(async () => {
         >
         <TransitionGroup name="line">
         <div v-for="m in messages" :key="m.id" class="line" :class="m.role">
-          <span class="who">{{ m.role === "jarvis" ? "JARVIS" : "JIJ" }}</span>
+          <span class="who">{{ m.role === "jarvis" ? "JARVIS" : "YOU" }}</span>
           <!-- Jarvis speaks Markdown; the user's own text stays literal. -->
           <span
             v-if="m.role === 'jarvis'"
@@ -208,13 +219,13 @@ onMounted(async () => {
       @mouseleave="hovered = false"
     >
       <div class="peek" :class="{ hide: revealed }">
-        <NavIcon name="core" /> praat met Jarvis
+        <NavIcon name="core" /> talk to Jarvis
       </div>
 
       <div class="dock" :class="{ show: revealed }">
         <div class="policy" :class="policy.allowed ? 'ok' : 'off'">
           <span class="pdot" :class="policy.allowed ? 'on' : ''"></span>
-          {{ policy.allowed ? "Jarvis kan praten" : "Jarvis is stil" }} · {{ policy.reason }}
+          {{ policy.allowed ? "Jarvis can speak" : "Jarvis is silent" }} · {{ policy.reason }}
           <span v-if="localSpeechStatus" role="status"> · {{ localSpeechStatus }}</span>
         </div>
         <form class="row" @submit.prevent="onSend">
@@ -224,15 +235,16 @@ onMounted(async () => {
             :class="{ live: mic.listening.value }"
             :style="micStyle"
             :disabled="!mic.available"
-            :title="mic.available ? (mic.listening.value ? 'Luistert… (stopt na 5s stilte)' : 'Spreken') : 'Spraakinvoer niet beschikbaar'"
+            :title="mic.available ? (mic.listening.value ? 'Listening… (stops after 5 s of silence)' : 'Speak') : 'Voice input unavailable'"
             @click="mic.toggle"
           >
             <NavIcon name="mic" />
           </button>
           <input
+            ref="inputEl"
             v-model="text"
-            placeholder="Typ of spreek tegen Jarvis…"
-            aria-label="bericht"
+            placeholder="Type or talk to Jarvis…"
+            aria-label="Message"
             @focus="focused = true"
             @blur="focused = false"
           />
@@ -240,21 +252,21 @@ onMounted(async () => {
             type="button"
             class="ic"
             :class="{ on: voiceEnabled }"
-            :title="voiceEnabled ? 'Spraak uit' : 'Spraak aan'"
+            :title="voiceEnabled ? 'Speech off' : 'Speech on'"
             @click="toggleVoice"
           >
             <NavIcon :name="voiceEnabled ? 'sound-on' : 'sound-off'" />
           </button>
-          <button v-if="voiceEnabled" type="button" title="Stop huidige spraak" @click="stopSpeaking">Stop spraak</button>
-          <select v-if="voiceEnabled" :value="voiceRate" aria-label="Spreeksnelheid voor volgende fragmenten"
+          <button v-if="voiceEnabled" type="button" title="Stop current speech" @click="stopSpeaking">Stop speech</button>
+          <select v-if="voiceEnabled" :value="voiceRate" aria-label="Speech rate for the next fragments"
             @change="setVoiceRate(Number(($event.target as HTMLSelectElement).value))">
             <option v-for="rate in [0.5,0.75,1,1.25,1.5,1.75,2]" :key="rate" :value="rate">{{rate}}×</option>
           </select>
-          <button v-if="voiceEnabled" type="button" @click="refreshLocalVoices">Stemmen</button>
-          <select v-if="voiceEnabled" :value="voiceChoice" aria-label="Lokale stem"
+          <button v-if="voiceEnabled" type="button" @click="refreshLocalVoices">Voices</button>
+          <select v-if="voiceEnabled" :value="voiceChoice" aria-label="Local voice"
             @change="setVoiceChoice(($event.target as HTMLSelectElement).value)">
-            <option value="">Systeemstandaard</option>
-            <option v-if="voiceChoice && !localVoices.some(v=>v.id===voiceChoice)" :value="voiceChoice">Opgeslagen stem</option>
+            <option value="">System default</option>
+            <option v-if="voiceChoice && !localVoices.some(v=>v.id===voiceChoice)" :value="voiceChoice">Saved voice</option>
             <option v-for="voice in localVoices" :key="voice.id" :value="voice.id">{{voice.label}}</option>
           </select>
           <span v-if="voiceChoiceError" role="status">{{voiceChoiceError}}</span>
@@ -262,12 +274,12 @@ onMounted(async () => {
             type="button"
             class="ic"
             :class="{ on: headset }"
-            title="Oortje in/uit"
+            title="Earphones on/off"
             @click="toggleHeadset"
           >
             <NavIcon name="headset" />
           </button>
-          <button type="submit" class="ic send" aria-label="verstuur"><NavIcon name="send" /></button>
+          <button type="submit" class="ic send" aria-label="Send"><NavIcon name="send" /></button>
         </form>
       </div>
     </div>
@@ -329,10 +341,8 @@ onMounted(async () => {
   padding: 4px 10px;
   border-radius: 999px;
   cursor: pointer;
-  background: rgba(6, 14, 10, 0.55);
+  background: rgba(6, 22, 18, 0.9);
   border: 1px solid var(--border);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   color: var(--muted);
   font-size: 11px;
   line-height: 1.6;
@@ -344,7 +354,7 @@ onMounted(async () => {
 .tab.active {
   color: var(--accent);
   border-color: var(--accent);
-  box-shadow: 0 0 10px rgba(52, 245, 160, 0.25);
+  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.25);
 }
 .tab-title {
   overflow: hidden;
@@ -365,7 +375,7 @@ onMounted(async () => {
   font-weight: 600;
   color: var(--accent);
   border-color: var(--accent);
-  background: rgba(52, 245, 160, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
 }
 
 .transcript {
@@ -413,8 +423,6 @@ onMounted(async () => {
     rgba(2, 10, 7, 0.18) 82%,
     rgba(2, 10, 7, 0) 100%
   );
-  backdrop-filter: blur(6px) saturate(115%);
-  -webkit-backdrop-filter: blur(6px) saturate(115%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
@@ -623,10 +631,8 @@ onMounted(async () => {
   margin-bottom: 9px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(6, 14, 10, 0.55);
+  background: rgba(6, 22, 18, 0.9);
   border: 1px solid var(--border);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.03em;
@@ -652,10 +658,8 @@ onMounted(async () => {
   gap: 7px;
   padding: 8px;
   border-radius: 16px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03));
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  background: rgba(8, 26, 22, 0.92);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
   box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 .row input {
@@ -698,7 +702,7 @@ onMounted(async () => {
 .ic.on {
   color: var(--accent);
   border-color: var(--accent);
-  box-shadow: 0 0 8px rgba(52, 245, 160, 0.35);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.35);
 }
 .ic.mic.live {
   border-color: var(--accent);
