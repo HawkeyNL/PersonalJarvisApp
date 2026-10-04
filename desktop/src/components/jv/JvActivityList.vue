@@ -3,9 +3,10 @@ import NavIcon, { type IconName } from "../NavIcon.vue";
 import type { Tone } from "../../hubModel";
 
 // Recent items next to the tile grid. Each row: icon, title, detail, time,
-// optional row actions (slot "actions"), status.
+// optional row actions (slot "actions"), status. `fullDetail` shows the whole
+// detail (wrapped, scrolling when long) instead of one truncated line.
 export type ActivityItem = { id: string; icon: IconName; title: string; detail?: string; time?: string; tone: Tone; toneLabel: string };
-defineProps<{ title: string; items: ActivityItem[]; empty: string }>();
+defineProps<{ title: string; items: ActivityItem[]; empty: string; fullDetail?: boolean }>();
 </script>
 
 <template>
@@ -19,7 +20,7 @@ defineProps<{ title: string; items: ActivityItem[]; empty: string }>();
         <span class="icon" aria-hidden="true"><NavIcon :name="item.icon" /></span>
         <span class="text">
           <span class="title">{{ item.title }}</span>
-          <span v-if="item.detail" class="detail">{{ item.detail }}</span>
+          <span v-if="item.detail" class="detail" :class="{ full: fullDetail }" :tabindex="fullDetail ? 0 : undefined">{{ item.detail }}</span>
         </span>
         <span v-if="item.time" class="time">{{ item.time }}</span>
         <span v-if="$slots.actions" class="actions"><slot name="actions" :item="item" /></span>
@@ -48,6 +49,10 @@ li + li { border-top: 1px solid var(--line-a18); }
 .title, .detail { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .title { font-size: 12px; font-weight: 500; color: #f1faf6; }
 .detail { margin-top: 2px; font-size: 11px; color: var(--text-5); }
+.detail.full {
+  white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; max-height: 240px; margin-top: 6px; padding: 8px 10px;
+  font-family: ui-monospace, monospace; color: var(--text-3); border-radius: var(--r-8); background: rgba(6, 30, 24, 0.9);
+}
 .time { flex: none; font-size: 11px; color: var(--text-5); }
 .actions { flex: none; display: flex; gap: 8px; }
 .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--idle); }

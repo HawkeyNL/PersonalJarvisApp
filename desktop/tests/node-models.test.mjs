@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  agentStatus, countOf, diskState, filterConversations, formatMs, groupAgents, ibkrState, isTrader, measuredCount,
+  agentStatus, canSignApproval, countOf, diskState, filterConversations, formatMs, groupAgents, ibkrState, isTrader, measuredCount,
   outcomeTone, serviceState, servicesSummary, sessionState, splitSessions,
 } from "../src/nodeModels.ts";
 
@@ -103,4 +103,14 @@ test("uninstrumented usage counts read 'Not measured yet', never 0", () => {
   assert.equal(measuredCount(undefined), "—");
   assert.equal(measuredCount(0), "0");
   assert.equal(measuredCount(1234), "1,234");
+});
+
+test("only agent-approval-v1 pending actions with an action hash can be signed", () => {
+  const hash = "8d2dd02e0f1e485d0be7f748f2fdd0d2160dd245b000ca1bff1ca15cd043dbe5";
+  assert.equal(canSignApproval({ approval_message: "agent-approval-v1", action_sha256: hash }), true);
+  assert.equal(canSignApproval({}), false, "older Core: raw nonce only");
+  assert.equal(canSignApproval({ approval_message: "agent-approval-v2", action_sha256: hash }), false);
+  assert.equal(canSignApproval({ approval_message: "agent-approval-v1" }), false);
+  assert.equal(canSignApproval({ approval_message: "agent-approval-v1", action_sha256: hash.slice(2) }), false);
+  assert.equal(canSignApproval({ approval_message: "agent-approval-v1", action_sha256: hash.toUpperCase() }), false);
 });

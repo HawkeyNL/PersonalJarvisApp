@@ -9,7 +9,7 @@ import JvUnavailable from "../components/jv/JvUnavailable.vue";
 import { loadOptional } from "../coreStatus";
 import { approveAction, denyAction, type PendingAction } from "../agentApprovals";
 import { relativeTime, type Availability, type Tone } from "../hubModel";
-import { outcomeTone, sessionState, splitSessions, type CodingSessionRow } from "../nodeModels";
+import { canSignApproval, outcomeTone, sessionState, splitSessions, type CodingSessionRow } from "../nodeModels";
 
 // Tasks: coding sessions, agent actions waiting for the owner, and the agent
 // audit history. Scheduled and recurring tasks and goals need Core support
@@ -85,6 +85,7 @@ const pendingRows = computed<ActivityItem[]>(() => waiting.value.map((p) => ({
   id: p.pending_id, icon: "alert", title: p.action, detail: p.preview, time: relativeTime(p.created_at, now.value),
   tone: "warn", toneLabel: "Waiting for approval",
 })));
+const signable = computed(() => new Set(waiting.value.filter(canSignApproval).map((p) => p.pending_id)));
 const lastUpdate = computed(() => {
   const first = sessions.value.state === "ok" ? sessions.value.value.sessions[0] : undefined;
   return first?.updated_at ? relativeTime(first.updated_at, now.value) || "—" : "—";
@@ -145,14 +146,17 @@ async function decide(id: string, approve: boolean) {
           :kind="pending.state === 'unsupported' ? 'core-update' : 'error'" icon="alert" />
         <p v-else-if="pending.state === 'loading'" class="muted" role="status">Loading approvals…</p>
         <template v-else>
-          <p class="muted small">Approving asks this device to confirm it is you, then signs the action with its device key.</p>
+          <p class="muted small">Read the full preview first. Approving asks this device to confirm it is you, then signs this exact action with its device key.</p>
           <p v-if="decisionError" class="err" role="alert">{{ decisionError }}</p>
-          <JvActivityList title="Waiting for approval" :items="pendingRows" empty="Nothing is waiting for you.">
+          <JvActivityList title="Waiting for approval" :items="pendingRows" empty="Nothing is waiting for you." full-detail>
             <template #actions="{ item }">
-              <button type="button" class="ghost-btn sm" :disabled="!!deciding" @click="decide(item.id, true)">
+              <button v-if="signable.has(item.id)" type="button" class="ghost-btn sm" :disabled="!!deciding"
+                :aria-label="`Approve ${item.title}`" @click="decide(item.id, true)">
                 {{ deciding === item.id ? "Confirming…" : "Approve" }}
               </button>
-              <button type="button" class="ghost-btn sm danger" :disabled="!!deciding" @click="decide(item.id, false)">Deny</button>
+              <span v-else class="muted small">Requires newer Core</span>
+              <button type="button" class="ghost-btn sm danger" :disabled="!!deciding" :aria-label="`Deny ${item.title}`"
+                @click="decide(item.id, false)">Deny</button>
             </template>
           </JvActivityList>
         </template>
