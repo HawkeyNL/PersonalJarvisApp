@@ -47,16 +47,16 @@ async function onEnroll() {
 }
 
 const accent = ref<Accent>(currentAccent());
-const sections = ["Algemeen", "Account & beveiliging", "Stem", "Updates"] as const;
-const section = ref<(typeof sections)[number]>("Algemeen");
+const sections = ["General", "Account & security", "Voice", "Updates"] as const;
+const section = ref<(typeof sections)[number]>("General");
 const session = ref<AuthStatus | null>(null);
 const homeNodeOriginInput = ref("");
 const homeNodeSaving = ref(false);
 const homeNodeMessage = ref<string | null>(null);
 
 const labels: Record<Accent, string> = {
-  green: "Jarvis-groen",
-  cyan: "Cyaan",
+  green: "Jarvis green",
+  cyan: "Cyan",
   amber: "Amber",
   violet: "Violet",
 };
@@ -75,7 +75,7 @@ async function doUnlink() {
     await deregisterDevice();
     session.value = await currentAuthStatus();
   } catch {
-    homeNodeMessage.value = "Loskoppelen niet voltooid. Bevestig met je apparaat en probeer opnieuw.";
+    homeNodeMessage.value = "Unlinking did not finish. Confirm on your device and try again.";
   } finally {
     unlinking.value = false;
     confirmUnlink.value = false;
@@ -88,7 +88,7 @@ async function saveHomeNodeOrigin() {
   try {
     const value = await configureHomeNode(homeNodeOriginInput.value);
     homeNodeOriginInput.value = value.origin ?? "";
-    homeNodeMessage.value = "Home Node-origin opgeslagen.";
+    homeNodeMessage.value = "Home Node origin saved.";
     await loadUpdateStatus();
   } catch (error) {
     homeNodeMessage.value = error instanceof Error ? error.message : String(error);
@@ -113,18 +113,18 @@ onMounted(async () => {
   <JvBackdrop glow-y="20%" horizon="80px" />
   <JvTopBar variant="node" title="SETTINGS" subtitle="THIS DEVICE AND YOUR ACCOUNT" />
   <section class="view settings">
-    <nav class="settings-sections" aria-label="Instellingenonderdelen">
+    <nav class="settings-sections" aria-label="Settings sections">
       <button v-for="item in sections" :key="item" :aria-pressed="section === item"
         :class="{ selected: section === item }" @click="section = item">{{ item }}</button>
     </nav>
-    <AccountAdministration v-if="session?.authenticated && section === 'Account & beveiliging'" class="account-administration" />
+    <AccountAdministration v-if="session?.authenticated && section === 'Account & security'" class="account-administration" />
 
-    <div v-if="section === 'Algemeen'" class="panel glass">
-      <div class="panel-head">HOME NODE <span class="hint">apparaatconfiguratie</span></div>
+    <div v-if="section === 'General'" class="panel glass">
+      <div class="panel-head">HOME NODE <span class="hint">device configuration</span></div>
       <p class="muted small">
-        Dit credential-vrije adres wordt lokaal bewaard en gebruikt voor alle API-aanvragen en updater-discovery.
+        This credential-free address is stored locally and used for all API requests and update discovery.
       </p>
-      <label class="field-label" for="settings-home-node-origin">HTTPS-origin</label>
+      <label class="field-label" for="settings-home-node-origin">HTTPS origin</label>
       <div class="origin-row">
         <input
           id="settings-home-node-origin"
@@ -135,14 +135,14 @@ onMounted(async () => {
           placeholder="https://jarvis.home.example"
         />
         <button class="ghost" :disabled="homeNodeSaving" @click="saveHomeNodeOrigin">
-          {{ homeNodeSaving ? "Opslaan…" : "Opslaan" }}
+          {{ homeNodeSaving ? "Saving…" : "Save" }}
         </button>
       </div>
       <p v-if="homeNodeMessage" class="small muted" role="status">{{ homeNodeMessage }}</p>
     </div>
 
-    <div v-if="section === 'Algemeen'" class="panel glass">
-      <div class="panel-head">WEERGAVE <span class="hint">accentkleur</span></div>
+    <div v-if="section === 'General'" class="panel glass">
+      <div class="panel-head">APPEARANCE <span class="hint">accent colour</span></div>
       <div class="swatches">
         <button
           v-for="a in ACCENTS"
@@ -156,26 +156,26 @@ onMounted(async () => {
           {{ labels[a] }}
         </button>
       </div>
-      <p class="muted small">Groen is de standaardkleur van Jarvis.</p>
+      <p class="muted small">Green is the Jarvis default.</p>
     </div>
 
-    <div v-if="section === 'Account & beveiliging'" class="panel glass">
+    <div v-if="section === 'Account & security'" class="panel glass">
       <div class="panel-head">ACCOUNT <span class="hint">device-bound</span></div>
       <ul class="kv">
         <li>
           <span class="k">Status</span>
           <span class="v">
             <span class="dot" :class="session?.authenticated ? 'dot-ok' : 'dot-todo'"></span>
-            {{ session?.authenticated ? "ingelogd" : "uitgelogd" }}
+            {{ session?.authenticated ? "signed in" : "signed out" }}
           </span>
         </li>
         <li>
-          <span class="k">Apparaat-ID</span>
+          <span class="k">Device ID</span>
           <span class="v mono">{{ session?.device_id ?? "—" }}</span>
         </li>
         <li>
-          <span class="k">Sleutel</span>
-          <span class="v">{{ session?.has_key ? "in keychain" : "geen" }}</span>
+          <span class="k">Key</span>
+          <span class="v">{{ session?.has_key ? "in keychain" : "none" }}</span>
         </li>
       </ul>
       <button
@@ -183,18 +183,18 @@ onMounted(async () => {
         class="ghost danger"
         @click="confirmUnlink = true"
       >
-        Dit apparaat loskoppelen
+        Unlink this device
       </button>
     </div>
 
-    <div v-if="section === 'Account & beveiliging'" class="panel glass">
-      <div class="panel-head">BEVEILIGING <span class="hint">app-vergrendeling</span></div>
+    <div v-if="section === 'Account & security'" class="panel glass">
+      <div class="panel-head">SECURITY <span class="hint">app lock</span></div>
       <label class="toggle" :class="{ off: !isDesktop }">
         <span class="tl">
-          <span class="tt">Vergrendel bij openen</span>
+          <span class="tt">Lock on open</span>
           <span class="td">
-            Touch ID / Face ID bij het openen. Faalt de biometrie, dan keur je
-            goed via je telefoon.
+            Touch ID / Face ID when Jarvis opens. If biometrics fail, you
+            approve from your phone.
           </span>
         </span>
         <input
@@ -206,18 +206,18 @@ onMounted(async () => {
         <span class="sw"></span>
       </label>
       <p v-if="!isDesktop" class="muted small">
-        Dit toestel keurt ontgrendelingen goed voor je desktop — geen eigen slot nodig.
+        This device approves unlocks for your desktop, so it needs no lock of its own.
       </p>
     </div>
 
-    <div v-if="section === 'Stem'" class="panel glass full-width">
-      <div class="panel-head">STEM <span class="hint">server-side · centraal</span></div>
+    <div v-if="section === 'Voice'" class="panel glass full-width">
+      <div class="panel-head">VOICE <span class="hint">server-side · central</span></div>
       <ul class="kv">
         <li>
-          <span class="k">Stemprofiel</span>
+          <span class="k">Voice profile</span>
           <span class="v">
             <span class="dot" :class="enrolled ? 'dot-ok' : 'dot-todo'"></span>
-            {{ enrolled ? "ingeschreven" : "nog niet" }}
+            {{ enrolled ? "enrolled" : "not yet" }}
           </span>
         </li>
         <li v-if="engine">
@@ -227,20 +227,20 @@ onMounted(async () => {
       </ul>
 
       <label class="miclabel">
-        <span class="fl">Microfoon</span>
+        <span class="fl">Microphone</span>
         <select
           class="micsel"
           :value="selectedMic"
           @change="setMic(($event.target as HTMLSelectElement).value)"
         >
-          <option value="">Systeemstandaard</option>
+          <option value="">System default</option>
           <option v-for="m in mics" :key="m.deviceId" :value="m.deviceId">{{ m.label }}</option>
         </select>
       </label>
 
       <div class="enroll">
         <button class="ghost" :disabled="!voiceSupported || busy" @click="onEnroll">
-          {{ enrolled ? "Stem opnieuw opnemen" : "Neem je stem op" }}
+          {{ enrolled ? "Record voice again" : "Record your voice" }}
         </button>
         <button
           v-if="enrolled"
@@ -248,12 +248,12 @@ onMounted(async () => {
           :disabled="!voiceSupported || busy"
           @click="verify()"
         >
-          Test verificatie
+          Test verification
         </button>
       </div>
 
       <p v-if="!voiceSupported" class="small errc">
-        Microfoon niet beschikbaar op dit toestel.
+        Microphone unavailable on this device.
       </p>
       <p v-else-if="voiceStatus" class="small" :class="busy ? 'muted' : 'okc'">
         {{ voiceStatus }}
@@ -261,15 +261,15 @@ onMounted(async () => {
       <p v-if="voiceError" class="small errc">{{ voiceError }}</p>
 
       <p v-if="lastVerify && lastVerify.enrolled && lastVerify.transcript" class="small muted">
-        Gehoord: "{{ lastVerify.transcript }}"
+        Heard: "{{ lastVerify.transcript }}"
       </p>
 
       <label class="toggle" :class="{ off: !wakeReady }" style="margin-top: 14px">
         <span class="tl">
-          <span class="tt">Luister naar "Hey Jarvis"</span>
+          <span class="tt">Listen for "Hey Jarvis"</span>
           <span class="td">
-            Werkt op elk toestel (in de app zelf). Alleen jouw stem wekt Jarvis.
-            Tot de auto-detectie er is: ⌘⇧J als test-trigger.
+            Works on every device (inside the app). Only your voice wakes Jarvis.
+            Until auto-detection exists: ⌘⇧J as a test trigger.
           </span>
         </span>
         <input
@@ -285,33 +285,33 @@ onMounted(async () => {
       </p>
 
       <p class="muted small">
-        Je stem staat centraal op je eigen server en geldt op al je toestellen.
-        Stem is gemak — Touch ID / je telefoon blijft het slot.
+        Your voice lives centrally on your own server and works on all your devices.
+        Voice is convenience; Touch ID or your phone stays the lock.
       </p>
     </div>
 
     <div v-if="section === 'Updates'" class="panel glass full-width">
       <div class="panel-head">JARVIS APP <span class="hint">private updates</span></div>
       <ul class="kv">
-        <li><span class="k">Versie</span><span class="v mono">v{{ currentAppVersion }}</span></li>
+        <li><span class="k">Version</span><span class="v mono">v{{ currentAppVersion }}</span></li>
         <li>
           <span class="k">Status</span>
           <span class="v">
             <span class="dot" :class="updateState === 'error' ? 'dot-err' : updateState === 'available' ? 'dot-todo' : 'dot-ok'"></span>
-            <template v-if="updateState === 'checking'">controleren…</template>
-            <template v-else-if="updateState === 'downloading'">downloaden{{ updateProgress === null ? '…' : ` · ${updateProgress}%` }}</template>
-            <template v-else-if="updateState === 'installing'">installeren…</template>
-            <template v-else-if="updateState === 'available'">v{{ availableAppVersion }} beschikbaar</template>
-            <template v-else-if="updateState === 'installed'">installatie gereed</template>
+            <template v-if="updateState === 'checking'">checking…</template>
+            <template v-else-if="updateState === 'downloading'">downloading{{ updateProgress === null ? '…' : ` · ${updateProgress}%` }}</template>
+            <template v-else-if="updateState === 'installing'">installing…</template>
+            <template v-else-if="updateState === 'available'">v{{ availableAppVersion }} available</template>
+            <template v-else-if="updateState === 'installed'">installation ready</template>
             <template v-else-if="updateState === 'up_to_date'">up-to-date</template>
-            <template v-else-if="updateState === 'ready'">gereed om te controleren</template>
-            <template v-else-if="updateState === 'unauthenticated'">log in om te controleren</template>
-            <template v-else-if="updateState === 'unconfigured'">Home Node niet geconfigureerd</template>
-            <template v-else-if="updateState === 'unsupported'">niet beschikbaar in deze build</template>
-            <template v-else-if="updateState === 'incompatible'">updateprotocol niet compatibel</template>
-            <template v-else-if="updateState === 'unavailable'">updateservice niet bereikbaar</template>
-            <template v-else-if="updateState === 'error'">controle mislukt</template>
-            <template v-else>gereed</template>
+            <template v-else-if="updateState === 'ready'">ready to check</template>
+            <template v-else-if="updateState === 'unauthenticated'">sign in to check</template>
+            <template v-else-if="updateState === 'unconfigured'">Home Node not configured</template>
+            <template v-else-if="updateState === 'unsupported'">not available in this build</template>
+            <template v-else-if="updateState === 'incompatible'">update protocol not compatible</template>
+            <template v-else-if="updateState === 'unavailable'">update service unreachable</template>
+            <template v-else-if="updateState === 'error'">check failed</template>
+            <template v-else>ready</template>
           </span>
         </li>
       </ul>
@@ -320,13 +320,13 @@ onMounted(async () => {
       </div>
       <div class="update-actions">
         <button v-if="updateState === 'available'" class="ghost" :disabled="updateBusy" @click="installAvailableUpdate">
-          Update nu
+          Update now
         </button>
         <button v-else-if="updateState === 'installed'" class="ghost" @click="restartAfterUpdate">
-          Herstart Jarvis
+          Restart Jarvis
         </button>
         <button v-else class="ghost" :disabled="updateBusy || updateState === 'unsupported'" @click="checkForUpdate">
-          Controleer op updates
+          Check for updates
         </button>
       </div>
       <p v-if="updateError" class="small errc">{{ updateError }}</p>
@@ -334,14 +334,14 @@ onMounted(async () => {
         {{ updateNotes }}
       </p>
       <p v-else class="muted small">
-        Updates komen via je gekoppelde Home Node en worden vóór installatie cryptografisch gecontroleerd.
+        Updates come through your paired Home Node and are verified cryptographically before installation.
       </p>
     </div>
 
-    <div v-if="section === 'Algemeen'" class="panel glass full-width">
-      <div class="panel-head">SYSTEEM <span class="hint">info</span></div>
+    <div v-if="section === 'General'" class="panel glass full-width">
+      <div class="panel-head">SYSTEM <span class="hint">info</span></div>
       <ul class="kv">
-        <li><span class="k">Backend</span><span class="v mono">{{ homeNodeConfig.origin ?? "niet geconfigureerd" }}</span></li>
+        <li><span class="k">Backend</span><span class="v mono">{{ homeNodeConfig.origin ?? "not configured" }}</span></li>
         <li><span class="k">Client</span><span class="v mono">Jarvis MK I · v{{ currentAppVersion || "…" }}</span></li>
         <li><span class="k">Broker</span><span class="v">IBKR read-only</span></li>
       </ul>
@@ -351,18 +351,18 @@ onMounted(async () => {
     <Transition name="modal">
       <div v-if="confirmUnlink" class="modal-overlay" @click.self="confirmUnlink = false">
         <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="unlink-title">
-          <h2 id="unlink-title">Dit apparaat loskoppelen?</h2>
+          <h2 id="unlink-title">Unlink this device?</h2>
           <p>
-            Dit trekt dit toestel serverside in en wist de device-sleutel hier.
-            Je moet dit apparaat daarna opnieuw koppelen (enrollen) om weer in te
-            loggen. Je gegevens op de server blijven bestaan.
+            This revokes the device on the server and erases its device key here.
+            You then have to pair (enroll) this device again to sign in.
+            Your data on the server stays.
           </p>
           <div class="modal-actions">
             <button class="ghost" :disabled="unlinking" @click="confirmUnlink = false">
-              Annuleren
+              Cancel
             </button>
             <button class="ghost danger" :disabled="unlinking" @click="doUnlink">
-              {{ unlinking ? "Loskoppelen…" : "Loskoppelen" }}
+              {{ unlinking ? "Unlinking…" : "Unlink" }}
             </button>
           </div>
         </div>

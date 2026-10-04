@@ -13,7 +13,7 @@ async function refresh() {
     const [account, knownDevices] = await Promise.all([accountStatus(), listDevices()]);
     passwordRequired.value = account.password_required;
     devices.value = knownDevices;
-  } catch { message.value = "Meld je aan om je apparaten te beheren."; }
+  } catch { message.value = "Sign in to manage your devices."; }
 }
 async function changePassword() {
   busy.value = true;
@@ -25,8 +25,8 @@ async function changePassword() {
   try {
     await setAccountPassword(next, previous || undefined);
     devices.value = [];
-    message.value = "Wachtwoord gewijzigd. Meld je opnieuw aan op je apparaten.";
-  } catch { message.value = "Wijziging niet voltooid. Controleer je wachtwoord en bevestig met je apparaat."; }
+    message.value = "Password changed. Sign in again on your devices.";
+  } catch { message.value = "Change not completed. Check your password and confirm on your device."; }
   finally { busy.value = false; }
 }
 async function confirmRevoke() {
@@ -37,9 +37,9 @@ async function confirmRevoke() {
   try {
     await revokeDevice(device.id);
     devices.value = devices.value.filter(item => item.id !== device.id);
-    message.value = "Apparaat ingetrokken. De bijbehorende sessies zijn beëindigd.";
+    message.value = "Device revoked. Its sessions have ended.";
     confirmation.value = null;
-  } catch { message.value = "Intrekken niet voltooid. Er is een geldige apparaattoestemming nodig."; }
+  } catch { message.value = "Revocation not completed. A valid device approval is required."; }
   finally { busy.value = false; }
 }
 onMounted(refresh);
@@ -48,29 +48,29 @@ onBeforeUnmount(() => { currentPassword.value = ""; newPassword.value = ""; });
 
 <template>
   <section class="panel glass account-administration">
-    <h2>Account en apparaten</h2>
-    <p>Een wachtwoord vervangt nooit de ondertekende goedkeuring van een vertrouwd apparaat.</p>
+    <h2>Account and devices</h2>
+    <p>A password never replaces the signed approval of a trusted device.</p>
     <form @submit.prevent="changePassword">
-      <label v-if="passwordRequired">Huidig wachtwoord
+      <label v-if="passwordRequired">Current password
         <input v-model="currentPassword" type="password" autocomplete="current-password" maxlength="1024" required />
       </label>
-      <label>Nieuw accountwachtwoord
+      <label>New account password
         <input v-model="newPassword" type="password" autocomplete="new-password" minlength="15" maxlength="1024" required />
       </label>
-      <button :disabled="busy">Wachtwoord instellen en ondertekenen</button>
+      <button :disabled="busy">Set and sign password</button>
     </form>
-    <h3>Vertrouwde apparaten</h3>
-    <button :disabled="busy" @click="refresh">Vernieuwen</button>
+    <h3>Trusted devices</h3>
+    <button :disabled="busy" @click="refresh">Refresh</button>
     <ul>
       <li v-for="device in devices" :key="device.id">
         <span>{{ device.name }} · {{ device.platform }} · {{ device.status }}</span>
-        <button v-if="device.status === 'active'" :disabled="busy" @click="confirmation = device">Intrekken…</button>
+        <button v-if="device.status === 'active'" :disabled="busy" @click="confirmation = device">Revoke…</button>
       </li>
     </ul>
-    <div v-if="confirmation" role="alertdialog" aria-label="Apparaat intrekken">
-      <p>{{ confirmation.name }} intrekken? Dit beëindigt de sessies van dat apparaat.</p>
-      <button :disabled="busy" @click="confirmation = null">Annuleren</button>
-      <button :disabled="busy" @click="confirmRevoke">Bevestigen en ondertekenen</button>
+    <div v-if="confirmation" role="alertdialog" aria-label="Revoke device">
+      <p>Revoke {{ confirmation.name }}? This ends that device's sessions.</p>
+      <button :disabled="busy" @click="confirmation = null">Cancel</button>
+      <button :disabled="busy" @click="confirmRevoke">Confirm and sign</button>
     </div>
     <p v-if="message" role="status">{{ message }}</p>
   </section>

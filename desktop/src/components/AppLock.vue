@@ -27,8 +27,8 @@ onMounted(async () => {
         <span class="ring"></span>
         <span class="glyph">J</span>
       </div>
-      <h1>Jarvis is vergrendeld</h1>
-      <p class="sub">Verifieer jezelf om verder te gaan.</p>
+      <h1>Jarvis is locked</h1>
+      <p class="sub">Verify it is you to continue.</p>
 
       <button
         v-if="supportsBiometrics"
@@ -36,16 +36,16 @@ onMounted(async () => {
         :disabled="unlocking || phoneWaiting"
         @click="biometricUnlock"
       >
-        {{ unlocking ? "Even verifiëren…" : "Ontgrendel met Touch ID / Face ID" }}
+        {{ unlocking ? "Verifying…" : "Unlock with Touch ID / Face ID" }}
       </button>
 
       <template v-if="!phoneWaiting">
-        <button class="ghost" @click="requestPhoneApproval">Ontgrendel via telefoon</button>
+        <button class="ghost" @click="requestPhoneApproval">Unlock with your phone</button>
       </template>
       <div v-else class="waiting">
         <span class="spinner" aria-hidden="true"></span>
-        Wachten op goedkeuring via je telefoon…
-        <button class="link" @click="cancelPhoneApproval">annuleren</button>
+        Waiting for approval on your phone…
+        <button class="link" @click="cancelPhoneApproval">cancel</button>
       </div>
 
       <p v-if="phoneError || lockError" class="err">{{ phoneError || lockError }}</p>

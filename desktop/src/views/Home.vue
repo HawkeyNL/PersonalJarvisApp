@@ -271,9 +271,9 @@ onBeforeUnmount(() => {
     <div v-if="backend === 'unconfigured' || (accountMode && backend === 'ok')" class="gate">
       <JvOrb class="gate-orb" :size="182" :label="false" />
       <form v-if="backend === 'unconfigured'" class="connection-setup" @submit.prevent="saveHomeNode">
-        <h2>Verbind met je Home Node</h2>
-        <p>Voer de HTTPS-origin van je Home Node in. Jarvis bewaart alleen dit adres lokaal; geen credentials.</p>
-        <label for="home-node-origin">Home Node-origin</label>
+        <h2>Connect to your Home Node</h2>
+        <p>Enter the HTTPS origin of your Home Node. Jarvis stores only this address locally, never credentials.</p>
+        <label for="home-node-origin">Home Node origin</label>
         <input
           id="home-node-origin"
           v-model.trim="originInput"
@@ -284,34 +284,34 @@ onBeforeUnmount(() => {
           required
         />
         <button type="submit" :disabled="configBusy">
-          {{ configBusy ? "Verbinden…" : "Verbinden en koppelen" }}
+          {{ configBusy ? "Connecting…" : "Connect and pair" }}
         </button>
         <p v-if="configError" class="config-error" role="alert">{{ configError }}</p>
-        <p class="setup-hint">Lokale HTTP op localhost is uitsluitend toegestaan in een development-build.</p>
+        <p class="setup-hint">Plain HTTP on localhost is only allowed in a development build.</p>
       </form>
       <form v-if="accountMode && backend === 'ok'" class="connection-setup" @submit.prevent="submitAccount">
-        <h2>{{ accountMode === "activate" ? "Activeer je eerste apparaat" : "Aanmelden bij Jarvis" }}</h2>
-        <p v-if="accountMode === 'activate'">Gebruik de eenmalige activatiecode van je Home Node en kies een accountwachtwoord van minimaal 15 tekens.</p>
-        <label v-if="accountMode === 'activate'" for="activation-code">Activatiecode</label>
+        <h2>{{ accountMode === "activate" ? "Activate your first device" : "Sign in to Jarvis" }}</h2>
+        <p v-if="accountMode === 'activate'">Use the one-time activation code from your Home Node and choose an account password of at least 15 characters.</p>
+        <label v-if="accountMode === 'activate'" for="activation-code">Activation code</label>
         <input v-if="accountMode === 'activate'" id="activation-code" v-model="activationCode" type="text" autocomplete="off" autocapitalize="off" :spellcheck="false" maxlength="256" required />
-        <label for="account-password">Accountwachtwoord</label>
+        <label for="account-password">Account password</label>
         <div class="password-input">
           <input id="account-password" v-model="password" :type="passwordVisible ? 'text' : 'password'" :autocomplete="accountMode === 'activate' ? 'new-password' : 'current-password'" autocapitalize="off" :spellcheck="false" :minlength="accountMode === 'activate' ? 15 : undefined" maxlength="1024" required />
-          <button type="button" class="password-toggle" :aria-label="passwordVisible ? 'Wachtwoord verbergen' : 'Wachtwoord tonen'" :aria-pressed="passwordVisible" aria-controls="account-password" @click="passwordVisible = !passwordVisible">
+          <button type="button" class="password-toggle" :aria-label="passwordVisible ? 'Hide password' : 'Show password'" :aria-pressed="passwordVisible" aria-controls="account-password" @click="passwordVisible = !passwordVisible">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path v-if="passwordVisible" d="m3 3 18 18"/></svg>
           </button>
         </div>
-        <button type="submit" :disabled="accountBusy">{{ accountBusy ? "Bezig…" : "Doorgaan" }}</button>
+        <button type="submit" :disabled="accountBusy">{{ accountBusy ? "Working…" : "Continue" }}</button>
         <p v-if="accountError" class="config-error" role="alert">{{ accountError }}</p>
       </form>
     </div>
 
     <div v-else class="body">
       <p v-if="auth === 'wachten'" class="pairing-wait" role="status">
-        Wacht op goedkeuring vanaf een vertrouwd Jarvis-apparaat.
+        Waiting for approval from a trusted Jarvis device.
       </p>
       <p v-else-if="backend === 'fout'" class="connection-error" role="status">
-        Home Node niet bereikbaar op {{ homeNodeConfig.origin }}. Controleer het netwerk en probeer opnieuw.
+        Home Node unreachable at {{ homeNodeConfig.origin }}. Check the network and try again.
       </p>
 
       <!-- Desktop hub: orb in the middle, seven modules around it. -->

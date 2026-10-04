@@ -48,7 +48,7 @@ function resampleTo16k(input: Float32Array, inRate: number): Int16Array {
 
 /** Record for `ms` milliseconds and return 16 kHz mono PCM. */
 export async function recordPcm(ms: number): Promise<Pcm> {
-  if (!captureSupported) throw new Error("microfoon niet beschikbaar");
+  if (!captureSupported) throw new Error("microphone unavailable");
   const stream = await navigator.mediaDevices.getUserMedia(micConstraints());
   const ctx = new AC();
   const source = ctx.createMediaStreamSource(stream);

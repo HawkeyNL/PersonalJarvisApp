@@ -31,7 +31,7 @@ export async function listMics(): Promise<MicDevice[]> {
   const devices = await navigator.mediaDevices.enumerateDevices();
   mics.value = devices
     .filter((d) => d.kind === "audioinput")
-    .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Microfoon ${i + 1}` }));
+    .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Microphone ${i + 1}` }));
   // If the remembered device vanished, drop back to the default.
   if (selectedMic.value && !mics.value.some((m) => m.deviceId === selectedMic.value)) {
     setMic("");

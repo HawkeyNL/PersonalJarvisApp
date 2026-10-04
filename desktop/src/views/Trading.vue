@@ -85,7 +85,7 @@ async function refreshIbkr() {
       positions.value = p.positions;
     } else {
       ibStatus.value = "disconnected";
-      ibHint.value = s.hint ?? "IBKR-gateway niet verbonden (start de Client Portal Gateway en log in).";
+      ibHint.value = "IBKR gateway not connected. Start the Client Portal Gateway and log in.";
     }
   } catch (e) {
     ibStatus.value = "disconnected";
@@ -108,8 +108,8 @@ onMounted(() => {
       <div>
         <h1>Trading</h1>
         <p class="muted sub">
-          Je posities op één desk — handmatig en live via IBKR (read-only).
-          Traden (orders) volgt later, met risk-checks en bevestiging.
+          Your positions on one desk: manual, and live through IBKR (read-only).
+          Trading (orders) comes later, with risk checks and confirmation.
         </p>
       </div>
     </header>
@@ -117,18 +117,18 @@ onMounted(() => {
     <!-- summary tiles -->
     <div class="tiles">
       <div class="tile glass">
-        <span class="t-k">POSITIES</span>
+        <span class="t-k">POSITIONS</span>
         <span class="t-v">{{ holdings.length }}</span>
       </div>
       <div class="tile glass">
-        <span class="t-k">KOSTENBASIS</span>
+        <span class="t-k">COST BASIS</span>
         <span class="t-v mono">{{ total }}</span>
       </div>
       <div class="tile glass">
         <span class="t-k">IBKR</span>
         <span class="t-v small">
           <span class="dot" :class="ibStatus === 'connected' ? 'dot-ok' : ibStatus === 'disconnected' ? 'dot-err' : 'dot-todo'"></span>
-          {{ ibStatus === "connected" ? "verbonden" : ibStatus === "disconnected" ? "offline" : "…" }}
+          {{ ibStatus === "connected" ? "connected" : ibStatus === "disconnected" ? "offline" : "…" }}
         </span>
       </div>
     </div>
@@ -141,31 +141,31 @@ onMounted(() => {
     <!-- MANUAL -->
     <div v-show="seg === 'manual'" class="panel glass">
       <form class="holding-form" @submit.prevent="add">
-        <input v-model="symbol" placeholder="Symbool (AAPL)" aria-label="symbool" />
-        <input v-model="quantity" placeholder="Aantal" inputmode="decimal" aria-label="aantal" />
-        <input v-model="avgCost" placeholder="Gem. kostprijs" inputmode="decimal" aria-label="kostprijs" />
-        <button type="submit">Toevoegen</button>
+        <input v-model="symbol" placeholder="Symbol (AAPL)" aria-label="Symbol" />
+        <input v-model="quantity" placeholder="Quantity" inputmode="decimal" aria-label="Quantity" />
+        <input v-model="avgCost" placeholder="Avg. cost" inputmode="decimal" aria-label="Average cost" />
+        <button type="submit">Add</button>
       </form>
 
       <p v-if="hError" class="muted err">{{ hError }}</p>
-      <p v-if="loading" class="muted">Laden…</p>
+      <p v-if="loading" class="muted">Loading…</p>
 
       <div v-else-if="holdings.length" class="holdings">
-        <div class="total">Totale kostenbasis: <strong>{{ total }}</strong></div>
+        <div class="total">Total cost basis: <strong>{{ total }}</strong></div>
         <ul class="holding-list">
           <li v-for="h in holdings" :key="h.id" class="holding">
             <div class="holding-head">
               <span class="sym">{{ h.symbol }}</span>
               <span class="muted">{{ h.quantity }} × {{ h.avg_cost }} {{ h.currency }}</span>
               <span class="cost mono">{{ h.cost_basis }}</span>
-              <button class="del" @click="remove(h.id)" aria-label="verwijderen">✕</button>
+              <button class="del" @click="remove(h.id)" aria-label="Remove">✕</button>
             </div>
             <div class="bar"><div class="bar-fill" :style="{ width: h.weight_pct + '%' }"></div></div>
             <div class="weight muted">{{ h.weight_pct }}%</div>
           </li>
         </ul>
       </div>
-      <p v-else-if="!loading" class="muted">Nog geen posities. Voeg er hierboven één toe.</p>
+      <p v-else-if="!loading" class="muted">No positions yet. Add one above.</p>
     </div>
 
     <!-- IBKR -->
@@ -175,18 +175,18 @@ onMounted(() => {
           <span class="dot" :class="ibStatus === 'connected' ? 'dot-ok' : ibStatus === 'disconnected' ? 'dot-err' : 'dot-todo'"></span>
           {{
             ibStatus === "connected"
-              ? `verbonden — account ${account}`
+              ? `connected — account ${account}`
               : ibStatus === "disconnected"
-                ? "niet verbonden"
-                : "controleren…"
+                ? "not connected"
+                : "checking…"
           }}
         </div>
-        <button class="ghost" @click="refreshIbkr">Opnieuw verbinden</button>
+        <button class="ghost" @click="refreshIbkr">Reconnect</button>
       </div>
 
       <p class="muted sub">
-        Read-only via de Client Portal Gateway (paper of live). De login met
-        SSO + 2FA doe je in de gateway; Jarvis leest alleen.
+        Read-only through the Client Portal Gateway (paper or live). You log in
+        with SSO + 2FA in the gateway; Jarvis only reads.
       </p>
       <p v-if="ibHint" class="muted">{{ ibHint }}</p>
 

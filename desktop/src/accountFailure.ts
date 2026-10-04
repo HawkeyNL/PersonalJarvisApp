@@ -3,16 +3,16 @@
 export function accountFailure(error: unknown): string {
   const e = error as { name?: string; status?: number; path?: string; kind?: string } | null;
   if (e?.name === "ApiError") {
-    const stage = e.path === "/v1/auth/bootstrap" ? "Eerste activatie" : "Aanmelden";
+    const stage = e.path === "/v1/auth/bootstrap" ? "First activation" : "Sign-in";
     switch (e.status) {
-      case 400: return `${stage}: invoer afgewezen (HTTP 400). Controleer de apparaatnaam en het wachtwoord.`;
-      case 401: return `${stage}: authenticatie geweigerd (HTTP 401).`;
-      case 403: return `${stage}: geweigerd (HTTP 403). Bij activatie kan de code verlopen/ongeldig zijn, het clientnetwerk niet toegestaan zijn of activatie al gebruikt zijn.`;
-      case 429: return `${stage}: te veel pogingen (HTTP 429). Wacht minstens een minuut voordat je opnieuw probeert.`;
-      case 503: return `${stage}: tijdelijk niet beschikbaar (HTTP 503). Controleer de Core-status.`;
-      default: return `${stage}: onverwachte HTTP-fout. Controleer de Core-status.`;
+      case 400: return `${stage}: input rejected (HTTP 400). Check the device name and password.`;
+      case 401: return `${stage}: authentication refused (HTTP 401).`;
+      case 403: return `${stage}: refused (HTTP 403). For activation, the code may be expired or invalid, the client network not allowed, or activation already used.`;
+      case 429: return `${stage}: too many attempts (HTTP 429). Wait at least a minute before trying again.`;
+      case 503: return `${stage}: temporarily unavailable (HTTP 503). Check the Core status.`;
+      default: return `${stage}: unexpected HTTP error. Check the Core status.`;
     }
   }
-  if (e?.name === "NetworkError") return "Geen antwoord van de Home Node. Controleer HTTPS, de verbinding en het ingestelde adres.";
-  return "Aanmelden of activeren mislukt in de app. Controleer of de OS-sleutelhanger beschikbaar is en probeer opnieuw.";
+  if (e?.name === "NetworkError") return "No response from the Home Node. Check HTTPS, the connection and the configured address.";
+  return "Sign-in or activation failed in the app. Check that the OS keychain is available and try again.";
 }

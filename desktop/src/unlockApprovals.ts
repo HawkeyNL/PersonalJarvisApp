@@ -51,7 +51,7 @@ export async function approve(req: UnlockReq): Promise<void> {
   approving.value = req.id;
   try {
     const status = await currentAuthStatus();
-    if (!status.authenticated) throw new Error("niet ingelogd");
+    if (!status.authenticated) throw new Error("not signed in");
     // Verify locally on the phone: biometrics, falling back to the passcode.
     await invoke("biometric_unlock", {
       reason: `${req.device_name} ontgrendelen`,
@@ -72,7 +72,7 @@ export async function deny(req: UnlockReq): Promise<void> {
   approvalError.value = null;
   try {
     const status = await currentAuthStatus();
-    if (!status.authenticated) throw new Error("niet ingelogd");
+    if (!status.authenticated) throw new Error("not signed in");
     await postJsonAuth(`/v1/auth/unlock/${req.id}/deny`, {});
     pending.value = pending.value.filter((r) => r.id !== req.id);
   } catch (e) {

@@ -61,7 +61,7 @@ export async function checkForUpdate(): Promise<void> {
     apply(await invoke<NativeUpdateStatus>("app_update_check"));
   } catch {
     updateState.value = "error";
-    updateError.value = "De privé-updateservice is momenteel niet bereikbaar. Jarvis blijft gewoon bruikbaar.";
+    updateError.value = "The private update service is unreachable right now. Jarvis keeps working as usual.";
   }
 }
 
@@ -87,7 +87,7 @@ export async function installAvailableUpdate(): Promise<void> {
     apply(await invoke<NativeUpdateStatus>("app_update_install", { onEvent }));
   } catch {
     updateState.value = "error";
-    updateError.value = "Download, handtekeningcontrole of installatie is mislukt. De huidige versie is niet gewijzigd.";
+    updateError.value = "Download, signature check or installation failed. The current version is unchanged.";
   }
 }
 

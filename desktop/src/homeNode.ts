@@ -16,7 +16,7 @@ export const homeNodeConfig = readonly(config);
 
 export class HomeNodeUnconfiguredError extends Error {
   constructor() {
-    super("Home Node is niet geconfigureerd");
+    super("Home Node is not configured");
     this.name = "HomeNodeUnconfiguredError";
   }
 }

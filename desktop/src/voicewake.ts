@@ -52,11 +52,11 @@ export async function triggerWake(): Promise<void> {
   wakeError.value = null;
   try {
     if (enrolled.value && voiceSupported) {
-      wakeStatus.value = "stem controleren…";
+      wakeStatus.value = "checking voice…";
       const res = await verify(3);
       lastScore.value = res?.score ?? 0;
       if (res && res.enrolled && !res.is_you) {
-        wakeStatus.value = `niet herkend (${res.score.toFixed(2)})`;
+        wakeStatus.value = `not recognized (${res.score.toFixed(2)})`;
         return; // not your voice → do not wake
       }
     }
@@ -73,7 +73,7 @@ export async function startWake(): Promise<void> {
   if (wakeRunning.value) return;
   await initPlatformCapabilities();
   if (!wakeReady.value) {
-    wakeError.value = "Wake-word is niet beschikbaar op dit platform.";
+    wakeError.value = "The wake word is not available on this platform.";
     return;
   }
 
@@ -109,12 +109,12 @@ export async function startWake(): Promise<void> {
     await d.start();
     detector = d;
     wakeListening.value = true;
-    wakeStatus.value = "luistert naar ‘Hey Jarvis’ 🎙️";
+    wakeStatus.value = "listening for ‘Hey Jarvis’ 🎙️";
   } catch (e) {
     detector = null;
     wakeListening.value = false;
     wakeStatus.value =
-      "gereed — ⌘⇧J werkt; auto-detectie: draai scripts/setup-wakeword.sh";
+      "ready — ⌘⇧J works; for auto-detection run scripts/setup-wakeword.sh";
     // Not fatal: the hotkey + native-event paths remain active.
     console.warn("[wake] onnx detector unavailable:", e);
   }

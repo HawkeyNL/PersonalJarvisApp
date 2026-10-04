@@ -130,7 +130,7 @@ function receiveRealtime(event:RealtimeEvent) {
       break;
     case "assistant.failed":
       pending.delete(event.payload.run.request_id);
-      if(currentId.value===event.payload.run.conversation_id) {thinking.value=false;push("jarvis","Antwoord onderbroken. Je bericht is opgeslagen; er wordt niet automatisch opnieuw gegenereerd.");}
+      if(currentId.value===event.payload.run.conversation_id) {thinking.value=false;push("jarvis","Reply interrupted. Your message is saved; it is not regenerated automatically.");}
       break;
   }
 }
@@ -160,7 +160,7 @@ const MAX_TURNS = 20;
 
 async function ask(epoch:number): Promise<ChatReply> {
   const status = await currentAuthStatus();
-  if (!status.authenticated || !chatSession.current(epoch)) throw new Error("niet ingelogd");
+  if (!status.authenticated || !chatSession.current(epoch)) throw new Error("not signed in");
   const history = messages.value.slice(-MAX_TURNS).map((m) => ({
     role: m.role === "jarvis" ? "assistant" : "user",
     content: m.text,
@@ -242,7 +242,7 @@ export async function send(input: string): Promise<void> {
   const t = input.trim();
   if (!t || thinking.value) return;
   if(realtimeAvailable && pending.full) {
-    push("jarvis","Te veel onbevestigde verzoeken. Herstel eerst de verbinding; er wordt niets opnieuw verstuurd.");
+    push("jarvis","Too many unconfirmed requests. Restore the connection first; nothing is resent.");
     return;
   }
   push("user", t);
@@ -263,7 +263,7 @@ export async function send(input: string): Promise<void> {
     } catch {
       if(!chatSession.current(epoch)) return;
       thinking.value=false;
-      push("jarvis","Verzending niet bevestigd. Niet automatisch opnieuw verstuurd; verbind opnieuw om de opgeslagen geschiedenis te controleren.");
+      push("jarvis","Delivery not confirmed. Not resent automatically; reconnect to check the saved history.");
     }
     return;
   }
@@ -288,10 +288,10 @@ export async function send(input: string): Promise<void> {
     void loadConversations();
   } catch (e) {
     if(!chatSession.current(epoch)) return;
-    const detail = e instanceof Error ? e.message : "onbekende fout";
+    const detail = e instanceof Error ? e.message : "unknown error";
     push(
       "jarvis",
-      `Mijn brein is even niet bereikbaar (${detail}). Controleer JARVIS_LLM_API_KEY in de backend of start Ollama lokaal.`,
+      `My brain is unreachable right now (${detail}). Check JARVIS_LLM_API_KEY on the backend or start Ollama locally.`,
       false,
     );
   } finally {
