@@ -6,6 +6,7 @@ import Settings from "../views/Settings.vue";
 import NodeStub from "../views/NodeStub.vue";
 import Context from "../views/Context.vue";
 import Conversations from "../views/Conversations.vue";
+import Tasks from "../views/Tasks.vue";
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -14,7 +15,7 @@ export const router = createRouter({
     { path: "/", name: "home", component: Home },
     { path: "/conversations", name: "conversations", component: Conversations },
     { path: "/agents", name: "agents", component: NodeStub },
-    { path: "/tasks", name: "tasks", component: NodeStub },
+    { path: "/tasks", name: "tasks", component: Tasks },
     { path: "/integrations", name: "integrations", component: NodeStub },
     { path: "/health", name: "health", component: Health },
     { path: "/memory", name: "memory", component: NodeStub },
