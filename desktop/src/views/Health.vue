@@ -14,6 +14,7 @@ import JvActivityList, { type ActivityItem } from "../components/jv/JvActivityLi
 import JvUnavailable from "../components/jv/JvUnavailable.vue";
 import { loadOptional } from "../coreStatus";
 import { formatUptime, relativeTime, type Availability, type Tone } from "../hubModel";
+import { diskState, formatMs, serviceState, servicesSummary, type Disk } from "../nodeModels";
 
 // System Health: the former System view (connection, live host, usage,
 // model access, self-improvement) on the shared node layout.
@@ -71,7 +72,13 @@ interface Usage {
   output_tokens?: number;
   cache_read_tokens?: number;
   total_tokens?: number;
-  by_backend: { backend: string; spent_eur: number; total_tokens?: number }[];
+  // Newer Cores add failure, fallback and latency aggregates.
+  failures?: number;
+  fallbacks?: number;
+  latency_p50_ms?: number | null;
+  latency_p95_ms?: number | null;
+  failures_by_category?: { category: string; requests: number }[];
+  by_backend: { backend: string; spent_eur: number; total_tokens?: number; failures?: number; latency_p95_ms?: number | null }[];
   daily?: { day: string; spent_eur: number; total_tokens: number; input_tokens?: number; output_tokens?: number; cache_read_tokens?: number; cache_write_tokens?: number }[];
 }
 
@@ -131,6 +138,23 @@ const auditItems = computed<ActivityItem[]>(() => {
     };
   });
 });
+
+// --- Services & disk (/v1/system/services) ------------------------------------
+type Service = { label: string; unit: string; state: string };
+const services = ref<Availability<{ services: Service[]; disks: Disk[] }>>({ state: "loading" });
+const servicesBusy = ref(false);
+async function loadServices() {
+  servicesBusy.value = true;
+  services.value = await loadOptional<{ services: Service[]; disks: Disk[] }>("/v1/system/services");
+  servicesBusy.value = false;
+}
+const serviceItems = computed<ActivityItem[]>(() => (services.value.state === "ok" ? services.value.value.services : []).map((svc) => {
+  const [tone, label] = serviceState(svc.state);
+  return { id: svc.unit, icon: "chip", title: svc.label, detail: svc.unit, tone, toneLabel: label, time: label };
+}));
+const failureItems = computed<ActivityItem[]>(() => (usage.value?.failures_by_category ?? []).map((f) => ({
+  id: f.category, icon: "alert", title: f.category, time: `${f.requests}×`, tone: "warn", toneLabel: "Failed requests",
+})));
 
 // --- Self-improvement (ADR-029 4d): Jarvis proposes, the owner approves -------
 interface Proposal { title: string; category: string; rationale: string; cost: string; requires_approval: boolean; steps: string[] }
@@ -198,13 +222,19 @@ const items = computed<NodeItem[]>(() => {
     : regError.value ? ["warn", "Unavailable"] : ["idle", "Loading…"];
   const improve: [Tone, string] = adviceBusy.value ? ["ok", "Thinking…"]
     : advice.value ? ["ok", `${advice.value.proposals.length} proposals`] : ["idle", "On request"];
+  let svc: [Tone, string] = services.value.state === "ok" ? servicesSummary(services.value.value.services)
+    : services.value.state === "loading" ? ["idle", "Loading…"]
+    : services.value.state === "unsupported" ? ["idle", "Requires newer Core"] : ["warn", "Unavailable"];
+  // A nearly full disk outranks "all running".
+  const fullDisk = services.value.state === "ok" && services.value.value.disks.some((d) => ["warn", "error"].includes(diskState(d)[0]));
+  if (fullDisk && svc[0] === "ok") svc = ["warn", `${svc[1]} · disk nearly full`];
   return [
     { id: "core", label: "Core", title: "Jarvis Core", icon: "chip", tone: core[0], status: core[1], description: "The heart of Jarvis" },
     { id: "node", label: "Home Node", title: "Home Node", icon: "home", tone: node[0], status: node[1], description: "Hardware, live load and software" },
     { id: "usage", label: "Usage", title: "Usage", icon: "trend", tone: spend[0], status: spend[1], description: "Spend, budget and tokens this month" },
     { id: "models", label: "Models", title: "Models", icon: "layers", tone: "idle", status: "Owner policy", description: "Which models Jarvis may use" },
     { id: "improve", label: "Improve", title: "Self-improvement", icon: "bulb", tone: improve[0], status: improve[1], description: "Jarvis proposes, you approve" },
-    { id: "services", label: "Services", title: "Services & disk", icon: "disk", tone: "idle", status: "Requires newer Core", description: "Service status and disk space" },
+    { id: "services", label: "Services", title: "Services & disk", icon: "disk", tone: svc[0], status: svc[1], description: "Service status and disk space" },
   ];
 });
 const current = computed(() => items.value.find((item) => item.id === selected.value)!);
@@ -220,7 +250,7 @@ const DETAILS: Record<string, { description: string; quote?: string }> = {
   usage: { description: "Monthly spend against the hard budget, with token use per backend." },
   models: { description: "Owner-controlled model access. Allowing a model never selects it for a running request." },
   improve: { description: "Jarvis reviews its own ecosystem and proposes improvements. It never runs anything itself." },
-  services: { description: "Per-service status and disk space need a newer Core endpoint." },
+  services: { description: "The Jarvis services on your Home Node and the free space on its disks." },
 };
 const softwareItems = computed<ActivityItem[]>(() => (reg.value?.software ?? []).map((s) => ({
   id: s.name,
@@ -234,7 +264,8 @@ const backendItems = computed<ActivityItem[]>(() => (usage.value?.by_backend ?? 
   id: b.backend,
   icon: "spark",
   title: b.backend,
-  detail: `${tokens(b.total_tokens ?? 0)} tokens`,
+  detail: [`${tokens(b.total_tokens ?? 0)} tokens`, b.failures ? `${b.failures} failed` : "",
+    b.latency_p95_ms != null ? `p95 ${formatMs(b.latency_p95_ms)}` : ""].filter(Boolean).join(" · "),
   time: eur(b.spent_eur),
   tone: "ok",
   toneLabel: "Used this month",
@@ -257,6 +288,7 @@ onMounted(async () => {
   check();
   loadRegistry();
   hardwareTimer = setTimeout(pollHardware, 5000);
+  void loadServices();
   audit.value = await loadOptional<{ entries: AuditEntry[] }>("/v1/system/audit");
 });
 onUnmounted(() => {
@@ -277,6 +309,8 @@ onUnmounted(() => {
         <button v-if="current.id === 'core'" type="button" class="ghost-btn" @click="check">Check again</button>
         <button v-else-if="current.id === 'node' || current.id === 'usage'" type="button" class="ghost-btn"
           :disabled="regBusy" @click="loadRegistry(true)">{{ regBusy ? "Refreshing…" : "Refresh" }}</button>
+        <button v-else-if="current.id === 'services'" type="button" class="ghost-btn" :disabled="servicesBusy"
+          @click="loadServices">{{ servicesBusy ? "Refreshing…" : "Refresh" }}</button>
       </template>
 
       <JvSegmented v-if="subTabs.length" v-model="sub" :items="subTabs" :label="`${current.title} sections`" />
@@ -365,9 +399,16 @@ onUnmounted(() => {
                 <JvTile icon="memory" label="Cached" :value="tokens(usage.cache_read_tokens ?? 0)" />
                 <JvTile icon="api" label="Calls" :value="String(usage.requests ?? 0)" />
                 <JvTile icon="calendar" label="Days with usage" :value="String(usage.daily?.length ?? 0)" />
+                <JvTile v-if="usage.failures !== undefined" icon="alert" label="Failures / fallbacks"
+                  :value="`${usage.failures} / ${usage.fallbacks ?? 0}`" />
+                <JvTile v-if="usage.latency_p50_ms !== undefined" icon="clock" label="Latency p50 / p95"
+                  :value="`${formatMs(usage.latency_p50_ms)} / ${formatMs(usage.latency_p95_ms)}`" />
               </div>
             </section>
-            <JvActivityList title="By backend" :items="backendItems" empty="No usage this month." />
+            <div class="lists">
+              <JvActivityList title="By backend" :items="backendItems" empty="No usage this month." />
+              <JvActivityList v-if="failureItems.length" title="Failures by category" :items="failureItems" empty="" />
+            </div>
           </div>
         </template>
         <template v-else>
@@ -421,8 +462,22 @@ onUnmounted(() => {
       </div>
 
       <!-- Services & disk -->
-      <JvUnavailable v-else title="Services & disk" kind="core-update" icon="disk"
-        detail="A sanitized services and disk status endpoint is planned for the Core. Until your Core has it, nothing is shown here." />
+      <template v-else>
+        <JvUnavailable v-if="services.state === 'unsupported' || services.state === 'error'" title="Services & disk"
+          :kind="services.state === 'unsupported' ? 'core-update' : 'error'" icon="disk" />
+        <p v-else-if="services.state === 'loading'" class="muted" role="status">Loading services…</p>
+        <div v-else class="split">
+          <section class="tiles" aria-label="Disks">
+            <h3 class="eyebrow">DISKS</h3>
+            <div class="grid">
+              <JvTile v-for="disk in services.value.disks" :key="disk.label" icon="disk"
+                :label="disk.label.charAt(0).toUpperCase() + disk.label.slice(1)" :value="diskState(disk)[1]" />
+            </div>
+            <p v-if="!services.value.disks.length" class="muted small">No disks reported.</p>
+          </section>
+          <JvActivityList title="Services" :items="serviceItems" empty="No services reported." />
+        </div>
+      </template>
     </JvPanel>
   </NodePage>
 </template>
@@ -444,6 +499,7 @@ onUnmounted(() => {
 .bar .fill.over { background: var(--danger); }
 .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
 .charts > div { min-width: 0; }
+.lists { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
 .ghost-btn, .primary-btn, .link-btn { font: inherit; font-size: var(--fs-13); font-weight: 400; cursor: pointer; }
 .ghost-btn {

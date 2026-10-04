@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  agentStatus, countOf, filterConversations, formatMs, groupAgents, ibkrState, isTrader, outcomeTone, sessionState, splitSessions,
+  agentStatus, countOf, diskState, filterConversations, formatMs, groupAgents, ibkrState, isTrader, outcomeTone, serviceState,
+  servicesSummary, sessionState, splitSessions,
 } from "../src/nodeModels.ts";
 
 const NOW = Date.parse("2026-10-04T12:00:00Z");
@@ -75,4 +76,22 @@ test("agent status reports usage, never a fake live state", () => {
   assert.equal(formatMs(null), "—");
   assert.equal(formatMs(850.4), "850 ms");
   assert.equal(formatMs(1234), "1.2 s");
+});
+
+test("service and disk states are labelled from what Core reports", () => {
+  assert.deepEqual(serviceState("active"), ["ok", "Running"]);
+  assert.deepEqual(serviceState("failed"), ["error", "Failed"]);
+  assert.deepEqual(serviceState("not_found"), ["idle", "Not installed"]);
+  assert.deepEqual(serviceState("unknown"), ["idle", "Unknown"]);
+  assert.deepEqual(serviceState("activating"), ["warn", "Activating"]);
+  assert.deepEqual(servicesSummary([]), ["idle", "No services reported"]);
+  assert.deepEqual(servicesSummary([{ state: "active" }, { state: "active" }]), ["ok", "2 of 2 running"]);
+  assert.deepEqual(servicesSummary([{ state: "active" }, { state: "inactive" }]), ["warn", "1 of 2 running"]);
+  assert.deepEqual(servicesSummary([{ state: "active" }, { state: "failed" }]), ["error", "1 failed"]);
+  assert.deepEqual(diskState({ label: "data", state: "unknown" }), ["idle", "Unknown"]);
+  const GiB = 1024 ** 3;
+  assert.deepEqual(diskState({ label: "system", state: "ok", total_bytes: 100 * GiB, free_bytes: 40 * GiB, used_percent: 60 }),
+    ["ok", "60% used · 40.0 GiB free of 100.0 GiB"]);
+  assert.equal(diskState({ label: "system", state: "ok", total_bytes: 100 * GiB, free_bytes: 15 * GiB, used_percent: 85 })[0], "warn");
+  assert.equal(diskState({ label: "system", state: "ok", total_bytes: 100 * GiB, free_bytes: 5 * GiB, used_percent: 95 })[0], "error");
 });

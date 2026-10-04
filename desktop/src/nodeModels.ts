@@ -99,3 +99,34 @@ export function formatMs(ms: number | null | undefined): string {
   if (ms === null || ms === undefined || !Number.isFinite(ms)) return "—";
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
+
+// --- Health: services and disks ------------------------------------------------------
+
+/** Tone and label of a systemd unit state as Core reports it. */
+export function serviceState(state: string): [Tone, string] {
+  if (state === "active") return ["ok", "Running"];
+  if (state === "failed") return ["error", "Failed"];
+  if (state === "not_found") return ["idle", "Not installed"];
+  if (!state || state === "unknown") return ["idle", "Unknown"];
+  return ["warn", state.charAt(0).toUpperCase() + state.slice(1)];
+}
+
+/** Satellite status for the services tab. */
+export function servicesSummary(services: { state: string }[]): [Tone, string] {
+  if (!services.length) return ["idle", "No services reported"];
+  const failed = services.filter((s) => s.state === "failed").length;
+  if (failed) return ["error", `${failed} failed`];
+  const running = services.filter((s) => s.state === "active").length;
+  return [running === services.length ? "ok" : "warn", `${running} of ${services.length} running`];
+}
+
+export type Disk = { label: string; state: string; total_bytes?: number; free_bytes?: number; used_percent?: number };
+/** Tone and one-line summary of a disk; full disks warn early. */
+export function diskState(disk: Disk): [Tone, string] {
+  if (disk.state !== "ok" || disk.used_percent === undefined || disk.free_bytes === undefined || disk.total_bytes === undefined) {
+    return ["idle", "Unknown"];
+  }
+  const gib = (n: number) => `${(n / 1024 ** 3).toFixed(1)} GiB`;
+  const tone: Tone = disk.used_percent >= 90 ? "error" : disk.used_percent >= 80 ? "warn" : "ok";
+  return [tone, `${disk.used_percent}% used · ${gib(disk.free_bytes)} free of ${gib(disk.total_bytes)}`];
+}
