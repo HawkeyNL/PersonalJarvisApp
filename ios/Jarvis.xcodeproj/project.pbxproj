@@ -7,6 +7,11 @@
 
 /* Begin PBXBuildFile section */
         A00000000000000000000054 /* HubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000054 /* HubModel.swift */; };
+        A00000000000000000000060 /* Exo2-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000060 /* Exo2-Variable.ttf */; };
+        A00000000000000000000061 /* Exo2-Italic-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000061 /* Exo2-Italic-Variable.ttf */; };
+        A00000000000000000000062 /* Rajdhani-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000062 /* Rajdhani-Medium.ttf */; };
+        A00000000000000000000063 /* Rajdhani-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000063 /* Rajdhani-SemiBold.ttf */; };
+        A00000000000000000000064 /* OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000064 /* OFL.txt */; };
         A00000000000000000000055 /* HubModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000055 /* HubModelTests.swift */; };
         A00000000000000000000042 /* ModelAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000042; };
         A00000000000000000000043 /* ModelAuthorizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000043; };
@@ -48,6 +53,11 @@
 
 /* Begin PBXFileReference section */
         B00000000000000000000054 /* HubModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/HubModel.swift; sourceTree = "<group>"; };
+        B00000000000000000000060 /* Exo2-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/Exo2-Variable.ttf; sourceTree = "<group>"; };
+        B00000000000000000000061 /* Exo2-Italic-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/Exo2-Italic-Variable.ttf; sourceTree = "<group>"; };
+        B00000000000000000000062 /* Rajdhani-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/Rajdhani-Medium.ttf; sourceTree = "<group>"; };
+        B00000000000000000000063 /* Rajdhani-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/Rajdhani-SemiBold.ttf; sourceTree = "<group>"; };
+        B00000000000000000000064 /* OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = Fonts/OFL.txt; sourceTree = "<group>"; };
         B00000000000000000000055 /* HubModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubModelTests.swift; sourceTree = "<group>"; };
         B00000000000000000000042 /* ModelAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/ModelAuthorization.swift; sourceTree = "<group>"; };
         B00000000000000000000043 /* ModelAuthorizationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAuthorizationTests.swift; sourceTree = "<group>"; };
@@ -120,6 +130,11 @@
 				B00000000000000000000010 /* EnrollmentView.swift */,
 				B00000000000000000000011 /* SettingsView.swift */,
                 B00000000000000000000054 /* HubModel.swift */,
+                B00000000000000000000060 /* Exo2-Variable.ttf */,
+                B00000000000000000000061 /* Exo2-Italic-Variable.ttf */,
+                B00000000000000000000062 /* Rajdhani-Medium.ttf */,
+                B00000000000000000000063 /* Rajdhani-SemiBold.ttf */,
+                B00000000000000000000064 /* OFL.txt */,
 				B00000000000000000000012 /* Assets.xcassets */,
 				B00000000000000000000013 /* Info.plist */,
 				B00000000000000000000016 /* PrivacyInfo.xcprivacy */,
@@ -208,7 +223,7 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		D00000000000000000000002 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000012 /* Assets.xcassets in Resources */, A00000000000000000000015 /* PrivacyInfo.xcprivacy in Resources */); runOnlyForDeploymentPostprocessing = 0; };
+		D00000000000000000000002 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000012 /* Assets.xcassets in Resources */, A00000000000000000000015 /* PrivacyInfo.xcprivacy in Resources */, A00000000000000000000060 /* Exo2-Variable.ttf in Resources */, A00000000000000000000061 /* Exo2-Italic-Variable.ttf in Resources */, A00000000000000000000062 /* Rajdhani-Medium.ttf in Resources */, A00000000000000000000063 /* Rajdhani-SemiBold.ttf in Resources */, A00000000000000000000064 /* OFL.txt in Resources */); runOnlyForDeploymentPostprocessing = 0; };
 		D00000000000000000000005 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
