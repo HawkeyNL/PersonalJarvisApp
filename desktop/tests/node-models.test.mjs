@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  agentStatus, countOf, diskState, filterConversations, formatMs, groupAgents, ibkrState, isTrader, outcomeTone, serviceState,
-  servicesSummary, sessionState, splitSessions,
+  agentStatus, countOf, diskState, filterConversations, formatMs, groupAgents, ibkrState, isTrader, measuredCount,
+  outcomeTone, serviceState, servicesSummary, sessionState, splitSessions,
 } from "../src/nodeModels.ts";
 
 const NOW = Date.parse("2026-10-04T12:00:00Z");
@@ -67,6 +67,8 @@ test("agents group alphabetically with ungrouped agents last", () => {
 
 test("agent status reports usage, never a fake live state", () => {
   assert.deepEqual(agentStatus(null), ["idle", "Usage unavailable"]);
+  assert.deepEqual(agentStatus(null, "usage_query_failed"), ["idle", "Usage unavailable"]);
+  assert.deepEqual(agentStatus(null, "agent_usage_not_instrumented"), ["idle", "Not measured yet"]);
   assert.deepEqual(agentStatus({ requests: 0 }), ["idle", "Not used this month"]);
   assert.deepEqual(agentStatus({ requests: 1 }), ["ok", "1 request this month"]);
   assert.deepEqual(agentStatus({ requests: 12 }), ["ok", "12 requests this month"]);
@@ -94,4 +96,11 @@ test("service and disk states are labelled from what Core reports", () => {
     ["ok", "60% used · 40.0 GiB free of 100.0 GiB"]);
   assert.equal(diskState({ label: "system", state: "ok", total_bytes: 100 * GiB, free_bytes: 15 * GiB, used_percent: 85 })[0], "warn");
   assert.equal(diskState({ label: "system", state: "ok", total_bytes: 100 * GiB, free_bytes: 5 * GiB, used_percent: 95 })[0], "error");
+});
+
+test("uninstrumented usage counts read 'Not measured yet', never 0", () => {
+  assert.equal(measuredCount(null), "Not measured yet");
+  assert.equal(measuredCount(undefined), "—");
+  assert.equal(measuredCount(0), "0");
+  assert.equal(measuredCount(1234), "1,234");
 });

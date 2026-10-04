@@ -58,7 +58,8 @@ export function countOf<T>(list: T[], flag: (item: T) => boolean): string {
 
 export type AgentUsage = {
   requests: number; input_tokens: number; output_tokens: number; total_tokens: number; spent_eur: number;
-  failures?: number; fallbacks?: number; latency_p50_ms?: number | null; latency_p95_ms?: number | null; last_used?: string | null;
+  // `null` = Core does not measure this yet (never a measured zero).
+  failures?: number | null; fallbacks?: number | null; latency_p50_ms?: number | null; latency_p95_ms?: number | null; last_used?: string | null;
 };
 export type AgentInfo = {
   id: string; name: string; group: string | null; description: string; model_policy: string; allowed_tools: string[];
@@ -81,10 +82,14 @@ export function groupAgents<T extends { name: string; group: string | null }>(ag
     .map(([group, list]) => ({ group: group || "Other", agents: list }));
 }
 
+/** Core's reason for `usage: null` when it does not record per-agent usage yet. */
+export const AGENT_USAGE_NOT_INSTRUMENTED = "agent_usage_not_instrumented";
+export const NOT_MEASURED = "Not measured yet";
+
 /** What an agent's status line may honestly say: its usage this month, not a
  *  live Active/Idle state (Core does not report one). */
-export function agentStatus(usage: AgentUsage | null): [Tone, string] {
-  if (!usage) return ["idle", "Usage unavailable"];
+export function agentStatus(usage: AgentUsage | null, unavailableReason?: string | null): [Tone, string] {
+  if (!usage) return ["idle", unavailableReason === AGENT_USAGE_NOT_INSTRUMENTED ? NOT_MEASURED : "Usage unavailable"];
   if (!usage.requests) return ["idle", "Not used this month"];
   return ["ok", `${usage.requests} ${usage.requests === 1 ? "request" : "requests"} this month`];
 }
@@ -92,6 +97,13 @@ export function agentStatus(usage: AgentUsage | null): [Tone, string] {
 /** The trading agent gets the "Open Trading" button. */
 export function isTrader(agent: { id: string; name: string }): boolean {
   return /trad(er|ing)/i.test(agent.id) || /trad(er|ing)/i.test(agent.name);
+}
+
+/** A usage count Core may not measure yet: `null` is "Not measured yet",
+ *  never 0; `undefined` (an older Core without the field) is "—". */
+export function measuredCount(n: number | null | undefined): string {
+  if (n === null) return NOT_MEASURED;
+  return n === undefined ? "—" : new Intl.NumberFormat("en").format(n);
 }
 
 /** "850 ms", "1.2 s"; "—" when Core has no measurement. */

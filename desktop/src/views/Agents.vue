@@ -9,7 +9,9 @@ import JvUnavailable from "../components/jv/JvUnavailable.vue";
 import NavIcon from "../components/NavIcon.vue";
 import { loadOptional } from "../coreStatus";
 import { relativeTime, type Availability } from "../hubModel";
-import { agentStatus, formatMs, groupAgents, isTrader, type AgentInfo, type AgentsResponse } from "../nodeModels";
+import {
+  AGENT_USAGE_NOT_INSTRUMENTED, agentStatus, formatMs, groupAgents, isTrader, measuredCount, type AgentInfo, type AgentsResponse,
+} from "../nodeModels";
 
 // Agents: the private agent bundle installed on Core (read-only metadata and
 // this month's usage). Core reports no live run state, so none is shown.
@@ -17,10 +19,11 @@ const source = ref<Availability<AgentsResponse>>({ state: "loading" });
 onMounted(async () => { source.value = await loadOptional<AgentsResponse>("/v1/agents"); });
 
 const response = computed(() => (source.value.state === "ok" ? source.value.value : null));
+const usageReason = computed(() => response.value?.usage_unavailable_reason ?? null);
 const groups = computed(() => groupAgents(response.value?.agents ?? []));
 const ordered = computed(() => groups.value.flatMap((g) => g.agents));
 const items = computed<NodeItem[]>(() => ordered.value.map((agent) => {
-  const [tone, status] = agentStatus(agent.usage);
+  const [tone, status] = agentStatus(agent.usage, usageReason.value);
   return {
     id: agent.id, label: agent.name, title: agent.name, icon: isTrader(agent) ? "trend" : "agents",
     description: agent.description, tone, status,
@@ -41,7 +44,7 @@ const compact = (n: number) => new Intl.NumberFormat("en", { notation: "compact"
 const groupRows = computed(() => groups.value.map((g) => ({
   group: g.group,
   rows: g.agents.map((a): ActivityItem => {
-    const [tone, label] = agentStatus(a.usage);
+    const [tone, label] = agentStatus(a.usage, usageReason.value);
     return { id: a.id, icon: isTrader(a) ? "trend" : "agents", title: a.name, detail: a.model_policy, tone, toneLabel: label };
   }),
 })));
@@ -95,15 +98,17 @@ const empty = computed(() => {
       <JvActivityList v-else-if="sub === 'tools'" title="Allowed tools" :items="toolRows" empty="This agent may not use any tools." />
 
       <template v-else>
-        <JvUnavailable v-if="!agent.usage" title="Usage" kind="error" icon="trend"
+        <JvUnavailable v-if="!agent.usage && usageReason === AGENT_USAGE_NOT_INSTRUMENTED" title="Usage" icon="trend"
+          detail="Not measured yet: Core does not record which agent made each call." />
+        <JvUnavailable v-else-if="!agent.usage" title="Usage" kind="error" icon="trend"
           detail="Core could not read the usage statistics for this month." />
         <div v-else class="node-grid usage">
           <JvTile icon="api" label="Requests this month" :value="number(agent.usage.requests)" />
           <JvTile icon="trend" label="Spent" :value="`€${agent.usage.spent_eur.toFixed(2)}`" />
           <JvTile icon="layers" label="Tokens in / out" :value="`${compact(agent.usage.input_tokens)} / ${compact(agent.usage.output_tokens)}`" />
           <JvTile icon="clock" label="Latency p50 / p95" :value="`${formatMs(agent.usage.latency_p50_ms)} / ${formatMs(agent.usage.latency_p95_ms)}`" />
-          <JvTile icon="alert" label="Failures" :value="agent.usage.failures === undefined ? '—' : number(agent.usage.failures)" />
-          <JvTile icon="restart" label="Fallbacks" :value="agent.usage.fallbacks === undefined ? '—' : number(agent.usage.fallbacks)" />
+          <JvTile icon="alert" label="Failures" :value="measuredCount(agent.usage.failures)" />
+          <JvTile icon="restart" label="Fallbacks" :value="measuredCount(agent.usage.fallbacks)" />
           <JvTile icon="calendar" label="Last used" :value="agent.usage.last_used ? relativeTime(agent.usage.last_used, Date.now()) || agent.usage.last_used : 'Not this month'" />
         </div>
       </template>

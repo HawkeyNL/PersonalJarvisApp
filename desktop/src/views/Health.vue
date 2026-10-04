@@ -14,7 +14,7 @@ import JvActivityList, { type ActivityItem } from "../components/jv/JvActivityLi
 import JvUnavailable from "../components/jv/JvUnavailable.vue";
 import { loadOptional } from "../coreStatus";
 import { formatUptime, relativeTime, type Availability, type Tone } from "../hubModel";
-import { diskState, formatMs, serviceState, servicesSummary, type Disk } from "../nodeModels";
+import { diskState, formatMs, measuredCount, NOT_MEASURED, serviceState, servicesSummary, type Disk } from "../nodeModels";
 
 // System Health: the former System view (connection, live host, usage,
 // model access, self-improvement) on the shared node layout.
@@ -72,13 +72,14 @@ interface Usage {
   output_tokens?: number;
   cache_read_tokens?: number;
   total_tokens?: number;
-  // Newer Cores add failure, fallback and latency aggregates.
-  failures?: number;
-  fallbacks?: number;
+  // Newer Cores add failure, fallback and latency aggregates; `null` means
+  // Core does not measure that yet (never a measured zero).
+  failures?: number | null;
+  fallbacks?: number | null;
   latency_p50_ms?: number | null;
   latency_p95_ms?: number | null;
-  failures_by_category?: { category: string; requests: number }[];
-  by_backend: { backend: string; spent_eur: number; total_tokens?: number; failures?: number; latency_p95_ms?: number | null }[];
+  failures_by_category?: { category: string; requests: number }[] | null;
+  by_backend: { backend: string; spent_eur: number; total_tokens?: number; failures?: number | null; latency_p95_ms?: number | null }[];
   daily?: { day: string; spent_eur: number; total_tokens: number; input_tokens?: number; output_tokens?: number; cache_read_tokens?: number; cache_write_tokens?: number }[];
 }
 
@@ -400,7 +401,8 @@ onUnmounted(() => {
                 <JvTile icon="api" label="Calls" :value="String(usage.requests ?? 0)" />
                 <JvTile icon="calendar" label="Days with usage" :value="String(usage.daily?.length ?? 0)" />
                 <JvTile v-if="usage.failures !== undefined" icon="alert" label="Failures / fallbacks"
-                  :value="`${usage.failures} / ${usage.fallbacks ?? 0}`" />
+                  :value="usage.failures === null && usage.fallbacks === null ? NOT_MEASURED
+                    : `${measuredCount(usage.failures)} / ${measuredCount(usage.fallbacks)}`" />
                 <JvTile v-if="usage.latency_p50_ms !== undefined" icon="clock" label="Latency p50 / p95"
                   :value="`${formatMs(usage.latency_p50_ms)} / ${formatMs(usage.latency_p95_ms)}`" />
               </div>
