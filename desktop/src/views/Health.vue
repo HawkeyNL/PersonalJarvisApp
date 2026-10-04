@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
+import { useRoute } from "vue-router";
 import { getJson, getJsonAuth, postJsonAuth } from "../api";
 import { currentAuthStatus } from "../auth";
 import { homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
@@ -180,7 +181,10 @@ function cancelSelfImprove() {
 }
 
 // --- Node items ---------------------------------------------------------------
-const selected = ref("core");
+// `?node=models` opens a tab directly (e.g. from Integrations → Models).
+const NODES = ["core", "node", "usage", "models", "improve", "services"];
+const requested = useRoute().query.node;
+const selected = ref(typeof requested === "string" && NODES.includes(requested) ? requested : "core");
 const sub = ref("overview");
 watch(selected, () => { sub.value = "overview"; });
 

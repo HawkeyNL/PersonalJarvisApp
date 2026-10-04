@@ -38,3 +38,18 @@ export function splitSessions<T extends { state: string }>(list: T[]): { open: T
 export function outcomeTone(outcome: string): Tone {
   return outcome === "ok" ? "ok" : outcome === "error" ? "error" : outcome === "denied" ? "warn" : "idle";
 }
+
+// --- Integrations --------------------------------------------------------------
+
+export type IbkrState = { reachable: boolean; authenticated: boolean; connected?: boolean };
+/** Tone and label of the IBKR gateway link. */
+export function ibkrState(status: IbkrState): [Tone, string] {
+  if (!status.reachable) return ["warn", "Gateway unreachable"];
+  if (!status.authenticated) return ["warn", "Not logged in"];
+  return status.connected === false ? ["warn", "Logged in, not connected"] : ["ok", "Connected"];
+}
+
+/** "3 of 9" style count of items with a truthy flag. */
+export function countOf<T>(list: T[], flag: (item: T) => boolean): string {
+  return `${list.filter(flag).length} of ${list.length}`;
+}
