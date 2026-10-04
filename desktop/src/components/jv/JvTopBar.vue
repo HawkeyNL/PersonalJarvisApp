@@ -137,6 +137,8 @@ const core = computed(() =>
 .pdot { position: absolute; right: 1px; bottom: 1px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: var(--glow-sm); }
 
 .is-hub .center { width: min(584px, 44vw); }
+/* Narrow windows: the command bar or page title needs the room. */
+@media (max-width: 1299px) { .cluster .item, .cluster .sep { display: none; } }
 
 @media (max-width: 1099px), (max-height: 759px) {
   .jv-topbar { padding: 16px 16px 0; gap: 12px; grid-template-columns: auto minmax(0, 1fr) auto; }

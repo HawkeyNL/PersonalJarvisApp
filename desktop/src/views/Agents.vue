@@ -8,7 +8,7 @@ import JvActivityList, { type ActivityItem } from "../components/jv/JvActivityLi
 import JvUnavailable from "../components/jv/JvUnavailable.vue";
 import NavIcon from "../components/NavIcon.vue";
 import { loadOptional } from "../coreStatus";
-import { relativeTime, type Availability } from "../hubModel";
+import { failureText, relativeTime, type Availability } from "../hubModel";
 import {
   AGENT_USAGE_NOT_INSTRUMENTED, agentStatus, formatMs, groupAgents, isTrader, measuredCount, type AgentInfo, type AgentsResponse,
 } from "../nodeModels";
@@ -54,7 +54,7 @@ const toolRows = computed<ActivityItem[]>(() => (agent.value?.allowed_tools ?? [
 // Without a bundle (or on an older Core) there is nothing to select.
 const empty = computed(() => {
   if (source.value.state === "unsupported") return { kind: "core-update" as const, detail: "This Core has no agent overview yet. Update Core to see your agents here." };
-  if (source.value.state === "error") return { kind: "error" as const, detail: "Sign in and check the connection to your Home Node." };
+  if (source.value.state === "error") return { kind: "error" as const, detail: failureText(source.value.reason, "Agent is turned off in Core.") };
   if (response.value && !response.value.agents.length) {
     return response.value.unavailable_reason
       ? { kind: "planned" as const, detail: "Core has no agent bundle installed, so there are no agents to show." }

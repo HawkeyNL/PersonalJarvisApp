@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   agentsCard,
   availabilityFromError,
+  failureText,
+  fitScale,
   contextCard,
   conversationsCard,
   countSince,
@@ -48,18 +50,37 @@ test("uptime formatting", () => {
   assert.equal(formatUptime(-5), "0m");
 });
 
-test("older Core routes become 'requires newer Core', other failures an error", () => {
+test("failed reads say why: older Core, sign-in, turned off, connection or Core error", () => {
+  const error = (reason) => ({ state: "error", reason });
   assert.deepEqual(availabilityFromError({ name: "ApiError", status: 404 }), { state: "unsupported" });
   assert.deepEqual(availabilityFromError({ name: "ApiError", status: 405 }), { state: "unsupported" });
-  assert.deepEqual(availabilityFromError({ name: "ApiError", status: 500 }), { state: "error" });
-  assert.deepEqual(availabilityFromError({ name: "NetworkError" }), { state: "error" });
-  assert.deepEqual(availabilityFromError(null), { state: "error" });
+  assert.deepEqual(availabilityFromError({ name: "ApiError", status: 401 }), error("signin"));
+  assert.deepEqual(availabilityFromError({ name: "ApiError", status: 403 }), error("forbidden"));
+  assert.deepEqual(availabilityFromError({ name: "ApiError", status: 500 }), error("failed"));
+  assert.deepEqual(availabilityFromError({ name: "ApiError", status: 503 }), error("failed"));
+  assert.deepEqual(availabilityFromError({ name: "NetworkError" }), error("network"));
+  // A refused native request (e.g. a path outside the proxy allowlist) is not
+  // a connection problem.
+  assert.deepEqual(availabilityFromError(new Error("authenticated API path is invalid")), error("failed"));
+  assert.deepEqual(availabilityFromError(null), error("failed"));
+});
+
+test("only a network failure asks to check the connection", () => {
+  assert.equal(failureText("network"), "Check the connection to your Home Node.");
+  assert.equal(failureText("signin"), "Sign in again on the Core page.");
+  assert.equal(failureText("forbidden", "Agent is turned off in Core."), "Agent is turned off in Core.");
+  for (const reason of ["signin", "forbidden", "failed"]) {
+    assert.doesNotMatch(failureText(reason), /connection/i);
+    assert.doesNotMatch(agentsCard({ state: "error", reason }).lines.join(" "), /connection/i);
+  }
+  assert.deepEqual(agentsCard({ state: "error", reason: "network" }).lines, ["Unavailable", "Check the connection"]);
+  assert.deepEqual(agentsCard({ state: "error", reason: "forbidden" }).lines, ["Unavailable", "Turned off in Core"]);
 });
 
 test("cards never invent numbers for missing data", () => {
   assert.deepEqual(agentsCard({ state: "unsupported" }).lines, ["Requires newer Core", ""]);
   assert.deepEqual(agentsCard({ state: "loading" }).lines, ["Loading…", ""]);
-  assert.equal(agentsCard({ state: "error" }).tone, "warn");
+  assert.equal(agentsCard({ state: "error", reason: "network" }).tone, "warn");
   assert.deepEqual(agentsCard({ state: "ok", value: 1 }).lines, ["1 agent", "Configured on Core"]);
   assert.deepEqual(agentsCard({ state: "ok", value: 0 }), { lines: ["0 agents", "None configured"], tone: "idle" });
 });
@@ -94,4 +115,14 @@ test("footer shows only the origin host", () => {
   assert.equal(originHost("https://jarvis.home.example:8443"), "jarvis.home.example:8443");
   assert.equal(originHost(null), "");
   assert.equal(originHost("not a url"), "");
+});
+
+test("fit scale: the stage fits the room on both axes, within bounds", () => {
+  const design = { width: 1060, height: 740 };
+  assert.equal(fitScale({ width: 1060, height: 740 }, design, 1.75), 1);
+  assert.equal(fitScale({ width: 2000, height: 370 }, design, 1.75), 0.5); // height limits
+  assert.equal(fitScale({ width: 530, height: 2000 }, design, 1.75), 0.5); // width limits
+  assert.equal(fitScale({ width: 5000, height: 5000 }, design, 1.75), 1.75); // grows, capped
+  assert.equal(fitScale({ width: 100, height: 100 }, design, 1.75), 0.4); // never collapses
+  assert.equal(fitScale({ width: 0, height: 0 }, design, 1.75), 1); // not laid out yet
 });

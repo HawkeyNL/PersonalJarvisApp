@@ -1,23 +1,26 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import NavIcon, { type IconName } from "../NavIcon.vue";
 import JvBackdrop from "./JvBackdrop.vue";
 import JvTopBar from "./JvTopBar.vue";
 import JvOrb from "./JvOrb.vue";
-import JvSegmented from "./JvSegmented.vue";
 import JvStatusDot from "./JvStatusDot.vue";
 import type { Mood, Tone } from "../../hubModel";
+import { useFitScale } from "../../fitScale";
 
 // Shared layout of every module page: small orb with three satellites on each
-// side, a tab bar with the same six items, and the detail panel (default slot)
-// for the selected item. Satellites and tabs both select.
+// side and the detail panel (default slot) for the selected satellite. The
+// page fills the window: the stage scales into the room left above the
+// panel, and only the panel body scrolls.
 export type NodeItem = { id: string; label: string; title: string; icon: IconName; tone: Tone; status: string; description: string };
 const props = withDefaults(defineProps<{ title: string; subtitle: string; items: NodeItem[]; modelValue: string; mood?: Mood }>(), {
   mood: "idle",
 });
 const emit = defineEmits<{ "update:modelValue": [id: string] }>();
-const tabs = computed(() => props.items.map(({ id, label, icon }) => ({ id, label, icon })));
 const selected = computed({ get: () => props.modelValue, set: (id: string) => emit("update:modelValue", id) });
+const room = ref<HTMLElement | null>(null);
+const stage = ref<HTMLElement | null>(null);
+const scale = useFitScale(room, stage, () => 1.6);
 </script>
 
 <template>
@@ -25,52 +28,55 @@ const selected = computed({ get: () => props.modelValue, set: (id: string) => em
     <JvBackdrop glow-y="27%" horizon="101px" />
     <JvTopBar variant="node" :title="title" :subtitle="subtitle" />
 
-    <div class="stage">
-      <svg v-if="items.length" class="wires" viewBox="0 0 981 363" aria-hidden="true">
-        <g transform="translate(-234 -97)">
-          <circle cx="725" cy="288" r="168" fill="none" stroke="rgba(150,255,210,.55)" stroke-width="1.5" />
-          <circle cx="725" cy="288" r="180" fill="none" class="a20" stroke-width="1" />
-          <circle cx="725" cy="288" r="212" fill="none" class="a22" stroke-width="1" stroke-dasharray="1 6" />
-          <path d="M596.1 180.2L538 150M557.0 284.8L512 268M578.5 370.2L527 396M853.5 179.7L912 150M893.0 285.8L934 268M871.5 370.3L920 398M725 456V462" class="a55" stroke-width="1" />
-          <g class="fill-accent"><circle cx="538" cy="150" r="2.5" /><circle cx="512" cy="268" r="2.5" /><circle cx="527" cy="396" r="2.5" /><circle cx="912" cy="150" r="2.5" /><circle cx="934" cy="268" r="2.5" /><circle cx="920" cy="398" r="2.5" /></g>
-          <g fill="rgba(2,20,15,.9)" stroke="rgba(150,255,210,.85)" stroke-width="1.4"><circle cx="596.1" cy="180.2" r="6.5" /><circle cx="557" cy="284.8" r="6.5" /><circle cx="578.5" cy="370.2" r="6.5" /><circle cx="853.5" cy="179.7" r="6.5" /><circle cx="893" cy="285.8" r="6.5" /><circle cx="871.5" cy="370.3" r="6.5" /><circle cx="725" cy="456" r="5" /></g>
-          <g class="fill-accent"><circle cx="596.1" cy="180.2" r="2" /><circle cx="557" cy="284.8" r="2" /><circle cx="578.5" cy="370.2" r="2" /><circle cx="853.5" cy="179.7" r="2" /><circle cx="893" cy="285.8" r="2" /><circle cx="871.5" cy="370.3" r="2" /><circle cx="725" cy="456" r="1.6" /></g>
-        </g>
-      </svg>
-      <JvOrb class="orb" :size="290" :mood="mood" />
+    <div ref="room" class="stage-room" :style="{ '--fit': scale }">
+      <div ref="stage" class="stage">
+        <svg v-if="items.length" class="wires" viewBox="0 0 981 363" aria-hidden="true">
+          <g transform="translate(-234 -97)">
+            <circle cx="725" cy="288" r="168" fill="none" stroke="rgba(150,255,210,.55)" stroke-width="1.5" />
+            <circle cx="725" cy="288" r="180" fill="none" class="a20" stroke-width="1" />
+            <circle cx="725" cy="288" r="212" fill="none" class="a22" stroke-width="1" stroke-dasharray="1 6" />
+            <path d="M596.1 180.2L538 150M557.0 284.8L512 268M578.5 370.2L527 396M853.5 179.7L912 150M893.0 285.8L934 268M871.5 370.3L920 398M725 456V462" class="a55" stroke-width="1" />
+            <g class="fill-accent"><circle cx="538" cy="150" r="2.5" /><circle cx="512" cy="268" r="2.5" /><circle cx="527" cy="396" r="2.5" /><circle cx="912" cy="150" r="2.5" /><circle cx="934" cy="268" r="2.5" /><circle cx="920" cy="398" r="2.5" /></g>
+            <g fill="rgba(2,20,15,.9)" stroke="rgba(150,255,210,.85)" stroke-width="1.4"><circle cx="596.1" cy="180.2" r="6.5" /><circle cx="557" cy="284.8" r="6.5" /><circle cx="578.5" cy="370.2" r="6.5" /><circle cx="853.5" cy="179.7" r="6.5" /><circle cx="893" cy="285.8" r="6.5" /><circle cx="871.5" cy="370.3" r="6.5" /><circle cx="725" cy="456" r="5" /></g>
+            <g class="fill-accent"><circle cx="596.1" cy="180.2" r="2" /><circle cx="557" cy="284.8" r="2" /><circle cx="578.5" cy="370.2" r="2" /><circle cx="853.5" cy="179.7" r="2" /><circle cx="893" cy="285.8" r="2" /><circle cx="871.5" cy="370.3" r="2" /><circle cx="725" cy="456" r="1.6" /></g>
+          </g>
+        </svg>
+        <JvOrb class="orb" :size="290" :mood="mood" />
 
-      <div class="sats">
-        <button
-          v-for="(item, i) in items.slice(0, 6)"
-          :key="item.id"
-          type="button"
-          class="sat"
-          :class="['s' + i, { on: item.id === selected }]"
-          :aria-pressed="item.id === selected"
-          @click="selected = item.id"
-        >
-          <span class="icon" aria-hidden="true"><NavIcon :name="item.icon" /></span>
-          <span class="text">
-            <span class="name">{{ item.title }}</span>
-            <JvStatusDot :tone="item.tone" :label="item.status" :size="11" class="status" />
-            <span class="desc">{{ item.description }}</span>
-          </span>
-        </button>
+        <div class="sats" role="group" :aria-label="title">
+          <button
+            v-for="(item, i) in items.slice(0, 6)"
+            :key="item.id"
+            type="button"
+            class="sat"
+            :class="['s' + i, { on: item.id === selected }]"
+            :aria-current="item.id === selected ? 'true' : undefined"
+            @click="selected = item.id"
+          >
+            <span class="icon" aria-hidden="true"><NavIcon :name="item.icon" /></span>
+            <span class="text">
+              <span class="name">{{ item.title }}</span>
+              <JvStatusDot :tone="item.tone" :label="item.status" :size="11" class="status" />
+              <span class="desc">{{ item.description }}</span>
+            </span>
+          </button>
+        </div>
       </div>
     </div>
 
     <div class="detail">
-      <JvSegmented v-if="items.length" v-model="selected" class="tabbar" variant="tabs" :items="tabs" :label="title" />
       <slot />
     </div>
   </div>
 </template>
 
 <style scoped>
-.node-page { position: relative; min-height: 100%; padding-bottom: 120px; box-sizing: border-box; }
+.node-page { position: relative; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
 .node-page > :not(.jv-backdrop) { position: relative; z-index: 1; }
 
-.stage { width: 981px; height: 363px; margin: 18px auto 0; position: relative; }
+/* The stage keeps its design coordinates and is scaled into this room. */
+.stage-room { flex: none; height: clamp(240px, 37vh, 600px); margin-top: 10px; }
+.stage { position: absolute; left: 50%; top: 50%; width: 981px; height: 363px; transform: translate(-50%, -50%) scale(var(--fit, 1)); }
 .wires { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .a20 { stroke: rgba(var(--accent-rgb), 0.2); }
 .a22 { stroke: rgba(var(--accent-rgb), 0.22); }
@@ -104,11 +110,18 @@ const selected = computed({ get: () => props.modelValue, set: (id: string) => em
 .status { margin-top: 5px; font-size: var(--fs-13); }
 .desc { margin-top: 6px; font-size: var(--fs-12); line-height: 1.35; color: var(--text-3); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
-.detail { width: min(1148px, calc(100% - 48px)); margin: 21px auto 0; }
-.tabbar { width: calc(100% - 86px); margin: 0 auto; }
+.sat:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+.detail {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  width: min(max(1148px, 62vw), calc(100% - 48px)); margin: 14px auto 20px;
+}
+/* The panel shrinks to the space left; its body scrolls (see JvPanel). */
+.detail > :deep(*) { flex: 0 1 auto; min-height: 0; }
 
 @media (max-width: 1099px), (max-height: 759px) {
-  .stage { width: auto; height: auto; padding: 18px 16px 0; top: 0; }
+  .stage-room { height: auto; margin: 0; }
+  .stage { position: static; width: auto; height: auto; padding: 18px 16px 0; transform: none; }
   .wires, .orb { display: none; }
   .sats { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
   .sat { position: static; width: auto; height: auto; min-height: 76px; padding: 10px 14px; gap: 12px; border-radius: var(--r-16); }
@@ -116,7 +129,6 @@ const selected = computed({ get: () => props.modelValue, set: (id: string) => em
   .icon :deep(svg) { width: 22px; height: 22px; }
   .name { font-size: 14px; }
   .desc { display: none; }
-  .detail { width: auto; margin: 16px 16px 0; }
-  .tabbar { width: 100%; }
+  .detail { width: auto; margin: 14px 16px 16px; }
 }
 </style>

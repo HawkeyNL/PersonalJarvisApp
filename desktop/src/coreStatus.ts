@@ -11,11 +11,12 @@ import { availabilityFromError, type Availability } from "./hubModel";
 export const coreOnline = ref<boolean | null>(null);
 export const agentCount = ref<Availability<number>>({ state: "loading" });
 
-/** GET an owner endpoint; a missing route (older Core) becomes "unsupported". */
+/** GET an owner endpoint; a missing route (older Core) becomes "unsupported",
+ *  other failures say why (see availabilityFromError). */
 export async function loadOptional<T>(path: string): Promise<Availability<T>> {
   try {
     const status = await currentAuthStatus();
-    if (!status.authenticated) return { state: "error" };
+    if (!status.authenticated) return { state: "error", reason: "signin" };
     return { state: "ok", value: await getJsonAuth<T>(path) };
   } catch (error) {
     return availabilityFromError(error);
