@@ -6,6 +6,7 @@ import { currentAuthStatus } from "../auth";
 import { homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
 import SystemUsageChart from "../components/SystemUsageChart.vue";
 import ModelControls from "../components/ModelControls.vue";
+import ModelRouting from "../components/ModelRouting.vue";
 import NodePage, { type NodeItem } from "../components/jv/NodePage.vue";
 import JvPanel from "../components/jv/JvPanel.vue";
 import JvSegmented from "../components/jv/JvSegmented.vue";
@@ -243,13 +244,14 @@ const subTabs = computed(() => ({
   core: [{ id: "overview", label: "Overview", icon: "doc" as const }, { id: "history", label: "History", icon: "clock" as const }],
   node: [{ id: "overview", label: "Overview", icon: "doc" as const }, { id: "software", label: "Software", icon: "layers" as const }],
   usage: [{ id: "overview", label: "Overview", icon: "doc" as const }, { id: "charts", label: "Charts", icon: "trend" as const }],
+  models: [{ id: "overview", label: "Access", icon: "shield" as const }, { id: "routing", label: "Routing", icon: "branch" as const }],
 }[selected.value] ?? []));
 
 const DETAILS: Record<string, { description: string; quote?: string }> = {
   core: { description: "The heart of Jarvis on your Home Node — everything else talks through it." },
   node: { description: "The machine Jarvis runs on: hardware inventory, live load and installed tools." },
   usage: { description: "Monthly spend against the hard budget, with token use per backend." },
-  models: { description: "Owner-controlled model access. Allowing a model never selects it for a running request." },
+  models: { description: "Owner-controlled model access and routing order. Allowing a model never selects it for a running request." },
   improve: { description: "Jarvis reviews its own ecosystem and proposes improvements. It never runs anything itself." },
   services: { description: "The Jarvis services on your Home Node and the free space on its disks." },
 };
@@ -424,7 +426,8 @@ onUnmounted(() => {
 
       <!-- Models -->
       <div v-else-if="current.id === 'models'" class="models">
-        <ModelControls />
+        <ModelControls v-if="sub === 'overview'" />
+        <ModelRouting v-else />
       </div>
 
       <!-- Self-improvement -->
