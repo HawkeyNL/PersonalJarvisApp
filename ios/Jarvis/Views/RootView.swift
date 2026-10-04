@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @ObservedObject var model: JarvisAppModel
+    @State private var path: [HubRoute] = []
 
     var body: some View {
         Group {
@@ -11,38 +12,46 @@ struct RootView: View {
                     .background(JarvisTheme.background)
                     .ignoresSafeArea()
             } else {
-            TabView {
-                ChatView(model: model)
-                    .tabItem { Label("Chat", systemImage: "message.fill") }
-                MilestonePlaceholder(
-                    title: "Voice",
-                    detail: "Push-to-talk arrives in milestone 2. This build does not request microphone access.",
-                    symbol: "waveform"
-                )
-                .tabItem { Label("Voice", systemImage: "waveform") }
-                MilestonePlaceholder(title: "Activity", detail: "Jarvis activity will appear here.", symbol: "clock")
-                    .tabItem { Label("Activity", systemImage: "clock") }
-                MilestonePlaceholder(title: "Agents", detail: "Connected agent status will appear here.", symbol: "person.3")
-                    .tabItem { Label("Agents", systemImage: "person.3") }
-                SettingsView(model: model)
-                    .tabItem { Label("Settings", systemImage: "gearshape") }
-            }
-            .toolbarBackground(JarvisTheme.panel, for: .tabBar)
-            .toolbarBackground(.visible, for: .tabBar)
+                NavigationStack(path: $path) {
+                    Group {
+                        if model.connectionState == .reachable && model.isAuthenticated {
+                            HubView(model: model)
+                        } else {
+                            // Connecting, enrolling or signed out: Settings stays
+                            // reachable to configure the Home Node address.
+                            EnrollmentView(model: model)
+                                .navigationTitle("Jarvis")
+                                .navigationBarTitleDisplayMode(.inline)
+                                .toolbarBackground(JarvisTheme.background, for: .navigationBar)
+                                .toolbarBackground(.visible, for: .navigationBar)
+                                .toolbar { ToolbarItem(placement: .topBarTrailing) { ProfileButton() } }
+                        }
+                    }
+                    .navigationDestination(for: HubRoute.self) { route in destination(route) }
+                }
+                // Owner pages must not stay mounted after logout, reset or a 401.
+                .onChange(of: model.isAuthenticated) { _, authenticated in
+                    if !authenticated { path.removeAll() }
+                }
             }
         }
     }
-}
 
-private struct MilestonePlaceholder: View {
-    let title: String
-    let detail: String
-    let symbol: String
-
-    var body: some View {
-        NavigationStack {
-            ContentUnavailableView(title, systemImage: symbol, description: Text(detail))
-                .navigationTitle(title)
+    @ViewBuilder private func destination(_ route: HubRoute) -> some View {
+        switch route {
+        case .chat: ChatView(model: model)
+        case .voice: VoicePage()
+        case .settings: SettingsView(model: model)
+        case .models: ModelsView(model: model)
+        case .conversations: ConversationsPage(model: model, navigate: navigate)
+        case .agents: AgentsPage(model: model)
+        case .tasks: TasksPage(model: model)
+        case .integrations: IntegrationsPage(model: model, navigate: navigate)
+        case .health: HealthPage(model: model, navigate: navigate)
+        case .memory: MemoryPage(model: model)
+        case .context: ContextPage(model: model)
         }
     }
+
+    private func navigate(_ route: HubRoute) { path.append(route) }
 }

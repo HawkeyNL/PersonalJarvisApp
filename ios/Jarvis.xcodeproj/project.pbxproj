@@ -6,6 +6,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        A00000000000000000000050 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000050 /* Theme.swift */; };
+        A00000000000000000000051 /* JarvisComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000051 /* JarvisComponents.swift */; };
+        A00000000000000000000052 /* HubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000052 /* HubView.swift */; };
+        A00000000000000000000053 /* NodePages.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000053 /* NodePages.swift */; };
         A00000000000000000000054 /* HubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000054 /* HubModel.swift */; };
         A00000000000000000000060 /* Exo2-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000060 /* Exo2-Variable.ttf */; };
         A00000000000000000000061 /* Exo2-Italic-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000061 /* Exo2-Italic-Variable.ttf */; };
@@ -52,6 +56,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+        B00000000000000000000050 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Theme.swift; sourceTree = "<group>"; };
+        B00000000000000000000051 /* JarvisComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/JarvisComponents.swift; sourceTree = "<group>"; };
+        B00000000000000000000052 /* HubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/HubView.swift; sourceTree = "<group>"; };
+        B00000000000000000000053 /* NodePages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NodePages.swift; sourceTree = "<group>"; };
         B00000000000000000000054 /* HubModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/HubModel.swift; sourceTree = "<group>"; };
         B00000000000000000000060 /* Exo2-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/Exo2-Variable.ttf; sourceTree = "<group>"; };
         B00000000000000000000061 /* Exo2-Italic-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/Exo2-Italic-Variable.ttf; sourceTree = "<group>"; };
@@ -129,6 +137,10 @@
 				B0000000000000000000000F /* ChatView.swift */,
 				B00000000000000000000010 /* EnrollmentView.swift */,
 				B00000000000000000000011 /* SettingsView.swift */,
+                B00000000000000000000050 /* Theme.swift */,
+                B00000000000000000000051 /* JarvisComponents.swift */,
+                B00000000000000000000052 /* HubView.swift */,
+                B00000000000000000000053 /* NodePages.swift */,
                 B00000000000000000000054 /* HubModel.swift */,
                 B00000000000000000000060 /* Exo2-Variable.ttf */,
                 B00000000000000000000061 /* Exo2-Italic-Variable.ttf */,
@@ -253,6 +265,10 @@
 				A0000000000000000000000F /* ChatView.swift in Sources */,
 				A00000000000000000000010 /* EnrollmentView.swift in Sources */,
 				A00000000000000000000011 /* SettingsView.swift in Sources */,
+                A00000000000000000000050 /* Theme.swift in Sources */,
+                A00000000000000000000051 /* JarvisComponents.swift in Sources */,
+                A00000000000000000000052 /* HubView.swift in Sources */,
+                A00000000000000000000053 /* NodePages.swift in Sources */,
                 A00000000000000000000054 /* HubModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

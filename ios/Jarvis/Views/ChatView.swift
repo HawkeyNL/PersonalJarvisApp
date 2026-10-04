@@ -6,37 +6,36 @@ struct ChatView: View {
     @FocusState private var composerFocused: Bool
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if model.connectionState != .reachable || !model.isAuthenticated {
-                    EnrollmentView(model: model)
-                } else {
-                    conversation
-                }
+        Group {
+            if model.connectionState != .reachable || !model.isAuthenticated {
+                EnrollmentView(model: model)
+            } else {
+                conversation
             }
-            .navigationTitle(model.currentConversationTitle)
-            .toolbarBackground(JarvisTheme.panel, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done", systemImage: "keyboard.chevron.compact.down") {
-                        composerFocused = false
-                    }
-                    .accessibilityLabel("Dismiss keyboard")
+        }
+        .navigationTitle(model.currentConversationTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(JarvisTheme.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done", systemImage: "keyboard.chevron.compact.down") {
+                    composerFocused = false
                 }
-                if model.isAuthenticated {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            if model.voiceEnabled {
-                                Button("Stop speaking", systemImage: "stop.circle") { model.stopSpeaking() }
-                            }
-                            Button("New conversation", systemImage: "square.and.pencil") { model.newConversation() }
-                            ForEach(model.conversations) { item in
-                                Button(item.title) { Task { await model.openConversation(item.id) } }
-                            }
-                        } label: { Image(systemName: "ellipsis.circle") }
-                    }
+                .accessibilityLabel("Dismiss keyboard")
+            }
+            if model.isAuthenticated {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        if model.voiceEnabled {
+                            Button("Stop speaking", systemImage: "stop.circle") { model.stopSpeaking() }
+                        }
+                        Button("New conversation", systemImage: "square.and.pencil") { model.newConversation() }
+                        ForEach(model.conversations) { item in
+                            Button(item.title) { Task { await model.openConversation(item.id) } }
+                        }
+                    } label: { Image(systemName: "ellipsis.circle") }
                 }
             }
         }
@@ -61,10 +60,11 @@ struct ChatView: View {
                     if let last = model.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
-            Divider()
+            Divider().overlay(JarvisTheme.accent.opacity(0.2))
             HStack(alignment: .bottom, spacing: 10) {
                 TextField("Message Jarvis", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
+                    .font(JarvisFont.body(15))
                     .lineLimit(1...3)
                     .focused($composerFocused)
                     .padding(14)
@@ -77,7 +77,7 @@ struct ChatView: View {
                     .accessibilityLabel("Send message")
             }
             .padding()
-            .background(.bar)
+            .background(JarvisTheme.background)
         }
     }
 
@@ -95,10 +95,13 @@ private struct MessageBubble: View {
         HStack {
             if !message.isAssistant { Spacer(minLength: 48) }
             Text(message.content)
+                .font(JarvisFont.body(15))
+                .foregroundStyle(JarvisTheme.text2)
                 .textSelection(.enabled)
                 .padding(12)
-                .background(message.isAssistant ? JarvisTheme.panel : JarvisTheme.accent.opacity(0.18))
+                .background(message.isAssistant ? JarvisTheme.tile : JarvisTheme.accent.opacity(0.18))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(JarvisTheme.accent.opacity(message.isAssistant ? 0.3 : 0.45), lineWidth: 1))
             if message.isAssistant { Spacer(minLength: 48) }
         }
     }
