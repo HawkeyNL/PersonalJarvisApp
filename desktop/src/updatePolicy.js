@@ -9,3 +9,11 @@ export const AUTOMATIC_UPDATE_DELAY_MS = 2500;
 export function shouldScheduleAutomaticUpdateCheck(configured, authenticated, alreadyScheduled) {
   return configured && authenticated && !alreadyScheduled;
 }
+
+/** A verified update restarts Jarvis only when none of these is going on.
+ * `speech` is the latest native "jarvis-local-speech" status.
+ * @param {{ reply: boolean, console: boolean, speech: unknown, voiceCheck: boolean }} activity
+ */
+export function updateSessionActive(activity) {
+  return activity.reply || activity.console || activity.speech === "speaking" || activity.voiceCheck;
+}

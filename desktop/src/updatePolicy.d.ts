@@ -4,3 +4,9 @@ export function shouldScheduleAutomaticUpdateCheck(
   authenticated: boolean,
   alreadyScheduled: boolean,
 ): boolean;
+export function updateSessionActive(activity: {
+  reply: boolean;
+  console: boolean;
+  speech: unknown;
+  voiceCheck: boolean;
+}): boolean;

@@ -5,7 +5,18 @@ import test from "node:test";
 import {
   AUTOMATIC_UPDATE_DELAY_MS,
   shouldScheduleAutomaticUpdateCheck,
+  updateSessionActive,
 } from "../src/updatePolicy.js";
+
+test("automatic update restart waits for reply, speech, mic, draft and voice checks", () => {
+  const idle = { reply: false, console: false, speech: "idle", voiceCheck: false };
+  assert.equal(updateSessionActive(idle), false);
+  assert.equal(updateSessionActive({ ...idle, speech: "failed" }), false);
+  assert.equal(updateSessionActive({ ...idle, speech: "speaking" }), true);
+  assert.equal(updateSessionActive({ ...idle, reply: true }), true);
+  assert.equal(updateSessionActive({ ...idle, console: true }), true);
+  assert.equal(updateSessionActive({ ...idle, voiceCheck: true }), true);
+});
 
 test("automatic update check runs once only after authentication", () => {
   assert.equal(shouldScheduleAutomaticUpdateCheck(false, true, false), false);
@@ -38,4 +49,14 @@ test("session bearer is never exposed through the desktop JavaScript API", async
   assert.doesNotMatch(native, /generate_handler![\s\S]*auth_session/);
   assert.match(native, /auth_complete_login/);
   assert.match(native, /async fn auth_request/);
+});
+
+test("webview listens to the native update status event and reports session activity", async () => {
+  const web = await readFile(new URL("../src/updates.ts", import.meta.url), "utf8");
+  const native = await readFile(new URL("../src-tauri/src/app_updates.rs", import.meta.url), "utf8");
+  const event = native.match(/STATUS_EVENT: &str = "([^"]+)"/)?.[1];
+  assert.ok(event);
+  assert.match(web, new RegExp(`listen<NativeUpdateStatus>\\("${event}"`));
+  assert.match(web, /invoke\("app_update_set_session_active", \{ active \}\)/);
+  assert.match(native, /fn app_update_set_session_active\(\s*app: AppHandle,\s*active: bool,/);
 });

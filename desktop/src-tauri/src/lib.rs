@@ -22,6 +22,8 @@ mod model_control;
 mod native_response;
 mod realtime;
 mod speech_playback;
+#[cfg(desktop)]
+mod tray;
 mod voice_control;
 
 // Serialize metadata/token transitions. Never hold this guard across an await.
@@ -736,6 +738,8 @@ fn auth_logout(app: AppHandle) -> Result<(), String> {
     realtime::stop(&app);
     let mut guard = auth_storage()?;
     advance_auth_epoch(&mut guard)?;
+    #[cfg(desktop)]
+    app_updates::forget(&app);
     let auth = load_secure_auth_unlocked(&app)?;
     delete_credential(TOKEN_ACCOUNT)?;
     save_metadata(&app, &auth.metadata)
@@ -749,6 +753,8 @@ fn auth_reset(app: AppHandle) -> Result<(), String> {
     realtime::stop(&app);
     let mut guard = auth_storage()?;
     advance_auth_epoch(&mut guard)?;
+    #[cfg(desktop)]
+    app_updates::forget(&app);
     let home_node_origin = load_metadata(&app)?.home_node_origin;
     delete_credential(KEY_ACCOUNT)?;
     delete_credential(TOKEN_ACCOUNT)?;
@@ -784,6 +790,8 @@ fn home_node_configure(app: AppHandle, origin: String) -> Result<HomeNodeConfig,
         // A bearer is scoped to the Home Node that minted it. Clear both the
         // token and server-side device id before persisting a different origin
         // so the old credential can never be sent to a newly entered host.
+        #[cfg(desktop)]
+        app_updates::forget(&app);
         delete_credential(TOKEN_ACCOUNT)?;
         metadata.device_id = None;
     }
@@ -911,9 +919,7 @@ pub fn run() {
             app.manage(realtime::Runtime::default());
             #[cfg(desktop)]
             {
-                use std::sync::Mutex;
-
-                app.manage(app_updates::PendingUpdate(Mutex::new(None)));
+                app.manage(app_updates::Updates::default());
                 let enabled = app_updates::updater_public_key().is_some();
                 app.manage(app_updates::UpdateRuntime { enabled });
                 if let Some(public_key) = app_updates::updater_public_key() {
@@ -922,7 +928,9 @@ pub fn run() {
                             .pubkey(public_key)
                             .build(),
                     )?;
+                    app_updates::spawn_periodic_check(app.handle());
                 }
+                tray::init(app.handle());
             }
             Ok(())
         })
@@ -959,6 +967,8 @@ pub fn run() {
             app_updates::app_update_install,
             #[cfg(desktop)]
             app_updates::app_update_restart,
+            #[cfg(desktop)]
+            app_updates::app_update_set_session_active,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

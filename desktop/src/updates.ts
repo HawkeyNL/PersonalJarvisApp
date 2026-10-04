@@ -1,6 +1,11 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import { computed, ref } from "vue";
-import { AUTOMATIC_UPDATE_DELAY_MS, shouldScheduleAutomaticUpdateCheck } from "./updatePolicy.js";
+import { listen } from "@tauri-apps/api/event";
+import { computed, ref, watch } from "vue";
+import {
+  AUTOMATIC_UPDATE_DELAY_MS,
+  shouldScheduleAutomaticUpdateCheck,
+  updateSessionActive,
+} from "./updatePolicy.js";
 
 type NativeUpdateState =
   | "ready"
@@ -11,7 +16,10 @@ type NativeUpdateState =
   | "unavailable"
   | "up_to_date"
   | "available"
-  | "installed";
+  | "checking"
+  | "downloading"
+  | "ready_to_restart"
+  | "error";
 
 type NativeUpdateStatus = {
   state: NativeUpdateState;
@@ -25,7 +33,7 @@ type DownloadEvent =
   | { event: "progress"; data: { chunk_length: number } }
   | { event: "finished" };
 
-export type UpdateUiState = NativeUpdateState | "idle" | "checking" | "downloading" | "installing" | "error";
+export type UpdateUiState = NativeUpdateState | "idle" | "installing";
 
 export const updateState = ref<UpdateUiState>("idle");
 export const currentAppVersion = ref("");
@@ -91,14 +99,51 @@ export async function installAvailableUpdate(): Promise<void> {
   }
 }
 
-export function restartAfterUpdate(): Promise<void> {
-  return invoke("app_update_restart");
+export async function restartAfterUpdate(): Promise<void> {
+  try {
+    await invoke("app_update_restart");
+  } catch {
+    updateState.value = "error";
+    updateError.value = "Installation failed. The current version is unchanged.";
+  }
+}
+
+/** True while the chat console listens or holds an unsent draft; set by JarvisConsole. */
+export const consoleActive = ref(false);
+
+/** Mirrors native update state changes (tray, periodic check) into the UI and
+ * tells the native side when a reply, speech, mic, draft or voice check is
+ * active, so a verified update restarts Jarvis only once it is idle. */
+export function startUpdateSync(activity: { reply: () => boolean; voiceCheck: () => boolean }): void {
+  void listen<NativeUpdateStatus>("app-update-status", (event) => {
+    apply(event.payload);
+    updateError.value =
+      event.payload.state === "error"
+        ? (updateError.value ?? "The update failed. The current version is unchanged.")
+        : null;
+  }).catch(() => {});
+  const speech = ref<unknown>("idle");
+  void listen<unknown>("jarvis-local-speech", (event) => {
+    speech.value = event.payload;
+  }).catch(() => {});
+  watch(
+    () =>
+      updateSessionActive({
+        reply: activity.reply(),
+        console: consoleActive.value,
+        speech: speech.value,
+        voiceCheck: activity.voiceCheck(),
+      }),
+    (active) => void invoke("app_update_set_session_active", { active }).catch(() => {}),
+    { immediate: true },
+  );
 }
 
 let automaticCheckScheduled = false;
 
 /** Run at most one gentle, non-blocking check after an authenticated startup.
- * Installation and restart always remain explicit user actions. */
+ * The native side re-checks every six hours. Installing stays an explicit user
+ * action; the restart that follows waits until no session is active. */
 export function scheduleAutomaticUpdateCheck(configured: boolean, authenticated: boolean): void {
   if (!shouldScheduleAutomaticUpdateCheck(configured, authenticated, automaticCheckScheduled)) return;
   automaticCheckScheduled = true;

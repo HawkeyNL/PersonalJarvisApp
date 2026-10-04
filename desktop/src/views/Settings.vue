@@ -297,12 +297,12 @@ onMounted(async () => {
         <li>
           <span class="k">Status</span>
           <span class="v">
-            <span class="dot" :class="updateState === 'error' ? 'dot-err' : updateState === 'available' ? 'dot-todo' : 'dot-ok'"></span>
+            <span class="dot" :class="updateState === 'error' ? 'dot-err' : updateState === 'available' || updateState === 'ready_to_restart' ? 'dot-todo' : 'dot-ok'"></span>
             <template v-if="updateState === 'checking'">checking…</template>
             <template v-else-if="updateState === 'downloading'">downloading{{ updateProgress === null ? '…' : ` · ${updateProgress}%` }}</template>
             <template v-else-if="updateState === 'installing'">installing…</template>
             <template v-else-if="updateState === 'available'">v{{ availableAppVersion }} available</template>
-            <template v-else-if="updateState === 'installed'">installation ready</template>
+            <template v-else-if="updateState === 'ready_to_restart'">v{{ availableAppVersion }} ready · restarts when idle</template>
             <template v-else-if="updateState === 'up_to_date'">up-to-date</template>
             <template v-else-if="updateState === 'ready'">ready to check</template>
             <template v-else-if="updateState === 'unauthenticated'">sign in to check</template>
@@ -310,7 +310,7 @@ onMounted(async () => {
             <template v-else-if="updateState === 'unsupported'">not available in this build</template>
             <template v-else-if="updateState === 'incompatible'">update protocol not compatible</template>
             <template v-else-if="updateState === 'unavailable'">update service unreachable</template>
-            <template v-else-if="updateState === 'error'">check failed</template>
+            <template v-else-if="updateState === 'error'">update failed</template>
             <template v-else>ready</template>
           </span>
         </li>
@@ -322,8 +322,8 @@ onMounted(async () => {
         <button v-if="updateState === 'available'" class="ghost" :disabled="updateBusy" @click="installAvailableUpdate">
           Update now
         </button>
-        <button v-else-if="updateState === 'installed'" class="ghost" @click="restartAfterUpdate">
-          Restart Jarvis
+        <button v-else-if="updateState === 'ready_to_restart'" class="ghost" @click="restartAfterUpdate">
+          Restart now
         </button>
         <button v-else class="ghost" :disabled="updateBusy || updateState === 'unsupported'" @click="checkForUpdate">
           Check for updates
@@ -332,6 +332,10 @@ onMounted(async () => {
       <p v-if="updateError" class="small errc">{{ updateError }}</p>
       <p v-else-if="updateNotes && (updateState === 'incompatible' || updateState === 'unavailable')" class="small muted">
         {{ updateNotes }}
+      </p>
+      <p v-else-if="updateState === 'ready_to_restart'" class="small muted">
+        A reply or voice session is active. Jarvis installs the verified update and restarts as soon as it is idle,
+        or now if you restart (this ends the session).
       </p>
       <p v-else class="muted small">
         Updates come through your paired Home Node and are verified cryptographically before installation.

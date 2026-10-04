@@ -57,6 +57,9 @@ const core = computed(() =>
         <RouterLink v-if="updateState === 'available'" to="/settings" class="update">
           Update v{{ availableAppVersion }}
         </RouterLink>
+        <RouterLink v-else-if="updateState === 'ready_to_restart'" to="/settings" class="update">
+          Restart pending
+        </RouterLink>
         <JvStatusDot :tone="core.tone" :label="core.label" class="core" />
         <template v-if="agentCount.state === 'ok'">
           <span class="sep" aria-hidden="true"></span>
