@@ -19,6 +19,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.withResumed
+import com.hawkeynl.jarvis.ui.CoreViewModel
 import com.hawkeynl.jarvis.ui.JarvisApp
 import com.hawkeynl.jarvis.ui.JarvisTheme
 import com.hawkeynl.jarvis.ui.JarvisViewModel
@@ -28,6 +29,7 @@ class MainActivity : FragmentActivity() {
         get() = (application as JarvisApplication).container
 
     private val viewModel: JarvisViewModel by viewModels { JarvisViewModel.factory(container) }
+    private val coreViewModel: CoreViewModel by viewModels { CoreViewModel.factory(container) }
     private var biometricPromptActive = false
     private var modelAuthenticationActive = false
     private var modelCredentialResult: ((Boolean) -> Unit)? = null
@@ -96,6 +98,7 @@ class MainActivity : FragmentActivity() {
                 JarvisApp(
                     state = state,
                     actions = viewModel,
+                    core = coreViewModel,
                     onRequestBiometric = ::requestBiometricUnlock,
                     onInstallUpdate = ::installVerifiedUpdate,
                     modelControls = modelControls,

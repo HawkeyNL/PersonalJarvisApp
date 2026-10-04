@@ -140,6 +140,7 @@ fun CircleIconButton(
     selected: Boolean = false,
     tint: Color = Jv.Accent,
     background: Color = Jv.Satellite,
+    enabled: Boolean = true,
 ) {
     Box(
         modifier
@@ -148,7 +149,7 @@ fun CircleIconButton(
             .clip(CircleShape)
             .background(if (selected) Jv.SatelliteSelected else background)
             .border(if (selected) 2.dp else 1.5.dp, if (selected) Jv.Accent else Jv.accent(0.6f), CircleShape)
-            .clickable(onClickLabel = contentDescription, role = Role.Button, onClick = onClick)
+            .clickable(enabled = enabled, onClickLabel = contentDescription, role = Role.Button, onClick = onClick)
             .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center,
     ) {

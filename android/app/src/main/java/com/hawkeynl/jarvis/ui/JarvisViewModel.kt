@@ -31,7 +31,8 @@ import com.hawkeynl.jarvis.chat.SpeechRate
 import com.hawkeynl.jarvis.chat.realtimeSnapshot
 import com.hawkeynl.jarvis.chat.realtimeSelectedHistory
 
-enum class AppTab { CHAT, CONVERSATIONS, SETTINGS }
+/** Where the authenticated app is: the hub, a node page, chat or settings. */
+enum class Screen { HUB, CHAT, SETTINGS, CONVERSATIONS, AGENTS, TASKS, INTEGRATIONS, HEALTH, MEMORY, CONTEXT }
 
 sealed interface AndroidUpdateUiState {
     data object Idle : AndroidUpdateUiState
@@ -51,7 +52,7 @@ data class JarvisUiState(
     val selectedVoice: String = "",
     val availableVoices: List<com.hawkeynl.jarvis.chat.LocalVoice> = emptyList(),
     val voiceStatus: String? = null,
-    val selectedTab: AppTab = AppTab.CHAT,
+    val screen: Screen = Screen.HUB,
     val endpoint: HomeNodeEndpoint? = null,
     val endpointDraft: String = "",
     val connection: ConnectionState = ConnectionState.NotConfigured,
@@ -62,7 +63,7 @@ data class JarvisUiState(
     val pairingExpiresAt: Long? = null,
     val conversations: List<ConversationSummary> = emptyList(),
     val conversationId: String? = null,
-    val conversationTitle: String = "Nieuw gesprek",
+    val conversationTitle: String = "New conversation",
     val messages: List<ConversationMessage> = emptyList(),
     val busy: Boolean = false,
     val appUpdate: AndroidUpdateUiState = AndroidUpdateUiState.Idle,
@@ -97,7 +98,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun selectTab(tab: AppTab) = _state.update { it.copy(selectedTab = tab) }
+    fun navigate(screen: Screen) = _state.update { it.copy(screen = screen) }
     fun editEndpoint(value: String) = _state.update { it.copy(endpointDraft = value, error = null) }
 
     fun saveEndpoint() {
@@ -135,7 +136,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                     it.copy(appUpdate = AndroidUpdateUiState.Ready(result.versionName))
                 }
                 AndroidUpdateDownload.Unauthorized -> _state.update {
-                    it.copy(authenticated = false, appUpdate = AndroidUpdateUiState.Failed("Sessie verlopen."))
+                    it.copy(authenticated = false, appUpdate = AndroidUpdateUiState.Failed("Session expired."))
                 }
                 is AndroidUpdateDownload.Failed -> _state.update {
                     it.copy(appUpdate = AndroidUpdateUiState.Failed(result.message))
@@ -182,9 +183,9 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                     viewModelScope.launch { refreshAfterUnlock(endpoint) }
                 }
             }
-            BiometricResult.Cancelled -> _state.update { it.copy(biometricMessage = "Ontgrendeling geannuleerd.") }
-            BiometricResult.Failed -> _state.update { it.copy(biometricMessage = "Biometrie niet herkend. Probeer opnieuw.") }
-            BiometricResult.LockedOut -> _state.update { it.copy(biometricMessage = "Biometrie is tijdelijk geblokkeerd.") }
+            BiometricResult.Cancelled -> _state.update { it.copy(biometricMessage = "Unlock cancelled.") }
+            BiometricResult.Failed -> _state.update { it.copy(biometricMessage = "Biometrics not recognised. Try again.") }
+            BiometricResult.LockedOut -> _state.update { it.copy(biometricMessage = "Biometrics are temporarily locked.") }
             is BiometricResult.Unavailable -> _state.update {
                 it.copy(biometricMessage = result.availability.message())
             }
@@ -198,7 +199,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             when (val result = container.conversations.load(endpoint, id)) {
                 is ApiResult.Success -> _state.update {
                     it.copy(
-                        selectedTab = AppTab.CHAT,
+                        screen = Screen.CHAT,
                         conversationId = result.value.id,
                         conversationTitle = result.value.title,
                         messages = result.value.messages,
@@ -212,9 +213,9 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 
     fun newConversation() = _state.update {
         it.copy(
-            selectedTab = AppTab.CHAT,
+            screen = Screen.CHAT,
             conversationId = null,
-            conversationTitle = "Nieuw gesprek",
+            conversationTitle = "New conversation",
             messages = emptyList(),
             error = null,
         )
@@ -228,7 +229,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             val requestId = java.util.UUID.randomUUID().toString()
             val optimisticId = "request:$requestId"
             if (!pending.add(requestId, optimisticId)) {
-                _state.update { it.copy(error = "Te veel onbevestigde verzoeken. Herstel eerst de verbinding; niets wordt opnieuw verstuurd.") }
+                _state.update { it.copy(error = "Too many unconfirmed requests. Restore the connection first; nothing is sent again.") }
                 return
             }
             _state.update { it.copy(busy = true, messages = it.messages + ConversationMessage("user", text.trim(), at = Instant.now().toString(), id = optimisticId)) }
@@ -238,7 +239,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                     val run = container.realtime.submit(endpoint, requestId, current.conversationId, history, text.trim())
                     _state.update { if (current.conversationId == null && it.conversationId == null && it.messages.any { message -> message.id == optimisticId }) it.copy(conversationId = run.conversation_id) else it }
                 } catch (error: kotlinx.coroutines.CancellationException) { throw error } catch (_: Exception) {
-                    _state.update { it.copy(busy = false, error = "Verzending niet bevestigd. Verbind opnieuw om de opgeslagen geschiedenis te controleren; geen automatische hergeneratie.") }
+                    _state.update { it.copy(busy = false, error = "Sending was not confirmed. Reconnect to check the stored history; nothing is regenerated automatically.") }
                 }
             }
             return
@@ -361,7 +362,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         when (result) {
             EnrollmentOutcome.PasswordRequired -> _state.update {
                 it.copy(busy = false, pairingPending = false, authenticated = false, locked = false,
-                    activationRequired = false, error = "Voer je accountwachtwoord in om aan te melden.")
+                    activationRequired = false, error = "Enter your account password to sign in.")
             }
             EnrollmentOutcome.ActivationRequired -> _state.update { it.copy(busy = false, pairingPending = false, activationRequired = true, error = null) }
             is EnrollmentOutcome.Pending -> _state.update {
@@ -384,17 +385,22 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                     )
                 }
             }
-            EnrollmentOutcome.Denied -> enrollmentError("Koppelverzoek geweigerd.")
-            EnrollmentOutcome.Expired -> enrollmentError("Koppelverzoek verlopen. Start opnieuw.")
-            EnrollmentOutcome.Unauthorized -> enrollmentError("Dit apparaat is niet meer geautoriseerd.")
+            EnrollmentOutcome.Denied -> enrollmentError("Pairing request denied.")
+            EnrollmentOutcome.Expired -> enrollmentError("Pairing request expired. Start again.")
+            EnrollmentOutcome.Unauthorized -> enrollmentError("This device is no longer authorised.")
             is EnrollmentOutcome.Unreachable -> enrollmentError(result.reason.message())
-            is EnrollmentOutcome.Rejected -> enrollmentError(result.message ?: "Home Node weigerde het verzoek (${result.status}).")
+            is EnrollmentOutcome.Rejected -> enrollmentError(result.message ?: "Home Node refused the request (${result.status}).")
             is EnrollmentOutcome.InvalidResponse -> enrollmentError(result.message)
         }
     }
 
     private fun enrollmentError(message: String) = _state.update {
         it.copy(busy = false, pairingPending = false, error = message)
+    }
+
+    fun refreshConversations() {
+        val endpoint = _state.value.endpoint ?: return
+        viewModelScope.launch { loadConversations(endpoint) }
     }
 
     private suspend fun loadConversations(endpoint: HomeNodeEndpoint) {
@@ -424,7 +430,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     fun selectLocalVoice(id: String) {
         val voices = container.localSpeech.availableVoices()
         if (id.isNotEmpty() && voices.none { it.id == id }) {
-            _state.update { it.copy(voiceStatus = "Gekozen lokale stem is niet beschikbaar", availableVoices = voices) }
+            _state.update { it.copy(voiceStatus = "The chosen local voice is not available", availableVoices = voices) }
             return
         }
         container.localSpeech.selectedVoice = id
@@ -435,7 +441,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     fun stopSpeaking() {
         speech.stop()
         speech.ownedRun()?.let(container.realtime::releaseVoice)
-        _state.update { it.copy(voiceStatus = "Lokale spraak gestopt") }
+        _state.update { it.copy(voiceStatus = "Local speech stopped") }
         // Keep voiceEnabled unchanged for the next response. No chat request,
         // history mutation or generation cancellation is performed here.
     }
@@ -473,9 +479,9 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     private fun receiveRealtime(event: RealtimeEvent) {
         val p = event.payload
         when (event.type) {
-            "voice.started" -> _state.update { it.copy(voiceStatus = "Actieve apparaat spreekt") }
-            "voice.stopped" -> _state.update { it.copy(voiceStatus = "Spraak gestopt") }
-            "voice.failed" -> _state.update { it.copy(voiceStatus = "Lokale spraak niet beschikbaar op actieve apparaat") }
+            "voice.started" -> _state.update { it.copy(voiceStatus = "Active device is speaking") }
+            "voice.stopped" -> _state.update { it.copy(voiceStatus = "Speech stopped") }
+            "voice.failed" -> _state.update { it.copy(voiceStatus = "Local speech unavailable on the active device") }
             "voice.owner_changed" -> _state.update { it.copy(voiceStatus = null) }
             "conversation.created", "conversation.updated" -> {
                 val id = p.id ?: return; val title = p.title ?: return; val at = p.updated_at ?: return
@@ -519,7 +525,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             }
             "assistant.failed" -> {
                 val run = p.run ?: return; pending.remove(run.request_id)
-                _state.update { if (it.conversationId == run.conversation_id) it.copy(busy = false, error = "Antwoord onderbroken. Je bericht is opgeslagen.") else it }
+                _state.update { if (it.conversationId == run.conversation_id) it.copy(busy = false, error = "Reply interrupted. Your message was saved.") else it }
             }
         }
     }
@@ -534,7 +540,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 it.copy(appUpdate = AndroidUpdateUiState.Available(result.metadata))
             }
             AndroidUpdateCheck.Unauthorized -> _state.update {
-                it.copy(authenticated = false, appUpdate = AndroidUpdateUiState.Failed("Sessie verlopen."))
+                it.copy(authenticated = false, appUpdate = AndroidUpdateUiState.Failed("Session expired."))
             }
             is AndroidUpdateCheck.Failed -> _state.update {
                 it.copy(appUpdate = AndroidUpdateUiState.Failed(result.message))
@@ -547,7 +553,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             ApiResult.Unauthorized -> state.copy(
                 authenticated = false,
                 busy = false,
-                error = "Sessie verlopen. Meld dit apparaat opnieuw aan.",
+                error = "Session expired. Sign this device in again.",
             )
             is ApiResult.Unreachable -> state.copy(
                 connection = ConnectionState.Unreachable(result.reason),
@@ -575,18 +581,18 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 }
 
 private fun UnreachableReason.message(): String = when (this) {
-    UnreachableReason.TIMEOUT -> "Home Node antwoordt niet binnen de tijdslimiet."
-    UnreachableReason.DNS -> "De hostnaam van de Home Node kan niet worden gevonden."
-    UnreachableReason.TLS -> "De beveiligde verbinding met de Home Node is ongeldig."
-    UnreachableReason.REFUSED -> "Home Node weigert de verbinding."
-    UnreachableReason.NETWORK -> "Home Node is niet bereikbaar. Controleer wifi en het adres."
+    UnreachableReason.TIMEOUT -> "Home Node did not answer in time."
+    UnreachableReason.DNS -> "The Home Node host name cannot be found."
+    UnreachableReason.TLS -> "The secure connection to the Home Node is invalid."
+    UnreachableReason.REFUSED -> "Home Node refused the connection."
+    UnreachableReason.NETWORK -> "Home Node is unreachable. Check Wi-Fi and the address."
 }
 
 private fun BiometricAvailability.message(): String = when (this) {
-    BiometricAvailability.Available -> "Biometrie beschikbaar."
-    BiometricAvailability.NotEnrolled -> "Stel eerst sterke biometrie in bij Android-instellingen."
-    BiometricAvailability.NoHardware -> "Dit toestel heeft geen ondersteunde sterke biometrie."
-    BiometricAvailability.TemporarilyUnavailable -> "Biometrie is tijdelijk niet beschikbaar."
-    BiometricAvailability.SecurityUpdateRequired -> "Installeer de Android-beveiligingsupdate voor biometrie."
-    BiometricAvailability.Unsupported -> "Sterke biometrie wordt niet ondersteund op dit toestel."
+    BiometricAvailability.Available -> "Biometrics available."
+    BiometricAvailability.NotEnrolled -> "Set up strong biometrics in Android settings first."
+    BiometricAvailability.NoHardware -> "This device has no supported strong biometrics."
+    BiometricAvailability.TemporarilyUnavailable -> "Biometrics are temporarily unavailable."
+    BiometricAvailability.SecurityUpdateRequired -> "Install the Android security update for biometrics."
+    BiometricAvailability.Unsupported -> "Strong biometrics are not supported on this device."
 }

@@ -10,6 +10,7 @@ import com.hawkeynl.jarvis.network.IbkrStatus
 import com.hawkeynl.jarvis.network.LoadFailure
 import com.hawkeynl.jarvis.network.Registry
 import com.hawkeynl.jarvis.network.ServiceStatus
+import com.hawkeynl.jarvis.network.valueOrNull
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.Locale
@@ -124,7 +125,7 @@ fun agentsCard(source: Availability<AgentsResponse>): CardSummary = summarize(so
 
 fun tasksCard(sessions: Availability<List<CodingSession>>, pending: Availability<Int>): CardSummary = summarize(sessions) { list ->
     val active = list.count { it.state == "active" }
-    val waiting = (pending as? Availability.Ok)?.value
+    val waiting = pending.valueOrNull
     CardSummary(
         "$active active",
         if (waiting == null) "Approvals unavailable" else "$waiting awaiting approval",
@@ -153,7 +154,7 @@ fun contextCard(devices: Availability<Int>): CardSummary = summarize(devices) {
 fun healthCard(online: Boolean?, registry: Availability<Registry>): CardSummary {
     if (online == null) return CardSummary("Checking…", "", Tone.IDLE)
     if (!online) return CardSummary("Core unreachable", "Check the Home Node", Tone.ERROR)
-    val live = (registry as? Availability.Ok)?.value?.live_host
+    val live = registry.valueOrNull?.live_host
         ?: return CardSummary("Core ready", if (registry is Availability.Ok) "Live vitals need newer Core" else "", Tone.OK)
     val cpu = live.cpu_percent?.let { " · CPU ${Math.round(it)}%" } ?: ""
     return CardSummary("Up ${formatUptime(live.uptime_seconds)}", "Core ready$cpu", Tone.OK)
