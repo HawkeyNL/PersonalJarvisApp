@@ -36,7 +36,7 @@ time = "0.3"
 url = "2"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
-jarvis-client-core = { git = "https://github.com/HawkeyNL/PersonalJarvis.git", rev = "d1f11f3f95e54dcef2f4ff471b2193ee48c607f6" }
+jarvis-client-core = { git = "https://github.com/HawkeyNL/PersonalJarvis.git", rev = "b1016c93d383f8be0c2bea2e42e06d8c30c44028" }
 tokio = { version = "1", features = ["time", "sync", "process", "io-util"] }
 tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
