@@ -7,6 +7,12 @@ interface JarvisApi {
         ApiResult.InvalidResponse("Modelbediening niet beschikbaar")
     suspend fun modelToggle(endpoint: HomeNodeEndpoint, token: String, body: kotlinx.serialization.json.JsonObject): ApiResult<kotlinx.serialization.json.JsonObject> =
         ApiResult.InvalidResponse("Modelbediening niet beschikbaar")
+    /** Authenticated GET of an owner route under /v1/; the caller decodes the JSON. */
+    suspend fun getAuthorized(endpoint: HomeNodeEndpoint, token: String, path: String): ApiResult<kotlinx.serialization.json.JsonElement> =
+        ApiResult.InvalidResponse("Not supported")
+    /** Authenticated POST of a JSON body to an owner route under /v1/. */
+    suspend fun postAuthorized(endpoint: HomeNodeEndpoint, token: String, path: String, body: kotlinx.serialization.json.JsonObject): ApiResult<Unit> =
+        ApiResult.InvalidResponse("Not supported")
     suspend fun accountStatus(endpoint: HomeNodeEndpoint): ApiResult<AccountStatus>
     suspend fun activateFirstDevice(endpoint: HomeNodeEndpoint, request: PairingCreateRequest, code: String): ApiResult<FirstDeviceResponse>
     suspend fun ready(endpoint: HomeNodeEndpoint): ApiResult<HealthResponse>

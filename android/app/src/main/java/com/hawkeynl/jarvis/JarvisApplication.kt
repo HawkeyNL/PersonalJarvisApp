@@ -27,6 +27,7 @@ class AppContainer(application: Application) {
     val api = KtorJarvisApi()
     val enrollment = EnrollmentService(api, identity, sessions)
     val conversations = ConversationService(api, sessions)
+    val core = com.hawkeynl.jarvis.network.CoreReader(api, sessions)
     val appUpdates = AndroidUpdateService(application, api, sessions)
     val biometricGate = BiometricGate()
 }
