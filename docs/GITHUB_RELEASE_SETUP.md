@@ -91,8 +91,10 @@ The desktop app shows a system tray icon with the update status, "Check for
 updates" and "Install update and restart". It checks on startup (after sign-in)
 and every six hours, through the same authenticated Home Node path as Settings.
 "Install" downloads the package and verifies its Tauri signature, then installs
-and relaunches right away, or waits until no reply or mic session is active
-(the tray and Settings offer "Restart now" to end the session instead).
+and relaunches right away, or waits while a reply streams, speech plays, the
+mic listens, a chat draft is unsent or a voice check runs (the tray and Settings
+offer "Restart now" to end the session instead). Signing out, resetting the
+device or changing the Home Node drops any pending or downloaded update.
 
 - Linux (AppImage): the AppImage is replaced in place, then Jarvis relaunches.
   The tray uses libayatana-appindicator (bundled into the AppImage by the Tauri

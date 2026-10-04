@@ -738,6 +738,8 @@ fn auth_logout(app: AppHandle) -> Result<(), String> {
     realtime::stop(&app);
     let mut guard = auth_storage()?;
     advance_auth_epoch(&mut guard)?;
+    #[cfg(desktop)]
+    app_updates::forget(&app);
     let auth = load_secure_auth_unlocked(&app)?;
     delete_credential(TOKEN_ACCOUNT)?;
     save_metadata(&app, &auth.metadata)
@@ -751,6 +753,8 @@ fn auth_reset(app: AppHandle) -> Result<(), String> {
     realtime::stop(&app);
     let mut guard = auth_storage()?;
     advance_auth_epoch(&mut guard)?;
+    #[cfg(desktop)]
+    app_updates::forget(&app);
     let home_node_origin = load_metadata(&app)?.home_node_origin;
     delete_credential(KEY_ACCOUNT)?;
     delete_credential(TOKEN_ACCOUNT)?;
@@ -786,6 +790,8 @@ fn home_node_configure(app: AppHandle, origin: String) -> Result<HomeNodeConfig,
         // A bearer is scoped to the Home Node that minted it. Clear both the
         // token and server-side device id before persisting a different origin
         // so the old credential can never be sent to a newly entered host.
+        #[cfg(desktop)]
+        app_updates::forget(&app);
         delete_credential(TOKEN_ACCOUNT)?;
         metadata.device_id = None;
     }

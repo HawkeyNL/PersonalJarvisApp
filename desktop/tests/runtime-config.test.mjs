@@ -5,7 +5,18 @@ import test from "node:test";
 import {
   AUTOMATIC_UPDATE_DELAY_MS,
   shouldScheduleAutomaticUpdateCheck,
+  updateSessionActive,
 } from "../src/updatePolicy.js";
+
+test("automatic update restart waits for reply, speech, mic, draft and voice checks", () => {
+  const idle = { reply: false, console: false, speech: "idle", voiceCheck: false };
+  assert.equal(updateSessionActive(idle), false);
+  assert.equal(updateSessionActive({ ...idle, speech: "failed" }), false);
+  assert.equal(updateSessionActive({ ...idle, speech: "speaking" }), true);
+  assert.equal(updateSessionActive({ ...idle, reply: true }), true);
+  assert.equal(updateSessionActive({ ...idle, console: true }), true);
+  assert.equal(updateSessionActive({ ...idle, voiceCheck: true }), true);
+});
 
 test("automatic update check runs once only after authentication", () => {
   assert.equal(shouldScheduleAutomaticUpdateCheck(false, true, false), false);

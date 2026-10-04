@@ -214,10 +214,32 @@ pub(crate) struct Updates {
 
 #[derive(Default)]
 struct Inner {
+    /// Bumped by `forget`; results of work started earlier are discarded.
+    generation: u64,
     status: Option<UpdateStatus>,
+    /// `Update` keeps the bearer header it was checked with.
     pending: Option<Update>,
     /// Downloaded package whose signature `Update::download` already verified.
     ready: Option<(Update, Vec<u8>)>,
+}
+
+impl Inner {
+    fn reset(&mut self) {
+        *self = Inner {
+            generation: self.generation.wrapping_add(1),
+            ..Inner::default()
+        };
+    }
+
+    /// Stores a result unless `forget` ran since the work started.
+    fn commit(&mut self, generation: u64, next: UpdateStatus, pending: Option<Update>) -> bool {
+        if generation != self.generation {
+            return false;
+        }
+        self.status = Some(next);
+        self.pending = pending;
+        true
+    }
 }
 
 pub(crate) const STATUS_EVENT: &str = "app-update-status";
@@ -269,12 +291,33 @@ fn notify(app: &AppHandle, current: &UpdateStatus) {
     let _ = app.emit(STATUS_EVENT, current);
 }
 
-fn finish(app: &AppHandle, next: UpdateStatus, pending: Option<Update>) {
-    if let Ok(mut inner) = lock(app) {
-        inner.status = Some(next.clone());
-        inner.pending = pending;
+const CANCELLED: &str = "the update was cancelled by sign-out or a Home Node change";
+
+fn finish(
+    app: &AppHandle,
+    generation: u64,
+    next: UpdateStatus,
+    pending: Option<Update>,
+) -> Result<(), String> {
+    let committed = lock(app)?.commit(generation, next.clone(), pending);
+    if !committed {
+        return Err(CANCELLED.into());
     }
     notify(app, &next);
+    Ok(())
+}
+
+/// Sign-out, device reset or a new Home Node origin: drop any pending or
+/// downloaded update (its requests carry the old bearer) and cancel work in
+/// flight, so nothing from the old session can be installed or reused.
+pub(crate) fn forget(app: &AppHandle) {
+    let Some(updates) = app.try_state::<Updates>() else {
+        return;
+    };
+    if let Ok(mut inner) = updates.inner.lock() {
+        inner.reset();
+    }
+    notify(app, &stored(app));
 }
 
 async fn find_update(app: &AppHandle) -> Result<(UpdateStatus, Option<Update>), String> {
@@ -331,7 +374,7 @@ pub(crate) async fn check(app: &AppHandle) -> Result<UpdateStatus, String> {
         return Ok(status(app, UpdateState::Unsupported));
     }
     let checking = status(app, UpdateState::Checking);
-    {
+    let generation = {
         let mut inner = lock(app)?;
         if inner.status.as_ref().is_some_and(|current| {
             matches!(
@@ -342,15 +385,16 @@ pub(crate) async fn check(app: &AppHandle) -> Result<UpdateStatus, String> {
             return Err("an update action is already running".into());
         }
         inner.status = Some(checking.clone());
-    }
+        inner.generation
+    };
     notify(app, &checking);
     match find_update(app).await {
         Ok((next, pending)) => {
-            finish(app, next.clone(), pending);
+            finish(app, generation, next.clone(), pending)?;
             Ok(next)
         }
         Err(error) => {
-            finish(app, status(app, UpdateState::Error), None);
+            finish(app, generation, status(app, UpdateState::Error), None)?;
             Err(error)
         }
     }
@@ -363,7 +407,7 @@ pub(crate) async fn install(
     app: &AppHandle,
     on_event: impl Fn(DownloadEvent),
 ) -> Result<UpdateStatus, String> {
-    let update = {
+    let (update, generation) = {
         let mut inner = lock(app)?;
         let available = inner
             .status
@@ -376,9 +420,10 @@ pub(crate) async fn install(
             .ok_or_else(|| "there is no verified pending update".to_string())?;
         let downloading = update_status(&update, UpdateState::Downloading);
         inner.status = Some(downloading.clone());
+        let generation = inner.generation;
         drop(inner);
         notify(app, &downloading);
-        update
+        (update, generation)
     };
     let started = AtomicBool::new(false);
     let downloaded = update
@@ -393,14 +438,16 @@ pub(crate) async fn install(
         )
         .await;
     let Ok(bytes) = downloaded else {
-        finish(app, status(app, UpdateState::Error), None);
+        finish(app, generation, status(app, UpdateState::Error), None)?;
         return Err("update download or signature verification failed".into());
     };
     let ready = update_status(&update, UpdateState::ReadyToRestart);
     {
         let mut inner = lock(app)?;
+        if !inner.commit(generation, ready.clone(), None) {
+            return Err(CANCELLED.into());
+        }
         inner.ready = Some((update, bytes));
-        inner.status = Some(ready.clone());
     }
     notify(app, &ready);
     if !session_active(app) {
@@ -413,13 +460,17 @@ pub(crate) async fn install(
 /// updater hands over to the NSIS installer, which exits this process and
 /// starts the new version itself.
 pub(crate) async fn apply_and_restart(app: &AppHandle) -> Result<(), String> {
-    let (update, bytes) = lock(app)?
-        .ready
-        .take()
-        .ok_or_else(|| "there is no verified update ready to install".to_string())?;
+    let ((update, bytes), generation) = {
+        let mut inner = lock(app)?;
+        let ready = inner
+            .ready
+            .take()
+            .ok_or_else(|| "there is no verified update ready to install".to_string())?;
+        (ready, inner.generation)
+    };
     let installed = tauri::async_runtime::spawn_blocking(move || update.install(bytes)).await;
     if !matches!(installed, Ok(Ok(()))) {
-        finish(app, status(app, UpdateState::Error), None);
+        let _ = finish(app, generation, status(app, UpdateState::Error), None);
         return Err("update installation failed".into());
     }
     app.request_restart();
@@ -526,6 +577,24 @@ mod tests {
         assert!(!encoded.contains("token"));
         assert!(!encoded.contains("endpoint"));
         assert!(!encoded.contains("signature"));
+    }
+
+    #[test]
+    fn forget_drops_state_and_rejects_results_of_earlier_work() {
+        let next = || UpdateStatus {
+            state: UpdateState::Available,
+            current_version: "1.0.0".into(),
+            version: Some("1.1.0".into()),
+            notes: None,
+        };
+        let mut inner = Inner::default();
+        let started = inner.generation;
+        assert!(inner.commit(started, next(), None));
+        inner.reset();
+        assert!(inner.status.is_none() && inner.pending.is_none() && inner.ready.is_none());
+        assert!(!inner.commit(started, next(), None));
+        assert!(inner.status.is_none());
+        assert!(inner.commit(inner.generation, next(), None));
     }
 
     #[test]

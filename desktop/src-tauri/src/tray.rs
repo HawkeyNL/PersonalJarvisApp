@@ -184,7 +184,7 @@ pub(crate) fn init(app: &AppHandle) {
             );
         }
         Ok(Err(error)) => eprintln!("system tray unavailable: {error}"),
-        Err(_) => eprintln!("system tray unavailable: no AppIndicator library"),
+        Err(_) => eprintln!("system tray unavailable: tray init panicked"),
     }
 }
 
