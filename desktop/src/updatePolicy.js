@@ -17,3 +17,12 @@ export function shouldScheduleAutomaticUpdateCheck(configured, authenticated, al
 export function updateSessionActive(activity) {
   return activity.reply || activity.console || activity.speech === "speaking" || activity.voiceCheck;
 }
+
+/** Native update errors are fixed English copy with a typed cause; show it
+ * instead of guessing. Anything else (a bridge failure) gets `fallback`.
+ * @param {unknown} error
+ * @param {string} fallback
+ */
+export function updateErrorMessage(error, fallback) {
+  return typeof error === "string" && error.trim() && error.length <= 200 ? error : fallback;
+}

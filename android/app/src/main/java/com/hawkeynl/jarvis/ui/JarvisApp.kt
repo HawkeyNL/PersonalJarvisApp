@@ -1,199 +1,49 @@
 package com.hawkeynl.jarvis.ui
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.material3.Button
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Text
-import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.hawkeynl.jarvis.R
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hawkeynl.jarvis.network.ConnectionState
-import com.hawkeynl.jarvis.network.ConversationMessage
+import com.hawkeynl.jarvis.security.ModelControlService
 
 @Composable
 fun JarvisApp(
     state: JarvisUiState,
     actions: JarvisViewModel,
+    core: CoreViewModel,
     onRequestBiometric: () -> Unit,
     onInstallUpdate: () -> Unit,
-    modelControls: com.hawkeynl.jarvis.security.ModelControlService? = null,
+    modelControls: ModelControlService? = null,
 ) {
-    when {
-        state.locked -> AppLockScreen(
-            message = state.biometricMessage,
-            onRetry = onRequestBiometric,
-            onReset = actions::resetDevice,
-        )
-        state.endpoint == null || !state.authenticated -> OnboardingScreen(state, actions)
-        else -> AuthenticatedShell(state, actions, onInstallUpdate, modelControls)
-    }
-}
-
-@Composable
-private fun AppLockScreen(message: String?, onRetry: () -> Unit, onReset: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("J", style = MaterialTheme.typography.displayLarge, color = MaterialTheme.colorScheme.primary)
-        Text("Jarvis is vergrendeld", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            message ?: "Bevestig met sterke biometrie om je sessie te openen.",
-            modifier = Modifier.padding(vertical = 16.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Button(onClick = onRetry) { Text("Opnieuw ontgrendelen") }
-        OutlinedButton(onClick = onReset, modifier = Modifier.padding(top = 24.dp)) {
-            Text("Wis dit apparaat en koppel opnieuw")
-        }
-    }
-}
-
-@Composable
-private fun OnboardingScreen(state: JarvisUiState, actions: JarvisViewModel) {
-    // Deliberately not rememberSaveable: never serialize passwords into activity state.
-    var password by remember { mutableStateOf("") }
-    var activationCode by remember { mutableStateOf("") }
-    var passwordVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(state.activationRequired) { passwordVisible = false }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) {
-                passwordVisible = false
-                password = ""
-                activationCode = ""
+    val signedIn = !state.locked && state.endpoint != null && state.authenticated
+    // Locking or signing out drops every Core read and cancels running ones.
+    LaunchedEffect(signedIn) { if (!signedIn) core.clear() }
+    Box(Modifier.fillMaxSize().jvBackdrop()) {
+        Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+            when {
+                state.locked -> AppLockScreen(
+                    message = state.biometricMessage,
+                    onRetry = onRequestBiometric,
+                    onReset = actions::resetDevice,
+                )
+                state.endpoint == null || !state.authenticated -> OnboardingScreen(state, actions)
+                else -> AuthenticatedShell(state, actions, core, onInstallUpdate, modelControls)
             }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().imePadding().testTag("onboarding"),
-        contentPadding = PaddingValues(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        item {
-            Text("Jarvis", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-            Text(
-                "Verbind deze telefoon met je Home Node en laat een bestaand vertrouwd apparaat de koppeling goedkeuren.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Home Node", style = MaterialTheme.typography.titleMedium)
-                    OutlinedTextField(
-                        value = state.endpointDraft,
-                        onValueChange = actions::editEndpoint,
-                        modifier = Modifier.fillMaxWidth().testTag("endpoint"),
-                        label = { Text("https://jarvis.local") },
-                        singleLine = true,
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { actions.saveEndpoint() }),
-                    )
-                    Button(onClick = actions::saveEndpoint, enabled = !state.busy) {
-                        Text("Opslaan en controleren")
-                    }
-                    ConnectionLine(state.connection)
-                }
-            }
-        }
-        if (state.endpoint != null) {
-            item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("Apparaat koppelen", style = MaterialTheme.typography.titleMedium)
-                        if (state.pairingPending) {
-                            Text("Wacht op goedkeuring vanaf een vertrouwd Jarvis-apparaat.")
-                            Text(
-                                "Verloopt: ${state.pairingExpiresAt ?: "—"}",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontFamily = FontFamily.Monospace,
-                            )
-                            CircularProgressIndicator()
-                        } else {
-                            if (state.activationRequired) {
-                                Text("Gebruik de eenmalige code van je Home Node en kies een wachtwoord van minimaal 15 tekens.")
-                                OutlinedTextField(value = activationCode, onValueChange = { activationCode = it.take(256) },
-                                    label = { Text("Activatiecode") }, singleLine = true,
-                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                        autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii),
-                                    visualTransformation = VisualTransformation.None)
-                            }
-                            OutlinedTextField(value = password, onValueChange = { password = it.take(1024) },
-                                label = { Text("Accountwachtwoord") }, singleLine = true,
-                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                    autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
-                                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                                trailingIcon = {
-                                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                                        Icon(painterResource(if (passwordVisible) R.drawable.ic_visibility_off else R.drawable.ic_visibility),
-                                            contentDescription = if (passwordVisible) "Wachtwoord verbergen" else "Wachtwoord tonen")
-                                    }
-                                })
-                            Button(onClick = {
-                                val suppliedPassword = password.ifEmpty { null }
-                                val suppliedCode = if (state.activationRequired) activationCode else null
-                                password = ""
-                                passwordVisible = false
-                                activationCode = ""
-                                actions.beginEnrollment(suppliedPassword, suppliedCode)
-                            }, enabled = !state.busy) {
-                                Text(if (state.busy) "Bezig…" else "Doorgaan")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        state.error?.let { error ->
-            item { Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("error")) }
         }
     }
 }
@@ -202,255 +52,79 @@ private fun OnboardingScreen(state: JarvisUiState, actions: JarvisViewModel) {
 private fun AuthenticatedShell(
     state: JarvisUiState,
     actions: JarvisViewModel,
+    core: CoreViewModel,
     onInstallUpdate: () -> Unit,
-    modelControls: com.hawkeynl.jarvis.security.ModelControlService?,
+    modelControls: ModelControlService?,
 ) {
-    Scaffold(
-        bottomBar = {
-            NavigationBar(modifier = Modifier.testTag("bottom-navigation")) {
-                listOf(
-                    AppTab.CHAT to ("●" to "Chat"),
-                    AppTab.CONVERSATIONS to ("≡" to "Gesprekken"),
-                    AppTab.SETTINGS to ("⚙" to "Instellingen"),
-                ).forEach { (tab, presentation) ->
-                    NavigationBarItem(
-                        selected = state.selectedTab == tab,
-                        onClick = { actions.selectTab(tab) },
-                        icon = { Text(presentation.first) },
-                        label = { Text(presentation.second) },
-                    )
-                }
-            }
-        },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            ConnectionBanner(state.connection, actions::checkConnection)
-            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(12.dp)) }
-            when (state.selectedTab) {
-                AppTab.CHAT -> ChatScreen(state, actions)
-                AppTab.CONVERSATIONS -> ConversationsScreen(state, actions)
-                AppTab.SETTINGS -> SettingsScreen(state, actions, onInstallUpdate, modelControls)
+    val data by core.state.collectAsStateWithLifecycle()
+    val screen = state.screen
+    BackHandler(enabled = screen != Screen.HUB) { actions.navigate(Screen.HUB) }
+    val mood = if (state.busy) Mood.THINKING else Mood.IDLE
+    val navigate = actions::navigate
+    Column(Modifier.fillMaxSize()) {
+        ConnectionBanner(state.connection, actions::checkConnection)
+        state.error?.let { ErrorText(it, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) }
+        Box(Modifier.weight(1f)) {
+            when (screen) {
+                Screen.HUB -> HubScreen(state, data, mood, navigate, core::refreshHub)
+                Screen.CHAT -> ChatScreen(state, actions)
+                Screen.SETTINGS -> SettingsScreen(state, actions, onInstallUpdate)
+                Screen.CONVERSATIONS -> ConversationsScreen(state, actions, mood)
+                Screen.AGENTS -> AgentsScreen(data, mood, navigate, core::refreshAgents)
+                Screen.TASKS -> TasksScreen(data, mood, navigate, core::refreshTasks, core::deny)
+                Screen.INTEGRATIONS -> IntegrationsScreen(data, mood, navigate, core::refreshIntegrations)
+                Screen.HEALTH -> HealthScreen(state, data, mood, navigate, core::refreshHealth, actions::checkConnection, modelControls)
+                Screen.MEMORY -> MemoryScreen(mood, navigate)
+                Screen.CONTEXT -> ContextScreen(data, mood, navigate, core::refreshContext)
             }
         }
+        if (screen != Screen.CHAT && screen != Screen.SETTINGS) Dock(screen, navigate)
     }
 }
 
+/** One-line text of the Home Node connection check. */
+fun connectionText(connection: ConnectionState): String = when (connection) {
+    ConnectionState.NotConfigured -> "Not set up yet"
+    ConnectionState.Checking -> "Checking the connection…"
+    is ConnectionState.Reachable -> "Connected · ${connection.status}"
+    is ConnectionState.Unreachable -> "Unreachable · ${connection.reason.name.lowercase()}"
+    is ConnectionState.Rejected -> "Home Node answered with HTTP ${connection.status}"
+}
+
+fun connectionTone(connection: ConnectionState): Tone = when (onlineOf(connection)) {
+    true -> Tone.OK
+    false -> Tone.ERROR
+    null -> Tone.IDLE
+}
+
 @Composable
-private fun ConnectionLine(connection: ConnectionState) {
-    Text(
-        when (connection) {
-            ConnectionState.NotConfigured -> "Nog niet ingesteld"
-            ConnectionState.Checking -> "Verbinding controleren…"
-            is ConnectionState.Reachable -> "Verbonden · ${connection.status}"
-            is ConnectionState.Unreachable -> "Niet bereikbaar · ${connection.reason.name.lowercase()}"
-            is ConnectionState.Rejected -> "Home Node antwoordde met HTTP ${connection.status}"
-        },
-        color = when (connection) {
-            is ConnectionState.Reachable -> MaterialTheme.colorScheme.primary
-            is ConnectionState.Unreachable, is ConnectionState.Rejected -> MaterialTheme.colorScheme.error
-            else -> MaterialTheme.colorScheme.onSurfaceVariant
-        },
-    )
+fun ConnectionLine(connection: ConnectionState) {
+    StatusDot(connectionTone(connection), connectionText(connection))
 }
 
 @Composable
 private fun ConnectionBanner(connection: ConnectionState, retry: () -> Unit) {
     if (connection is ConnectionState.Reachable) return
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Box(Modifier.weight(1f)) { ConnectionLine(connection) }
-        OutlinedButton(onClick = retry) { Text("Opnieuw") }
+        GhostButton("Retry", retry)
     }
-    HorizontalDivider()
 }
 
 @Composable
-private fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel) {
-    var draft by remember(state.conversationId) { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().imePadding().testTag("chat")) {
+internal fun ScreenHeader(title: String, onBack: () -> Unit, trailing: (@Composable () -> Unit)? = null) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        CircleIconButton(JvIcon.ARROW_LEFT, "Back to Core", onBack, Modifier.align(Alignment.CenterStart))
         Text(
-            state.conversationTitle,
-            modifier = Modifier.padding(16.dp),
-            style = MaterialTheme.typography.titleLarge,
+            title,
+            Modifier.align(Alignment.Center).padding(horizontal = 56.dp),
+            style = exo(15f, FontWeight.Medium, Jv.Text0, 0.04f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
-        if (state.voiceEnabled) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(state.voiceStatus ?: "Lokale spraak ingeschakeld", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                OutlinedButton(onClick = actions::stopSpeaking) { Text("Stop spraak") }
-            }
-        }
-        LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            if (state.messages.isEmpty()) item { Text("Waarmee kan ik helpen?") }
-            items(state.messages) { message -> MessageBubble(message) }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                modifier = Modifier.weight(1f).testTag("composer"),
-                placeholder = { Text("Bericht aan Jarvis") },
-                maxLines = 5,
-            )
-            Button(
-                onClick = {
-                    val message = draft
-                    draft = ""
-                    actions.send(message)
-                },
-                enabled = draft.isNotBlank() && !state.busy,
-            ) { Text("Stuur") }
-        }
-    }
-}
-
-@Composable
-private fun MessageBubble(message: ConversationMessage) {
-    val jarvis = message.role == "assistant" || message.role == "jarvis"
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp)) {
-            Text(if (jarvis) "JARVIS" else "JIJ", color = MaterialTheme.colorScheme.primary)
-            Text(message.content)
-        }
-    }
-}
-
-@Composable
-private fun ConversationsScreen(state: JarvisUiState, actions: JarvisViewModel) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().testTag("conversations"),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Gesprekken", style = MaterialTheme.typography.headlineSmall)
-                Button(onClick = actions::newConversation) { Text("Nieuw") }
-            }
-        }
-        items(state.conversations, key = { it.id }) { conversation ->
-            Card(onClick = { actions.openConversation(conversation.id) }, modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(14.dp)) {
-                    Text(conversation.title, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        conversation.updated_at,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SettingsScreen(
-    state: JarvisUiState,
-    actions: JarvisViewModel,
-    onInstallUpdate: () -> Unit,
-    modelControls: com.hawkeynl.jarvis.security.ModelControlService?,
-) {
-    var voiceMenu by remember { mutableStateOf(false) }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().imePadding().testTag("settings"),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item { Text("Instellingen", style = MaterialTheme.typography.headlineSmall) }
-        if (modelControls != null) { item { ModelControls(modelControls) } }
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Lokale spraak op actief apparaat")
-                Switch(checked = state.voiceEnabled, onCheckedChange = actions::setVoiceEnabled)
-            }
-        }
-        item {
-            Text("Spreeksnelheid: ${state.voiceRate}× (volgende fragmenten)")
-            androidx.compose.material3.Slider(value = state.voiceRate, onValueChange = actions::setVoiceRate,
-                valueRange = 0.5f..2f, steps = 5)
-        }
-        item {
-            androidx.compose.foundation.layout.Box {
-                OutlinedButton(onClick = { actions.refreshLocalVoices(); voiceMenu = true }) {
-                    Text(if (state.selectedVoice.isEmpty()) "Stem: lokale standaard" else
-                        state.availableVoices.firstOrNull { it.id == state.selectedVoice }?.label ?: "Opgeslagen lokale stem")
-                }
-                androidx.compose.material3.DropdownMenu(expanded = voiceMenu, onDismissRequest = { voiceMenu = false }) {
-                    androidx.compose.material3.DropdownMenuItem(text = { Text("Lokale standaard") },
-                        onClick = { actions.selectLocalVoice(""); voiceMenu = false })
-                    for (voice in state.availableVoices) {
-                        androidx.compose.material3.DropdownMenuItem(text = { Text(voice.label) },
-                            onClick = { actions.selectLocalVoice(voice.id); voiceMenu = false })
-                    }
-                    if (state.availableVoices.isEmpty()) Text("Geen geïnstalleerde offline stemmen beschikbaar")
-                }
-            }
-        }
-        item {
-            OutlinedTextField(
-                value = state.endpointDraft,
-                onValueChange = actions::editEndpoint,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Home Node-adres") },
-                singleLine = true,
-            )
-        }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = actions::saveEndpoint) { Text("Opslaan") }
-                OutlinedButton(onClick = actions::checkConnection) { Text("Test") }
-            }
-        }
-        item { ConnectionLine(state.connection) }
-        item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Jarvis Android", style = MaterialTheme.typography.titleMedium)
-                    when (val update = state.appUpdate) {
-                        AndroidUpdateUiState.Idle -> Text("Update nog niet gecontroleerd")
-                        AndroidUpdateUiState.Checking -> Text("Update controleren…")
-                        AndroidUpdateUiState.Current -> Text("App is bijgewerkt")
-                        is AndroidUpdateUiState.Available -> {
-                            Text("Versie ${update.metadata.version_name} is beschikbaar")
-                            Button(onClick = actions::downloadUpdate) { Text("Download update") }
-                        }
-                        AndroidUpdateUiState.Downloading -> Text("APK downloaden en controleren…")
-                        is AndroidUpdateUiState.Ready -> {
-                            Text("Versie ${update.versionName} is gecontroleerd en klaar voor installatie")
-                            Button(onClick = onInstallUpdate) { Text("Open Android-installatie") }
-                        }
-                        AndroidUpdateUiState.PermissionRequired -> Text(
-                            "Geef Jarvis in Android-instellingen toestemming om deze gecontroleerde APK te installeren en probeer opnieuw.",
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                        is AndroidUpdateUiState.Failed -> Text(
-                            update.message,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = actions::checkForUpdate,
-                        enabled = state.appUpdate !is AndroidUpdateUiState.Checking &&
-                        state.appUpdate !is AndroidUpdateUiState.Downloading,
-                    ) { Text("Opnieuw controleren") }
-                    if (state.appUpdate is AndroidUpdateUiState.PermissionRequired) {
-                        Button(onClick = onInstallUpdate) { Text("Installatie opnieuw openen") }
-                    }
-                }
-            }
-        }
-        item { Spacer(Modifier.height(8.dp)) }
-        item { OutlinedButton(onClick = actions::logout) { Text("Uitloggen") } }
-        item { OutlinedButton(onClick = actions::resetDevice) { Text("Apparaat wissen en opnieuw koppelen") } }
+        trailing?.let { Box(Modifier.align(Alignment.CenterEnd)) { it() } }
     }
 }

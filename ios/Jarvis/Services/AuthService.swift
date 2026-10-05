@@ -119,6 +119,22 @@ actor AuthService {
         return try await api.get("/v1/system/models", token: token, expectedBinding: binding)
     }
 
+    /// Authenticated GET for read-only owner routes, bound to the current origin.
+    func ownerGet<Response: Decodable>(_ path: String) async throws -> Response {
+        let binding = await api.binding()
+        guard let token = try await credentials.session()?.token else { throw JarvisAPIError.unauthorized }
+        return try await api.get(path, token: token, expectedBinding: binding)
+    }
+
+    /// Authenticated POST with an empty JSON body, bound to the current origin.
+    func ownerPost(_ path: String) async throws {
+        let binding = await api.binding()
+        guard let token = try await credentials.session()?.token else { throw JarvisAPIError.unauthorized }
+        try await api.postDiscardingResponse(path, body: [String: String](), token: token, expectedBinding: binding)
+    }
+
+    func registeredDeviceID() async -> UUID? { try? await credentials.deviceId() }
+
     func setModelEnabled(_ entry: ModelAccessEntry, policyHash: String) async throws {
         guard !modelChangeRunning else { throw JarvisAPIError.rejected(status: 409, message: "Another model change is running.") }
         modelChangeRunning = true

@@ -37,6 +37,7 @@ import {
   updateBusy,
   updateError,
   updateNotes,
+  lastUpdateCheck,
   updateProgress,
   updateState,
 } from "../updates";
@@ -303,16 +304,20 @@ onMounted(async () => {
             <template v-else-if="updateState === 'installing'">installing…</template>
             <template v-else-if="updateState === 'available'">v{{ availableAppVersion }} available</template>
             <template v-else-if="updateState === 'ready_to_restart'">v{{ availableAppVersion }} ready · restarts when idle</template>
-            <template v-else-if="updateState === 'up_to_date'">up-to-date</template>
+            <template v-else-if="updateState === 'up_to_date'">up to date · Home Node offers nothing newer than v{{ currentAppVersion }}</template>
             <template v-else-if="updateState === 'ready'">ready to check</template>
             <template v-else-if="updateState === 'unauthenticated'">sign in to check</template>
             <template v-else-if="updateState === 'unconfigured'">Home Node not configured</template>
             <template v-else-if="updateState === 'unsupported'">not available in this build</template>
             <template v-else-if="updateState === 'incompatible'">update protocol not compatible</template>
-            <template v-else-if="updateState === 'unavailable'">update service unreachable</template>
+            <template v-else-if="updateState === 'unavailable'">update service unavailable</template>
             <template v-else-if="updateState === 'error'">update failed</template>
             <template v-else>ready</template>
           </span>
+        </li>
+        <li v-if="lastUpdateCheck !== null">
+          <span class="k">Last check</span>
+          <span class="v">{{ new Date(lastUpdateCheck * 1000).toLocaleString() }}</span>
         </li>
       </ul>
       <div v-if="updateState === 'downloading' || updateState === 'installing'" class="update-progress" aria-live="polite">

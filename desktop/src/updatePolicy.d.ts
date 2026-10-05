@@ -4,6 +4,7 @@ export function shouldScheduleAutomaticUpdateCheck(
   authenticated: boolean,
   alreadyScheduled: boolean,
 ): boolean;
+export function updateErrorMessage(error: unknown, fallback: string): string;
 export function updateSessionActive(activity: {
   reply: boolean;
   console: boolean;

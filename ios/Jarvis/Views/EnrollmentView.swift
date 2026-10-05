@@ -70,7 +70,7 @@ struct EnrollmentView: View {
     @ViewBuilder private var actions: some View {
         switch model.connectionState {
         case .unconfigured:
-            Text("Open Settings to configure the address.")
+            Text("Open Settings with the profile button to configure the address.")
         case .checking:
             ProgressView()
         case .unreachable:

@@ -11,6 +11,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import com.hawkeynl.jarvis.security.ModelControlService
 import androidx.activity.compose.setContent
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.LaunchedEffect
@@ -19,6 +20,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.withResumed
+import com.hawkeynl.jarvis.ui.CoreViewModel
 import com.hawkeynl.jarvis.ui.JarvisApp
 import com.hawkeynl.jarvis.ui.JarvisTheme
 import com.hawkeynl.jarvis.ui.JarvisViewModel
@@ -28,6 +30,7 @@ class MainActivity : FragmentActivity() {
         get() = (application as JarvisApplication).container
 
     private val viewModel: JarvisViewModel by viewModels { JarvisViewModel.factory(container) }
+    private val coreViewModel: CoreViewModel by viewModels { CoreViewModel.factory(container) }
     private var biometricPromptActive = false
     private var modelAuthenticationActive = false
     private var modelCredentialResult: ((Boolean) -> Unit)? = null
@@ -86,7 +89,11 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // Jarvis is dark only: keep light system bar icons in every system theme.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         setContent {
             val state by viewModel.state.collectAsStateWithLifecycle()
             LaunchedEffect(state.locked) {
@@ -96,6 +103,7 @@ class MainActivity : FragmentActivity() {
                 JarvisApp(
                     state = state,
                     actions = viewModel,
+                    core = coreViewModel,
                     onRequestBiometric = ::requestBiometricUnlock,
                     onInstallUpdate = ::installVerifiedUpdate,
                     modelControls = modelControls,
@@ -109,7 +117,11 @@ class MainActivity : FragmentActivity() {
         // Android's own credential confirmation may temporarily cover this
         // Activity. Cancelling it still fails closed; do not cancel the signed
         // operation solely because the OS password screen takes foreground.
-        if (!isChangingConfigurations && !modelAuthenticationActive) viewModel.lockForBackground()
+        if (!isChangingConfigurations && !modelAuthenticationActive) {
+            viewModel.lockForBackground()
+            // Drop Core data now; the UI stops recomposing while stopped.
+            coreViewModel.clear()
+        }
     }
 
     private fun requestBiometricUnlock() {
