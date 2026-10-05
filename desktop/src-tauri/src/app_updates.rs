@@ -54,6 +54,87 @@ pub(crate) struct UpdateStatus {
     pub(crate) current_version: String,
     pub(crate) version: Option<String>,
     pub(crate) notes: Option<String>,
+    /// Unix seconds of the last completed check against the Home Node.
+    pub(crate) checked_at: Option<i64>,
+}
+
+/// Why a check or download did not complete. Each cause has fixed English
+/// copy; nothing from a Home Node response body is shown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum UpdateFailure {
+    Unreachable,
+    Timeout,
+    HttpStatus(u16),
+    CapabilityUnsupported,
+    CapabilityInvalid,
+    NoRelease,
+    ManifestInvalid,
+    SignatureInvalid,
+    DownloadRefused,
+    Other,
+}
+
+impl UpdateFailure {
+    /// Classifies a transport error (reqwest 0.12 in the updater, 0.13 here).
+    fn transport(timeout: bool, decode: bool, status: Option<u16>) -> Self {
+        match (timeout, decode, status) {
+            (true, _, _) => Self::Timeout,
+            (_, _, Some(status)) => Self::HttpStatus(status),
+            (_, true, _) => Self::ManifestInvalid,
+            _ => Self::Unreachable,
+        }
+    }
+
+    /// A Core without the capability route answers 404.
+    fn capability_status(status: u16) -> Self {
+        if status == 404 {
+            Self::CapabilityUnsupported
+        } else {
+            Self::HttpStatus(status)
+        }
+    }
+
+    fn from_updater(error: &tauri_plugin_updater::Error) -> Self {
+        use tauri_plugin_updater::Error as E;
+        match error {
+            E::Reqwest(error) => Self::transport(
+                error.is_timeout(),
+                error.is_decode(),
+                error.status().map(|status| status.as_u16()),
+            ),
+            // The updater reports a refused or empty check as "no release".
+            E::ReleaseNotFound => Self::NoRelease,
+            E::Serialization(_)
+            | E::Semver(_)
+            | E::UrlParse(_)
+            | E::TargetNotFound(_)
+            | E::TargetsNotFound(_) => Self::ManifestInvalid,
+            E::Minisign(_) | E::Base64(_) | E::SignatureUtf8(_) => Self::SignatureInvalid,
+            // Only raised for a non-success download response.
+            E::Network(_) => Self::DownloadRefused,
+            _ => Self::Other,
+        }
+    }
+
+    pub(crate) fn message(self) -> String {
+        match self {
+            Self::Unreachable => "Home Node unreachable".into(),
+            Self::Timeout => "Home Node did not respond in time".into(),
+            Self::HttpStatus(status @ (401 | 403)) => {
+                format!("Home Node refused the session (HTTP {status}); sign in again")
+            }
+            Self::HttpStatus(status) => format!("Home Node update service answered HTTP {status}"),
+            Self::CapabilityUnsupported => "This Home Node does not offer app updates".into(),
+            Self::CapabilityInvalid => "Home Node sent an invalid update capability".into(),
+            Self::NoRelease => {
+                "Home Node refused the check or has no release for this device".into()
+            }
+            Self::ManifestInvalid => "Home Node sent an invalid update manifest".into(),
+            Self::SignatureInvalid => "Update signature is invalid; nothing was installed".into(),
+            Self::DownloadRefused => "Home Node refused the update download".into(),
+            Self::Other => "Update failed".into(),
+        }
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -70,6 +151,7 @@ fn status(app: &AppHandle, state: UpdateState) -> UpdateStatus {
         current_version: app.package_info().version.to_string(),
         version: None,
         notes: None,
+        checked_at: None,
     }
 }
 
@@ -77,6 +159,18 @@ fn status_with_notes(app: &AppHandle, state: UpdateState, notes: String) -> Upda
     let mut result = status(app, state);
     result.notes = Some(notes);
     result
+}
+
+fn unavailable(app: &AppHandle, failure: UpdateFailure) -> UpdateStatus {
+    status_with_notes(app, UpdateState::Unavailable, failure.message())
+}
+
+fn transport_failure(error: &reqwest::Error) -> UpdateFailure {
+    UpdateFailure::transport(
+        error.is_timeout(),
+        error.is_decode(),
+        error.status().map(|status| status.as_u16()),
+    )
 }
 
 fn origin_and_token(app: &AppHandle) -> Result<(String, String), UpdateStatus> {
@@ -161,35 +255,28 @@ async fn discover_endpoint(
         .bearer_auth(token)
         .send()
         .await
-        .map_err(|_| {
-            status_with_notes(
-                app,
-                UpdateState::Unavailable,
-                "Update service unreachable".into(),
-            )
-        })?;
+        .map_err(|error| unavailable(app, transport_failure(&error)))?;
     if !response.status().is_success() {
-        return Err(status_with_notes(
+        return Err(unavailable(
             app,
-            UpdateState::Unavailable,
-            "Update service unavailable".into(),
+            UpdateFailure::capability_status(response.status().as_u16()),
         ));
     }
+    let invalid = || unavailable(app, UpdateFailure::CapabilityInvalid);
     if response
         .content_length()
         .is_some_and(|size| size > MAX_CAPABILITY_BYTES as u64)
     {
-        return Err(status(app, UpdateState::Unsupported));
+        return Err(invalid());
     }
     let bytes = response
         .bytes()
         .await
-        .map_err(|_| status(app, UpdateState::Unsupported))?;
+        .map_err(|error| unavailable(app, transport_failure(&error)))?;
     if bytes.len() > MAX_CAPABILITY_BYTES {
-        return Err(status(app, UpdateState::Unsupported));
+        return Err(invalid());
     }
-    let capability: UpdateCapability =
-        serde_json::from_slice(&bytes).map_err(|_| status(app, UpdateState::Unsupported))?;
+    let capability: UpdateCapability = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
     match validate_capability(capability, origin, cfg!(debug_assertions)) {
         Ok(endpoint) => Ok(endpoint),
         Err("release requires a newer updater protocol") => Err(status_with_notes(
@@ -200,7 +287,7 @@ async fn discover_endpoint(
                 CURRENT_DESKTOP_UPDATE_PROTOCOL
             ),
         )),
-        Err(_) => Err(status(app, UpdateState::Unsupported)),
+        Err(_) => Err(invalid()),
     }
 }
 
@@ -282,6 +369,7 @@ fn update_status(update: &Update, state: UpdateState) -> UpdateStatus {
         current_version: update.current_version.clone(),
         version: Some(update.version.clone()),
         notes: update.body.clone(),
+        checked_at: None,
     }
 }
 
@@ -320,7 +408,7 @@ pub(crate) fn forget(app: &AppHandle) {
     notify(app, &stored(app));
 }
 
-async fn find_update(app: &AppHandle) -> Result<(UpdateStatus, Option<Update>), String> {
+async fn find_update(app: &AppHandle) -> Result<(UpdateStatus, Option<Update>), UpdateFailure> {
     let (origin, token) = match origin_and_token(app) {
         Ok(values) => values,
         Err(state) => return Ok((state, None)),
@@ -329,42 +417,43 @@ async fn find_update(app: &AppHandle) -> Result<(UpdateStatus, Option<Update>), 
         Ok(endpoint) => endpoint,
         Err(state) => return Ok((state, None)),
     };
-    let endpoint =
-        url::Url::parse(&endpoint).map_err(|_| "stored update endpoint is invalid".to_string())?;
+    let endpoint = url::Url::parse(&endpoint).map_err(|_| UpdateFailure::CapabilityInvalid)?;
     let updater = app
         .updater_builder()
         .endpoints(vec![endpoint])
-        .map_err(|_| "update configuration failed".to_string())?
+        .map_err(|_| UpdateFailure::CapabilityInvalid)?
         .header("Authorization", format!("Bearer {token}"))
-        .map_err(|_| "update authentication failed".to_string())?
+        .map_err(|_| UpdateFailure::Other)?
         // Home Node update routes do not redirect. Refusing all redirects
         // keeps the native bearer credential pinned to the enrolled origin.
         .configure_client(|client| client.redirect(reqwest::redirect::Policy::none()))
         .timeout(Duration::from_secs(30))
         .build()
-        .map_err(|_| "update service is unavailable".to_string())?;
+        .map_err(|_| UpdateFailure::Other)?;
     let update = updater
         .check()
         .await
-        .map_err(|_| "update check failed".to_string())?;
+        .map_err(|error| UpdateFailure::from_updater(&error))?;
     let Some(update) = update else {
         return Ok((status(app, UpdateState::UpToDate), None));
     };
     let download_origin = update.download_url.origin().ascii_serialization();
-    let download_origin = normalize_home_node_origin(&download_origin, cfg!(debug_assertions))
-        .map_err(|_| "update download endpoint is insecure".to_string())?;
+    let foreign = || {
+        status_with_notes(
+            app,
+            UpdateState::Unavailable,
+            "Update download address does not belong to the paired Home Node".into(),
+        )
+    };
+    let Ok(download_origin) = normalize_home_node_origin(&download_origin, cfg!(debug_assertions))
+    else {
+        return Ok((foreign(), None));
+    };
     if download_origin != origin
         || !update.download_url.username().is_empty()
         || update.download_url.password().is_some()
     {
-        return Ok((
-            status_with_notes(
-                app,
-                UpdateState::Unsupported,
-                "Update download address does not belong to the paired Home Node".into(),
-            ),
-            None,
-        ));
+        return Ok((foreign(), None));
     }
     Ok((update_status(&update, UpdateState::Available), Some(update)))
 }
@@ -388,14 +477,18 @@ pub(crate) async fn check(app: &AppHandle) -> Result<UpdateStatus, String> {
         inner.generation
     };
     notify(app, &checking);
+    let checked_at = Some(time::OffsetDateTime::now_utc().unix_timestamp());
     match find_update(app).await {
-        Ok((next, pending)) => {
+        Ok((mut next, pending)) => {
+            next.checked_at = checked_at;
             finish(app, generation, next.clone(), pending)?;
             Ok(next)
         }
-        Err(error) => {
-            finish(app, generation, status(app, UpdateState::Error), None)?;
-            Err(error)
+        Err(failure) => {
+            let mut next = status_with_notes(app, UpdateState::Error, failure.message());
+            next.checked_at = checked_at;
+            finish(app, generation, next, None)?;
+            Err(failure.message())
         }
     }
 }
@@ -437,9 +530,18 @@ pub(crate) async fn install(
             || on_event(DownloadEvent::Finished),
         )
         .await;
-    let Ok(bytes) = downloaded else {
-        finish(app, generation, status(app, UpdateState::Error), None)?;
-        return Err("update download or signature verification failed".into());
+    let bytes = match downloaded {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            let message = UpdateFailure::from_updater(&error).message();
+            finish(
+                app,
+                generation,
+                status_with_notes(app, UpdateState::Error, message.clone()),
+                None,
+            )?;
+            return Err(message);
+        }
     };
     let ready = update_status(&update, UpdateState::ReadyToRestart);
     {
@@ -572,6 +674,7 @@ mod tests {
             current_version: "1.0.0".to_string(),
             version: Some("1.1.0".to_string()),
             notes: Some("notes".to_string()),
+            checked_at: Some(1),
         })
         .unwrap();
         assert!(!encoded.contains("token"));
@@ -586,6 +689,7 @@ mod tests {
             current_version: "1.0.0".into(),
             version: Some("1.1.0".into()),
             notes: None,
+            checked_at: None,
         };
         let mut inner = Inner::default();
         let started = inner.generation;
@@ -678,6 +782,64 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn failures_map_to_typed_causes_not_one_unreachable() {
+        use tauri_plugin_updater::Error as E;
+        use UpdateFailure as F;
+        assert_eq!(F::transport(true, false, None), F::Timeout);
+        assert_eq!(F::transport(false, false, Some(502)), F::HttpStatus(502));
+        assert_eq!(F::transport(false, true, None), F::ManifestInvalid);
+        assert_eq!(F::transport(false, false, None), F::Unreachable);
+        assert_eq!(F::capability_status(404), F::CapabilityUnsupported);
+        assert_eq!(F::capability_status(503), F::HttpStatus(503));
+        let json = serde_json::from_str::<u8>("x").unwrap_err();
+        for (error, cause) in [
+            (E::ReleaseNotFound, F::NoRelease),
+            (E::Serialization(json), F::ManifestInvalid),
+            (E::TargetNotFound("linux-x86_64".into()), F::ManifestInvalid),
+            (
+                E::Minisign(minisign_verify::Error::InvalidSignature),
+                F::SignatureInvalid,
+            ),
+            (E::SignatureUtf8("x".into()), F::SignatureInvalid),
+            (E::Network("status: 404".into()), F::DownloadRefused),
+            (E::EmptyEndpoints, F::Other),
+        ] {
+            assert_eq!(F::from_updater(&error), cause);
+        }
+    }
+
+    #[test]
+    fn failure_copy_is_fixed_and_distinct() {
+        use UpdateFailure as F;
+        let all = [
+            F::Unreachable,
+            F::Timeout,
+            F::HttpStatus(401),
+            F::HttpStatus(503),
+            F::CapabilityUnsupported,
+            F::CapabilityInvalid,
+            F::NoRelease,
+            F::ManifestInvalid,
+            F::SignatureInvalid,
+            F::DownloadRefused,
+            F::Other,
+        ];
+        let messages: std::collections::BTreeSet<_> = all.iter().map(|f| f.message()).collect();
+        assert_eq!(messages.len(), all.len());
+        assert_eq!(
+            F::HttpStatus(503).message(),
+            "Home Node update service answered HTTP 503"
+        );
+        assert!(F::HttpStatus(401).message().contains("sign in again"));
+        // An invalid capability must never read as a build without updates.
+        for failure in all {
+            let message = failure.message().to_lowercase();
+            assert!(!message.contains("this build") && !message.contains("token"));
+        }
+        assert!(!F::CapabilityInvalid.message().contains("unreachable"));
     }
 
     #[test]

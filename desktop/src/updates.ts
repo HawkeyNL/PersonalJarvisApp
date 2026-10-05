@@ -4,6 +4,7 @@ import { computed, ref, watch } from "vue";
 import {
   AUTOMATIC_UPDATE_DELAY_MS,
   shouldScheduleAutomaticUpdateCheck,
+  updateErrorMessage,
   updateSessionActive,
 } from "./updatePolicy.js";
 
@@ -26,6 +27,7 @@ type NativeUpdateStatus = {
   current_version: string;
   version: string | null;
   notes: string | null;
+  checked_at: number | null;
 };
 
 type DownloadEvent =
@@ -41,6 +43,8 @@ export const availableAppVersion = ref<string | null>(null);
 export const updateNotes = ref<string | null>(null);
 export const updateError = ref<string | null>(null);
 export const updateProgress = ref<number | null>(null);
+/** Unix seconds of the last completed Home Node check, if any. */
+export const lastUpdateCheck = ref<number | null>(null);
 
 export const updateBusy = computed(() =>
   ["checking", "downloading", "installing"].includes(updateState.value),
@@ -51,6 +55,7 @@ function apply(status: NativeUpdateStatus) {
   currentAppVersion.value = status.current_version;
   availableAppVersion.value = status.version;
   updateNotes.value = status.notes;
+  if (status.checked_at !== null) lastUpdateCheck.value = status.checked_at;
 }
 
 export async function loadUpdateStatus(): Promise<void> {
@@ -67,9 +72,9 @@ export async function checkForUpdate(): Promise<void> {
   updateProgress.value = null;
   try {
     apply(await invoke<NativeUpdateStatus>("app_update_check"));
-  } catch {
+  } catch (error) {
     updateState.value = "error";
-    updateError.value = "The private update service is unreachable right now. Jarvis keeps working as usual.";
+    updateError.value = `${updateErrorMessage(error, "The update check failed")}. Jarvis keeps working as usual.`;
   }
 }
 
@@ -93,9 +98,9 @@ export async function installAvailableUpdate(): Promise<void> {
   };
   try {
     apply(await invoke<NativeUpdateStatus>("app_update_install", { onEvent }));
-  } catch {
+  } catch (error) {
     updateState.value = "error";
-    updateError.value = "Download, signature check or installation failed. The current version is unchanged.";
+    updateError.value = `${updateErrorMessage(error, "Download, signature check or installation failed")}. The current version is unchanged.`;
   }
 }
 
@@ -119,7 +124,7 @@ export function startUpdateSync(activity: { reply: () => boolean; voiceCheck: ()
     apply(event.payload);
     updateError.value =
       event.payload.state === "error"
-        ? (updateError.value ?? "The update failed. The current version is unchanged.")
+        ? (updateError.value ?? `${event.payload.notes ?? "The update failed"}. The current version is unchanged.`)
         : null;
   }).catch(() => {});
   const speech = ref<unknown>("idle");

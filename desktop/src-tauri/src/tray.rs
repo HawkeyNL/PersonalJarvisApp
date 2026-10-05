@@ -37,7 +37,7 @@ pub(crate) fn view(current: &UpdateStatus, session_active: bool) -> TrayView {
     let status = match current.state {
         UpdateState::Ready => "Updates: not checked yet".to_string(),
         UpdateState::Checking => "Checking for updates…".to_string(),
-        UpdateState::UpToDate => "Up to date".to_string(),
+        UpdateState::UpToDate => "Up to date per Home Node".to_string(),
         UpdateState::Available => format!("Update available: v{version}"),
         UpdateState::Downloading => format!("Downloading v{version}…"),
         UpdateState::ReadyToRestart if session_active => {
@@ -48,8 +48,17 @@ pub(crate) fn view(current: &UpdateStatus, session_active: bool) -> TrayView {
         UpdateState::Unauthenticated => "Updates: sign in to check".to_string(),
         UpdateState::Unsupported => "Updates not available in this build".to_string(),
         UpdateState::Incompatible => "Update needs a newer app".to_string(),
-        UpdateState::Unavailable => "Update service unreachable".to_string(),
-        UpdateState::Error => "Update failed".to_string(),
+        UpdateState::Unavailable | UpdateState::Error => format!(
+            "Updates: {}",
+            current
+                .notes
+                .as_deref()
+                .unwrap_or(if current.state == UpdateState::Error {
+                    "update failed"
+                } else {
+                    "service unavailable"
+                })
+        ),
     };
     let (install_label, install_enabled) = match (current.state, session_active) {
         (UpdateState::Available, true) => ("Install update (restart when idle)", true),
@@ -216,14 +225,15 @@ mod tests {
             current_version: "0.1.16".into(),
             version: version.map(Into::into),
             notes: None,
+            checked_at: None,
         }
     }
 
     #[test]
     fn up_to_date_offers_only_a_check() {
         let view = view(&status(UpdateState::UpToDate, None), false);
-        assert_eq!(view.status, "Up to date");
-        assert_eq!(view.tooltip, "Jarvis v0.1.16 — Up to date");
+        assert_eq!(view.status, "Up to date per Home Node");
+        assert_eq!(view.tooltip, "Jarvis v0.1.16 — Up to date per Home Node");
         assert!(view.check_enabled);
         assert!(!view.install_enabled);
         assert!(!view.attention);
@@ -264,8 +274,14 @@ mod tests {
         let unsupported = view(&status(UpdateState::Unsupported, None), false);
         assert!(!unsupported.check_enabled && !unsupported.install_enabled);
         let failed = view(&status(UpdateState::Error, None), false);
-        assert_eq!(failed.status, "Update failed");
+        assert_eq!(failed.status, "Updates: update failed");
         assert!(failed.check_enabled && !failed.install_enabled);
+        let mut unreachable = status(UpdateState::Error, None);
+        unreachable.notes = Some("Home Node unreachable".into());
+        assert_eq!(
+            view(&unreachable, false).status,
+            "Updates: Home Node unreachable"
+        );
     }
 
     #[test]

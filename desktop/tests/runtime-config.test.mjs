@@ -5,8 +5,17 @@ import test from "node:test";
 import {
   AUTOMATIC_UPDATE_DELAY_MS,
   shouldScheduleAutomaticUpdateCheck,
+  updateErrorMessage,
   updateSessionActive,
 } from "../src/updatePolicy.js";
+
+test("update errors show the native typed cause instead of a blanket 'unreachable'", () => {
+  assert.equal(updateErrorMessage("Home Node sent an invalid update capability", "fallback"), "Home Node sent an invalid update capability");
+  assert.equal(updateErrorMessage("Home Node did not respond in time", "fallback"), "Home Node did not respond in time");
+  for (const odd of [undefined, null, "", "   ", new Error("x"), { message: "x" }, "x".repeat(201)]) {
+    assert.equal(updateErrorMessage(odd, "fallback"), "fallback");
+  }
+});
 
 test("automatic update restart waits for reply, speech, mic, draft and voice checks", () => {
   const idle = { reply: false, console: false, speech: "idle", voiceCheck: false };
