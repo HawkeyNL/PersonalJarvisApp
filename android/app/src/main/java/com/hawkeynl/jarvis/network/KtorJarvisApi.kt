@@ -66,6 +66,20 @@ class KtorJarvisApi(
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { ApiResult.InvalidResponse("Modelbediening niet bereikbaar of ongeldig antwoord") }
     }
+    override suspend fun getAuthorized(endpoint: HomeNodeEndpoint, token: String, path: String): ApiResult<kotlinx.serialization.json.JsonElement> {
+        if (!OWNER_PATH.matches(path)) return ApiResult.InvalidResponse("Invalid Core path")
+        return request<kotlinx.serialization.json.JsonElement> { client.get(endpoint.url(path)) { bearerAuth(token) } }
+    }
+
+    override suspend fun postAuthorized(endpoint: HomeNodeEndpoint, token: String, path: String, body: kotlinx.serialization.json.JsonObject): ApiResult<Unit> {
+        if (!OWNER_PATH.matches(path)) return ApiResult.InvalidResponse("Invalid Core path")
+        return request<Unit> {
+            client.post(endpoint.url(path)) {
+                bearerAuth(token); contentType(ContentType.Application.Json); setBody(body)
+            }
+        }
+    }
+
     override suspend fun accountStatus(endpoint: HomeNodeEndpoint) = request<AccountStatus> {
         client.get(endpoint.url("/v1/auth/account/status"))
     }
@@ -271,6 +285,8 @@ class KtorJarvisApi(
     }
 
     companion object {
+        // Fixed owner routes only: no query, no dot segments, no foreign origin.
+        private val OWNER_PATH = Regex("/v1/[A-Za-z0-9_/-]+")
         private val ANDROID_APK_CONTENT_TYPE = ContentType("application", "vnd.android.package-archive")
 
         private fun defaultHttpClient() = HttpClient(Android) {
