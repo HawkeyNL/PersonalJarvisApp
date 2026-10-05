@@ -48,7 +48,7 @@ class KtorJarvisApi(
     private suspend inline fun <reified T> boundedModelRequest(crossinline block: suspend () -> io.ktor.client.statement.HttpResponse): ApiResult<T> {
         return try {
             val response = block()
-            if (response.status.value !in 200..299) return ApiResult.HttpError(response.status.value, "Modelwijziging niet bevestigd; ververs de status.")
+            if (response.status.value !in 200..299) return ApiResult.HttpError(response.status.value, "Model change not confirmed; refresh the status.")
             val raw = withContext(Dispatchers.IO) {
                 response.bodyAsChannel().toInputStream().use { input ->
                     val output = java.io.ByteArrayOutputStream()
@@ -64,7 +64,7 @@ class KtorJarvisApi(
             }
             ApiResult.Success(Json { ignoreUnknownKeys = true }.decodeFromString<T>(raw.decodeToString()))
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { ApiResult.InvalidResponse("Modelbediening niet bereikbaar of ongeldig antwoord") }
+        catch (_: Exception) { ApiResult.InvalidResponse("Model control unreachable or invalid response") }
     }
     override suspend fun getAuthorized(endpoint: HomeNodeEndpoint, token: String, path: String): ApiResult<kotlinx.serialization.json.JsonElement> {
         if (!OWNER_PATH.matches(path)) return ApiResult.InvalidResponse("Invalid Core path")
@@ -205,11 +205,11 @@ class KtorJarvisApi(
                     ApiResult.HttpError(response.status.value, error?.hint ?: error?.error)
                 }
                 response.contentType()?.withoutParameters() != ANDROID_APK_CONTENT_TYPE ->
-                    ApiResult.InvalidResponse("Home Node stuurde geen Android APK")
+                    ApiResult.InvalidResponse("Home Node did not send an Android APK")
                 response.headers[HttpHeaders.ContentLength]
                     ?.toLongOrNull()
                     ?.let { it != expectedSize } == true ->
-                    ApiResult.InvalidResponse("Home Node stuurde een APK met een onverwachte grootte")
+                    ApiResult.InvalidResponse("Home Node sent an APK of unexpected size")
                 else -> {
                     val exactSize = withContext(Dispatchers.IO) {
                         var written = 0L
@@ -229,7 +229,7 @@ class KtorJarvisApi(
                     }
                     if (!exactSize) {
                         destination.delete()
-                        ApiResult.InvalidResponse("APK-download heeft niet de verwachte grootte")
+                        ApiResult.InvalidResponse("APK download is not the expected size")
                     } else {
                         ApiResult.Success(Unit)
                     }
@@ -278,7 +278,7 @@ class KtorJarvisApi(
         } catch (_: ConnectException) {
             ApiResult.Unreachable(UnreachableReason.REFUSED)
         } catch (error: SerializationException) {
-            ApiResult.InvalidResponse(error.message ?: "Ongeldig antwoord van Home Node")
+            ApiResult.InvalidResponse(error.message ?: "Invalid response from Home Node")
         } catch (_: Exception) {
             ApiResult.Unreachable(UnreachableReason.NETWORK)
         }
@@ -317,7 +317,7 @@ class KtorJarvisApi(
         is SSLException -> ApiResult.Unreachable(UnreachableReason.TLS)
         is ConnectException -> ApiResult.Unreachable(UnreachableReason.REFUSED)
         is SerializationException -> ApiResult.InvalidResponse(
-            error.message ?: "Ongeldig antwoord van Home Node",
+            error.message ?: "Invalid response from Home Node",
         )
         else -> ApiResult.Unreachable(UnreachableReason.NETWORK)
     }

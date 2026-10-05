@@ -8,24 +8,24 @@ value class HomeNodeEndpoint private constructor(val baseUrl: String) {
     companion object {
         fun parse(raw: String, allowInsecureLocal: Boolean = BuildConfig.DEBUG): EndpointValidation {
             val input = raw.trim().trimEnd('/')
-            if (input.isEmpty()) return EndpointValidation.Invalid("Voer het adres van je Home Node in.")
+            if (input.isEmpty()) return EndpointValidation.Invalid("Enter your Home Node address.")
 
             val uri = runCatching { URI(input) }.getOrNull()
-                ?: return EndpointValidation.Invalid("Dit is geen geldig webadres.")
+                ?: return EndpointValidation.Invalid("This is not a valid web address.")
             val scheme = uri.scheme?.lowercase()
             if (scheme != "https" && scheme != "http") {
-                return EndpointValidation.Invalid("Gebruik https://, of http:// voor een lokaal netwerk.")
+                return EndpointValidation.Invalid("Use https://, or http:// for a local network.")
             }
             val host = uri.host
-                ?: return EndpointValidation.Invalid("Het Home Node-adres mist een hostnaam.")
+                ?: return EndpointValidation.Invalid("The Home Node address is missing a hostname.")
             if (host.isBlank() || uri.userInfo != null || uri.query != null || uri.fragment != null) {
-                return EndpointValidation.Invalid("Gebruik alleen een Home Node-adres, zonder login, query of fragment.")
+                return EndpointValidation.Invalid("Use only a Home Node address, without credentials, query or fragment.")
             }
             if (uri.path.orEmpty().let { it.isNotEmpty() && it != "/" }) {
-                return EndpointValidation.Invalid("Het Home Node-adres mag geen pad bevatten.")
+                return EndpointValidation.Invalid("The Home Node address must not contain a path.")
             }
             if (scheme == "http" && (!allowInsecureLocal || !isLocalHost(host))) {
-                return EndpointValidation.Invalid("HTTP is alleen toegestaan voor lokale Home Nodes in een debug-build.")
+                return EndpointValidation.Invalid("HTTP is only allowed for local Home Nodes in a debug build.")
             }
             val displayHost = if (host.contains(':')) "[$host]" else host
             val authority = if (uri.port == -1) displayHost else "$displayHost:${uri.port}"

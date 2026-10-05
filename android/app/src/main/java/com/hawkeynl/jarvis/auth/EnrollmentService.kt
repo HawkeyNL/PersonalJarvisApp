@@ -85,7 +85,7 @@ class EnrollmentService(
 
     suspend fun poll(endpoint: HomeNodeEndpoint): EnrollmentOutcome {
         val ticket = sessions.pairingTicket()
-            ?: return EnrollmentOutcome.InvalidResponse("Geen openstaand koppelverzoek.")
+            ?: return EnrollmentOutcome.InvalidResponse("No pending pairing request.")
         return poll(endpoint, ticket)
     }
 
@@ -115,7 +115,7 @@ class EnrollmentService(
                 "pending" -> EnrollmentOutcome.Pending(ticket)
                 "approved" -> {
                     val deviceId = result.value.device_id
-                        ?: return EnrollmentOutcome.InvalidResponse("Goedgekeurd verzoek mist device_id.")
+                        ?: return EnrollmentOutcome.InvalidResponse("Approved request is missing device_id.")
                     sessions.saveDeviceId(deviceId)
                     sessions.clearPairingTicket()
                     login(endpoint, deviceId)
@@ -142,14 +142,14 @@ class EnrollmentService(
         val challenge = when (val result = api.challenge(endpoint, ChallengeRequest(deviceId))) {
             is ApiResult.Success -> result.value
             ApiResult.Unauthorized -> return EnrollmentOutcome.Rejected(401,
-                "Apparaatchallenge geweigerd. Controleer in Core Admin of dit apparaat nog goedgekeurd is; opnieuw koppelen vereist expliciete goedkeuring.")
+                "Device challenge refused. Check in Core Admin whether this device is still approved; pairing again requires explicit approval.")
             else -> return result.toEnrollmentFailure()
         }
         if (challenge.nonce.length != 64) {
-            return EnrollmentOutcome.InvalidResponse("Loginchallenge heeft een ongeldige nonce.")
+            return EnrollmentOutcome.InvalidResponse("Login challenge has an invalid nonce.")
         }
         val signature = runCatching { identity.signHex(challenge.nonce) }
-            .getOrElse { return EnrollmentOutcome.InvalidResponse("Device-identiteit kan niet ondertekenen.") }
+            .getOrElse { return EnrollmentOutcome.InvalidResponse("Device identity cannot sign.") }
         return when (val result = api.login(
             endpoint,
             LoginRequest(deviceId, challenge.challenge_id, signature, password),
@@ -159,7 +159,7 @@ class EnrollmentService(
                 EnrollmentOutcome.Authenticated(result.value.expires_at)
             }
             ApiResult.Unauthorized -> EnrollmentOutcome.Rejected(401,
-                "Wachtwoord/apparaathandtekening geweigerd. Controleer je wachtwoord en oorspronkelijke apparaatidentiteit. Er zijn geen instellingen of sleutels gewist.")
+                "Password/device signature refused. Check your password and original device identity. No settings or keys were erased.")
             else -> result.toEnrollmentFailure()
         }
     }

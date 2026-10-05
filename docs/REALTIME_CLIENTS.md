@@ -139,7 +139,7 @@ utterance text enters callback metadata or SwiftUI state. XCTest covers request
 shape, invalid origins, drainage, stale cancellation and the metadata bound.
 These Swift changes still require macOS compilation/tests and live-device audio
 validation; neither was run on the Linux development host.
-Desktop's separate **Stop spraak** button clears the current native speech
+Desktop's separate **Stop speech** button clears the current native speech
 buffer and cancels queued playback without changing its saved enable preference,
 disconnecting realtime, or cancelling inference. Late deltas do not resume that
 utterance; a later assistant run may speak. Desktop stop/mute also releases the

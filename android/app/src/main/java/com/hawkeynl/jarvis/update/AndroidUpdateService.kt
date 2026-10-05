@@ -45,7 +45,7 @@ class AndroidUpdateService(
     suspend fun check(endpoint: HomeNodeEndpoint): AndroidUpdateCheck {
         val token = sessions.session().token ?: return AndroidUpdateCheck.Unauthorized
         val installedSigner = installedSigningCertificateSha256()
-            ?: return AndroidUpdateCheck.Failed("De ondertekening van de geïnstalleerde Jarvis-app kan niet worden gelezen.")
+            ?: return AndroidUpdateCheck.Failed("The signature of the installed Jarvis app cannot be read.")
         return when (val result = api.androidUpdate(
             endpoint,
             token,
@@ -64,10 +64,10 @@ class AndroidUpdateService(
             }
             ApiResult.Unauthorized -> AndroidUpdateCheck.Unauthorized
             is ApiResult.HttpError -> AndroidUpdateCheck.Failed(
-                result.message ?: "Home Node weigerde de Android-updatecontrole (${result.status}).",
+                result.message ?: "Home Node refused the Android update check (${result.status}).",
             )
             is ApiResult.InvalidResponse -> AndroidUpdateCheck.Failed(result.message)
-            is ApiResult.Unreachable -> AndroidUpdateCheck.Failed("Home Node is niet bereikbaar voor updates.")
+            is ApiResult.Unreachable -> AndroidUpdateCheck.Failed("Home Node is unreachable for updates.")
         }
     }
 
@@ -93,7 +93,7 @@ class AndroidUpdateService(
                     AndroidUpdateDownload.Failed(error)
                 } else if ((verified.exists() && !verified.delete()) || !temporary.renameTo(verified)) {
                     temporary.delete()
-                    AndroidUpdateDownload.Failed("De geverifieerde APK kon niet worden klaargezet.")
+                    AndroidUpdateDownload.Failed("The verified APK could not be prepared.")
                 } else {
                     pending = PendingApk(verified)
                     AndroidUpdateDownload.Ready(metadata.version_name)
@@ -101,15 +101,15 @@ class AndroidUpdateService(
             }
             ApiResult.Unauthorized -> AndroidUpdateDownload.Unauthorized
             is ApiResult.HttpError -> AndroidUpdateDownload.Failed(
-                result.message ?: "Home Node weigerde de APK-download (${result.status}).",
+                result.message ?: "Home Node refused the APK download (${result.status}).",
             )
             is ApiResult.InvalidResponse -> AndroidUpdateDownload.Failed(result.message)
-            is ApiResult.Unreachable -> AndroidUpdateDownload.Failed("APK-download onderbroken: Home Node is niet bereikbaar.")
+            is ApiResult.Unreachable -> AndroidUpdateDownload.Failed("APK download interrupted: Home Node is unreachable.")
         }
     }
 
     fun handOffToPackageInstaller(activity: Activity): InstallerHandoff {
-        val update = pending ?: return InstallerHandoff.Failed("Download en controleer eerst de update.")
+        val update = pending ?: return InstallerHandoff.Failed("Download and verify the update first.")
         if (!application.packageManager.canRequestPackageInstalls()) {
             return try {
                 activity.startActivity(
@@ -120,7 +120,7 @@ class AndroidUpdateService(
                 )
                 InstallerHandoff.PermissionRequired
             } catch (_: RuntimeException) {
-                InstallerHandoff.Failed("Android kon de installatietoestemming niet openen.")
+                InstallerHandoff.Failed("Android could not open the install permission screen.")
             }
         }
         return try {
@@ -137,32 +137,32 @@ class AndroidUpdateService(
             )
             InstallerHandoff.Started
         } catch (_: RuntimeException) {
-            InstallerHandoff.Failed("Android kon het pakketinstallatiescherm niet openen.")
+            InstallerHandoff.Failed("Android could not open the package installer screen.")
         }
     }
 
     private fun verifyDownloadedApk(file: File, metadata: AndroidUpdateMetadata): String? {
         if (!file.isFile || file.length() != metadata.artifact.size) {
-            return "De APK-download is onvolledig."
+            return "The APK download is incomplete."
         }
         if (file.sha256() != metadata.artifact.sha256) {
-            return "De APK-controlehash komt niet overeen."
+            return "The APK checksum does not match."
         }
         val info = application.packageManager.getPackageArchiveInfo(
             file.absolutePath,
             android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES,
-        ) ?: return "Android herkent het gedownloade bestand niet als APK."
+        ) ?: return "Android does not recognise the downloaded file as an APK."
         if (info.packageName != JARVIS_ANDROID_PACKAGE || info.longVersionCode != metadata.version_code.toLong() ||
             info.versionName != metadata.version_name
         ) {
-            return "APK-pakket of versie komt niet overeen met de updatemetadata."
+            return "APK package or version does not match the update metadata."
         }
         val archiveSigner = info.signingInfo?.apkContentsSigners?.singleOrNull()?.toByteArray()?.sha256()
-            ?: return "De APK heeft geen eenduidige ondertekeningsidentiteit."
+            ?: return "The APK has no unambiguous signing identity."
         val installedSigner = installedSigningCertificateSha256()
-            ?: return "De geïnstalleerde ondertekeningsidentiteit is niet beschikbaar."
+            ?: return "The installed signing identity is unavailable."
         if (archiveSigner != installedSigner || archiveSigner != metadata.artifact.signing_certificate_sha256) {
-            return "APK-ondertekening komt niet overeen met de geïnstalleerde Jarvis-app."
+            return "APK signature does not match the installed Jarvis app."
         }
         return null
     }

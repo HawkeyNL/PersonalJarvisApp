@@ -54,7 +54,7 @@ export async function approve(req: UnlockReq): Promise<void> {
     if (!status.authenticated) throw new Error("not signed in");
     // Verify locally on the phone: biometrics, falling back to the passcode.
     await invoke("biometric_unlock", {
-      reason: `${req.device_name} ontgrendelen`,
+      reason: `Unlock ${req.device_name}`,
       allowPassword: true,
     });
     // Prove it with the device key by signing the request nonce.

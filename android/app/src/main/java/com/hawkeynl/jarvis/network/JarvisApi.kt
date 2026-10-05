@@ -4,9 +4,9 @@ import java.io.File
 
 interface JarvisApi {
     suspend fun modelPolicy(endpoint: HomeNodeEndpoint, token: String): ApiResult<com.hawkeynl.jarvis.security.ModelPolicySnapshot> =
-        ApiResult.InvalidResponse("Modelbediening niet beschikbaar")
+        ApiResult.InvalidResponse("Model control unavailable")
     suspend fun modelToggle(endpoint: HomeNodeEndpoint, token: String, body: kotlinx.serialization.json.JsonObject): ApiResult<kotlinx.serialization.json.JsonObject> =
-        ApiResult.InvalidResponse("Modelbediening niet beschikbaar")
+        ApiResult.InvalidResponse("Model control unavailable")
     /** Authenticated GET of an owner route under /v1/; the caller decodes the JSON. */
     suspend fun getAuthorized(endpoint: HomeNodeEndpoint, token: String, path: String): ApiResult<kotlinx.serialization.json.JsonElement> =
         ApiResult.InvalidResponse("Not supported")
