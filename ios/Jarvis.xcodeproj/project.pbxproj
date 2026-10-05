@@ -6,6 +6,17 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        A00000000000000000000050 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000050 /* Theme.swift */; };
+        A00000000000000000000051 /* JarvisComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000051 /* JarvisComponents.swift */; };
+        A00000000000000000000052 /* HubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000052 /* HubView.swift */; };
+        A00000000000000000000053 /* NodePages.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000053 /* NodePages.swift */; };
+        A00000000000000000000054 /* HubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000054 /* HubModel.swift */; };
+        A00000000000000000000060 /* Exo2-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000060 /* Exo2-Variable.ttf */; };
+        A00000000000000000000061 /* Exo2-Italic-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000061 /* Exo2-Italic-Variable.ttf */; };
+        A00000000000000000000062 /* Rajdhani-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000062 /* Rajdhani-Medium.ttf */; };
+        A00000000000000000000063 /* Rajdhani-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000063 /* Rajdhani-SemiBold.ttf */; };
+        A00000000000000000000064 /* OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000064 /* OFL.txt */; };
+        A00000000000000000000055 /* HubModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000055 /* HubModelTests.swift */; };
         A00000000000000000000042 /* ModelAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000042; };
         A00000000000000000000043 /* ModelAuthorizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000043; };
         A00000000000000000000040 /* ModelControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000040; };
@@ -45,6 +56,17 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+        B00000000000000000000050 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Theme.swift; sourceTree = "<group>"; };
+        B00000000000000000000051 /* JarvisComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/JarvisComponents.swift; sourceTree = "<group>"; };
+        B00000000000000000000052 /* HubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/HubView.swift; sourceTree = "<group>"; };
+        B00000000000000000000053 /* NodePages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NodePages.swift; sourceTree = "<group>"; };
+        B00000000000000000000054 /* HubModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/HubModel.swift; sourceTree = "<group>"; };
+        B00000000000000000000060 /* Exo2-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/Exo2-Variable.ttf; sourceTree = "<group>"; };
+        B00000000000000000000061 /* Exo2-Italic-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/Exo2-Italic-Variable.ttf; sourceTree = "<group>"; };
+        B00000000000000000000062 /* Rajdhani-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/Rajdhani-Medium.ttf; sourceTree = "<group>"; };
+        B00000000000000000000063 /* Rajdhani-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/Rajdhani-SemiBold.ttf; sourceTree = "<group>"; };
+        B00000000000000000000064 /* OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = Fonts/OFL.txt; sourceTree = "<group>"; };
+        B00000000000000000000055 /* HubModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubModelTests.swift; sourceTree = "<group>"; };
         B00000000000000000000042 /* ModelAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/ModelAuthorization.swift; sourceTree = "<group>"; };
         B00000000000000000000043 /* ModelAuthorizationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAuthorizationTests.swift; sourceTree = "<group>"; };
         B00000000000000000000040 /* ModelControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Jarvis/Domain/ModelControl.swift; sourceTree = SOURCE_ROOT; };
@@ -115,6 +137,16 @@
 				B0000000000000000000000F /* ChatView.swift */,
 				B00000000000000000000010 /* EnrollmentView.swift */,
 				B00000000000000000000011 /* SettingsView.swift */,
+                B00000000000000000000050 /* Theme.swift */,
+                B00000000000000000000051 /* JarvisComponents.swift */,
+                B00000000000000000000052 /* HubView.swift */,
+                B00000000000000000000053 /* NodePages.swift */,
+                B00000000000000000000054 /* HubModel.swift */,
+                B00000000000000000000060 /* Exo2-Variable.ttf */,
+                B00000000000000000000061 /* Exo2-Italic-Variable.ttf */,
+                B00000000000000000000062 /* Rajdhani-Medium.ttf */,
+                B00000000000000000000063 /* Rajdhani-SemiBold.ttf */,
+                B00000000000000000000064 /* OFL.txt */,
 				B00000000000000000000012 /* Assets.xcassets */,
 				B00000000000000000000013 /* Info.plist */,
 				B00000000000000000000016 /* PrivacyInfo.xcprivacy */,
@@ -128,6 +160,7 @@
 				B00000000000000000000014 /* EndpointNormalizerTests.swift */,
                 B00000000000000000000043 /* ModelAuthorizationTests.swift */,
 				B00000000000000000000015 /* ClientDTOTests.swift */,
+                B00000000000000000000055 /* HubModelTests.swift */,
 			);
 			path = JarvisTests;
 			sourceTree = "<group>";
@@ -202,7 +235,7 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		D00000000000000000000002 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000012 /* Assets.xcassets in Resources */, A00000000000000000000015 /* PrivacyInfo.xcprivacy in Resources */); runOnlyForDeploymentPostprocessing = 0; };
+		D00000000000000000000002 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000012 /* Assets.xcassets in Resources */, A00000000000000000000015 /* PrivacyInfo.xcprivacy in Resources */, A00000000000000000000060 /* Exo2-Variable.ttf in Resources */, A00000000000000000000061 /* Exo2-Italic-Variable.ttf in Resources */, A00000000000000000000062 /* Rajdhani-Medium.ttf in Resources */, A00000000000000000000063 /* Rajdhani-SemiBold.ttf in Resources */, A00000000000000000000064 /* OFL.txt in Resources */); runOnlyForDeploymentPostprocessing = 0; };
 		D00000000000000000000005 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
@@ -232,10 +265,15 @@
 				A0000000000000000000000F /* ChatView.swift in Sources */,
 				A00000000000000000000010 /* EnrollmentView.swift in Sources */,
 				A00000000000000000000011 /* SettingsView.swift in Sources */,
+                A00000000000000000000050 /* Theme.swift in Sources */,
+                A00000000000000000000051 /* JarvisComponents.swift in Sources */,
+                A00000000000000000000052 /* HubView.swift in Sources */,
+                A00000000000000000000053 /* NodePages.swift in Sources */,
+                A00000000000000000000054 /* HubModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		D00000000000000000000003 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000013 /* EndpointNormalizerTests.swift in Sources */, A00000000000000000000014 /* ClientDTOTests.swift in Sources */, A00000000000000000000043 /* ModelAuthorizationTests.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
+		D00000000000000000000003 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000013 /* EndpointNormalizerTests.swift in Sources */, A00000000000000000000014 /* ClientDTOTests.swift in Sources */, A00000000000000000000043 /* ModelAuthorizationTests.swift in Sources */, A00000000000000000000055 /* HubModelTests.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */

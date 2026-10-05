@@ -222,6 +222,17 @@ actor JarvisAPIClient {
         try await request(path: path, method: "POST", token: token, response: response)
     }
 
+    /// POST whose response body (empty or any JSON object) is not needed.
+    func postDiscardingResponse<Body: Encodable>(
+        _ path: String,
+        body: Body,
+        token: String,
+        expectedBinding: UUID
+    ) async throws {
+        _ = try await request(path: path, method: "POST", body: body, token: token,
+                              expectedBinding: expectedBinding, response: EmptyOrJSON.self)
+    }
+
     func delete(_ path: String, token: String) async throws {
         _ = try await request(path: path, method: "DELETE", token: token, response: EmptyOrJSON.self)
     }

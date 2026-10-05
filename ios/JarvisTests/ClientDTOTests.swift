@@ -397,9 +397,9 @@ final class EnrollmentInputTests: XCTestCase {
         let accent = try XCTUnwrap(UIColor(named: "AccentColor"))
         var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
         XCTAssertTrue(accent.getRed(&red, green: &green, blue: &blue, alpha: &alpha))
-        XCTAssertEqual(red, 52 / 255.0, accuracy: 0.001)
-        XCTAssertEqual(green, 245 / 255.0, accuracy: 0.001)
-        XCTAssertEqual(blue, 160 / 255.0, accuracy: 0.001)
+        XCTAssertEqual(red, 46 / 255.0, accuracy: 0.001)
+        XCTAssertEqual(green, 230 / 255.0, accuracy: 0.001)
+        XCTAssertEqual(blue, 162 / 255.0, accuracy: 0.001)
         let icons = try XCTUnwrap(Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any])
         let primary = try XCTUnwrap(icons["CFBundlePrimaryIcon"] as? [String: Any])
         XCTAssertEqual(primary["CFBundleIconName"] as? String, "AppIcon")

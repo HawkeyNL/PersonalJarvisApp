@@ -4,24 +4,22 @@ struct SettingsView: View {
     @ObservedObject var model: JarvisAppModel
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section("Home Node") {
-                    NavigationLink { HomeNodeSettingsView(model: model) } label: { Label("Connection", systemImage: "network") }
-                    if model.isAuthenticated {
-                        NavigationLink { ResourcesSettingsView(model: model) } label: { Label("Bronnen", systemImage: "cpu") }
-                        NavigationLink { ModelsView(model: model) } label: { Label("Models", systemImage: "square.stack.3d.up") }
-                    }
+        List {
+            Section("Home Node") {
+                NavigationLink { HomeNodeSettingsView(model: model) } label: { Label("Connection", systemImage: "network") }
+                if model.isAuthenticated {
+                    NavigationLink { ResourcesSettingsView(model: model) } label: { Label("Resources", systemImage: "cpu") }
+                    NavigationLink { ModelsView(model: model) } label: { Label("Models", systemImage: "square.stack.3d.up") }
                 }
-                Section("This device") {
-                    NavigationLink { VoiceSettingsView(model: model) } label: { Label("Voice", systemImage: "waveform") }
-                    NavigationLink { SecuritySettingsView(model: model) } label: { Label("Security", systemImage: "lock.shield") }
-                }
-                if let notice = model.notice { Section("Status") { Text(notice) } }
             }
-            .navigationTitle("Settings")
-            .settingsBackground()
+            Section("This device") {
+                NavigationLink { VoiceSettingsView(model: model) } label: { Label("Voice", systemImage: "waveform") }
+                NavigationLink { SecuritySettingsView(model: model) } label: { Label("Security", systemImage: "lock.shield") }
+            }
+            if let notice = model.notice { Section("Status") { Text(notice) } }
         }
+        .navigationTitle("Settings")
+        .settingsBackground()
     }
 }
 
@@ -148,7 +146,7 @@ private struct ResourcesSettingsView: View {
             } else if loading { ProgressView("Loading resources…") }
             if let error { Section("Status") { Text(error).foregroundStyle(.secondary) } }
         }
-        .navigationTitle("Bronnen")
+        .navigationTitle("Resources")
         .settingsBackground()
         .refreshable { await reload() }
         .task {
@@ -181,7 +179,7 @@ private extension View {
     func settingsBackground() -> some View {
         scrollContentBackground(.hidden)
             .background(JarvisTheme.background)
-            .toolbarBackground(JarvisTheme.panel, for: .navigationBar)
+            .toolbarBackground(JarvisTheme.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
     }
 }
