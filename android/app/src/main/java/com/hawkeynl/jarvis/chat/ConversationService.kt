@@ -27,7 +27,7 @@ class ConversationService(
         text: String,
     ): ApiResult<ChatResponse> {
         val message = text.trim()
-        if (message.isEmpty()) return ApiResult.InvalidResponse("Bericht is leeg.")
+        if (message.isEmpty()) return ApiResult.InvalidResponse("Message is empty.")
         val turns = (history + ChatTurn("user", message)).takeLast(MAX_TURNS)
         return withToken { token -> api.chat(endpoint, token, ChatRequest(turns, conversationId)) }
     }

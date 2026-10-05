@@ -31,19 +31,19 @@ object AndroidUpdatePolicy {
             return AndroidUpdateDecision.Invalid("Onbekend Android-updateformaat")
         }
         if (metadata.package_name != JARVIS_ANDROID_PACKAGE) {
-            return AndroidUpdateDecision.Invalid("Update is niet voor de Jarvis-app")
+            return AndroidUpdateDecision.Invalid("Update is not for the Jarvis app")
         }
         if (metadata.version_code <= installedVersionCode) {
-            return AndroidUpdateDecision.Invalid("Home Node bood een verouderde Android-versie aan")
+            return AndroidUpdateDecision.Invalid("Home Node offered an outdated Android version")
         }
         if (metadata.version_code <= 0 || !versionName.matches(metadata.version_name)) {
-            return AndroidUpdateDecision.Invalid("Ongeldige Android-versie")
+            return AndroidUpdateDecision.Invalid("Invalid Android version")
         }
         if (metadata.minimum_client_protocol <= 0 || metadata.minimum_client_protocol > clientProtocol) {
-            return AndroidUpdateDecision.Invalid("Deze update vereist een nieuwer Jarvis-updateprotocol")
+            return AndroidUpdateDecision.Invalid("This update requires a newer Jarvis update protocol")
         }
         if (!isEnrolledDownloadUrl(endpoint, metadata.download_url)) {
-            return AndroidUpdateDecision.Invalid("Ongeldig Android-updatedownloadadres")
+            return AndroidUpdateDecision.Invalid("Invalid Android update download address")
         }
         if (metadata.artifact.size <= 0 || metadata.artifact.size > MAX_APK_BYTES) {
             return AndroidUpdateDecision.Invalid("Ongeldige Android-updategrootte")
@@ -54,7 +54,7 @@ object AndroidUpdatePolicy {
         if (!digest.matches(metadata.artifact.signing_certificate_sha256) ||
             metadata.artifact.signing_certificate_sha256 != installedSigningCertificateSha256.lowercase()
         ) {
-            return AndroidUpdateDecision.Invalid("APK is niet ondertekend door de geïnstalleerde Jarvis-identiteit")
+            return AndroidUpdateDecision.Invalid("APK is not signed by the installed Jarvis identity")
         }
         return AndroidUpdateDecision.Available(metadata)
     }

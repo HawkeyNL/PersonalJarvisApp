@@ -74,10 +74,10 @@ class BiometricGate {
         )
         prompt.authenticate(
             BiometricPrompt.PromptInfo.Builder()
-                .setTitle("Jarvis ontgrendelen")
-                .setSubtitle("Bevestig met sterke biometrie")
+                .setTitle("Unlock Jarvis")
+                .setSubtitle("Confirm with strong biometrics")
                 .setAllowedAuthenticators(AUTHENTICATORS)
-                .setNegativeButtonText("Annuleren")
+                .setNegativeButtonText("Cancel")
                 .build(),
         )
     }

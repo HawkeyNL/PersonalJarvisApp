@@ -103,7 +103,7 @@ export async function verify(seconds = 3): Promise<VerifyResult | null> {
   voiceStatus.value = `recording… (${seconds}s)`;
   try {
     const rec = await recordPcm(seconds * 1000);
-    voiceStatus.value = "controleren…";
+    voiceStatus.value = "checking…";
     await requireAuth();
     const res = await postJsonAuth<VerifyResult>("/v1/voice/verify", {
       sample_rate: rec.sampleRate,

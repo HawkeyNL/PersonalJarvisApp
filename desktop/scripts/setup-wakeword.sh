@@ -22,4 +22,4 @@ for f in melspectrogram.onnx embedding_model.onnx hey_jarvis_v0.1.onnx; do
   fi
 done
 
-echo "✓ done. Enable “Luister naar ‘Hey Jarvis’” in Settings, then say it."
+echo "✓ done. Enable “Listen for ‘Hey Jarvis’” in Settings, then say it."

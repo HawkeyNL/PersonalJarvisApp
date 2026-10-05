@@ -35,7 +35,7 @@ class AndroidKeystoreSecureValueStore(context: Context) : SecureValueStore {
                 doFinal(ciphertext)
             }
         } catch (error: Exception) {
-            throw SecureStorageException("Beveiligde opslag kan niet worden ontsleuteld.", error)
+            throw SecureStorageException("Secure storage cannot be decrypted.", error)
         }
     }
 
@@ -53,14 +53,14 @@ class AndroidKeystoreSecureValueStore(context: Context) : SecureValueStore {
                 .array()
             check(preferences.edit().putString(key, Base64.encodeToString(blob, Base64.NO_WRAP)).commit())
         } catch (error: Exception) {
-            throw SecureStorageException("Beveiligde opslag kan niet worden bijgewerkt.", error)
+            throw SecureStorageException("Secure storage cannot be updated.", error)
         }
     }
 
     @Synchronized
     override fun remove(key: String) {
         if (!preferences.edit().remove(key).commit()) {
-            throw SecureStorageException("Beveiligde opslag kan niet worden gewist.")
+            throw SecureStorageException("Secure storage cannot be cleared.")
         }
     }
 
