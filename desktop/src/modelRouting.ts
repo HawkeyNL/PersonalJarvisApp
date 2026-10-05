@@ -6,7 +6,12 @@ export const TIERS = ["cheap", "default", "hard"] as const;
 export type Tier = (typeof TIERS)[number];
 export type RouteEntry = { provider: string; model: string };
 export type TierRoute = { chain: RouteEntry[]; metered_after_subscription: boolean };
-export type Routing = { version: number; paid_api: "allowed" | "off"; tiers: Partial<Record<Tier, TierRoute>> };
+export type Routing = {
+  version: number;
+  paid_api: "allowed" | "off";
+  tiers: Partial<Record<Tier, TierRoute>>;
+  research_web_search?: "on" | "off";
+};
 export type RoutingPolicy = {
   models: { provider: string; model: string; enabled: boolean }[];
   routing?: Routing | null;
@@ -43,7 +48,10 @@ export function canonicalRouting(routing: Routing | null | undefined): Routing {
       metered_after_subscription: !!route.metered_after_subscription,
     };
   }
-  return { version: routing?.version ?? 1, paid_api: routing?.paid_api === "off" ? "off" : "allowed", tiers };
+  const canonical: Routing = { version: routing?.version ?? 1, paid_api: routing?.paid_api === "off" ? "off" : "allowed", tiers };
+  // Core writes research last and only when on.
+  if (routing?.research_web_search === "on") canonical.research_web_search = "on";
+  return canonical;
 }
 
 export const sameRouting = (a: Routing, b: Routing) => JSON.stringify(canonicalRouting(a)) === JSON.stringify(canonicalRouting(b));

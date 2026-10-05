@@ -35,6 +35,10 @@ test("canonical routing follows Core's field order and omits absent tiers", () =
   assert.deepEqual(canonicalRouting(null), { version: 1, paid_api: "allowed", tiers: {} });
   assert.ok(sameRouting(loose, canonicalRouting(loose)));
   assert.ok(!sameRouting(loose, { ...loose, paid_api: "allowed" }));
+  // Research is written last and only when on, so saving never drops it.
+  assert.equal(JSON.stringify(canonicalRouting({ ...loose, tiers: {}, research_web_search: "on" })), '{"version":1,"paid_api":"off","tiers":{},"research_web_search":"on"}');
+  assert.ok(sameRouting(loose, { ...loose, research_web_search: "off" }));
+  assert.ok(!sameRouting(loose, { ...loose, research_web_search: "on" }));
 });
 
 test("validation mirrors Core's routing rules", () => {

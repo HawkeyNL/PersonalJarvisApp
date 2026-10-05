@@ -109,6 +109,13 @@ onMounted(reload);
           <small>Off: only subscriptions and local models, in every tier and the built-in order.</small></span>
       </label>
 
+      <label class="switch">
+        <input type="checkbox" :checked="draft.research_web_search === 'on'" :disabled="!editable"
+          @change="draft.research_web_search = ($event.target as HTMLInputElement).checked ? 'on' : 'off'" />
+        <span><strong>Research web search {{ draft.research_web_search === "on" ? "on" : "off" }}</strong>
+          <small>On: explicit Research requests may use the subscription's provider-hosted web search. Never a paid API.</small></span>
+      </label>
+
       <div class="tiers">
         <section v-for="tier in TIERS" :key="tier" class="tier" :aria-label="`${TIER_COPY[tier][0]} tier`">
           <header>
@@ -165,7 +172,7 @@ onMounted(reload);
     <div v-if="confirming" class="model-confirm" role="dialog" aria-modal="true" aria-label="Confirm routing change" @keydown.esc="confirming = false">
       <div>
         <h3>Replace model routing?</h3>
-        <p>This replaces the routing for all devices{{ draft.paid_api === "off" ? " and turns paid APIs off" : "" }}. Running requests are not cancelled.</p>
+        <p>This replaces the routing for all devices{{ draft.paid_api === "off" ? " and turns paid APIs off" : "" }}{{ draft.research_web_search === "on" ? ". Research may use web search" : "" }}. Running requests are not cancelled.</p>
         <ul class="summary">
           <li v-for="tier in TIERS" :key="tier">
             {{ TIER_COPY[tier][0] }}: {{ draft.tiers[tier] ? draft.tiers[tier]!.chain.map(label).join(" → ") : "built-in order" }}

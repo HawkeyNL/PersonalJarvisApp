@@ -3,7 +3,7 @@
 //! the typed routing document, never bytes to sign.
 use super::*;
 use jarvis_client_core::model_control::{
-    ModelRoutingApproval, ModelToggleApproval, PaidApi, RoutingDocument,
+    ModelRoutingApproval, ModelToggleApproval, PaidApi, ResearchWebSearch, RoutingDocument,
 };
 
 #[derive(Deserialize)]
@@ -139,11 +139,12 @@ struct Relaxation {
     paid_api: bool,
     paid_fallback: bool,
     paid_models: bool,
+    research_web_search: bool,
 }
 
 impl Relaxation {
     fn any(&self) -> bool {
-        self.paid_api || self.paid_fallback || self.paid_models
+        self.paid_api || self.paid_fallback || self.paid_models || self.research_web_search
     }
 
     fn prompt(&self) -> String {
@@ -158,6 +159,7 @@ impl Relaxation {
                 "; allow paid fallback after subscription",
             ),
             (self.paid_models, "; add paid API models"),
+            (self.research_web_search, "; allow research web search"),
         ] {
             if relaxed {
                 prompt.push_str(text);
@@ -181,12 +183,20 @@ fn current_routing(snapshot: &Snapshot) -> Option<RoutingDocument> {
 }
 
 fn relaxation(current: Option<&RoutingDocument>, next: &RoutingDocument) -> Relaxation {
+    // Web search sends research questions to a provider tool, whatever the
+    // paid API setting, so switching it on always needs a fresh prompt.
+    let research_web_search = next.research_web_search == ResearchWebSearch::On
+        && current.is_none_or(|current| current.research_web_search != ResearchWebSearch::On);
     if next.paid_api == PaidApi::Off {
         // No metered backend can run at all.
-        return Relaxation::default();
+        return Relaxation {
+            research_web_search,
+            ..Relaxation::default()
+        };
     }
     let mut result = Relaxation {
         paid_api: current.is_none_or(|current| current.paid_api == PaidApi::Off),
+        research_web_search,
         ..Relaxation::default()
     };
     let tier = |routing: &RoutingDocument, index: usize| {
@@ -744,6 +754,7 @@ mod tests {
             paid_api,
             paid_fallback,
             paid_models,
+            research_web_search: false,
         };
 
         // Relaxing: paid API back on (also from an unknown or failed-closed state).
@@ -800,6 +811,26 @@ mod tests {
         assert!(prompt.contains("allow paid APIs"));
         assert!(prompt.contains("allow paid fallback after subscription"));
         assert!(!prompt.contains("five minutes"));
+    }
+
+    #[test]
+    fn switching_research_web_search_on_always_needs_a_fresh_prompt() {
+        let research = |paid_api: &str, on: &str| {
+            doc(serde_json::json!({"version": 1, "paid_api": paid_api, "research_web_search": on}))
+        };
+        let on_only = Relaxation {
+            research_web_search: true,
+            ..Relaxation::default()
+        };
+        // Relaxing even with paid APIs off, and from an unknown state.
+        assert_eq!(relaxation(Some(&research("off", "off")), &research("off", "on")), on_only);
+        assert_eq!(relaxation(None, &research("off", "on")), on_only);
+        assert!(relaxation(Some(&research("off", "off")), &research("off", "on"))
+            .prompt()
+            .ends_with("; allow research web search"));
+        // Already on, or switched off: no research relaxation.
+        assert!(!relaxation(Some(&research("off", "on")), &research("off", "on")).any());
+        assert!(!relaxation(Some(&research("off", "on")), &research("off", "off")).any());
     }
 
     #[test]
