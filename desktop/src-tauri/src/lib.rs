@@ -949,6 +949,7 @@ pub fn run() {
             auth_sign_agent_approval,
             auth_sign_account_approval,
             model_control::set_model_enabled,
+            model_control::set_model_routing,
             auth_remember_enrolled_device,
             auth_complete_login,
             auth_request,

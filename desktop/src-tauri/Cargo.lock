@@ -2139,7 +2139,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 [[package]]
 name = "jarvis-client-core"
 version = "0.1.0"
-source = "git+https://github.com/HawkeyNL/PersonalJarvis.git?rev=b1016c93d383f8be0c2bea2e42e06d8c30c44028#b1016c93d383f8be0c2bea2e42e06d8c30c44028"
+source = "git+https://github.com/HawkeyNL/PersonalJarvis.git?rev=1f408a5fd54544b4780ba98856b09a4c424dd7b5#1f408a5fd54544b4780ba98856b09a4c424dd7b5"
 dependencies = [
  "hex",
  "serde",
