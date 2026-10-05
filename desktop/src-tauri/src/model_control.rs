@@ -823,11 +823,16 @@ mod tests {
             ..Relaxation::default()
         };
         // Relaxing even with paid APIs off, and from an unknown state.
-        assert_eq!(relaxation(Some(&research("off", "off")), &research("off", "on")), on_only);
+        assert_eq!(
+            relaxation(Some(&research("off", "off")), &research("off", "on")),
+            on_only
+        );
         assert_eq!(relaxation(None, &research("off", "on")), on_only);
-        assert!(relaxation(Some(&research("off", "off")), &research("off", "on"))
-            .prompt()
-            .ends_with("; allow research web search"));
+        assert!(
+            relaxation(Some(&research("off", "off")), &research("off", "on"))
+                .prompt()
+                .ends_with("; allow research web search")
+        );
         // Already on, or switched off: no research relaxation.
         assert!(!relaxation(Some(&research("off", "on")), &research("off", "on")).any());
         assert!(!relaxation(Some(&research("off", "on")), &research("off", "off")).any());
