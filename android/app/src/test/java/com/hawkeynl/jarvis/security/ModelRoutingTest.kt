@@ -168,6 +168,15 @@ class ModelRoutingTest {
         assertFalse(prompt.contains("five minutes"))
     }
 
+    @Test fun resettingATierToTheBuiltInOrderNeedsAFreshPrompt() {
+        val pinned = Routing(1, true, mapOf(Tier.HARD to TierRoute(listOf(e("claude-cli", "claude-opus-5")), false)))
+        val builtIn = Routing()
+        val relaxed = relaxation(pinned, builtIn)
+        assertTrue(relaxed.paidFallback && relaxed.paidModels)
+        assertFalse(relaxation(builtIn, builtIn).any())
+        assertFalse(relaxation(pinned, Routing(paidApiAllowed = false)).paidFallback)
+    }
+
     @Test fun switchingResearchWebSearchOnAlwaysNeedsAFreshPrompt() {
         fun research(paid: Boolean, on: Boolean) = Routing(paidApiAllowed = paid, researchWebSearch = on)
         val onOnly = Relaxation(researchWebSearch = true)

@@ -247,7 +247,13 @@ fun relaxation(current: Routing?, next: Routing): Relaxation {
     var fallback = false
     var models = false
     for (tier in Tier.entries) {
-        val route = next.tiers[tier] ?: continue
+        val route = next.tiers[tier]
+        if (route == null) {
+            // Resetting a customised tier to the built-in order may put paid
+            // APIs back after the subscriptions, so it always needs a prompt.
+            if (current?.tiers?.get(tier) != null) { fallback = true; models = true }
+            continue
+        }
         // A built-in (absent) tier counts as no paid fallback and no pinned paid models.
         val before = current?.tiers?.get(tier)
         if (route.meteredAfterSubscription && before?.meteredAfterSubscription != true) fallback = true
