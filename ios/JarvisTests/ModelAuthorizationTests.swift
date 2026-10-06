@@ -264,6 +264,16 @@ final class ModelRoutingTests: XCTestCase {
         XCTAssertFalse(prompt.contains("five minutes"))
     }
 
+    func testResettingATierToTheBuiltInOrderNeedsAFreshPrompt() throws {
+        let pinned = try doc(#"{"version":1,"tiers":{"hard":{"chain":[{"provider":"claude-cli","model":"claude-opus-5"}],"metered_after_subscription":false}}}"#)
+        let builtIn = RoutingDocument()
+        let relaxed = RoutingRules.relaxation(current: pinned, next: builtIn)
+        XCTAssertTrue(relaxed.paidFallback && relaxed.paidModels)
+        XCTAssertFalse(RoutingRules.relaxation(current: builtIn, next: builtIn).any)
+        var off = RoutingDocument(); off.paidApi = .off
+        XCTAssertFalse(RoutingRules.relaxation(current: pinned, next: off).paidFallback)
+    }
+
     func testSwitchingResearchWebSearchOnAlwaysNeedsAFreshPrompt() throws {
         func research(_ paidApi: String, _ on: String) throws -> RoutingDocument { try doc(#"{"version":1,"paid_api":"\#(paidApi)","research_web_search":"\#(on)"}"#) }
         let onOnly = RoutingRelaxation(researchWebSearch: true)

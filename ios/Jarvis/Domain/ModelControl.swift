@@ -406,7 +406,12 @@ enum RoutingRules {
         if next.paidApi == .off { return RoutingRelaxation(researchWebSearch: research) }
         var result = RoutingRelaxation(paidApi: current.map { $0.paidApi == .off } ?? true, researchWebSearch: research)
         for tier in RoutingTier.allCases {
-            guard let route = next.tiers[tier] else { continue }
+            guard let route = next.tiers[tier] else {
+                // Resetting a customised tier to the built-in order may put paid
+                // APIs back after the subscriptions, so it always needs a prompt.
+                if current?.tiers[tier] != nil { result.paidFallback = true; result.paidModels = true }
+                continue
+            }
             // A built-in (absent) tier counts as no paid fallback and no pinned paid models.
             let before = current?.tiers[tier]
             if route.metered_after_subscription && !(before?.metered_after_subscription ?? false) { result.paidFallback = true }
