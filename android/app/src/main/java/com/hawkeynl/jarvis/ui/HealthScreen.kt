@@ -187,6 +187,7 @@ fun HealthScreen(
                 "models" -> if (modelControls != null) {
                     MutedText("Every change asks Android to confirm it is you and is signed with this device's key.")
                     ModelControls(modelControls)
+                    ModelRoutingEditor(modelControls)
                 } else {
                     Unavailable("Models", JvIcon.LAYERS, kind = UnavailableKind.ERROR, detail = "Model controls are not available in this session.")
                 }

@@ -14,6 +14,10 @@ data class ModelEntry(val provider: String, val model: String, val enabled: Bool
 data class ModelPolicySnapshot(
     val models: List<ModelEntry>, val mutation: String, val policy_sha256: String? = null,
     val user_id: String, val device_id: String, val server_time: Long,
+    // Absent on a Core without signed routing. `routing` stays untyped so a newer
+    // routing shape never breaks model toggles.
+    val routing_mutation: String? = null, val routing_sha256: String? = null,
+    val routing: JsonElement? = null, val routing_unavailable_reason: String? = null,
 )
 
 /** Exact v1 client-core wire contract, never an arbitrary signing interface. */
@@ -35,14 +39,7 @@ data class ModelApproval(
     fun message(): ByteArray {
         require(nonce.size == 32 && issued >= 0 && expires > issued && expires - issued <= 300)
         val payload = MessageDigest.getInstance("SHA-256").digest(operation().toString().toByteArray(Charsets.UTF_8))
-        val domain = "jarvis-privileged-config-v1\u0000".toByteArray(Charsets.UTF_8)
-        val action = "model.set_enabled".toByteArray(Charsets.UTF_8)
-        return ByteBuffer.allocate(domain.size + 2 + action.size + 32 + 16 + 32 + 16 + 16 + 8 + 8 + 32)
-            .put(domain).putShort(action.size.toShort()).put(action).put(payload)
-            .putLong(request.mostSignificantBits).putLong(request.leastSignificantBits).put(nonce)
-            .putLong(user.mostSignificantBits).putLong(user.leastSignificantBits)
-            .putLong(device.mostSignificantBits).putLong(device.leastSignificantBits)
-            .putLong(issued).putLong(expires).put(Hex.decode(hash)).array()
+        return approvalMessage("model.set_enabled", payload, request, nonce, user, device, issued, expires, Hex.decode(hash))
     }
 
     fun signed(signature: String): JsonObject {
@@ -56,4 +53,21 @@ data class ModelApproval(
             put("operation", operation()); put("signature_hex", signature)
         }
     }
+}
+
+/** client-core `approval_message` (jarvis-privileged-config-v1), shared by every privileged operation. */
+fun approvalMessage(
+    action: String, payloadHash: ByteArray, request: UUID, nonce: ByteArray, user: UUID, device: UUID,
+    issued: Long, expires: Long, targetStateHash: ByteArray,
+): ByteArray {
+    val domain = "jarvis-privileged-config-v1\u0000".toByteArray(Charsets.UTF_8)
+    val name = action.toByteArray(Charsets.UTF_8)
+    require(name.isNotEmpty() && name.size <= 64 && action.none { it.isISOControl() })
+    require(payloadHash.size == 32 && targetStateHash.size == 32 && nonce.size == 32 && issued >= 0 && expires > issued && expires - issued <= 300)
+    return ByteBuffer.allocate(domain.size + 2 + name.size + 32 + 16 + 32 + 16 + 16 + 8 + 8 + 32)
+        .put(domain).putShort(name.size.toShort()).put(name).put(payloadHash)
+        .putLong(request.mostSignificantBits).putLong(request.leastSignificantBits).put(nonce)
+        .putLong(user.mostSignificantBits).putLong(user.leastSignificantBits)
+        .putLong(device.mostSignificantBits).putLong(device.leastSignificantBits)
+        .putLong(issued).putLong(expires).put(targetStateHash).array()
 }
