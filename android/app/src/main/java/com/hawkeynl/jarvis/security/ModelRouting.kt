@@ -231,7 +231,7 @@ data class Relaxation(
 
     fun prompt(): String = buildString {
         append("Jarvis: replace model routing")
-        if (!any()) append("; allow model changes for five minutes")
+        if (!this@Relaxation.any()) append("; allow model changes for five minutes")
         if (paidApi) append("; allow paid APIs")
         if (paidFallback) append("; allow paid fallback after subscription")
         if (paidModels) append("; add paid API models")
