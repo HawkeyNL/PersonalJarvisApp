@@ -52,15 +52,12 @@ export async function approve(req: UnlockReq): Promise<void> {
   try {
     const status = await currentAuthStatus();
     if (!status.authenticated) throw new Error("not signed in");
-    // Verify locally on the phone: biometrics, falling back to the passcode.
-    await invoke("biometric_unlock", {
-      reason: `Unlock ${req.device_name}`,
-      allowPassword: true,
-    });
-    // Prove it with the device key over the v1 unlock-approval message.
+    // The native command asks for biometrics (falling back to the passcode)
+    // and then signs the v1 unlock-approval message with the device key.
     const signature = await invoke<string>("auth_sign_unlock_approval", {
       requestId: req.id,
       nonceHex: req.nonce,
+      deviceName: req.device_name,
     });
     await postJsonAuth(`/v1/auth/unlock/${req.id}/approve`, { signature });
     pending.value = pending.value.filter((r) => r.id !== req.id);

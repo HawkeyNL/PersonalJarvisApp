@@ -282,13 +282,22 @@ fn auth_sign_login(
     )
 }
 
-/// Sign the v1 approval of one pending unlock request as this device.
+/// Sign the v1 approval of one pending unlock request as this device. The OS
+/// prompt runs here, not in the webview, so a compromised page cannot approve
+/// an unlock silently.
 #[tauri::command]
 fn auth_sign_unlock_approval(
     app: AppHandle,
     request_id: String,
     nonce_hex: String,
+    device_name: String,
 ) -> Result<String, String> {
+    let device_name: String = device_name
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(64)
+        .collect();
+    authenticate_owner(&format!("Unlock {device_name}"), true)?;
     sign_challenge(
         &app,
         &request_id,
