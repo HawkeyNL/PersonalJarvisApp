@@ -57,8 +57,11 @@ export async function approve(req: UnlockReq): Promise<void> {
       reason: `Unlock ${req.device_name}`,
       allowPassword: true,
     });
-    // Prove it with the device key by signing the request nonce.
-    const signature = await invoke<string>("auth_sign", { nonceHex: req.nonce });
+    // Prove it with the device key over the v1 unlock-approval message.
+    const signature = await invoke<string>("auth_sign_unlock_approval", {
+      requestId: req.id,
+      nonceHex: req.nonce,
+    });
     await postJsonAuth(`/v1/auth/unlock/${req.id}/approve`, { signature });
     pending.value = pending.value.filter((r) => r.id !== req.id);
   } catch (e) {

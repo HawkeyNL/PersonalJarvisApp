@@ -248,7 +248,7 @@ actor AuthService {
         } catch JarvisAPIError.unauthorized {
             throw DeviceLoginError.deviceRejected
         }
-        let signature = try await identity.signChallenge(hex: challenge.nonce)
+        let signature = try await identity.signLogin(challengeId: challenge.challengeId, deviceId: deviceId, nonceHex: challenge.nonce)
         let response: LoginResponse
         do {
             response = try await api.post(

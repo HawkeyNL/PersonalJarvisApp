@@ -90,7 +90,8 @@ export async function login(enrolledDeviceId?: string, password?: string, boundO
     { device_id: deviceId },
     expectedOrigin,
   );
-  const signature = await invoke<string>("auth_sign", {
+  const signature = await invoke<string>("auth_sign_login", {
+    challengeId: challenge.challenge_id,
     nonceHex: challenge.nonce,
   });
   await invoke("auth_complete_login", {

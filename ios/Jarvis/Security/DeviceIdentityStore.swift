@@ -30,12 +30,21 @@ actor DeviceIdentityStore {
         try signingKey(createIfMissing: false).publicKey.rawRepresentation.hexEncodedString()
     }
 
-    func signChallenge(hex nonce: String) throws -> String {
-        guard let data = Data(hexEncoded: nonce), data.count == 32 else {
+    /// Exact v1 client-core `login_message`: domain, challenge id, device id, 32-byte nonce.
+    static func loginMessage(challengeId: UUID, deviceId: UUID, nonceHex: String) throws -> Data {
+        guard let nonce = Data(hexEncoded: nonceHex), nonce.count == 32 else {
             throw DeviceIdentityError.invalidChallenge
         }
+        func bytes(_ value: UUID) -> Data { var raw = value.uuid; return withUnsafeBytes(of: &raw) { Data($0) } }
+        var result = Data("jarvis-login-v1\0".utf8)
+        result.append(bytes(challengeId)); result.append(bytes(deviceId)); result.append(nonce)
+        return result
+    }
+
+    func signLogin(challengeId: UUID, deviceId: UUID, nonceHex: String) throws -> String {
+        let message = try Self.loginMessage(challengeId: challengeId, deviceId: deviceId, nonceHex: nonceHex)
         // Login must never create a replacement key for an existing registration.
-        return try signingKey(createIfMissing: false).signature(for: data).hexEncodedString()
+        return try signingKey(createIfMissing: false).signature(for: message).hexEncodedString()
     }
 
     func reset() throws { try keychain.delete(account: account) }

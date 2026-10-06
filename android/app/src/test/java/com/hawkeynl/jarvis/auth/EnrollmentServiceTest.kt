@@ -6,6 +6,8 @@ import com.hawkeynl.jarvis.network.AccountStatus
 import com.hawkeynl.jarvis.network.FirstDeviceResponse
 import com.hawkeynl.jarvis.network.ChallengeRequest
 import com.hawkeynl.jarvis.network.ChallengeResponse
+import com.hawkeynl.jarvis.security.Hex
+import com.hawkeynl.jarvis.security.LoginMessage
 import com.hawkeynl.jarvis.network.ChatRequest
 import com.hawkeynl.jarvis.network.ChatResponse
 import com.hawkeynl.jarvis.network.ConversationDetailResponse
@@ -35,11 +37,11 @@ class EnrollmentServiceTest {
     fun `refused challenge preserves binding and does not attempt login`() = runTest {
         val api = FakeApi().apply { rejectChallenge = true }
         val sessions = SessionRepository(InMemorySecureValueStore())
-        sessions.saveDeviceId("device")
+        sessions.saveDeviceId(DEVICE_ID)
         val service = EnrollmentService(api, FakeIdentity(), sessions)
         val result = service.startOrResume(endpoint, "fixture", 100, "fixture password")
         assertTrue(result is EnrollmentOutcome.Rejected)
-        assertEquals("device", sessions.session().deviceId)
+        assertEquals(DEVICE_ID, sessions.session().deviceId)
         assertEquals(null, api.loginRequest)
         assertEquals(null, sessions.session().token)
     }
@@ -72,7 +74,7 @@ class EnrollmentServiceTest {
         assertTrue(!api.created.toString().contains(password))
         api.approved = true
         assertEquals(EnrollmentOutcome.PasswordRequired, service.poll(endpoint))
-        assertEquals("device", sessions.session().deviceId)
+        assertEquals(DEVICE_ID, sessions.session().deviceId)
         assertEquals(null, api.loginRequest)
         assertTrue(service.startOrResume(endpoint, "fixture", 100, password) is EnrollmentOutcome.Authenticated)
         assertEquals(password, api.loginRequest?.password)
@@ -91,7 +93,8 @@ class EnrollmentServiceTest {
     fun `persists pending request then signs challenge after approval`() = runTest {
         val api = FakeApi()
         val sessions = SessionRepository(InMemorySecureValueStore())
-        val service = EnrollmentService(api, FakeIdentity(), sessions)
+        val identity = FakeIdentity()
+        val service = EnrollmentService(api, identity, sessions)
 
         val pending = service.startOrResume(endpoint, "Android", 100)
         assertTrue(pending is EnrollmentOutcome.Pending)
@@ -101,15 +104,23 @@ class EnrollmentServiceTest {
         api.approved = true
         val authenticated = service.poll(endpoint)
         assertTrue(authenticated is EnrollmentOutcome.Authenticated)
-        assertEquals("device", sessions.session().deviceId)
+        assertEquals(DEVICE_ID, sessions.session().deviceId)
         assertEquals("token", sessions.session().token)
         assertEquals("cd".repeat(64), api.loginRequest?.signature)
+        assertEquals(Hex.encode(LoginMessage.build(CHALLENGE_ID, DEVICE_ID, "02".repeat(32))), identity.signedHex)
     }
 }
 
+private const val DEVICE_ID = "ffeeddcc-bbaa-9988-7766-554433221100"
+private const val CHALLENGE_ID = "00112233-4455-6677-8899-aabbccddeeff"
+
 private class FakeIdentity : DeviceIdentity {
+    var signedHex: String? = null
     override fun publicKeyHex() = "ab".repeat(32)
-    override fun signHex(messageHex: String) = "cd".repeat(64)
+    override fun signHex(messageHex: String): String {
+        signedHex = messageHex
+        return "cd".repeat(64)
+    }
     override fun reset() = Unit
 }
 
@@ -129,9 +140,9 @@ private class FakeApi : JarvisApi {
         return ApiResult.Success(PairingTicket("ticket", "01".repeat(32), 500))
     }
     override suspend fun pairingStatus(endpoint: HomeNodeEndpoint, ticket: PairingTicket) =
-        ApiResult.Success(PairingStatusResponse(pairingDecision ?: if (approved) "approved" else "pending", if (approved) "device" else null))
+        ApiResult.Success(PairingStatusResponse(pairingDecision ?: if (approved) "approved" else "pending", if (approved) DEVICE_ID else null))
     override suspend fun challenge(endpoint: HomeNodeEndpoint, request: ChallengeRequest): ApiResult<ChallengeResponse> =
-        if (rejectChallenge) ApiResult.Unauthorized else ApiResult.Success(ChallengeResponse("challenge", "02".repeat(32)))
+        if (rejectChallenge) ApiResult.Unauthorized else ApiResult.Success(ChallengeResponse(CHALLENGE_ID, "02".repeat(32)))
     override suspend fun login(endpoint: HomeNodeEndpoint, request: LoginRequest): ApiResult<LoginResponse> {
         loginRequest = request
         return ApiResult.Success(LoginResponse("token", 900))

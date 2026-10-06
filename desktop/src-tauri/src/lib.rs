@@ -267,16 +267,57 @@ fn auth_public_key(app: AppHandle) -> Result<String, String> {
     Ok(hex::encode(key.verifying_key().to_bytes()))
 }
 
-/// Sign a hex-encoded challenge nonce; returns the hex signature.
+/// Sign the v1 login message for one challenge as this enrolled device.
 #[tauri::command]
-fn auth_sign(app: AppHandle, nonce_hex: String) -> Result<String, String> {
+fn auth_sign_login(
+    app: AppHandle,
+    challenge_id: String,
+    nonce_hex: String,
+) -> Result<String, String> {
+    sign_challenge(
+        &app,
+        &challenge_id,
+        &nonce_hex,
+        jarvis_client_core::login_message,
+    )
+}
+
+/// Sign the v1 approval of one pending unlock request as this device.
+#[tauri::command]
+fn auth_sign_unlock_approval(
+    app: AppHandle,
+    request_id: String,
+    nonce_hex: String,
+) -> Result<String, String> {
+    sign_challenge(
+        &app,
+        &request_id,
+        &nonce_hex,
+        jarvis_client_core::unlock_approval_message,
+    )
+}
+
+type ChallengeMessage =
+    fn(uuid::Uuid, uuid::Uuid, &[u8]) -> Result<Vec<u8>, jarvis_client_core::ProtocolError>;
+
+/// The webview only supplies the server's id and nonce; the domain and this
+/// device's id are fixed here, so no command signs caller-chosen bytes.
+fn sign_challenge(
+    app: &AppHandle,
+    id: &str,
+    nonce_hex: &str,
+    message: ChallengeMessage,
+) -> Result<String, String> {
     let _guard = auth_storage()?;
-    let key = signing_key_unlocked(&app, false)?;
-    let nonce = hex::decode(nonce_hex).map_err(|e| e.to_string())?;
-    if nonce.len() != 32 {
-        return Err("invalid challenge".to_string());
-    }
-    Ok(hex::encode(key.sign(&nonce).to_bytes()))
+    let id = uuid::Uuid::parse_str(id).map_err(|_| "invalid challenge".to_string())?;
+    let device_id = load_metadata(app)?
+        .device_id
+        .and_then(|device_id| uuid::Uuid::parse_str(&device_id).ok())
+        .ok_or("this device is not enrolled")?;
+    let nonce = hex::decode(nonce_hex).map_err(|_| "invalid challenge".to_string())?;
+    let message = message(id, device_id, &nonce).map_err(|_| "invalid challenge".to_string())?;
+    let key = signing_key_unlocked(app, false)?;
+    Ok(hex::encode(key.sign(&message).to_bytes()))
 }
 
 /// Sign only the canonical device-pairing approval protocol. Keeping this
@@ -369,8 +410,8 @@ fn agent_approval(
 }
 
 /// Sign only the canonical agent-approval-v1 message, after OS authentication
-/// in Rust. A raw nonce signature would also be a login/unlock proof, so agent
-/// approvals never go through `auth_sign`.
+/// in Rust. Every signing command fixes its own domain, so no approval can be
+/// replayed as another kind.
 #[tauri::command]
 fn auth_sign_agent_approval(
     app: AppHandle,
@@ -950,7 +991,8 @@ pub fn run() {
             realtime::realtime_stop_speech,
             device_info,
             auth_public_key,
-            auth_sign,
+            auth_sign_login,
+            auth_sign_unlock_approval,
             auth_sign_pairing_approval,
             auth_sign_agent_approval,
             auth_sign_account_approval,
