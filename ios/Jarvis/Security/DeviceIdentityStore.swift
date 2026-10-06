@@ -44,6 +44,10 @@ actor DeviceIdentityStore {
         try signingKey(createIfMissing: false).signature(for: approval.message()).hexEncodedString()
     }
 
+    func signModelRouting(_ approval: ModelRoutingApproval) throws -> String {
+        try signingKey(createIfMissing: false).signature(for: approval.message()).hexEncodedString()
+    }
+
     private func signingKey(createIfMissing: Bool = true) throws -> Curve25519.Signing.PrivateKey {
         if let stored = try keychain.read(account: account) {
             do { return try Curve25519.Signing.PrivateKey(rawRepresentation: stored) }
