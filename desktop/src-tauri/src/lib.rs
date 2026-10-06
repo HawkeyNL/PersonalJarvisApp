@@ -480,15 +480,19 @@ fn native_http_client() -> Result<reqwest::Client, String> {
 }
 
 fn authenticated_api_path(path: &str) -> bool {
+    let route = path.split('?').next().unwrap_or(path);
+    // URL parsing decodes `%2e%2e` into a dot segment and resolves it, so
+    // the checked route must already be the final one: no percent-escapes
+    // and no dot segments in the path (route ids are plain UUIDs).
     if path.len() > 2048
         || !path.starts_with("/v1/")
         || path.starts_with("//")
         || path.contains(['\\', '#'])
-        || path.split('/').any(|part| part == "..")
+        || route.contains('%')
+        || route.split('/').any(|part| part == "." || part == "..")
     {
         return false;
     }
-    let route = path.split('?').next().unwrap_or(path);
     // Owner read models used by the Agents and Tasks pages. Exact routes only:
     // coding session lifecycle and agent actions stay outside this proxy.
     if ["/v1/agents", "/v1/coding/sessions", "/v1/agent/audit"].contains(&route) {
@@ -1155,6 +1159,17 @@ mod tests {
         assert!(!authenticated_api_path("/v1/app-updates/capability"));
         assert!(!authenticated_api_path("https://other.example/v1/devices"));
         assert!(!authenticated_api_path("/v1/devices/../auth/login"));
+        // Encoded or single dot segments resolve after this check.
+        for path in [
+            "/v1/system/%2e%2e/agent/action",
+            "/v1/system/.%2E/agent/action",
+            "/v1/system/%2E./agent/action",
+            "/v1/system/./status",
+            "/v1/devices/%2fsecret",
+        ] {
+            assert!(!authenticated_api_path(path), "{path}");
+        }
+        assert!(authenticated_api_path("/v1/conversations?q=a%20b"));
     }
 
     #[test]
