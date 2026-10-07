@@ -205,6 +205,12 @@ fn relaxation(current: Option<&RoutingDocument>, next: &RoutingDocument) -> Rela
     };
     for index in 0..3 {
         let Some(next) = tier(next, index) else {
+            // Resetting a customised tier to the built-in order may put paid
+            // APIs back after the subscriptions, so it always needs a prompt.
+            if current.and_then(|current| tier(current, index)).is_some() {
+                result.paid_fallback = true;
+                result.paid_models = true;
+            }
             continue;
         };
         // A built-in (absent) tier counts as no paid fallback and no pinned
@@ -811,6 +817,21 @@ mod tests {
         assert!(prompt.contains("allow paid APIs"));
         assert!(prompt.contains("allow paid fallback after subscription"));
         assert!(!prompt.contains("five minutes"));
+    }
+
+    #[test]
+    fn resetting_a_tier_to_the_built_in_order_needs_a_fresh_prompt() {
+        let pinned = doc(serde_json::json!({"version": 1, "tiers": {"hard": {
+            "chain": [{"provider": "claude-cli", "model": "claude-opus-5"}],
+            "metered_after_subscription": false}}}));
+        let built_in = doc(serde_json::json!({"version": 1}));
+        let relaxed = relaxation(Some(&pinned), &built_in);
+        assert!(relaxed.paid_fallback && relaxed.paid_models);
+        // Nothing to reset: built-in stays built-in.
+        assert!(!relaxation(Some(&built_in), &built_in).any());
+        // Paid APIs off: the built-in order cannot reach a metered backend.
+        let off = doc(serde_json::json!({"version": 1, "paid_api": "off"}));
+        assert!(!relaxation(Some(&pinned), &off).paid_fallback);
     }
 
     #[test]
