@@ -9,6 +9,8 @@ import com.hawkeynl.jarvis.network.PairingCreateRequest
 import com.hawkeynl.jarvis.network.PairingTicket
 import com.hawkeynl.jarvis.network.UnreachableReason
 import com.hawkeynl.jarvis.security.DeviceIdentity
+import com.hawkeynl.jarvis.security.Hex
+import com.hawkeynl.jarvis.security.LoginMessage
 import com.hawkeynl.jarvis.storage.ProtectedSession
 import com.hawkeynl.jarvis.storage.SessionRepository
 
@@ -148,7 +150,7 @@ class EnrollmentService(
         if (challenge.nonce.length != 64) {
             return EnrollmentOutcome.InvalidResponse("Login challenge has an invalid nonce.")
         }
-        val signature = runCatching { identity.signHex(challenge.nonce) }
+        val signature = runCatching { identity.signHex(Hex.encode(LoginMessage.build(challenge.challenge_id, deviceId, challenge.nonce))) }
             .getOrElse { return EnrollmentOutcome.InvalidResponse("Device identity cannot sign.") }
         return when (val result = api.login(
             endpoint,

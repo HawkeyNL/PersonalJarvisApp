@@ -174,11 +174,22 @@ final class FixtureSecureStorage: SecureValueStorage, @unchecked Sendable {
 }
 
 final class DeviceLoginRecoveryTests: XCTestCase {
+    func testLoginMessageGoldenVector() throws {
+        let message = try DeviceIdentityStore.loginMessage(
+            challengeId: UUID(uuidString: "00112233-4455-6677-8899-aabbccddeeff")!,
+            deviceId: UUID(uuidString: "ffeeddcc-bbaa-9988-7766-554433221100")!,
+            nonceHex: (0..<32).map { String(format: "%02x", $0) }.joined())
+        XCTAssertEqual(message.hexEncodedString(),
+            "6a61727669732d6c6f67696e2d763100" + "00112233445566778899aabbccddeeff" +
+            "ffeeddccbbaa99887766554433221100" + "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+        XCTAssertThrowsError(try DeviceIdentityStore.loginMessage(challengeId: UUID(), deviceId: UUID(), nonceHex: "00"))
+    }
+
     func testMissingSigningKeyIsNotRegenerated() async throws {
         let store = FixtureSecureStorage()
         let identity = DeviceIdentityStore(keychain: store)
         do {
-            _ = try await identity.signChallenge(hex: String(repeating: "00", count: 32))
+            _ = try await identity.signLogin(challengeId: UUID(), deviceId: UUID(), nonceHex: String(repeating: "00", count: 32))
             XCTFail("Missing registered identity must fail closed")
         } catch DeviceIdentityError.missingStoredKey { }
         XCTAssertNil(try store.read(account: "device-ed25519-seed-v1"))
