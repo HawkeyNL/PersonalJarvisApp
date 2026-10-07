@@ -108,6 +108,11 @@ final class JarvisAppModel: ObservableObject {
         try await auth.setModelEnabled(entry, policyHash: policyHash)
     }
 
+    func setModelRouting(_ routing: RoutingDocument, routingHash: String) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        try await auth.setModelRouting(routing, routingHash: routingHash)
+    }
+
     /// Orb mood from what the app knows: a reply in progress means thinking.
     /// iOS has no microphone input yet, so it never listens.
     var mood: Mood { isSending ? .thinking : .idle }

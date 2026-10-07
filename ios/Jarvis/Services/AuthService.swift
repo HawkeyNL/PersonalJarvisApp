@@ -178,6 +178,69 @@ actor AuthService {
         let result: StatusResponse = try await api.post("/v1/system/config/privileged", body: approval.signed(signature), token: token, expectedBinding: binding)
         guard result.status == "active" else { throw JarvisAPIError.rejected(status: 503, message: "Model activation was not confirmed. Refresh its status.") }
     }
+    /// Replace the owner routing document. Mirrors desktop `set_model_routing`: validate
+    /// against a fresh snapshot, then sign bytes built here from the typed document. Any
+    /// cost relaxation or web-search opt-in always gets its own OS prompt and never grants
+    /// or reuses the five-minute window.
+    func setModelRouting(_ routing: RoutingDocument, routingHash: String) async throws {
+        guard !modelChangeRunning else { throw JarvisAPIError.rejected(status: 409, message: "Another model change is running.") }
+        modelChangeRunning = true
+        defer { modelChangeRunning = false }
+        let ticket = modelAuthorization.ticket()
+        let binding = await api.binding()
+        guard let token = try await credentials.session()?.token,
+              let device = try await credentials.deviceId() else { throw JarvisAPIError.unauthorized }
+        let snapshot: ModelPolicySnapshot = try await api.get("/v1/system/models", token: token, expectedBinding: binding)
+        let now = Int64(Date().timeIntervalSince1970)
+        guard snapshot.routingMode == .editable, snapshot.routing_sha256 == routingHash, snapshot.device_id == device,
+              snapshot.server_time >= now - 30, snapshot.server_time <= now + 30
+        else { throw JarvisAPIError.rejected(status: 409, message: "Model routing, device or clock changed; refresh and try again.") }
+        if let issue = RoutingRules.issue(routing, discovered: snapshot.models.map { RouteEntry($0.provider, $0.model) }) {
+            throw JarvisAPIError.rejected(status: 400, message: issue)
+        }
+        let relaxed = RoutingRules.relaxation(current: snapshot.currentRouting, next: routing)
+        var bytes = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { throw JarvisAPIError.invalidResponse }
+        let approval = ModelRoutingApproval(request: UUID(), nonce: Data(bytes), user: snapshot.user_id, device: device,
+            issued: now, expires: now + RoutingRules.approvalSeconds, routing: routing, hash: routingHash)
+        _ = try approval.message()
+        // The broker reads one 16 KiB frame; refuse before prompting.
+        let sized = try approval.signed(String(repeating: "00", count: 64))
+        guard try JSONEncoder().encode(["request": sized]).count < 16 * 1024 else {
+            throw JarvisAPIError.rejected(status: 400, message: "Routing is too large to send")
+        }
+        let key = try await identity.existingPublicKeyHex()
+        let context = SHA256.hash(data: Data("\(binding)|\(device)|\(key)|\(token)".utf8)).map { String(format: "%02x", $0) }.joined()
+        try Task.checkCancellation()
+        let fresh = relaxed.any || !modelAuthorization.valid(context, ticket: ticket)
+        if fresh {
+            guard await authenticateOwner(relaxed.prompt) == .unlocked else {
+                modelAuthorization.invalidate()
+                throw JarvisAPIError.rejected(status: 403, message: "Routing change cancelled; device authentication is required.")
+            }
+        }
+        guard await api.binding() == binding, try await credentials.session()?.token == token,
+              try await credentials.deviceId() == device, try await identity.existingPublicKeyHex() == key,
+              Int64(Date().timeIntervalSince1970) < approval.expires else { throw JarvisAPIError.unauthorized }
+        try Task.checkCancellation()
+        guard modelAuthorization.accepts(ticket) else { throw JarvisAPIError.unauthorized }
+        if !relaxed.any {
+            if fresh { guard modelAuthorization.remember(context, ticket: ticket) else { throw JarvisAPIError.unauthorized } }
+            guard modelAuthorization.valid(context, ticket: ticket) else { throw JarvisAPIError.unauthorized }
+        }
+        let signature = try await identity.signModelRouting(approval)
+        guard modelAuthorization.accepts(ticket) else { throw JarvisAPIError.unauthorized }
+        let result: StatusResponse
+        do {
+            result = try await api.post("/v1/system/config/privileged", body: approval.signed(signature), token: token, expectedBinding: binding)
+        } catch JarvisAPIError.rejected(let status, _) {
+            throw JarvisAPIError.rejected(status: status, message: RoutingRules.refused(status: status))
+        } catch JarvisAPIError.unreachable, JarvisAPIError.timedOut {
+            throw JarvisAPIError.rejected(status: 503, message: "Outcome unknown; refresh the model status")
+        }
+        guard result.status == "active" else { throw JarvisAPIError.rejected(status: 503, message: "Activation not confirmed. Refresh the routing status.") }
+    }
+
     // Origin changes must clear server-specific state before the new host is
     // configured. No revocation request is sent to the replacement host.
     func clearLocalBinding() async throws { modelAuthorization.invalidate(); try await credentials.reset(); try await identity.reset() }
