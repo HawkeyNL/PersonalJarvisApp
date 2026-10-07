@@ -27,7 +27,7 @@ data class ModelApproval(
     val enabled: Boolean, val hash: String,
 ) {
     fun operation(): JsonObject {
-        require(provider in setOf("anthropic-api", "openai-api", "deepseek-api", "xai-api", "zai-api", "ollama", "ollama-cloud", "huggingface", "claude-cli"))
+        require(provider in setOf("anthropic-api", "openai-api", "deepseek-api", "xai-api", "zai-api", "ollama", "ollama-cloud", "huggingface", "claude-cli", "codex-cli"))
         require(model.isNotEmpty() && model.toByteArray(Charsets.UTF_8).size <= 256 && model.none { it.isISOControl() })
         require(hash.matches(Regex("[0-9a-fA-F]{64}")))
         return buildJsonObject {

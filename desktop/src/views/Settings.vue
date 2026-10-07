@@ -194,8 +194,8 @@ onMounted(async () => {
         <span class="tl">
           <span class="tt">Lock on open</span>
           <span class="td">
-            Touch ID / Face ID when Jarvis opens. If biometrics fail, you
-            approve from your phone.
+            When Jarvis opens and after 15 minutes without input: Touch ID,
+            Face ID or your computer password, or approve from your phone.
           </span>
         </span>
         <input
