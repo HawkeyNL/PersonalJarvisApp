@@ -1,13 +1,12 @@
 // App-lock: the desktop app sits behind a biometric gate (Touch ID / Face ID).
 //
-// Primary unlock is local biometrics (biometrics-only — no desktop-password
-// fallback on purpose). If that fails, the app falls back to approval from a
-// trusted phone: the desktop posts an unlock request and polls until the phone
-// signs it (see `requestPhoneApproval`). The phone itself is never locked
-// in-app: it is the approver and is already device-locked.
+// Primary unlock is local biometrics, with the OS account password as the
+// fallback the OS offers. Otherwise a trusted phone can approve: the desktop
+// posts an unlock request and polls until the phone signs it (see
+// `requestPhoneApproval`). The phone app locks itself whenever it leaves the
+// foreground and is the approver.
 //
-// The lock is opt-in via a Settings toggle (off by default) so day-to-day
-// development isn't interrupted by prompts.
+// The lock is on by default and can be switched off in Settings.
 import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { currentAuthStatus } from "./auth";
@@ -37,17 +36,15 @@ export const phoneWaiting = ref(false);
 export const phoneError = ref<string | null>(null);
 
 const LKEY = "jarvis.lock.enabled";
-export const lockEnabled = ref(localStorage.getItem(LKEY) === "true");
+export const lockEnabled = ref(localStorage.getItem(LKEY) !== "false");
 
 // Once unlocked, stay unlocked for the rest of this window session. sessionStorage
 // survives hot-reloads and page reloads but clears when the app is closed, so a
 // dev code-save never re-prompts for Touch ID, while a fresh launch still locks.
 const SESSION_UNLOCKED = "jarvis.unlocked";
 
-// Auto re-lock after this much inactivity (ms). 0 disables it — the app then
-// only locks on a fresh launch, so you authenticate once per session, not
-// repeatedly. (A configurable timeout can come back later if wanted.)
-const INACTIVITY_MS = 0;
+// Auto re-lock after this much time without pointer or keyboard input (ms).
+const INACTIVITY_MS = 15 * 60 * 1000;
 let idleTimer: number | undefined;
 let pollActive = false;
 
@@ -83,13 +80,13 @@ export function lockApp(): void {
   }
 }
 
-/** Local biometric unlock (Touch ID / Face ID), biometrics-only. */
+/** Local unlock: biometrics, or the OS password where the OS offers it. */
 export async function biometricUnlock(): Promise<boolean> {
   if (unlocking.value) return false;
   unlocking.value = true;
   lockError.value = null;
   try {
-    await invoke("biometric_unlock", { reason: "Unlock Jarvis", allowPassword: false });
+    await invoke("biometric_unlock", { reason: "Unlock Jarvis", allowPassword: true });
     unlockApp();
     return true;
   } catch (e) {
