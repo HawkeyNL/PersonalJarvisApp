@@ -89,7 +89,7 @@ struct ModelToggleApproval {
     let hash: String
 
     func operationBytes() throws -> Data {
-        let providers = ["anthropic-api", "openai-api", "deepseek-api", "xai-api", "zai-api", "ollama", "ollama-cloud", "huggingface", "claude-cli"]
+        let providers = ["anthropic-api", "openai-api", "deepseek-api", "xai-api", "zai-api", "ollama", "ollama-cloud", "huggingface", "claude-cli", "codex-cli"]
         guard providers.contains(provider), !model.isEmpty, model.utf8.count <= 256,
               model.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }),
               Data(hexEncoded: hash)?.count == 32 else { throw JarvisAPIError.invalidResponse }
