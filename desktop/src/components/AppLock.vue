@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
 import {
   biometricUnlock,
   unlocking,
@@ -11,13 +10,9 @@ import {
   supportsBiometrics,
 } from "../lock";
 
-// Offer Touch ID immediately. If it fails or the machine has no biometric
-// hardware (e.g. a Mac without Touch ID), fall straight through to the phone
-// route rather than the desktop password.
-onMounted(async () => {
-  const ok = supportsBiometrics.value ? await biometricUnlock() : false;
-  if (!ok) requestPhoneApproval();
-});
+// Locking only shows this screen. The OS prompt or a phone request starts when
+// the owner presses a button, so an idle lock never pops a dialog over other
+// apps.
 </script>
 
 <template>
@@ -28,7 +23,9 @@ onMounted(async () => {
         <span class="glyph">J</span>
       </div>
       <h1>Jarvis is locked</h1>
-      <p class="sub">Verify it is you to continue.</p>
+      <p class="sub">
+        {{ supportsBiometrics ? "Unlock with Touch ID, Face ID or your computer password." : "Approve the unlock from your phone." }}
+      </p>
 
       <button
         v-if="supportsBiometrics"
@@ -36,7 +33,7 @@ onMounted(async () => {
         :disabled="unlocking || phoneWaiting"
         @click="biometricUnlock"
       >
-        {{ unlocking ? "Verifying…" : "Unlock with Touch ID / Face ID" }}
+        {{ unlocking ? "Verifying…" : "Unlock" }}
       </button>
 
       <template v-if="!phoneWaiting">
