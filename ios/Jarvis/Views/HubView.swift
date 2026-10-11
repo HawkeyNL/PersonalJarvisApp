@@ -10,6 +10,7 @@ enum HubRoute: Hashable {
 /// Every number comes from Core; a route an older Core lacks says so.
 struct HubView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     @ObservedObject var model: JarvisAppModel
     @State private var devices: Availability<[LinkedDevice]> = .loading
     @State private var pending: Availability<[PendingAction]> = .loading
@@ -53,6 +54,7 @@ struct HubView: View {
                 commandBar
                 orbCluster
                 pill
+                updateBanner
                 VStack(alignment: .leading, spacing: 10) {
                     Eyebrow(text: "Your system")
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
@@ -71,6 +73,7 @@ struct HubView: View {
         .refreshable { await load() }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
+            await model.checkForAppUpdate()
             while !Task.isCancelled {
                 await load()
                 try? await Task.sleep(for: .seconds(30))
@@ -165,6 +168,29 @@ struct HubView: View {
         }
         .frame(height: 340)
         .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder private var updateBanner: some View {
+        if let update = model.iosUpdate {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Jarvis \(update.version) is available")
+                        .font(JarvisFont.body(13, 600)).foregroundStyle(JarvisTheme.text5)
+                    Spacer()
+                    Button { model.dismissAppUpdate() } label: { Image(systemName: "xmark") }
+                        .accessibilityLabel("Dismiss update notice")
+                }
+                HStack(spacing: 8) {
+                    Button("Open in AltStore") { openURL(update.altstoreURL) }
+                    Button("Open in SideStore") { openURL(update.sidestoreURL) }
+                    Button("Downloads page") { openURL(update.downloadsURL) }
+                }
+                .font(JarvisFont.body(11, 600))
+                .buttonStyle(.bordered)
+            }
+            .padding(12)
+            .background(Color(red: 6 / 255.0, green: 22 / 255.0, blue: 18 / 255.0).opacity(0.75), in: RoundedRectangle(cornerRadius: 14))
+        }
     }
 
     private var pill: some View {

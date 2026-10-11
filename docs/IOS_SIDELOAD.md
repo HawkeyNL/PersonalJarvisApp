@@ -21,16 +21,30 @@ Git tag, public Actions artifact, latest pointer or production deployment occurs
 The descriptor ios-candidate.json explicitly says manual-owner-signing,
 apple_signed=false and automatic_install=false. It is NOT latest.json and
 must not be accepted by the normal updater as an install authorization.
-The OCI hash protects transport identity, but this candidate is not yet bound
-to the production updater signing key. Full signed release promotion and the
-Home Node's private-source adapter/download route are still required before
-offering a production download URL or iOS update notification.
 
-Install using an owner-controlled sideload signing tool, e.g. AltStore Classic
-and AltServer on the owner's Mac. The downloaded unsigned IPA is not directly
-installable by tapping it or dragging it into Xcode. Source-based Xcode Run
-remains supported separately. With a free Apple account, provisioning expires
-and needs renewal. Never provide Apple passwords to Jarvis, CI, or its UI.
+## Install and update (primary path)
+
+On the iPhone, open `https://<home-node>/downloads/` in Safari and tap
+**Add to AltStore** or **Add to SideStore** once. Then install and update
+Jarvis from inside that app. The source lists only complete, verified
+releases, never standalone `ios-candidate` builds. Never provide Apple
+passwords to Jarvis, CI, or its UI.
+
+Jarvis shows an informational banner on the hub ("Jarvis X.Y.Z is available")
+with "Open in AltStore", "Open in SideStore" and "Downloads page" buttons. It
+is checked on foreground after unlock, at most every 6 hours, via the
+authenticated `GET /v1/app-updates/ios/{version}`. The banner can be dismissed
+per version. The app never downloads or installs anything itself; only
+`altstore://`, `sidestore://` and `https://` links are opened.
+
+Core pins bundle id `com.hawkeynl.jarvis` and the iOS 17.0 deployment target
+(`crates/app-downloads` `release_store.rs`). Any change to the bundle id or
+target in `ios/project.yml`, and any new entitlement or Info.plist privacy
+key, must be mirrored there.
+
+Source-based Xcode Run remains supported separately. With a free Apple
+account, provisioning expires and needs renewal. Paid-account signing is
+expected to work the same way but is still to be verified on a device.
 
 Before production promotion, test on a real iPhone:
 
