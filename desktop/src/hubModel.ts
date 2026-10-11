@@ -181,6 +181,20 @@ export function originHost(origin: string | null): string {
   try { return new URL(origin).host; } catch { return ""; }
 }
 
+/** In-app route for a notification deep link; null for anything else. Links
+ *  only navigate, never act. Pending pairings show on every page, so the
+ *  pairing link opens the hub. The OS does not deliver these to the desktop
+ *  app yet (no registered URL scheme); see README "Notification deep links". */
+export function deepLinkRoute(url: string): string | null {
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { return null; }
+  if (parsed.protocol !== "jarvis:") return null;
+  const link = `${parsed.hostname.toLowerCase()}${parsed.pathname}`;
+  if (link === "approvals/pairing") return "/";
+  if (link === "health/usage") return "/health?node=usage";
+  return null;
+}
+
 /** Scale factor that fits a box laid out at `design` size into `room`,
  *  clamped to [min, max]; 1 while either size is unknown (not laid out). */
 export function fitScale(

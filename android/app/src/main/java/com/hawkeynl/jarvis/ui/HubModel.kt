@@ -18,6 +18,22 @@ import java.util.Locale
 // Pure presentation helpers for the hub and node pages (no Android or Compose
 // imports), ported from desktop/src/hubModel.ts and nodeModels.ts.
 
+/** Target of a notification deep link: a screen and, for Health, its node. */
+data class DeepLink(val screen: Screen, val healthNode: String = "core")
+
+/** The two supported notification links; anything else is ignored. Links
+ *  only navigate, never act. Android cannot list pairing requests, so the
+ *  pairing link opens the linked devices (approve on desktop). */
+fun parseDeepLink(uri: String?): DeepLink? {
+    val parsed = runCatching { java.net.URI(uri) }.getOrNull() ?: return null
+    if (!parsed.scheme.equals("jarvis", ignoreCase = true)) return null
+    return when (parsed.host?.lowercase(Locale.ROOT) to parsed.path) {
+        "approvals" to "/pairing" -> DeepLink(Screen.CONTEXT)
+        "health" to "/usage" -> DeepLink(Screen.HEALTH, "usage")
+        else -> null
+    }
+}
+
 /** Status colour of a dot or label; every tone is always paired with text. */
 enum class Tone { OK, IDLE, WARN, ERROR }
 

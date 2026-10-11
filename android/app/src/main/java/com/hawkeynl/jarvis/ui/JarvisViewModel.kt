@@ -53,6 +53,8 @@ data class JarvisUiState(
     val availableVoices: List<com.hawkeynl.jarvis.chat.LocalVoice> = emptyList(),
     val voiceStatus: String? = null,
     val screen: Screen = Screen.HUB,
+    /** Node the Health screen opens on; set by a deep link. */
+    val healthNode: String = "core",
     val endpoint: HomeNodeEndpoint? = null,
     val endpointDraft: String = "",
     val connection: ConnectionState = ConnectionState.NotConfigured,
@@ -98,7 +100,11 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun navigate(screen: Screen) = _state.update { it.copy(screen = screen) }
+    fun navigate(screen: Screen) = _state.update { it.copy(screen = screen, healthNode = "core") }
+
+    /** Only navigates. The shell renders it after unlock and sign-in. */
+    fun openDeepLink(link: DeepLink) = _state.update { it.copy(screen = link.screen, healthNode = link.healthNode) }
+
     fun editEndpoint(value: String) = _state.update { it.copy(endpointDraft = value, error = null) }
 
     fun saveEndpoint() {

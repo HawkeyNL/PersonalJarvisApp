@@ -1,5 +1,6 @@
 package com.hawkeynl.jarvis
 
+import android.content.Intent
 import android.os.Bundle
 import android.os.Build
 import android.app.KeyguardManager
@@ -24,6 +25,7 @@ import com.hawkeynl.jarvis.ui.CoreViewModel
 import com.hawkeynl.jarvis.ui.JarvisApp
 import com.hawkeynl.jarvis.ui.JarvisTheme
 import com.hawkeynl.jarvis.ui.JarvisViewModel
+import com.hawkeynl.jarvis.ui.parseDeepLink
 
 class MainActivity : FragmentActivity() {
     private val container: AppContainer
@@ -110,6 +112,17 @@ class MainActivity : FragmentActivity() {
                 )
             }
         }
+        // A recreated Activity already applied its launch link.
+        if (savedInstanceState == null) openDeepLink(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        openDeepLink(intent)
+    }
+
+    private fun openDeepLink(intent: Intent?) {
+        parseDeepLink(intent?.dataString)?.let(viewModel::openDeepLink)
     }
 
     override fun onStop() {

@@ -53,6 +53,7 @@ fun HealthScreen(
     onRefresh: () -> Unit,
     onCheckConnection: () -> Unit,
     modelControls: ModelControlService?,
+    node: String = "core",
 ) {
     LaunchedEffect(Unit) { onRefresh() }
     val now = System.currentTimeMillis()
@@ -85,7 +86,7 @@ fun HealthScreen(
         NodeItem("services", "Services", "Services & disk", JvIcon.DISK, svc.first, svc.second, "Service status and disk space"),
         NodeItem("events", "Events", "Security events", JvIcon.SHIELD, events.first, events.second, "What Core recorded"),
     )
-    var selected by rememberSaveable { mutableStateOf("core") }
+    var selected by rememberSaveable { mutableStateOf(node) }
     var sub by rememberSaveable { mutableStateOf("overview") }
     val current = items.first { it.id == selected }
     val auditRows = data.systemAudit.valueOrNull?.entries.orEmpty().take(20).mapIndexed { i, e ->

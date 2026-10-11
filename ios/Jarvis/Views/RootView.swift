@@ -3,6 +3,8 @@ import SwiftUI
 struct RootView: View {
     @ObservedObject var model: JarvisAppModel
     @State private var path: [HubRoute] = []
+    /// Deep link waiting for unlock and sign-in.
+    @State private var pendingLink: HubRoute?
 
     var body: some View {
         Group {
@@ -31,10 +33,19 @@ struct RootView: View {
                 }
                 // Owner pages must not stay mounted after logout, reset or a 401.
                 .onChange(of: model.isAuthenticated) { _, authenticated in
-                    if !authenticated { path.removeAll() }
+                    if authenticated { openPendingLink() } else { path.removeAll() }
                 }
+                .onChange(of: pendingLink, initial: true) { _, _ in openPendingLink() }
             }
         }
+        .onOpenURL { url in pendingLink = deepLinkRoute(url) }
+    }
+
+    /// Links only navigate, and only once the app is unlocked and signed in.
+    private func openPendingLink() {
+        guard model.lockState == .unlocked, model.isAuthenticated, let route = pendingLink else { return }
+        pendingLink = nil
+        path = [route]
     }
 
     @ViewBuilder private func destination(_ route: HubRoute) -> some View {
@@ -48,6 +59,7 @@ struct RootView: View {
         case .tasks: TasksPage(model: model)
         case .integrations: IntegrationsPage(model: model, navigate: navigate)
         case .health: HealthPage(model: model, navigate: navigate)
+        case .healthUsage: HealthPage(model: model, navigate: navigate, node: "usage")
         case .memory: MemoryPage(model: model)
         case .context: ContextPage(model: model)
         }
