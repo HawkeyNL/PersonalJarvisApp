@@ -68,6 +68,8 @@ interface Usage {
   spent_eur: number;
   remaining_eur: number;
   over_budget: boolean;
+  reserved_eur?: number;
+  above_soft_budget?: boolean;
   requests?: number;
   input_tokens?: number;
   output_tokens?: number;
@@ -220,7 +222,7 @@ const items = computed<NodeItem[]>(() => {
   const node: [Tone, string] = live ? ["ok", `Up ${formatUptime(live.uptime_seconds)}`]
     : reg.value ? ["idle", "No live vitals"] : regError.value ? ["warn", "Unavailable"] : ["idle", "Loading…"];
   const u = usage.value;
-  const spend: [Tone, string] = u ? (u.over_budget ? ["error", "Budget reached"] : ["ok", `${eur(u.spent_eur)} of ${eur(u.budget_eur)}`])
+  const spend: [Tone, string] = u ? (u.over_budget ? ["error", "Budget reached"] : u.above_soft_budget ? ["warn", "Above soft budget"] : ["ok", `${eur(u.spent_eur)} of ${eur(u.budget_eur)}`])
     : regError.value ? ["warn", "Unavailable"] : ["idle", "Loading…"];
   const improve: [Tone, string] = adviceBusy.value ? ["ok", "Thinking…"]
     : advice.value ? ["ok", `${advice.value.proposals.length} proposals`] : ["idle", "On request"];
@@ -397,6 +399,7 @@ onUnmounted(() => {
               </div>
               <div class="grid">
                 <JvTile icon="trend" label="Remaining" :value="eur(usage.remaining_eur)" />
+                <JvTile icon="layers" label="Reserved" :value="usage.reserved_eur == null ? '—' : eur(usage.reserved_eur)" />
                 <JvTile icon="layers" label="Tokens" :value="tokens(usage.total_tokens ?? 0)" />
                 <JvTile icon="arrow-right" label="Input / output" :value="`${tokens(usage.input_tokens ?? 0)} / ${tokens(usage.output_tokens ?? 0)}`" />
                 <JvTile icon="memory" label="Cached" :value="tokens(usage.cache_read_tokens ?? 0)" />
