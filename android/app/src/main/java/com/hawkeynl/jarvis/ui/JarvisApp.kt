@@ -12,6 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -73,7 +74,9 @@ private fun AuthenticatedShell(
                 Screen.AGENTS -> AgentsScreen(data, mood, navigate, core::refreshAgents)
                 Screen.TASKS -> TasksScreen(data, mood, navigate, core::refreshTasks, core::deny)
                 Screen.INTEGRATIONS -> IntegrationsScreen(data, mood, navigate, core::refreshIntegrations)
-                Screen.HEALTH -> HealthScreen(state, data, mood, navigate, core::refreshHealth, actions::checkConnection, modelControls)
+                Screen.HEALTH -> key(state.healthNode) {
+                    HealthScreen(state, data, mood, navigate, core::refreshHealth, actions::checkConnection, modelControls, state.healthNode)
+                }
                 Screen.MEMORY -> MemoryScreen(mood, navigate)
                 Screen.CONTEXT -> ContextScreen(data, mood, navigate, core::refreshContext)
             }

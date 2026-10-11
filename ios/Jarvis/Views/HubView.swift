@@ -4,6 +4,21 @@ import SwiftUI
 enum HubRoute: Hashable {
     case chat, voice, settings, models
     case conversations, agents, tasks, integrations, health, memory, context
+    /// System Health opened on its Usage node.
+    case healthUsage
+}
+
+/// Route for a notification deep link. Links only navigate, never act; any
+/// other URL returns nil and is ignored. iOS cannot list pairing requests, so
+/// the pairing link opens the linked devices (approve on desktop).
+func deepLinkRoute(_ url: URL) -> HubRoute? {
+    guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+          components.scheme?.lowercased() == "jarvis" else { return nil }
+    switch (components.host?.lowercased(), components.path) {
+    case ("approvals", "/pairing"): return .context
+    case ("health", "/usage"): return .healthUsage
+    default: return nil
+    }
 }
 
 /// Core hub: the orb with its seven modules and a two-column card grid.

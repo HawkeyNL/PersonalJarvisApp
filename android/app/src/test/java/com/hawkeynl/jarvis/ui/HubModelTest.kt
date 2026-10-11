@@ -15,10 +15,24 @@ import com.hawkeynl.jarvis.network.SoftwareItem
 import com.hawkeynl.jarvis.network.UnreachableReason
 import java.time.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class HubModelTest {
     private val now = Instant.parse("2026-10-04T12:00:00Z").toEpochMilli()
+
+    @Test
+    fun `deep links only map the two supported routes`() {
+        assertEquals(DeepLink(Screen.CONTEXT), parseDeepLink("jarvis://approvals/pairing"))
+        assertEquals(DeepLink(Screen.HEALTH, "usage"), parseDeepLink("JARVIS://Health/usage"))
+        assertEquals(DeepLink(Screen.HEALTH, "usage"), parseDeepLink("jarvis://health/usage?approve=1"))
+        assertNull(parseDeepLink("jarvis://approvals/pairing/approve"))
+        assertNull(parseDeepLink("jarvis://approvals"))
+        assertNull(parseDeepLink("jarvis://health/models"))
+        assertNull(parseDeepLink("https://approvals/pairing"))
+        assertNull(parseDeepLink("not a uri"))
+        assertNull(parseDeepLink(null))
+    }
 
     @Test
     fun `relative time covers minutes hours days and bad input`() {

@@ -477,8 +477,14 @@ struct HealthPage: View {
     @State private var usage: Availability<UsageSummary> = .loading
     @State private var services: Availability<ServicesResponse> = .loading
     @State private var audit: Availability<[SystemAuditEntry]> = .loading
-    @State private var selected = "core"
+    @State private var selected: String
     @State private var sub = "overview"
+
+    init(model: JarvisAppModel, navigate: @escaping (HubRoute) -> Void, node: String = "core") {
+        self.model = model
+        self.navigate = navigate
+        _selected = State(initialValue: node)
+    }
 
     private var items: [NodeItem] {
         let core: (Tone, String) = !probed ? (Tone.idle, "Checking…") : readyz != nil ? (Tone.ok, "Running") : (Tone.error, "Unreachable")

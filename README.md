@@ -109,3 +109,22 @@ or a changed policy requires a new confirmation. The UI refreshes authoritative
 state after a change; it does not optimistically claim success. Older Core
 versions without the capability remain read-only. Core and client product
 versions remain independent.
+
+## Notification deep links
+
+Core's owner notifications (ntfy `Click` URL) open the apps through exactly
+two links. A link only navigates: it never approves, denies or changes
+anything. A locked or signed-out app shows the screen after unlock and sign-in.
+Any other `jarvis://` link is ignored and the app opens as usual.
+
+| Link | iOS / Android | Desktop |
+|------|---------------|---------|
+| `jarvis://approvals/pairing` | Context → Devices (the mobile apps cannot list or approve pairing requests; approve on desktop) | Hub, where pending pairing requests are shown |
+| `jarvis://health/usage` | System Health → Usage | `/health?node=usage` |
+
+iOS registers the scheme in `ios/Jarvis/Info.plist`, Android in the
+`MainActivity` intent filter. The desktop app does not register the scheme
+yet: on Linux and Windows that needs `tauri-plugin-deep-link` together with
+`tauri-plugin-single-instance`, or every click would start a second app.
+Desktop only has the tested in-app router (`deepLinkRoute` in
+`desktop/src/hubModel.ts`) for when OS registration is added.

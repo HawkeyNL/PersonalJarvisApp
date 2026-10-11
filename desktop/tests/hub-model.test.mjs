@@ -9,6 +9,7 @@ import {
   contextCard,
   conversationsCard,
   countSince,
+  deepLinkRoute,
   deriveMood,
   formatUptime,
   healthCard,
@@ -115,6 +116,17 @@ test("footer shows only the origin host", () => {
   assert.equal(originHost("https://jarvis.home.example:8443"), "jarvis.home.example:8443");
   assert.equal(originHost(null), "");
   assert.equal(originHost("not a url"), "");
+});
+
+test("deep links: only the two supported links map to a route", () => {
+  assert.equal(deepLinkRoute("jarvis://approvals/pairing"), "/");
+  assert.equal(deepLinkRoute("JARVIS://Health/usage"), "/health?node=usage");
+  assert.equal(deepLinkRoute("jarvis://health/usage?approve=1"), "/health?node=usage");
+  assert.equal(deepLinkRoute("jarvis://approvals/pairing/approve"), null);
+  assert.equal(deepLinkRoute("jarvis://approvals"), null);
+  assert.equal(deepLinkRoute("jarvis://health/models"), null);
+  assert.equal(deepLinkRoute("https://approvals/pairing"), null);
+  assert.equal(deepLinkRoute("not a url"), null);
 });
 
 test("fit scale: the stage fits the room on both axes, within bounds", () => {
