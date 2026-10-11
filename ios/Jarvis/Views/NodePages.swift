@@ -486,7 +486,9 @@ struct HealthPage: View {
             value.liveHost.map { live in (Tone.ok, "Up \(formatUptime(live.uptimeSeconds))") } ?? (Tone.idle, "No live vitals")
         }
         let spend = sourceStatus(usage) { u in
-            u.over_budget ? (Tone.error, "Budget reached") : (Tone.ok, "\(formatEuro(u.spent_eur)) of \(formatEuro(u.budget_eur))")
+            u.over_budget ? (Tone.error, "Budget reached")
+                : u.above_soft_budget == true ? (Tone.warn, "Above soft budget")
+                : (Tone.ok, "\(formatEuro(u.spent_eur)) of \(formatEuro(u.budget_eur))")
         }
         var svc = sourceStatus(services) { servicesSummary($0.services) }
         let fullDisk = (services.value?.disks ?? []).contains { disk in diskState(disk).0 == .warn || diskState(disk).0 == .error }
@@ -539,6 +541,7 @@ struct HealthPage: View {
                             TileData(label: "Spent this month", value: formatEuro(u.spent_eur), symbol: "eurosign.circle"),
                             TileData(label: "Budget", value: formatEuro(u.budget_eur), symbol: "gauge"),
                             TileData(label: "Remaining", value: formatEuro(u.remaining_eur ?? max(0, u.budget_eur - u.spent_eur)), symbol: "banknote"),
+                            TileData(label: "Reserved", value: u.reserved_eur.map(formatEuro) ?? "—", symbol: "lock"),
                             TileData(label: "Requests", value: u.requests.map { "\($0)" } ?? "—", symbol: "arrow.up.arrow.down"),
                             TileData(label: "Tokens", value: u.total_tokens.map(formatCompact) ?? "—", symbol: "number"),
                             TileData(label: "Latency p95", value: formatMs(u.latency_p95_ms), symbol: "timer"),

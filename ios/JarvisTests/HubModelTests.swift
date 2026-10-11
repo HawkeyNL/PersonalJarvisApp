@@ -63,6 +63,18 @@ final class HubModelTests: XCTestCase {
         XCTAssertEqual(healthCard(online: true, registry: .unsupported), CardSummary(line1: "Core ready", line2: "", tone: .ok))
     }
 
+    func testUsageSummaryDecodesBudgetFlags() throws {
+        let u = try decode(UsageSummary.self, """
+        {"budget_eur":10,"spent_eur":8.5,"remaining_eur":1.5,"over_budget":false,"reserved_eur":0.25,"above_soft_budget":true,
+         "by_backend":[{"backend":"anthropic","spent_eur":8.5,"total_tokens":1200}],"daily":[]}
+        """)
+        XCTAssertEqual(u.reserved_eur, 0.25)
+        XCTAssertEqual(u.above_soft_budget, true)
+        XCTAssertEqual(u.by_backend?.first?.backend, "anthropic")
+        let old = try decode(UsageSummary.self, #"{"budget_eur":1,"spent_eur":0,"over_budget":false}"#)
+        XCTAssertNil(old.above_soft_budget)
+    }
+
     func testTasksCardAndSessions() throws {
         let sessions = try decode(CodingSessionList.self, """
         {"sessions":[{"id":"a","state":"active"},{"id":"b","state":"suspended","repository":"r"},{"id":"c","state":"completed"}]}
