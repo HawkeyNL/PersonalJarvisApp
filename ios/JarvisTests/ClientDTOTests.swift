@@ -913,3 +913,154 @@ final class ClientDTOTests: XCTestCase {
         XCTAssertNil(IOSUpdateNotice.validated(try decoder.decode(IOSUpdateResponse.self, from: json(downloads: "http://h/downloads/")), running: "0.1.0"))
     }
 }
+
+final class PairingApprovalTests: XCTestCase {
+    private let key = Data((32..<64).map { UInt8($0) })
+    private let full = "72dbb7336c76780023f83da4c355f2eeea85733b13d3477697917790c1229084"
+    private let other = String(repeating: "ab", count: 32)
+
+    private func item(fingerprint: String? = nil, full: String? = nil, key: String? = nil, expiresIn: Int64 = 300) -> PairingApprovalItem {
+        let now = Int64(Date().timeIntervalSince1970)
+        return PairingApprovalItem(id: UUID(uuidString: "00112233-4455-6677-8899-aabbccddeeff")!, device_name: "Fixture phone",
+                                   platform: "android", fingerprint: fingerprint ?? String(self.full.prefix(16)),
+                                   nonce: String(repeating: "00", count: 32), candidate_public_key: key ?? self.key.hexEncodedString(),
+                                   created_at: now, expires_at: now + expiresIn, fingerprint_full: full)
+    }
+
+    func testPairingApprovalMessageMatchesClientCoreGoldenVector() throws {
+        let message = try DeviceIdentityStore.pairingApprovalMessage(
+            requestId: UUID(uuidString: "00112233-4455-6677-8899-aabbccddeeff")!,
+            nonceHex: Data((0..<32).map { UInt8($0) }).hexEncodedString(),
+            candidatePublicKeyHex: key.hexEncodedString(),
+            userId: UUID(uuidString: "10213243-5465-7687-98a9-bacbdcedfe0f")!,
+            approverDeviceId: UUID(uuidString: "ffeeddcc-bbaa-9988-7766-554433221100")!,
+            expiresAt: 1_800_000_000)
+        XCTAssertEqual(message.hexEncodedString(),
+            "6a61727669732d6465766963652d70616972696e672d763100" + "00112233445566778899aabbccddeeff" +
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" +
+            "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f" +
+            "102132435465768798a9bacbdcedfe0f" + "ffeeddccbbaa99887766554433221100" + "000000006b49d200")
+        for (nonce, candidate) in [("00", key.hexEncodedString()), (String(repeating: "00", count: 32), "+f" + String(repeating: "00", count: 31))] {
+            XCTAssertThrowsError(try DeviceIdentityStore.pairingApprovalMessage(requestId: UUID(), nonceHex: nonce,
+                candidatePublicKeyHex: candidate, userId: UUID(), approverDeviceId: UUID(), expiresAt: 1))
+        }
+    }
+
+    func testFingerprintIsComputedLocallyAndAnyMismatchIsRefused() throws {
+        XCTAssertEqual(PairingFingerprint.of(publicKey: key), full)
+        XCTAssertEqual(try PairingFingerprint.verified(item(full: full)), full)
+        // Older Core: no fingerprint_full, but the legacy prefix must still match.
+        XCTAssertEqual(try PairingFingerprint.verified(item()), full)
+        for tampered in [item(full: other), item(fingerprint: String(other.prefix(16))), item(full: full.uppercased())] {
+            XCTAssertThrowsError(try PairingFingerprint.verified(tampered)) { XCTAssertEqual($0 as? PairingFingerprint.Failure, .mismatch) }
+        }
+        for bad in ["", "zz", String(repeating: "07", count: 31)] {
+            XCTAssertThrowsError(try PairingFingerprint.verified(item(key: bad))) { XCTAssertEqual($0 as? PairingFingerprint.Failure, .invalidKey) }
+        }
+        XCTAssertEqual(PairingFingerprint.grouped("0123456789abcdef01"), "0123 4567 89ab cdef 01")
+        XCTAssertEqual(PairingFingerprint.hint(nil), "unknown")
+        XCTAssertEqual(PairingFingerprint.hint("Pixel\u{202E} 9\u{7}"), "Pixel 9")
+        XCTAssertEqual(PairingFingerprint.hint(String(repeating: "x", count: 70)), String(repeating: "x", count: 64) + "…")
+        XCTAssertEqual(pairingCountdown(100, now: Date(timeIntervalSince1970: 0)), "1:40")
+        XCTAssertEqual(pairingCountdown(100, now: Date(timeIntervalSince1970: 100)), "Expired")
+    }
+
+    func testDecodesPairingListWithAndWithoutDetails() throws {
+        let legacy = #"{"requests":[{"id":"018f47de-936a-7000-8000-000000000001","device_name":"Phone","platform":"ios","fingerprint":"72dbb7336c767800","nonce":"00","candidate_public_key":"20","created_at":1,"expires_at":2}]}"#
+        let old = try JSONDecoder().decode(PairingApprovalList.self, from: Data(legacy.utf8)).requests[0]
+        XCTAssertNil(old.fingerprint_full); XCTAssertNil(old.ip); XCTAssertNil(old.model)
+        let current = #"{"requests":[{"id":"018f47de-936a-7000-8000-000000000001","device_name":"Phone","platform":"ios","fingerprint":"72dbb7336c767800","fingerprint_full":"72dbb7336c76780023f83da4c355f2eeea85733b13d3477697917790c1229084","nonce":"00","candidate_public_key":"20","created_at":1,"expires_at":2,"ip":"192.0.2.7","user_agent":null,"app_version":"0.1.21","model":"iPhone16,1"}]}"#
+        let new = try JSONDecoder().decode(PairingApprovalList.self, from: Data(current.utf8)).requests[0]
+        XCTAssertEqual(new.fingerprint_full, full)
+        XCTAssertEqual(new.ip, "192.0.2.7"); XCTAssertNil(new.user_agent)
+        XCTAssertEqual(new.app_version, "0.1.21"); XCTAssertEqual(new.model, "iPhone16,1")
+    }
+
+    func testDecisionsSignOnlyAfterBiometricSuccess() async throws {
+        let store = FixtureSecureStorage()
+        let credentials = SecureCredentialStore(keychain: store)
+        let identity = DeviceIdentityStore(keychain: store)
+        let publicKey = try await identity.publicKeyHex()
+        try await credentials.save(deviceId: PairingDecisionProtocol.device)
+        try await credentials.save(session: SecureSession(token: "fixture-session-not-a-secret", expiresAt: Int64(Date().timeIntervalSince1970) + 3600))
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PairingDecisionProtocol.self]
+        let transport = URLSession(configuration: configuration)
+        defer { transport.invalidateAndCancel() }
+        let api = JarvisAPIClient(baseURL: URL(string: "https://jarvis.example.com")!, session: transport)
+        let prompts = PairingPromptCounter()
+        let auth = AuthService(api: api, identity: identity, credentials: credentials,
+                               authenticateBiometric: { _ in await prompts.authenticate() })
+        PairingDecisionProtocol.reset()
+        let request = item(full: full)
+
+        await prompts.set(.cancelled)
+        do { try await auth.approvePairing(request); XCTFail("Cancelled biometrics must not sign") } catch { }
+        do { try await auth.denyPairing(request); XCTFail("Cancelled biometrics must not deny") } catch { }
+        XCTAssertTrue(PairingDecisionProtocol.decisions().isEmpty)
+
+        await prompts.set(.unlocked)
+        do { try await auth.approvePairing(item(full: other)); XCTFail("Mismatch must be refused") }
+        catch { XCTAssertEqual(error as? PairingFingerprint.Failure, .mismatch) }
+        do { try await auth.approvePairing(item(full: full, expiresIn: -1)); XCTFail("Expired request must be refused") } catch { }
+        let refusedPrompts = await prompts.count
+        XCTAssertEqual(refusedPrompts, 2, "Mismatched or expired requests never prompt")
+
+        try await auth.approvePairing(request)
+        let decisions = PairingDecisionProtocol.decisions()
+        XCTAssertEqual(decisions.map { $0.path }, ["/v1/auth/pairing/requests/\(request.id.uuidString)/approve"])
+        let signature = try XCTUnwrap(decisions.first?.body["signature"].flatMap { Data(hexEncoded: $0) })
+        let message = try DeviceIdentityStore.pairingApprovalMessage(
+            requestId: request.id, nonceHex: request.nonce, candidatePublicKeyHex: request.candidate_public_key,
+            userId: PairingDecisionProtocol.user, approverDeviceId: PairingDecisionProtocol.device, expiresAt: request.expires_at)
+        let verifier = try Curve25519.Signing.PublicKey(rawRepresentation: XCTUnwrap(Data(hexEncoded: publicKey)))
+        XCTAssertTrue(verifier.isValidSignature(signature, for: message))
+    }
+}
+
+private actor PairingPromptCounter {
+    private(set) var count = 0
+    private var result = LocalUnlockResult.unlocked
+    func set(_ value: LocalUnlockResult) { result = value }
+    func authenticate() -> LocalUnlockResult { count += 1; return result }
+}
+
+private final class PairingDecisionProtocol: URLProtocol {
+    static let device = UUID(uuidString: "04040404-0404-0404-0404-040404040404")!
+    static let user = UUID(uuidString: "03030303-0303-0303-0303-030303030303")!
+    private static let lock = NSLock()
+    private static var captured: [(path: String, body: [String: String])] = []
+    static func reset() { lock.withLock { captured = [] } }
+    static func decisions() -> [(path: String, body: [String: String])] { lock.withLock { captured } }
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url?.path ?? ""
+        let object: [String: Any]
+        if path == "/v1/auth/me" {
+            object = ["user_id": Self.user.uuidString, "device_id": Self.device.uuidString]
+        } else if path.hasPrefix("/v1/auth/pairing/requests/") {
+            var data = request.httpBody ?? Data()
+            if let stream = request.httpBodyStream {
+                stream.open(); defer { stream.close() }
+                var buffer = [UInt8](repeating: 0, count: 4096)
+                while data.count < 16384 {
+                    let count = stream.read(&buffer, maxLength: buffer.count)
+                    if count <= 0 { break }
+                    data.append(contentsOf: buffer.prefix(count))
+                }
+            }
+            let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: String] ?? [:]
+            Self.lock.withLock { Self.captured.append((path, body)) }
+            object = [:]
+        } else {
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL)); return
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                       headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: try! JSONSerialization.data(withJSONObject: object))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() { }
+}

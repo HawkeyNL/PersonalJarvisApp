@@ -10,7 +10,11 @@ import androidx.biometric.BiometricPrompt
 import androidx.biometric.BiometricManager
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
+import com.hawkeynl.jarvis.security.BiometricAvailability
+import com.hawkeynl.jarvis.security.BiometricResult
 import com.hawkeynl.jarvis.security.ModelControlService
+import com.hawkeynl.jarvis.security.PairingApprovalService
+import kotlinx.coroutines.flow.first
 import androidx.activity.compose.setContent
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
@@ -47,6 +51,33 @@ class MainActivity : FragmentActivity() {
     }
     private val modelControls by lazy { ModelControlService(container.api, container.sessions, container.settings, container.identity, ::authenticateModelChange,
         { !viewModel.state.value.locked && viewModel.state.value.authenticated }) }
+
+    // Pairing decisions accept only strong biometrics: no device credential fallback.
+    private val pairingApprovals by lazy {
+        PairingApprovalService(
+            container.api, container.sessions, { container.settings.endpoint.first() }, container.identity,
+            ::authenticatePairing,
+            { container.biometricGate.availability(this) == BiometricAvailability.Available },
+            { !viewModel.state.value.locked && viewModel.state.value.authenticated },
+        )
+    }
+
+    private suspend fun authenticatePairing(reason: String): Boolean {
+        val accepted = suspendCancellableCoroutine<Boolean> { continuation ->
+            if (biometricPromptActive || modelAuthenticationActive) { continuation.resume(false); return@suspendCancellableCoroutine }
+            biometricPromptActive = true
+            val prompt = container.biometricGate.authenticate(
+                this, ContextCompat.getMainExecutor(this), "Pairing request", description = reason,
+            ) { result ->
+                // A rejected finger or face keeps the prompt open for another try.
+                if (result == BiometricResult.Failed) return@authenticate
+                biometricPromptActive = false
+                if (continuation.isActive) continuation.resume(result == BiometricResult.Authenticated)
+            }
+            continuation.invokeOnCancellation { runOnUiThread { prompt?.cancelAuthentication(); biometricPromptActive = false } }
+        }
+        return accepted && lifecycle.withResumed { !isFinishing && !isDestroyed }
+    }
 
     private suspend fun authenticateModelChange(reason: String): Boolean {
         val accepted = suspendCancellableCoroutine<Boolean> { continuation ->
@@ -109,6 +140,7 @@ class MainActivity : FragmentActivity() {
                     onRequestBiometric = ::requestBiometricUnlock,
                     onInstallUpdate = ::installVerifiedUpdate,
                     modelControls = modelControls,
+                    pairingApprovals = pairingApprovals,
                 )
             }
         }

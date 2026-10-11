@@ -15,6 +15,7 @@ import com.hawkeynl.jarvis.network.HomeNodeEndpoint
 import com.hawkeynl.jarvis.network.UnreachableReason
 import com.hawkeynl.jarvis.security.BiometricAvailability
 import com.hawkeynl.jarvis.security.BiometricResult
+import com.hawkeynl.jarvis.security.PairingApproval
 import com.hawkeynl.jarvis.update.AndroidUpdateCheck
 import com.hawkeynl.jarvis.update.AndroidUpdateDownload
 import com.hawkeynl.jarvis.update.InstallerHandoff
@@ -32,7 +33,7 @@ import com.hawkeynl.jarvis.chat.realtimeSnapshot
 import com.hawkeynl.jarvis.chat.realtimeSelectedHistory
 
 /** Where the authenticated app is: the hub, a node page, chat or settings. */
-enum class Screen { HUB, CHAT, SETTINGS, CONVERSATIONS, AGENTS, TASKS, INTEGRATIONS, HEALTH, MEMORY, CONTEXT }
+enum class Screen { HUB, CHAT, SETTINGS, CONVERSATIONS, AGENTS, TASKS, INTEGRATIONS, HEALTH, MEMORY, CONTEXT, PAIRING_APPROVALS }
 
 sealed interface AndroidUpdateUiState {
     data object Idle : AndroidUpdateUiState
@@ -63,6 +64,8 @@ data class JarvisUiState(
     val authenticated: Boolean = false,
     val pairingPending: Boolean = false,
     val pairingExpiresAt: Long? = null,
+    /** This device's key fingerprint, shown while waiting for approval. */
+    val ownFingerprint: String? = null,
     val conversations: List<ConversationSummary> = emptyList(),
     val conversationId: String? = null,
     val conversationTitle: String = "New conversation",
@@ -371,13 +374,19 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                     activationRequired = false, error = "Enter your account password to sign in.")
             }
             EnrollmentOutcome.ActivationRequired -> _state.update { it.copy(busy = false, pairingPending = false, activationRequired = true, error = null) }
-            is EnrollmentOutcome.Pending -> _state.update {
-                it.copy(
-                    busy = false,
-                    pairingPending = true,
-                    pairingExpiresAt = result.ticket.expires_at,
-                    error = null,
-                )
+            is EnrollmentOutcome.Pending -> {
+                val fingerprint = _state.value.ownFingerprint ?: runCatching {
+                    PairingApproval.grouped(PairingApproval.fingerprint(container.identity.publicKeyHex()))
+                }.getOrNull()
+                _state.update {
+                    it.copy(
+                        busy = false,
+                        pairingPending = true,
+                        pairingExpiresAt = result.ticket.expires_at,
+                        ownFingerprint = fingerprint,
+                        error = null,
+                    )
+                }
             }
             is EnrollmentOutcome.Authenticated -> {
                 _state.update {

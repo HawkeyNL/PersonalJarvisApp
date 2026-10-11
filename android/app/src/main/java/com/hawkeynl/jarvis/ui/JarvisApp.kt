@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hawkeynl.jarvis.network.ConnectionState
 import com.hawkeynl.jarvis.security.ModelControlService
+import com.hawkeynl.jarvis.security.PairingApprovalService
 
 @Composable
 fun JarvisApp(
@@ -30,6 +31,7 @@ fun JarvisApp(
     onRequestBiometric: () -> Unit,
     onInstallUpdate: () -> Unit,
     modelControls: ModelControlService? = null,
+    pairingApprovals: PairingApprovalService? = null,
 ) {
     val signedIn = !state.locked && state.endpoint != null && state.authenticated
     // Locking or signing out drops every Core read and cancels running ones.
@@ -43,7 +45,7 @@ fun JarvisApp(
                     onReset = actions::resetDevice,
                 )
                 state.endpoint == null || !state.authenticated -> OnboardingScreen(state, actions)
-                else -> AuthenticatedShell(state, actions, core, onInstallUpdate, modelControls)
+                else -> AuthenticatedShell(state, actions, core, onInstallUpdate, modelControls, pairingApprovals)
             }
         }
     }
@@ -56,6 +58,7 @@ private fun AuthenticatedShell(
     core: CoreViewModel,
     onInstallUpdate: () -> Unit,
     modelControls: ModelControlService?,
+    pairingApprovals: PairingApprovalService?,
 ) {
     val data by core.state.collectAsStateWithLifecycle()
     val screen = state.screen
@@ -79,6 +82,7 @@ private fun AuthenticatedShell(
                 }
                 Screen.MEMORY -> MemoryScreen(mood, navigate)
                 Screen.CONTEXT -> ContextScreen(data, mood, navigate, core::refreshContext)
+                Screen.PAIRING_APPROVALS -> PairingApprovalsScreen(data, navigate, core::refreshPairing, core::dropPairing, pairingApprovals)
             }
         }
         if (screen != Screen.CHAT && screen != Screen.SETTINGS) Dock(screen, navigate)

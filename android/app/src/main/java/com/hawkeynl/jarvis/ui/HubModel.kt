@@ -22,13 +22,12 @@ import java.util.Locale
 data class DeepLink(val screen: Screen, val healthNode: String = "core")
 
 /** The two supported notification links; anything else is ignored. Links
- *  only navigate, never act. Android cannot list pairing requests, so the
- *  pairing link opens the linked devices (approve on desktop). */
+ *  only navigate, never act. */
 fun parseDeepLink(uri: String?): DeepLink? {
     val parsed = runCatching { java.net.URI(uri) }.getOrNull() ?: return null
     if (!parsed.scheme.equals("jarvis", ignoreCase = true)) return null
     return when (parsed.host?.lowercase(Locale.ROOT) to parsed.path) {
-        "approvals" to "/pairing" -> DeepLink(Screen.CONTEXT)
+        "approvals" to "/pairing" -> DeepLink(Screen.PAIRING_APPROVALS)
         "health" to "/usage" -> DeepLink(Screen.HEALTH, "usage")
         else -> null
     }

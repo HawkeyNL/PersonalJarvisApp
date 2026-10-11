@@ -3,6 +3,7 @@ package com.hawkeynl.jarvis.auth
 import com.hawkeynl.jarvis.network.AndroidUpdateMetadata
 import com.hawkeynl.jarvis.network.ApiResult
 import com.hawkeynl.jarvis.network.AccountStatus
+import com.hawkeynl.jarvis.network.BootstrapRequest
 import com.hawkeynl.jarvis.network.FirstDeviceResponse
 import com.hawkeynl.jarvis.network.ChallengeRequest
 import com.hawkeynl.jarvis.network.ChallengeResponse
@@ -127,7 +128,7 @@ private class FakeIdentity : DeviceIdentity {
 private class FakeApi : JarvisApi {
     var account = AccountStatus(1, false, false)
     override suspend fun accountStatus(endpoint: HomeNodeEndpoint) = ApiResult.Success(account)
-    override suspend fun activateFirstDevice(endpoint: HomeNodeEndpoint, request: PairingCreateRequest, code: String): ApiResult<FirstDeviceResponse> = error("unused")
+    override suspend fun activateFirstDevice(endpoint: HomeNodeEndpoint, request: BootstrapRequest, code: String): ApiResult<FirstDeviceResponse> = error("unused")
     var created: PairingCreateRequest? = null
     var approved = false
     var pairingDecision: String? = null

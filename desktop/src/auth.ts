@@ -8,6 +8,7 @@ import { chatSession } from "./chatSession";
 import { homeNodeOrigin } from "./homeNode";
 import { getJson, getJsonAuth, getJsonWithHeaders, postAuth, postJson, postJsonAuth, postJsonWithHeaders } from "./api";
 import { scheduleAutomaticUpdateCheck } from "./updates";
+import { groupFingerprint, keyFingerprint } from "./pairingFingerprint";
 
 export type AuthStatus = {
   device_id: string | null;
@@ -103,6 +104,12 @@ export async function login(enrolledDeviceId?: string, password?: string, boundO
   });
   sessionStorage.removeItem(PAIRING_WAIT_KEY);
   scheduleAutomaticUpdateCheck(true, true);
+}
+
+/** This device's key fingerprint, for the owner to compare with the one the
+ *  approving device shows. */
+export async function ownKeyFingerprint(): Promise<string> {
+  return groupFingerprint(await keyFingerprint(await invoke<string>("auth_public_key")));
 }
 
 /** Local-LAN first-owner bootstrap. The secret is used once, never persisted,

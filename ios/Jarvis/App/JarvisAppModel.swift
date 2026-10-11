@@ -168,6 +168,22 @@ final class JarvisAppModel: ObservableObject {
         try await auth.ownerPost("/v1/agent/pending/\(id)/deny")
     }
 
+    /// Pairing decisions sign or deny only after Face ID / Touch ID on this device.
+    func approvePairing(_ item: PairingApprovalItem) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        try await auth.approvePairing(item)
+    }
+
+    func denyPairing(_ item: PairingApprovalItem) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        try await auth.denyPairing(item)
+    }
+
+    /// This device's own key fingerprint, grouped, for the pairing wait screen.
+    func ownKeyFingerprint() async -> String? {
+        (try? await auth.ownKeyFingerprint()).map(PairingFingerprint.grouped)
+    }
+
     func registeredDeviceID() async -> UUID? {
         guard isAuthenticated, lockState == .unlocked else { return nil }
         return await auth.registeredDeviceID()

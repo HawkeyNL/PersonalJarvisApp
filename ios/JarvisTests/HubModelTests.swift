@@ -165,7 +165,7 @@ final class HubModelTests: XCTestCase {
 
     func testDeepLinksOnlyMapTheTwoSupportedRoutes() {
         func route(_ text: String) -> HubRoute? { deepLinkRoute(URL(string: text)!) }
-        XCTAssertEqual(route("jarvis://approvals/pairing"), .context)
+        XCTAssertEqual(route("jarvis://approvals/pairing"), .pairingApprovals)
         XCTAssertEqual(route("JARVIS://Health/usage"), .healthUsage)
         XCTAssertEqual(route("jarvis://health/usage?approve=1"), .healthUsage)
         XCTAssertNil(route("jarvis://approvals/pairing/approve"))

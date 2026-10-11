@@ -15,3 +15,9 @@ test("activation failures distinguish status and never echo secrets or server te
     assert.ok(!accountFailure(error).includes("fixture-secret"));
   }
 });
+
+test("pairing without a stored account password names the fix", () => {
+  const text = accountFailure({ name: "ApiError", status: 403, path: "/v1/auth/pairing/requests", code: "pairing_password_not_set" });
+  assert.equal(text, "Set an account password on an active device first.");
+  assert.match(accountFailure({ name: "ApiError", status: 403, path: "/v1/auth/pairing/requests", code: "other" }), /HTTP 403/);
+});

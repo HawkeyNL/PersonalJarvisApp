@@ -32,17 +32,20 @@ actor AuthService {
     private let identity: DeviceIdentityStore
     private let credentials: SecureCredentialStore
     private let authenticateOwner: @Sendable (String) async -> LocalUnlockResult
+    private let authenticateBiometric: @Sendable (String) async -> LocalUnlockResult
 
     init(
         api: JarvisAPIClient,
         identity: DeviceIdentityStore = DeviceIdentityStore(),
         credentials: SecureCredentialStore = SecureCredentialStore(),
-        authenticateOwner: @escaping @Sendable (String) async -> LocalUnlockResult = { await BiometricLock().unlock(reason: $0) }
+        authenticateOwner: @escaping @Sendable (String) async -> LocalUnlockResult = { await BiometricLock().unlock(reason: $0) },
+        authenticateBiometric: @escaping @Sendable (String) async -> LocalUnlockResult = { await BiometricLock().biometricOnly(reason: $0) }
     ) {
         self.api = api
         self.identity = identity
         self.credentials = credentials
         self.authenticateOwner = authenticateOwner
+        self.authenticateBiometric = authenticateBiometric
     }
 
     func restore(password: String? = nil) async throws -> AuthServiceOutcome {
@@ -134,6 +137,71 @@ actor AuthService {
     }
 
     func registeredDeviceID() async -> UUID? { try? await credentials.deviceId() }
+
+    /// This installation's key fingerprint, shown while it waits for pairing approval.
+    func ownKeyFingerprint() async throws -> String {
+        try PairingFingerprint.of(publicKeyHex: try await identity.existingPublicKeyHex())
+    }
+
+    /// Approve one pairing request: verify the fingerprint locally, build the exact
+    /// v1 message, then sign only after Face ID / Touch ID succeeds.
+    func approvePairing(_ item: PairingApprovalItem) async throws {
+        let fingerprint = try PairingFingerprint.verified(item)
+        let binding = await api.binding()
+        guard let token = try await credentials.session()?.token,
+              let device = try await credentials.deviceId() else { throw JarvisAPIError.unauthorized }
+        // Core owns the user binding; learn it from the authenticated session.
+        let me: AuthenticatedIdentity = try await api.get("/v1/auth/me", token: token, expectedBinding: binding)
+        guard me.deviceId == device else { throw JarvisAPIError.unauthorized }
+        let message = try DeviceIdentityStore.pairingApprovalMessage(
+            requestId: item.id, nonceHex: item.nonce, candidatePublicKeyHex: item.candidate_public_key,
+            userId: me.userId, approverDeviceId: device, expiresAt: item.expires_at)
+        try requireUnexpired(item)
+        let name = PairingFingerprint.hint(item.device_name, max: 40)
+        try await requireBiometric("Approve \(name) with key \(PairingFingerprint.grouped(String(fingerprint.prefix(16))))")
+        guard await api.binding() == binding, try await credentials.session()?.token == token,
+              try await credentials.deviceId() == device else { throw JarvisAPIError.unauthorized }
+        try requireUnexpired(item)
+        try Task.checkCancellation()
+        let signature = try await identity.signPairingApproval(message)
+        try await pairingDecision("/v1/auth/pairing/requests/\(item.id.uuidString)/approve",
+                                  body: ["signature": signature], token: token, binding: binding)
+    }
+
+    /// Deny one pairing request. Also gated on Face ID / Touch ID.
+    func denyPairing(_ item: PairingApprovalItem) async throws {
+        let binding = await api.binding()
+        guard let token = try await credentials.session()?.token else { throw JarvisAPIError.unauthorized }
+        try await requireBiometric("Deny pairing of \(PairingFingerprint.hint(item.device_name, max: 40))")
+        guard await api.binding() == binding, try await credentials.session()?.token == token else { throw JarvisAPIError.unauthorized }
+        try await pairingDecision("/v1/auth/pairing/requests/\(item.id.uuidString)/deny",
+                                  body: [String: String](), token: token, binding: binding)
+    }
+
+    private func requireUnexpired(_ item: PairingApprovalItem) throws {
+        guard item.expires_at > Int64(Date().timeIntervalSince1970) else {
+            throw JarvisAPIError.rejected(status: 410, message: "This pairing request has expired.")
+        }
+    }
+
+    private func requireBiometric(_ reason: String) async throws {
+        switch await authenticateBiometric(reason) {
+        case .unlocked: return
+        case let .unavailable(message): throw JarvisAPIError.rejected(status: 403, message: message)
+        case .cancelled, .denied:
+            throw JarvisAPIError.rejected(status: 403, message: "Cancelled; Face ID or Touch ID is required.")
+        }
+    }
+
+    /// Core answers 401 for an unknown, handled or expired request too; report that
+    /// as a refusal instead of ending the session (the next read still detects a real 401).
+    private func pairingDecision(_ path: String, body: [String: String], token: String, binding: UUID) async throws {
+        do {
+            try await api.postDiscardingResponse(path, body: body, token: token, expectedBinding: binding)
+        } catch JarvisAPIError.unauthorized {
+            throw JarvisAPIError.rejected(status: 401, message: "Core refused this decision. The request may have expired or been handled already.")
+        }
+    }
 
     func setModelEnabled(_ entry: ModelAccessEntry, policyHash: String) async throws {
         guard !modelChangeRunning else { throw JarvisAPIError.rejected(status: 409, message: "Another model change is running.") }

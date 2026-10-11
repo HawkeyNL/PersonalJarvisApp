@@ -5,6 +5,7 @@ struct EnrollmentView: View {
     @ObservedObject var model: JarvisAppModel
     @State private var password = ""
     @State private var activationCode = ""
+    @State private var ownFingerprint: String?
 
     var body: some View {
         ScrollView {
@@ -79,8 +80,19 @@ struct EnrollmentView: View {
         case .reachable:
             switch model.enrollmentState {
             case .awaitingApproval:
+                if let ownFingerprint {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Check that the approving device shows this key fingerprint:")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Text(verbatim: ownFingerprint)
+                            .font(.system(.footnote, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                }
                 Button("Check approval") { Task { await model.refreshEnrollment() } }
                     .buttonStyle(.borderedProminent)
+                    .task { ownFingerprint = await model.ownKeyFingerprint() }
             case .requesting, .authenticating:
                 ProgressView()
             case .authenticated:

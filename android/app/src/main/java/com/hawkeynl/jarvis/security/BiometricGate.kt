@@ -36,12 +36,15 @@ class BiometricGate {
     fun authenticate(
         activity: FragmentActivity,
         executor: Executor,
+        title: String = "Unlock Jarvis",
+        subtitle: String = "Confirm with strong biometrics",
+        description: String? = null,
         callback: (BiometricResult) -> Unit,
-    ) {
+    ): BiometricPrompt? {
         val availability = availability(activity)
         if (availability != BiometricAvailability.Available) {
             callback(BiometricResult.Unavailable(availability))
-            return
+            return null
         }
 
         val prompt = BiometricPrompt(
@@ -74,12 +77,14 @@ class BiometricGate {
         )
         prompt.authenticate(
             BiometricPrompt.PromptInfo.Builder()
-                .setTitle("Unlock Jarvis")
-                .setSubtitle("Confirm with strong biometrics")
+                .setTitle(title)
+                .setSubtitle(subtitle)
+                .setDescription(description)
                 .setAllowedAuthenticators(AUTHENTICATORS)
                 .setNegativeButtonText("Cancel")
                 .build(),
         )
+        return prompt
     }
 
     private companion object {
