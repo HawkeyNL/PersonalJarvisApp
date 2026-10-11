@@ -11,6 +11,8 @@ final class JarvisAppModel: ObservableObject {
     }
     @Published private(set) var isUnlocking = false
     private var needsForegroundUnlock = false
+    /// Informational "update available" notice; nil when none, dismissed or invalid.
+    @Published private(set) var iosUpdate: IOSUpdateNotice?
     @Published private(set) var conversations: [ConversationSummary] = []
     @Published private(set) var messages: [ConversationMessage] = []
     @Published private(set) var currentConversationId: UUID?
@@ -131,6 +133,27 @@ final class JarvisAppModel: ObservableObject {
             if (error as? JarvisAPIError) == .unauthorized, presentation.accepts(generation) { handle(error) }
             return Availability(error: error)
         }
+    }
+
+    /// At most one check per 6 hours; any failure, 204 or older Core means no banner.
+    func checkForAppUpdate(now: Date = Date()) async {
+        let defaults = UserDefaults.standard
+        let last = defaults.object(forKey: "jarvis.update.checkedAt") as? Date ?? .distantPast
+        guard now.timeIntervalSince(last) >= 6 * 3600,
+              let running = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+              IOSUpdateNotice.parseVersion(running) != nil,
+              isAuthenticated, lockState == .unlocked else { return }
+        defaults.set(now, forKey: "jarvis.update.checkedAt")
+        guard case let .ok(response) = await coreRead("/v1/app-updates/ios/\(running)", as: IOSUpdateResponse.self),
+              let notice = IOSUpdateNotice.validated(response, running: running),
+              defaults.string(forKey: "jarvis.update.dismissedVersion") != notice.version
+        else { iosUpdate = nil; return }
+        iosUpdate = notice
+    }
+
+    func dismissAppUpdate() {
+        if let version = iosUpdate?.version { UserDefaults.standard.set(version, forKey: "jarvis.update.dismissedVersion") }
+        iosUpdate = nil
     }
 
     /// Public liveness/readiness probe; `nil` when the Home Node did not answer OK.

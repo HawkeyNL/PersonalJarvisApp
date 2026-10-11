@@ -897,4 +897,19 @@ final class ClientDTOTests: XCTestCase {
         XCTAssertEqual(current.liveHost?.memoryUsedBytes, 4_294_967_296)
         XCTAssertEqual(current.liveHost?.uptimeSeconds, 3_720)
     }
+
+    func testIOSUpdateDecodesAndValidates() throws {
+        func json(version: String = "0.2.0", altstore: String = "altstore://source?url=https%3A%2F%2Fh%2Fa.json",
+                  downloads: String = "https://h/downloads/") -> Data {
+            Data(#"{"schema_version":1,"platform":"ios","version":"\#(version)","released_at":"2026-10-01T00:00:00Z","notes":"","downloads_page_url":"\#(downloads)","altstore_source_url":"https://h/a.json","altstore_add_source_url":"\#(altstore)","sidestore_add_source_url":"sidestore://source?url=https%3A%2F%2Fh%2Fa.json"}"#.utf8)
+        }
+        let decoder = JSONDecoder()
+        let ok = try decoder.decode(IOSUpdateResponse.self, from: json())
+        XCTAssertEqual(IOSUpdateNotice.validated(ok, running: "0.1.0")?.version, "0.2.0")
+        XCTAssertNil(IOSUpdateNotice.validated(ok, running: "0.2.0"))
+        XCTAssertNil(IOSUpdateNotice.validated(ok, running: "0.10.0"))
+        XCTAssertNil(IOSUpdateNotice.validated(try decoder.decode(IOSUpdateResponse.self, from: json(version: "0.2.0-rc1")), running: "0.1.0"))
+        XCTAssertNil(IOSUpdateNotice.validated(try decoder.decode(IOSUpdateResponse.self, from: json(altstore: "javascript:alert(1)")), running: "0.1.0"))
+        XCTAssertNil(IOSUpdateNotice.validated(try decoder.decode(IOSUpdateResponse.self, from: json(downloads: "http://h/downloads/")), running: "0.1.0"))
+    }
 }

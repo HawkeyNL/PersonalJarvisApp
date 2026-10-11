@@ -371,3 +371,61 @@ struct HealthProbe: Decodable {
     let status: String?
     let environment: String?
 }
+
+// MARK: - iOS update notice (informational only; the app never downloads or installs)
+
+/// `GET /v1/app-updates/ios/{running version}`; 204 means no update.
+struct IOSUpdateResponse: Decodable, Equatable {
+    let schemaVersion: Int
+    let platform: String
+    let version: String
+    let releasedAt: String
+    let notes: String
+    let downloadsPageUrl: String
+    let altstoreSourceUrl: String
+    let altstoreAddSourceUrl: String
+    let sidestoreAddSourceUrl: String
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version", platform, version
+        case releasedAt = "released_at", notes
+        case downloadsPageUrl = "downloads_page_url"
+        case altstoreSourceUrl = "altstore_source_url"
+        case altstoreAddSourceUrl = "altstore_add_source_url"
+        case sidestoreAddSourceUrl = "sidestore_add_source_url"
+    }
+}
+
+/// A validated update: newer numeric semver and only altstore/sidestore/https links.
+struct IOSUpdateNotice: Equatable {
+    let version: String
+    let altstoreURL: URL
+    let sidestoreURL: URL
+    let downloadsURL: URL
+
+    /// Numeric `X.Y.Z` only; anything else (pre-release, build metadata) is rejected.
+    static func parseVersion(_ text: String) -> [Int]? {
+        let parts = text.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 3 else { return nil }
+        let numbers = parts.compactMap { part -> Int? in
+            part.isEmpty || !part.allSatisfy({ $0 >= "0" && $0 <= "9" }) ? nil : Int(part)
+        }
+        return numbers.count == 3 ? numbers : nil
+    }
+
+    private static func url(_ text: String, scheme: String) -> URL? {
+        guard let url = URL(string: text), url.scheme?.lowercased() == scheme else { return nil }
+        return url
+    }
+
+    static func validated(_ response: IOSUpdateResponse, running: String) -> IOSUpdateNotice? {
+        guard response.schemaVersion == 1, response.platform == "ios",
+              let offered = parseVersion(response.version), let current = parseVersion(running),
+              offered.lexicographicallyPrecedes(current) == false, offered != current,
+              let altstore = url(response.altstoreAddSourceUrl, scheme: "altstore"),
+              let sidestore = url(response.sidestoreAddSourceUrl, scheme: "sidestore"),
+              let downloads = url(response.downloadsPageUrl, scheme: "https")
+        else { return nil }
+        return IOSUpdateNotice(version: response.version, altstoreURL: altstore, sidestoreURL: sidestore, downloadsURL: downloads)
+    }
+}
