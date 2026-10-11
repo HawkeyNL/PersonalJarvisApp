@@ -13,13 +13,21 @@ enum EndpointValidationError: LocalizedError, Equatable {
         case .invalid: "Enter a valid Home Node URL."
         case .unsupportedScheme: "The Home Node URL must use http or https."
         case .containsCredentials: "Do not put credentials in the Home Node URL."
-        case .insecureRemote: "Public or remote Home Nodes must use https."
+        case .insecureRemote: "The Home Node must use https."
         }
     }
 }
 
 struct EndpointNormalizer {
-    static func normalize(_ input: String) throws -> URL {
+    /// Cleartext http is a development convenience for LAN Home Nodes only;
+    /// release builds always require https (same policy as Android/desktop).
+    #if DEBUG
+    static let allowsInsecureLocal = true
+    #else
+    static let allowsInsecureLocal = false
+    #endif
+
+    static func normalize(_ input: String, allowInsecureLocal: Bool = EndpointNormalizer.allowsInsecureLocal) throws -> URL {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw EndpointValidationError.empty }
 
@@ -35,7 +43,7 @@ struct EndpointNormalizer {
         guard components.user == nil, components.password == nil else {
             throw EndpointValidationError.containsCredentials
         }
-        guard scheme == "https" || isLocalHost(host) else {
+        guard scheme == "https" || (allowInsecureLocal && isLocalHost(host)) else {
             throw EndpointValidationError.insecureRemote
         }
         guard components.path.isEmpty || components.path == "/" else {

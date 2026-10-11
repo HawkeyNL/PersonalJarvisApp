@@ -49,6 +49,20 @@ test("production capabilities exclude development loopback HTTP", async () => {
   assert.match(development, /http:\/\/localhost:8080/);
 });
 
+test("desktop webview ships a strict CSP without remote sources", async () => {
+  const config = JSON.parse(await readFile(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
+  const csp = config.app.security.csp;
+  assert.equal(typeof csp, "string");
+  const directives = Object.fromEntries(csp.split(";").map((d) => d.trim().split(/\s+/)).map(([k, ...v]) => [k, v]));
+  assert.deepEqual(directives["default-src"], ["'self'"]);
+  assert.deepEqual(directives["img-src"], ["'self'", "data:", "blob:"]);
+  assert.deepEqual(directives["connect-src"], ["'self'", "ipc:", "http://ipc.localhost"]);
+  assert.deepEqual(directives["object-src"], ["'none'"]);
+  for (const sources of Object.values(directives)) {
+    assert.ok(!sources.some((s) => s === "*" || s === "https:" || s === "http:" || s === "'unsafe-eval'" || s === "'unsafe-inline'"), csp);
+  }
+});
+
 test("session bearer is never exposed through the desktop JavaScript API", async () => {
   const api = await readFile(new URL("../src/api.ts", import.meta.url), "utf8");
   const auth = await readFile(new URL("../src/auth.ts", import.meta.url), "utf8");

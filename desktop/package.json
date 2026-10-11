@@ -21,10 +21,10 @@
     "@tauri-apps/plugin-http": "^2.5.9",
     "@tauri-apps/plugin-opener": "^2",
     "chart.js": "^4.5.1",
-    "markdown-it": "^14.3.0",
+    "markdown-it": "^14.3.2",
     "onnxruntime-web": "^1.27.0",
     "pinia": "^2.2.0",
-    "vue": "^3.5.13",
+    "vue": "^3.5.43",
     "vue-router": "^4.4.0"
   },
   "devDependencies": {
