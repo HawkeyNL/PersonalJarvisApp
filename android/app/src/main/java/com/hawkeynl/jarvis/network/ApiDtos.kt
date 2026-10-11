@@ -10,8 +10,13 @@ data class ErrorResponse(
     val error: String? = null,
     val hint: String? = null,
     val conversation_id: String? = null,
+    /** Machine-readable Core error code; compared, never displayed. */
+    val code: String? = null,
 )
 
+/** `POST /v1/auth/pairing/requests`. Core rejects unknown fields, so this stays
+ *  separate from [BootstrapRequest]; optional pairing details are only added
+ *  once the app can tell that Core accepts them. */
 @Serializable
 data class PairingCreateRequest(
     val name: String,
@@ -19,6 +24,42 @@ data class PairingCreateRequest(
     val public_key: String,
     val password: String? = null,
 ) { override fun toString() = "PairingCreateRequest([redacted])" }
+
+/** `POST /v1/auth/bootstrap` (first owner device); Core rejects unknown fields. */
+@Serializable
+data class BootstrapRequest(
+    val name: String,
+    val platform: String,
+    val public_key: String,
+    val password: String? = null,
+) { override fun toString() = "BootstrapRequest([redacted])" }
+
+/** `GET /v1/auth/pairing/requests`. Fields after `expires_at` are absent from
+ *  Cores before the pairing-details release; the candidate details are
+ *  unauthenticated hints. Display [com.hawkeynl.jarvis.security.PairingApproval.verifiedFingerprint],
+ *  never the server's fingerprint fields. */
+@Serializable
+data class PairingRequestList(val requests: List<PairingRequestItem>)
+
+@Serializable
+data class PairingRequestItem(
+    val id: String,
+    val device_name: String,
+    val platform: String,
+    val fingerprint: String,
+    val nonce: String,
+    val candidate_public_key: String,
+    val created_at: Long,
+    val expires_at: Long,
+    val fingerprint_full: String? = null,
+    val ip: String? = null,
+    val user_agent: String? = null,
+    val app_version: String? = null,
+    val model: String? = null,
+)
+
+@Serializable
+data class AuthMe(val user_id: String, val device_id: String)
 
 @Serializable
 data class AccountStatus(val protocol: Int, val password_required: Boolean, val bootstrap_required: Boolean)

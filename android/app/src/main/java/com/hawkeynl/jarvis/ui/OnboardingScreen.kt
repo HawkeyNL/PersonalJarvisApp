@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -97,6 +98,10 @@ internal fun OnboardingScreen(state: JarvisUiState, actions: JarvisViewModel) {
                     if (state.pairingPending) {
                         Text("Waiting for approval from a trusted Jarvis device.", style = exo(13.5f, color = Jv.Text2))
                         Text("Expires: ${state.pairingExpiresAt?.let(::clockTime) ?: "—"}", style = exo(12f, color = Jv.Text5))
+                        state.ownFingerprint?.let { fingerprint ->
+                            Text("Check that the approving device shows this key fingerprint:", style = exo(12f, color = Jv.Text5))
+                            Text(fingerprint, style = exo(13f, color = Jv.Text0).copy(fontFamily = FontFamily.Monospace))
+                        }
                         CircularProgressIndicator()
                     } else {
                         if (state.activationRequired) {

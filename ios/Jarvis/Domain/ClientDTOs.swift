@@ -57,6 +57,28 @@ struct PairingStatusResponse: Decodable, Equatable {
     }
 }
 
+/// `GET /v1/auth/pairing/requests`. Fields after `expires_at` are absent from
+/// Cores before the pairing-details release; the candidate details are
+/// unauthenticated hints. Display `PairingFingerprint.verified`, never the
+/// server's fingerprint fields.
+struct PairingApprovalList: Decodable { let requests: [PairingApprovalItem] }
+
+struct PairingApprovalItem: Decodable, Identifiable, Equatable {
+    let id: UUID
+    let device_name: String
+    let platform: String
+    let fingerprint: String
+    let nonce: String
+    let candidate_public_key: String
+    let created_at: Int64
+    let expires_at: Int64
+    var fingerprint_full: String? = nil
+    var ip: String? = nil
+    var user_agent: String? = nil
+    var app_version: String? = nil
+    var model: String? = nil
+}
+
 struct ChallengeRequest: Encodable, Equatable {
     let deviceId: UUID
 
@@ -180,6 +202,7 @@ struct ChatResponse: Decodable, Equatable {
 struct APIErrorBody: Decodable {
     let error: String?
     let hint: String?
+    var code: String? = nil
 }
 
 // Read-only subset of /v1/system/registry used by the Resources, Health and

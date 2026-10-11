@@ -1,6 +1,7 @@
 package com.hawkeynl.jarvis.auth
 
 import com.hawkeynl.jarvis.network.ApiResult
+import com.hawkeynl.jarvis.network.BootstrapRequest
 import com.hawkeynl.jarvis.network.ChallengeRequest
 import com.hawkeynl.jarvis.network.HomeNodeEndpoint
 import com.hawkeynl.jarvis.network.JarvisApi
@@ -42,7 +43,7 @@ class EnrollmentService(
         activationCode: String? = null,
     ): EnrollmentOutcome {
         if (activationCode != null) {
-            return when (val result = api.activateFirstDevice(endpoint, PairingCreateRequest(deviceName.take(80), "android", identity.publicKeyHex(), password), activationCode)) {
+            return when (val result = api.activateFirstDevice(endpoint, BootstrapRequest(deviceName.take(80), "android", identity.publicKeyHex(), password), activationCode)) {
                 is ApiResult.Success -> {
                     sessions.saveDeviceId(result.value.device_id)
                     login(endpoint, result.value.device_id, password)

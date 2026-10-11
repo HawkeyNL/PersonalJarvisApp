@@ -62,6 +62,7 @@ struct RootView: View {
         case .healthUsage: HealthPage(model: model, navigate: navigate, node: "usage")
         case .memory: MemoryPage(model: model)
         case .context: ContextPage(model: model)
+        case .pairingApprovals: PairingApprovalsPage(model: model)
         }
     }
 

@@ -83,7 +83,7 @@ class KtorJarvisApi(
     override suspend fun accountStatus(endpoint: HomeNodeEndpoint) = request<AccountStatus> {
         client.get(endpoint.url("/v1/auth/account/status"))
     }
-    override suspend fun activateFirstDevice(endpoint: HomeNodeEndpoint, request: PairingCreateRequest, code: String): ApiResult<FirstDeviceResponse> {
+    override suspend fun activateFirstDevice(endpoint: HomeNodeEndpoint, request: BootstrapRequest, code: String): ApiResult<FirstDeviceResponse> {
         if (!code.matches(Regex("[a-fA-F0-9]{64}"))) return ApiResult.InvalidResponse("Ongeldige activatiecode.")
         return request<FirstDeviceResponse> {
             client.post(endpoint.url("/v1/auth/bootstrap")) {
@@ -253,7 +253,10 @@ class KtorJarvisApi(
                 response.status == HttpStatusCode.Unauthorized -> ApiResult.Unauthorized
                 response.status.value !in 200..299 -> {
                     val error = runCatching { response.body<ErrorResponse>() }.getOrNull()
-                    ApiResult.HttpError(response.status.value, error?.hint ?: error?.error)
+                    ApiResult.HttpError(
+                        response.status.value,
+                        if (error?.code == PAIRING_PASSWORD_NOT_SET) PAIRING_PASSWORD_NOT_SET_MESSAGE else error?.hint ?: error?.error,
+                    )
                 }
                 T::class == Unit::class -> {
                     @Suppress("UNCHECKED_CAST")
@@ -285,6 +288,9 @@ class KtorJarvisApi(
     }
 
     companion object {
+        private const val PAIRING_PASSWORD_NOT_SET = "pairing_password_not_set"
+        const val PAIRING_PASSWORD_NOT_SET_MESSAGE = "Set an account password on an active device first."
+
         // Fixed owner routes only: no query, no dot segments, no foreign origin.
         private val OWNER_PATH = Regex("/v1/[A-Za-z0-9_/-]+")
         private val ANDROID_APK_CONTENT_TYPE = ContentType("application", "vnd.android.package-archive")

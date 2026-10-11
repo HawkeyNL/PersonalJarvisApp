@@ -41,6 +41,27 @@ actor DeviceIdentityStore {
         return result
     }
 
+    /// Exact v1 client-core `pairing_approval_message`: domain, request id, 32-byte
+    /// nonce, 32-byte candidate key, user id, approver device id, big-endian i64 expiry.
+    static func pairingApprovalMessage(requestId: UUID, nonceHex: String, candidatePublicKeyHex: String,
+                                       userId: UUID, approverDeviceId: UUID, expiresAt: Int64) throws -> Data {
+        guard let nonce = Data(strictHex: nonceHex), nonce.count == 32,
+              let key = Data(strictHex: candidatePublicKeyHex), key.count == 32 else {
+            throw DeviceIdentityError.invalidChallenge
+        }
+        func bytes(_ value: UUID) -> Data { var raw = value.uuid; return withUnsafeBytes(of: &raw) { Data($0) } }
+        var result = Data("jarvis-device-pairing-v1\0".utf8)
+        result.append(bytes(requestId)); result.append(nonce); result.append(key)
+        result.append(bytes(userId)); result.append(bytes(approverDeviceId))
+        withUnsafeBytes(of: expiresAt.bigEndian) { result.append(contentsOf: $0) }
+        return result
+    }
+
+    func signPairingApproval(_ message: Data) throws -> String {
+        // Approving must never create a replacement key for this registration.
+        try signingKey(createIfMissing: false).signature(for: message).hexEncodedString()
+    }
+
     func signLogin(challengeId: UUID, deviceId: UUID, nonceHex: String) throws -> String {
         let message = try Self.loginMessage(challengeId: challengeId, deviceId: deviceId, nonceHex: nonceHex)
         // Login must never create a replacement key for an existing registration.
@@ -69,7 +90,66 @@ actor DeviceIdentityStore {
     }
 }
 
+/// Pairing key fingerprints, mirroring client-core `key_fingerprint` and
+/// `PairingRequestItem::verified_fingerprint`.
+enum PairingFingerprint {
+    enum Failure: LocalizedError, Equatable {
+        case invalidKey, mismatch
+        var errorDescription: String? {
+            switch self {
+            case .invalidKey: "The pairing request has an invalid device key."
+            case .mismatch: "The Home Node's fingerprint does not match the candidate key. Do not approve; check the Home Node."
+            }
+        }
+    }
+
+    /// Lowercase hex SHA-256 of a raw 32-byte public key.
+    static func of(publicKey: Data) -> String { Data(SHA256.hash(data: publicKey)).hexEncodedString() }
+
+    static func of(publicKeyHex: String) throws -> String {
+        guard let key = Data(strictHex: publicKeyHex), key.count == 32 else { throw Failure.invalidKey }
+        return of(publicKey: key)
+    }
+
+    /// The fingerprint an approver shows: computed here from the key the approval
+    /// signs. Any disagreement with the server's fields refuses the request.
+    static func verified(_ item: PairingApprovalItem) throws -> String {
+        let local = try of(publicKeyHex: item.candidate_public_key)
+        guard local.prefix(16) == item.fingerprint, item.fingerprint_full.map({ $0 == local }) ?? true else {
+            throw Failure.mismatch
+        }
+        return local
+    }
+
+    /// Groups of four hex characters for side-by-side comparison.
+    static func grouped(_ fingerprint: String) -> String {
+        stride(from: 0, to: fingerprint.count, by: 4).map { offset in
+            let start = fingerprint.index(fingerprint.startIndex, offsetBy: offset)
+            return String(fingerprint[start..<(fingerprint.index(start, offsetBy: 4, limitedBy: fingerprint.endIndex) ?? fingerprint.endIndex)])
+        }.joined(separator: " ")
+    }
+
+    /// An unauthenticated candidate hint as bounded plain text: control and
+    /// format (bidi, zero-width) characters dropped, at most `max` characters.
+    static func hint(_ value: String?, max: Int = 64) -> String {
+        guard let value else { return "unknown" }
+        var scalars = String.UnicodeScalarView()
+        scalars.append(contentsOf: value.unicodeScalars.filter {
+            $0.properties.generalCategory != .control && $0.properties.generalCategory != .format
+        })
+        let clean = String(scalars).trimmingCharacters(in: .whitespacesAndNewlines)
+        if clean.isEmpty { return "unknown" }
+        return clean.count > max ? String(clean.prefix(max)) + "…" : clean
+    }
+}
+
 extension Data {
+    /// Hex of ASCII digits only (no sign or other prefixes).
+    init?(strictHex value: String) {
+        guard value.unicodeScalars.allSatisfy({ $0.isASCII && $0.properties.isASCIIHexDigit }) else { return nil }
+        self.init(hexEncoded: value)
+    }
+
     init?(hexEncoded value: String) {
         guard value.count.isMultiple(of: 2) else { return nil }
         var bytes = [UInt8]()

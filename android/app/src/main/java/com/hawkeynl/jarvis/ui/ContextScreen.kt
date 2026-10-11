@@ -36,6 +36,7 @@ fun ContextScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRe
                 )
                 return@Panel
             }
+            ActionButton("Pairing requests", { onNavigate(Screen.PAIRING_APPROVALS) }, arrow = true)
             Loaded(data.devices, "Devices", JvIcon.MONITOR, "Loading devices…") { response ->
                 val devices = response.devices
                 TileGrid(

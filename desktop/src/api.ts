@@ -11,6 +11,8 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly path: string,
+    /** Machine-readable Core error code; compared only, never displayed. */
+    public readonly code?: string,
   ) {
     super(`HTTP ${status} (${path})`);
     this.name = "ApiError";
@@ -78,7 +80,8 @@ export async function postJson<T>(path: string, body: unknown, expectedOrigin?: 
     body: JSON.stringify(body),
   }, expectedOrigin);
   if (!res.ok) {
-    throw new ApiError(res.status, path);
+    const body = await res.json().catch(() => null) as { code?: unknown } | null;
+    throw new ApiError(res.status, path, typeof body?.code === "string" ? body.code : undefined);
   }
   return (await res.json()) as T;
 }

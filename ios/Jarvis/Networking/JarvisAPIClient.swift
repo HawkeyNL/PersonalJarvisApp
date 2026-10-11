@@ -270,6 +270,9 @@ actor JarvisAPIClient {
             guard (200..<300).contains(http.statusCode) else {
                 if http.statusCode == 401 { throw JarvisAPIError.unauthorized }
                 let body = try? decoder.decode(APIErrorBody.self, from: data)
+                if body?.code == "pairing_password_not_set" {
+                    throw JarvisAPIError.rejected(status: http.statusCode, message: "Set an account password on an active device first.")
+                }
                 throw JarvisAPIError.rejected(status: http.statusCode, message: body?.error)
             }
             if Response.self == EmptyOrJSON.self, data.isEmpty {

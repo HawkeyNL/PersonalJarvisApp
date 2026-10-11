@@ -709,6 +709,10 @@ struct ContextPage: View {
                             TileData(label: "This device", value: list.first { $0.id.lowercased() == thisDevice }?.name ?? "Unknown", symbol: "iphone"),
                             TileData(label: "Active", value: "\(list.filter { $0.status == "active" }.count)", symbol: "checkmark.circle"),
                         ])
+                        NavigationLink(value: HubRoute.pairingApprovals) {
+                            Label("Pairing requests", systemImage: "person.badge.key")
+                                .font(JarvisFont.body(14, 500))
+                        }
                         Eyebrow(text: "Linked devices")
                         ActivityList(rows: list.map { device in
                             let mobile = device.platform.lowercased().contains("ios") || device.platform.lowercased().contains("android")
@@ -735,6 +739,144 @@ struct ContextPage: View {
         devices = result.map(\.devices)
         thisDevice = mine
     }
+}
+
+// MARK: - Pairing approvals
+
+/// Pending new-device pairing requests. Approve and Deny need Face ID / Touch ID
+/// (never the passcode). The fingerprint is computed here from the key the
+/// approval signs; candidate details are unverified hints shown as plain text.
+struct PairingApprovalsPage: View {
+    @ObservedObject var model: JarvisAppModel
+    @State private var requests: Availability<[PairingApprovalItem]> = .loading
+    @State private var biometrics = BiometricLock.biometricsAvailable
+    @State private var busy: UUID?
+    @State private var decisionError: String?
+    @State private var lastLoad = Date.distantPast
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if !biometrics {
+                    UnavailableState(title: "Biometrics required", kind: .error, detail: BiometricLock.biometricsRequired, symbol: "faceid")
+                }
+                if let state = UnavailableState.forSource(requests, title: "Pairing requests", symbol: "person.badge.key") { state }
+                if let decisionError {
+                    Text(verbatim: decisionError).font(JarvisFont.body(12)).foregroundStyle(JarvisTheme.danger)
+                }
+                if let list = requests.value {
+                    if list.isEmpty { ActivityList(rows: [], emptyText: "No devices are waiting for approval.") }
+                    ForEach(list) { item in card(item) }
+                }
+            }
+            .padding(16)
+        }
+        .background { JarvisBackdrop() }
+        .jarvisNavigationBar(title: "Pairing requests", subtitle: "New devices waiting for you")
+        // List reads share Core's five-per-minute pairing budget per IP with
+        // candidates creating requests, so pull-to-refresh is throttled.
+        .refreshable { if Date().timeIntervalSince(lastLoad) >= 20 { await load() } }
+        .task {
+            while !Task.isCancelled {
+                await load()
+                try? await Task.sleep(for: .seconds(30))
+            }
+        }
+    }
+
+    private func card(_ item: PairingApprovalItem) -> some View {
+        let checked = Result { try PairingFingerprint.verified(item) }
+        let fingerprint = try? checked.get()
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(verbatim: PairingFingerprint.hint(item.device_name, max: 128))
+                .font(JarvisFont.body(15, 600))
+                .foregroundStyle(JarvisTheme.text1)
+            VStack(alignment: .leading, spacing: 4) {
+                detail("Platform", PairingFingerprint.hint(item.platform, max: 32))
+                detail("Model", PairingFingerprint.hint(item.model))
+                detail("App version", PairingFingerprint.hint(item.app_version, max: 32))
+                detail("IP address", PairingFingerprint.hint(item.ip))
+                detail("User agent", PairingFingerprint.hint(item.user_agent, max: 128))
+                detail("Requested", Date(timeIntervalSince1970: TimeInterval(item.created_at)).formatted(date: .abbreviated, time: .standard))
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    detail("Expires in", pairingCountdown(item.expires_at, now: context.date))
+                }
+            }
+            Eyebrow(text: "Key fingerprint")
+            switch checked {
+            case let .success(value):
+                Text(verbatim: PairingFingerprint.grouped(value))
+                    .font(.system(.footnote, design: .monospaced))
+                    .foregroundStyle(JarvisTheme.text2)
+                    .textSelection(.enabled)
+                Text("Compare it with the fingerprint the new device shows. Model, version, IP address and user agent are unverified hints.")
+                    .font(JarvisFont.body(12))
+                    .foregroundStyle(JarvisTheme.text5)
+                    .fixedSize(horizontal: false, vertical: true)
+            case let .failure(error):
+                Text(verbatim: (error as? LocalizedError)?.errorDescription ?? "Invalid fingerprint.")
+                    .font(JarvisFont.body(12))
+                    .foregroundStyle(JarvisTheme.danger)
+            }
+            if biometrics {
+                HStack(spacing: 10) {
+                    Button("Deny", role: .destructive) { Task { await decide(item, approve: false) } }
+                        .buttonStyle(.bordered)
+                    Spacer()
+                    Button(busy == item.id ? "Verifying…" : "Approve") { Task { await decide(item, approve: true) } }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(fingerprint == nil)
+                }
+                .font(JarvisFont.body(13, 500))
+                .disabled(busy != nil)
+            }
+        }
+        .padding(12)
+        .background(JarvisTheme.tile, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(JarvisTheme.warn.opacity(0.4), lineWidth: 1))
+    }
+
+    private func detail(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(label)
+                .font(JarvisFont.body(12))
+                .foregroundStyle(JarvisTheme.text5)
+                .frame(width: 96, alignment: .leading)
+            Text(verbatim: value)
+                .font(JarvisFont.body(13))
+                .foregroundStyle(JarvisTheme.text2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func decide(_ item: PairingApprovalItem, approve: Bool) async {
+        guard busy == nil else { return }
+        busy = item.id
+        decisionError = nil
+        do {
+            if approve { try await model.approvePairing(item) } else { try await model.denyPairing(item) }
+            // No extra list read: the 30-second poll picks up any other change.
+            requests = requests.map { list in list.filter { $0.id != item.id } }
+        } catch {
+            decisionError = (error as? LocalizedError)?.errorDescription ?? "The decision could not be completed."
+        }
+        busy = nil
+        biometrics = BiometricLock.biometricsAvailable
+    }
+
+    private func load() async {
+        let result = await model.coreRead("/v1/auth/pairing/requests", as: PairingApprovalList.self)
+        guard !Task.isCancelled else { return }
+        lastLoad = Date()
+        requests = result.map(\.requests)
+        biometrics = BiometricLock.biometricsAvailable
+    }
+}
+
+/// "m:ss" until a pairing request expires, or "Expired".
+func pairingCountdown(_ expiresAt: Int64, now: Date) -> String {
+    let left = expiresAt - Int64(now.timeIntervalSince1970.rounded(.down))
+    return left <= 0 ? "Expired" : String(format: "%lld:%02lld", left / 60, left % 60)
 }
 
 // MARK: - Voice

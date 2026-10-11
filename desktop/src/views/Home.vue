@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from "vue";
 import { getJson, ApiError } from "../api";
-import { currentAuthStatus, login, clearSession, listDevices, PairingPending, AccountPasswordRequired, AccountActivationRequired, bootstrapFirstDevice } from "../auth";
+import { currentAuthStatus, login, clearSession, listDevices, PairingPending, AccountPasswordRequired, AccountActivationRequired, bootstrapFirstDevice, ownKeyFingerprint } from "../auth";
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
 import JarvisConsole from "../components/JarvisConsole.vue";
 import JvBackdrop from "../components/jv/JvBackdrop.vue";
@@ -47,6 +47,13 @@ function hidePasswordOnBackground() {
 const activationCode = ref("");
 const accountError = ref<string | null>(null);
 const accountBusy = ref(false);
+// Shown while waiting so the owner can compare it on the approving device.
+const ownFingerprint = ref<string | null>(null);
+watch(auth, async (state) => {
+  if (state === "wachten" && !ownFingerprint.value) ownFingerprint.value = await ownKeyFingerprint().catch(() => null);
+});
+// Background sign-in errors that need owner action elsewhere.
+const authError = ref<string | null>(null);
 
 async function submitAccount() {
   accountBusy.value = true;
@@ -144,7 +151,9 @@ async function refreshAuth() {
       }
     }
     auth.value = "in";
+    authError.value = null;
   } catch (error) {
+    authError.value = error instanceof ApiError && error.code === "pairing_password_not_set" ? accountFailure(error) : null;
     if (error instanceof AccountPasswordRequired) accountMode.value = "login";
     if (error instanceof AccountActivationRequired) accountMode.value = "activate";
     auth.value = error instanceof PairingPending ? "wachten" : "fout";
@@ -315,7 +324,9 @@ onBeforeUnmount(() => {
     <div v-else ref="fitRoom" class="body" :style="{ '--fit': scale }">
       <p v-if="auth === 'wachten'" class="pairing-wait" role="status">
         Waiting for approval from a trusted Jarvis device.
+        <template v-if="ownFingerprint"><br />Check that it shows this key fingerprint: <code>{{ ownFingerprint }}</code></template>
       </p>
+      <p v-else-if="authError" class="connection-error" role="alert">{{ authError }}</p>
       <p v-else-if="backend === 'fout'" class="connection-error" role="status">
         Home Node unreachable at {{ homeNodeConfig.origin }}. Check the network and try again.
       </p>

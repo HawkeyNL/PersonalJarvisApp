@@ -110,6 +110,42 @@ state after a change; it does not optimistically claim success. Older Core
 versions without the capability remain read-only. Core and client product
 versions remain independent.
 
+## Pairing approvals
+
+A new device asks to pair with `POST /v1/auth/pairing/requests` (account
+password required; Core answers `403 pairing_password_not_set` until an
+account password has been set from an active device). While it waits, the new
+device shows its own key fingerprint: the lowercase hex SHA-256 of its raw
+32-byte Ed25519 public key, in groups of four.
+
+An already paired device lists pending requests (`GET
+/v1/auth/pairing/requests`) and shows, per request, the device name, platform,
+model, app version, IP address, user agent, request time, a countdown to expiry
+and the key fingerprint. Model, app version, IP address and user agent are
+unauthenticated hints from the candidate (shown as "unknown" on Cores that do
+not send them) and are rendered as bounded plain text only.
+
+The fingerprint shown to the approver is always computed locally from
+`candidate_public_key`, the key the approval signature binds. If Core's
+`fingerprint` (16-hex prefix) or `fingerprint_full` disagrees with it, the app
+shows an error and refuses to approve. The owner compares this fingerprint
+with the one the new device shows before approving.
+
+| Client | Where | Owner check before signing or denying |
+|--------|-------|---------------------------------------|
+| iOS | Context › Devices › Pairing requests, or `jarvis://approvals/pairing` | Face ID / Touch ID only (`deviceOwnerAuthenticationWithBiometrics`, no passcode fallback) for approve and deny |
+| Android | Context › Devices › Pairing requests, or `jarvis://approvals/pairing` | `BiometricPrompt` with `BIOMETRIC_STRONG` only (no device credential) for approve and deny |
+| Desktop | Overlay on every page | OS authentication in the native layer before signing an approval |
+
+Approving signs the v1 `pairing_approval_message` of `jarvis-client-core`
+(desktop in Rust; iOS and Android re-implement it and test against the same
+golden vector). Without usable biometrics the mobile apps say "Biometrics
+required" and offer no approve or deny buttons. The mobile list refreshes every
+30 seconds while open (Core allows five list reads per source IP per minute).
+The pairing request does not yet send `app_version` or `model`: Core rejects
+unknown fields and exposes no version before sign-in, so a candidate cannot tell
+whether the Home Node accepts them.
+
 ## Notification deep links
 
 Core's owner notifications (ntfy `Click` URL) open the apps through exactly
@@ -119,7 +155,7 @@ Any other `jarvis://` link is ignored and the app opens as usual.
 
 | Link | iOS / Android | Desktop |
 |------|---------------|---------|
-| `jarvis://approvals/pairing` | Context → Devices (the mobile apps cannot list or approve pairing requests; approve on desktop) | Hub, where pending pairing requests are shown |
+| `jarvis://approvals/pairing` | Pairing requests (Context → Devices) | Hub, where pending pairing requests are shown |
 | `jarvis://health/usage` | System Health → Usage | `/health?node=usage` |
 
 iOS registers the scheme in `ios/Jarvis/Info.plist`, Android in the

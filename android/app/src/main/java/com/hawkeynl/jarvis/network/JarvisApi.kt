@@ -14,7 +14,7 @@ interface JarvisApi {
     suspend fun postAuthorized(endpoint: HomeNodeEndpoint, token: String, path: String, body: kotlinx.serialization.json.JsonObject): ApiResult<Unit> =
         ApiResult.InvalidResponse("Not supported")
     suspend fun accountStatus(endpoint: HomeNodeEndpoint): ApiResult<AccountStatus>
-    suspend fun activateFirstDevice(endpoint: HomeNodeEndpoint, request: PairingCreateRequest, code: String): ApiResult<FirstDeviceResponse>
+    suspend fun activateFirstDevice(endpoint: HomeNodeEndpoint, request: BootstrapRequest, code: String): ApiResult<FirstDeviceResponse>
     suspend fun ready(endpoint: HomeNodeEndpoint): ApiResult<HealthResponse>
     suspend fun createPairing(
         endpoint: HomeNodeEndpoint,

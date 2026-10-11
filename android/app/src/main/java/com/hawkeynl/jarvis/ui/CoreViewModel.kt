@@ -13,6 +13,7 @@ import com.hawkeynl.jarvis.network.DevicesResponse
 import com.hawkeynl.jarvis.network.HomeNodeEndpoint
 import com.hawkeynl.jarvis.network.IbkrStatus
 import com.hawkeynl.jarvis.network.ModelPolicyList
+import com.hawkeynl.jarvis.network.PairingRequestList
 import com.hawkeynl.jarvis.network.PendingResponse
 import com.hawkeynl.jarvis.network.Registry
 import com.hawkeynl.jarvis.network.ServicesResponse
@@ -44,6 +45,7 @@ data class CoreData(
     val usage: Availability<SystemUsage> = Availability.Loading,
     val services: Availability<ServicesResponse> = Availability.Loading,
     val systemAudit: Availability<SystemAuditResponse> = Availability.Loading,
+    val pairing: Availability<PairingRequestList> = Availability.Loading,
     val loadedAt: Long = System.currentTimeMillis(),
     val denying: String? = null,
     val denyError: String? = null,
@@ -79,6 +81,7 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
     private val usage = source("/v1/system/usage", SystemUsage.serializer()) { copy(usage = it) }
     private val services = source("/v1/system/services", ServicesResponse.serializer()) { copy(services = it) }
     private val systemAudit = source("/v1/system/audit", SystemAuditResponse.serializer()) { copy(systemAudit = it) }
+    private val pairing = source("/v1/auth/pairing/requests", PairingRequestList.serializer()) { copy(pairing = it) }
 
     fun refreshHub() = refresh("hub", agents, devices, pending, sessions, registry)
     fun refreshAgents() = refresh("agents", agents)
@@ -86,6 +89,15 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
     fun refreshIntegrations() = refresh("integrations", registry, models, ibkr)
     fun refreshHealth() = refresh("health", registry, usage, services, systemAudit)
     fun refreshContext() = refresh("context", devices)
+    fun refreshPairing() = refresh("pairing", pairing)
+
+    /** Drop a decided request locally: list reads share Core's five-per-minute
+     *  pairing budget with candidates creating requests. */
+    fun dropPairing(id: String) = _state.update { state ->
+        val current = state.pairing
+        if (current !is Availability.Ok) return@update state
+        state.copy(pairing = Availability.Ok(current.value.copy(requests = current.value.requests.filter { it.id != id })))
+    }
 
     private fun refresh(page: String, vararg loads: suspend (HomeNodeEndpoint) -> Unit) {
         // A run cancelled by clear() releases its key in the old set only.

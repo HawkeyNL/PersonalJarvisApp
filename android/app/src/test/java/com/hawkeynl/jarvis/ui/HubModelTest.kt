@@ -23,7 +23,7 @@ class HubModelTest {
 
     @Test
     fun `deep links only map the two supported routes`() {
-        assertEquals(DeepLink(Screen.CONTEXT), parseDeepLink("jarvis://approvals/pairing"))
+        assertEquals(DeepLink(Screen.PAIRING_APPROVALS), parseDeepLink("jarvis://approvals/pairing"))
         assertEquals(DeepLink(Screen.HEALTH, "usage"), parseDeepLink("JARVIS://Health/usage"))
         assertEquals(DeepLink(Screen.HEALTH, "usage"), parseDeepLink("jarvis://health/usage?approve=1"))
         assertNull(parseDeepLink("jarvis://approvals/pairing/approve"))

@@ -1,8 +1,9 @@
 // Only fixed local labels/status codes reach the UI; never raw native errors,
 // HTTP response bodies, passwords or activation headers.
 export function accountFailure(error: unknown): string {
-  const e = error as { name?: string; status?: number; path?: string; kind?: string } | null;
+  const e = error as { name?: string; status?: number; path?: string; kind?: string; code?: string } | null;
   if (e?.name === "ApiError") {
+    if (e.code === "pairing_password_not_set") return "Set an account password on an active device first.";
     const stage = e.path === "/v1/auth/bootstrap" ? "First activation" : "Sign-in";
     switch (e.status) {
       case 400: return `${stage}: input rejected (HTTP 400). Check the device name and password.`;

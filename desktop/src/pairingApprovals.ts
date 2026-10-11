@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { currentAuthStatus } from "./auth";
 import { getJsonAuth, postJsonAuth } from "./api";
 import { createSerialPoller } from "./serialPoller";
+import { verifiedFingerprint } from "./pairingFingerprint";
 
 export type PairingRequest = {
   id: string;
@@ -15,8 +16,18 @@ export type PairingRequest = {
   candidate_public_key: string;
   created_at: number;
   expires_at: number;
+  // Absent from Cores before the pairing-details release.
+  fingerprint_full?: string | null;
+  // Unauthenticated candidate hints; null when unknown.
+  ip?: string | null;
+  user_agent?: string | null;
+  app_version?: string | null;
+  model?: string | null;
 };
-export const pairingRequests = ref<PairingRequest[]>([]);
+/** A request plus the fingerprint computed here from its candidate key, or
+ *  null when the server's fingerprint disagrees (approval is then refused). */
+export type CheckedPairingRequest = PairingRequest & { verified_fingerprint: string | null };
+export const pairingRequests = ref<CheckedPairingRequest[]>([]);
 export const pairingError = ref<string | null>(null);
 // Core allows five pairing-list reads per source IP per minute. Leave room for
 // manual/other-device requests and never overlap requests across app restarts.
@@ -27,7 +38,10 @@ async function refresh(): Promise<boolean> {
   if (!status.authenticated) return false;
   try {
     const response = await getJsonAuth<{ requests: PairingRequest[] }>("/v1/auth/pairing/requests");
-    pairingRequests.value = response.requests;
+    pairingRequests.value = await Promise.all(response.requests.map(async (request) => ({
+      ...request,
+      verified_fingerprint: await verifiedFingerprint(request).catch(() => null),
+    })));
     return true;
   } catch { return false; }
 }
@@ -37,6 +51,8 @@ export async function approvePairing(request: PairingRequest): Promise<void> {
   if (!status.authenticated || !status.device_id) throw new Error("not signed in");
   pairingError.value = null;
   try {
+    // Recompute from the exact key that is signed; never trust the list state.
+    await verifiedFingerprint(request);
     const signature = await invoke<string>("auth_sign_pairing_approval", {
       candidateName: request.device_name,
       requestId: request.id, nonceHex: request.nonce,
