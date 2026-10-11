@@ -33,11 +33,6 @@
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Jarvis uses Face ID to unlock your authenticated conversations.</string>
 	<key>NSLocalNetworkUsageDescription</key>

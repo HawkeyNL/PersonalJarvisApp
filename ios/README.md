@@ -18,7 +18,8 @@ provisioning profiles, certificates, team IDs, or credentials.
 In Simulator, enroll Face ID/Touch ID from the simulator Features menu before
 testing the app lock. A real device must have biometrics or a device passcode
 configured. Use a Home Node certificate trusted by the device for HTTPS. Local
-`http` is intended only for LAN development; ATS is not globally disabled.
+`http` is accepted only in Debug builds for LAN development; Release builds
+require `https`. ATS is not globally disabled.
 
 ## Local device installation
 
@@ -63,9 +64,9 @@ xcodegen generate
 
 ## Milestone 1 behavior
 
-Settings accepts an `http` or `https` Home Node origin with no embedded
-credentials or API path. Jarvis checks `/readyz`, presents unreachable and
-timeout states, then uses the production pairing flow:
+Settings accepts an `https` Home Node origin (or local `http` in Debug builds)
+with no embedded credentials or API path. Jarvis checks `/readyz`, presents
+unreachable and timeout states, then uses the production pairing flow:
 
 1. Generate a unique Ed25519 identity on the iPhone/iPad.
 2. `POST /v1/auth/pairing/requests` with the public key.
