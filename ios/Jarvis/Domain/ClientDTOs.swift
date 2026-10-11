@@ -326,6 +326,8 @@ struct UsageSummary: Decodable {
     let spent_eur: Double
     let remaining_eur: Double?
     let over_budget: Bool
+    let reserved_eur: Double?
+    let above_soft_budget: Bool?
     let requests: Int?
     let total_tokens: Int?
     let failures: Int?

@@ -174,6 +174,8 @@ data class SystemUsage(
     val spent_eur: Double = 0.0,
     val remaining_eur: Double = 0.0,
     val over_budget: Boolean = false,
+    val reserved_eur: Double = 0.0,
+    val above_soft_budget: Boolean = false,
     val requests: Long = 0,
     val input_tokens: Long = 0,
     val output_tokens: Long = 0,

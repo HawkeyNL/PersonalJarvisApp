@@ -66,7 +66,11 @@ fun HealthScreen(
         r.live_host?.let { Tone.OK to "Up ${formatUptime(it.uptime_seconds)}" } ?: (Tone.IDLE to "No live vitals")
     }
     val spend = statusOf(data.usage) { u ->
-        if (u.over_budget) Tone.ERROR to "Budget reached" else Tone.OK to "${eur(u.spent_eur)} of ${eur(u.budget_eur)}"
+        when {
+            u.over_budget -> Tone.ERROR to "Budget reached"
+            u.above_soft_budget -> Tone.WARN to "Above soft budget"
+            else -> Tone.OK to "${eur(u.spent_eur)} of ${eur(u.budget_eur)}"
+        }
     }
     var svc = statusOf(data.services) { servicesSummary(it.services) }
     // A nearly full disk outranks "all running".
@@ -171,6 +175,7 @@ fun HealthScreen(
                         "This month",
                         listOf(
                             TileData(JvIcon.TREND, "Remaining", eur(usage.remaining_eur)),
+                            TileData(JvIcon.TREND, "Reserved", eur(usage.reserved_eur)),
                             TileData(JvIcon.LAYERS, "Tokens", tokens(usage.total_tokens)),
                             TileData(JvIcon.ARROW_RIGHT, "Input / output", "${tokens(usage.input_tokens)} / ${tokens(usage.output_tokens)}"),
                             TileData(JvIcon.API, "Calls", tokens(usage.requests)),
