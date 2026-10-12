@@ -99,11 +99,16 @@ class KeystoreBackedEd25519Identity(
         check(ivLength in 12..16 && sealed.size > ivLength + 1) { "Device key storage is damaged; explicitly re-enroll this device." }
         val iv = ByteArray(ivLength).also { buffer.get(it) }
         val ciphertext = ByteArray(buffer.remaining()).also { buffer.get(it) }
-        val cipher = authenticate(reason, vault.decrypter(iv)) ?: throw cancelled()
+        val cipher = authorised(reason, vault.decrypter(iv), authenticate)
         cipher.updateAAD(SEED.toByteArray(Charsets.UTF_8))
         val seed = cipher.doFinal(ciphertext)
-        // A copy left by an interrupted move is the same seed without biometric protection.
-        synchronized(this) { if (legacy.exists(LEGACY_SEED)) legacy.remove(LEGACY_SEED) }
+        try {
+            // A copy left by an interrupted move is the same seed without biometric protection.
+            synchronized(this) { if (legacy.exists(LEGACY_SEED)) legacy.remove(LEGACY_SEED) }
+        } catch (error: Exception) {
+            seed.fill(0)
+            throw error
+        }
         return seed
     }
 
@@ -113,7 +118,7 @@ class KeystoreBackedEd25519Identity(
         val seed = synchronized(this) { legacy.read(LEGACY_SEED) }
             ?: throw IllegalStateException("Original device key unavailable; explicitly re-enroll this device.")
         try {
-            val cipher = authenticate(reason, vault.encrypter()) ?: throw cancelled()
+            val cipher = authorised(reason, vault.encrypter(), authenticate)
             cipher.updateAAD(SEED.toByteArray(Charsets.UTF_8))
             val ciphertext = cipher.doFinal(seed)
             val sealed = ByteBuffer.allocate(1 + cipher.iv.size + ciphertext.size)
@@ -129,6 +134,10 @@ class KeystoreBackedEd25519Identity(
             throw error
         }
     }
+
+    /** Only the Keystore cipher handed to the prompt may touch the seed. */
+    private suspend fun authorised(reason: String, cipher: Cipher, authenticate: suspend (String, Cipher) -> Cipher?): Cipher =
+        authenticate(reason, cipher)?.takeIf { it === cipher } ?: throw cancelled()
 
     private fun publicKey(seed: ByteArray): ByteArray = Ed25519PrivateKeyParameters(seed, 0).generatePublicKey().encoded
 

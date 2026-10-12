@@ -88,6 +88,16 @@ class KeystoreBackedEd25519IdentityTest {
         assertTrue(legacy.exists(LEGACY_SEED))
     }
 
+    @Test
+    fun `a cipher other than the Keystore one is refused`() = runTest {
+        identity.publicKeyHex()
+        identity.prompt = { _, _ -> javax.crypto.Cipher.getInstance("AES/GCM/NoPadding") }
+        val error = runCatching { identity.signHex(Hex.encode(MESSAGE), "fixture") }.exceptionOrNull()
+        assertTrue("$error", error is DeviceSigningException)
+        assertNull(vault.load(SEED))
+        assertTrue(legacy.exists(LEGACY_SEED))
+    }
+
     private fun assertValid(publicKey: String, signatureHex: String) {
         val signature = Hex.decode(signatureHex)
         assertEquals(64, signature.size)

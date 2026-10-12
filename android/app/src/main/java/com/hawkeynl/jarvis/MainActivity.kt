@@ -20,6 +20,8 @@ import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleDestroyedException
 import androidx.lifecycle.withResumed
 import com.hawkeynl.jarvis.ui.CoreViewModel
 import com.hawkeynl.jarvis.ui.JarvisApp
@@ -56,11 +58,15 @@ class MainActivity : FragmentActivity() {
     private suspend fun authenticatePairing(reason: String): Boolean =
         strongBiometric("Pairing request", reason) is BiometricResult.Authenticated
 
-    /** One BIOMETRIC_STRONG prompt, no device credential. Null while another prompt is
-     *  open; the result is handed back only once this Activity is resumed again. */
+    /** One BIOMETRIC_STRONG prompt, no device credential. Null while another prompt is open
+     *  or the app is not in the foreground; the result is handed back only once this
+     *  Activity is resumed again. */
     private suspend fun strongBiometric(title: String, reason: String, cryptoObject: BiometricPrompt.CryptoObject? = null): BiometricResult? {
         val result = suspendCancellableCoroutine<BiometricResult?> { continuation ->
-            if (biometricPromptActive) { continuation.resume(null); return@suspendCancellableCoroutine }
+            // A prompt started after onSaveInstanceState is dropped without a callback.
+            if (biometricPromptActive || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) || supportFragmentManager.isStateSaved) {
+                continuation.resume(null); return@suspendCancellableCoroutine
+            }
             biometricPromptActive = true
             val prompt = container.biometricGate.authenticate(
                 this, ContextCompat.getMainExecutor(this), title, description = reason, cryptoObject = cryptoObject,
@@ -72,7 +78,11 @@ class MainActivity : FragmentActivity() {
             }
             continuation.invokeOnCancellation { runOnUiThread { prompt?.cancelAuthentication(); biometricPromptActive = false } }
         }
-        return result?.takeIf { lifecycle.withResumed { !isFinishing && !isDestroyed } }
+        return try {
+            result?.takeIf { lifecycle.withResumed { !isFinishing && !isDestroyed } }
+        } catch (_: LifecycleDestroyedException) {
+            null // This Activity was recreated while the prompt was open.
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

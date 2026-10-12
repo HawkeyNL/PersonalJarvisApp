@@ -7,7 +7,6 @@ import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import java.security.KeyStore
-import java.security.ProviderException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -63,8 +62,8 @@ class AndroidDeviceKeyVault(context: Context) : DeviceKeyVault {
     private fun generateKey(): SecretKey = try {
         try {
             generateKey(strongBox = true)
-        } catch (_: ProviderException) {
-            // StrongBoxUnavailableException is a ProviderException; fall back to the TEE.
+        } catch (_: Exception) {
+            // No StrongBox, or it refuses this key: fall back to the TEE.
             generateKey(strongBox = false)
         }
     } catch (error: Exception) {
