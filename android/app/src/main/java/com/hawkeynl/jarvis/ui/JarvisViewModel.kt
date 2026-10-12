@@ -64,6 +64,8 @@ data class JarvisUiState(
     val authenticated: Boolean = false,
     val pairingPending: Boolean = false,
     val pairingExpiresAt: Long? = null,
+    /** Keystore invalidated the device key; onboarding offers erase and pair again. */
+    val deviceKeyLost: Boolean = false,
     /** This device's key fingerprint, shown while waiting for approval. */
     val ownFingerprint: String? = null,
     val conversations: List<ConversationSummary> = emptyList(),
@@ -407,6 +409,9 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             is EnrollmentOutcome.Unreachable -> enrollmentError(result.reason.message())
             is EnrollmentOutcome.Rejected -> enrollmentError(result.message ?: "Home Node refused the request (${result.status}).")
             is EnrollmentOutcome.InvalidResponse -> enrollmentError(result.message)
+            EnrollmentOutcome.DeviceKeyLost -> _state.update {
+                it.copy(busy = false, pairingPending = false, authenticated = false, deviceKeyLost = true, error = null)
+            }
         }
     }
 

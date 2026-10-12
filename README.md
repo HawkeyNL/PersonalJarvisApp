@@ -110,6 +110,10 @@ state after a change; it does not optimistically claim success. Older Core
 versions without the capability remain read-only. Core and client product
 versions remain independent.
 
+Android differs: every model change needs its own `BIOMETRIC_STRONG` prompt that
+unlocks the device signing key, with no device-credential fallback and no
+five-minute window.
+
 ## Pairing approvals
 
 A new device asks to pair with `POST /v1/auth/pairing/requests` (account

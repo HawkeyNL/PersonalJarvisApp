@@ -1,5 +1,6 @@
 package com.hawkeynl.jarvis.security
 
+import android.app.KeyguardManager
 import android.content.Context
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
@@ -7,6 +8,7 @@ import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import java.security.KeyStore
+import java.security.UnrecoverableKeyException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -19,6 +21,7 @@ import javax.crypto.spec.GCMParameterSpec
  */
 class AndroidDeviceKeyVault(context: Context) : DeviceKeyVault {
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+    private val keyguard = context.getSystemService(KeyguardManager::class.java)
 
     override fun load(name: String): ByteArray? = preferences.getString(name, null)?.let { Base64.decode(it, Base64.NO_WRAP) }
 
@@ -30,25 +33,36 @@ class AndroidDeviceKeyVault(context: Context) : DeviceKeyVault {
         check(preferences.edit().remove(name).commit()) { "Device key storage cannot be cleared." }
     }
 
-    override fun encrypter(): Cipher {
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        try {
-            cipher.init(Cipher.ENCRYPT_MODE, existingKey() ?: generateKey())
-        } catch (_: KeyPermanentlyInvalidatedException) {
-            // Only reached while moving a legacy seed: no ciphertext uses this key yet.
-            deleteKey()
-            cipher.init(Cipher.ENCRYPT_MODE, generateKey())
-        }
-        return cipher
+    override fun encrypter(): Cipher = try {
+        encryptCipher(existingKey() ?: generateKey())
+    } catch (error: DeviceSigningException) {
+        throw error
+    } catch (_: Exception) {
+        // No ciphertext uses this key yet (only called before sealing): replace it.
+        deleteKey()
+        encryptCipher(generateKey())
     }
 
     override fun decrypter(iv: ByteArray): Cipher {
-        val key = existingKey() ?: throw DeviceKeyInvalidatedException()
+        val key = try {
+            existingKey()
+        } catch (error: UnrecoverableKeyException) {
+            if (error.isInvalidation()) throw DeviceKeyInvalidatedException()
+            throw error
+        } ?: missingKey()
         return try {
             Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, iv)) }
         } catch (_: KeyPermanentlyInvalidatedException) {
             throw DeviceKeyInvalidatedException()
         }
+    }
+
+    override fun finish(cipher: Cipher, aad: ByteArray, input: ByteArray): ByteArray = try {
+        cipher.updateAAD(aad)
+        cipher.doFinal(input)
+    } catch (error: Exception) {
+        if (error.isInvalidation()) throw DeviceKeyInvalidatedException()
+        throw error
     }
 
     override fun deleteKey() {
@@ -58,6 +72,18 @@ class AndroidDeviceKeyVault(context: Context) : DeviceKeyVault {
     private fun keyStore() = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
 
     private fun existingKey() = keyStore().getKey(KEY_ALIAS, null) as? SecretKey
+
+    private fun encryptCipher(key: SecretKey): Cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key) }
+
+    /** A missing key counts as lost only when a fresh Keystore load agrees while the
+     *  phone is unlocked; anything else is reported as temporary. */
+    private fun missingKey(): Nothing {
+        if (!keyguard.isDeviceLocked && !keyStore().containsAlias(KEY_ALIAS)) throw DeviceKeyInvalidatedException()
+        throw DeviceSigningException("The device key is not available right now. Unlock this phone and try again.")
+    }
+
+    private fun Throwable.isInvalidation(): Boolean =
+        generateSequence(this) { it.cause }.take(8).any { it is KeyPermanentlyInvalidatedException }
 
     private fun generateKey(): SecretKey = try {
         try {

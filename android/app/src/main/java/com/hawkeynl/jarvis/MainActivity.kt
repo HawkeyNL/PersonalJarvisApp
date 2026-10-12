@@ -4,7 +4,9 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.biometric.BiometricPrompt
 import javax.crypto.Cipher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import com.hawkeynl.jarvis.security.BiometricAvailability
 import com.hawkeynl.jarvis.security.BiometricResult
@@ -61,7 +63,10 @@ class MainActivity : FragmentActivity() {
     /** One BIOMETRIC_STRONG prompt, no device credential. Null while another prompt is open
      *  or the app is not in the foreground; the result is handed back only once this
      *  Activity is resumed again. */
-    private suspend fun strongBiometric(title: String, reason: String, cryptoObject: BiometricPrompt.CryptoObject? = null): BiometricResult? {
+    private suspend fun strongBiometric(
+        title: String, reason: String, cryptoObject: BiometricPrompt.CryptoObject? = null,
+    ): BiometricResult? = withContext(Dispatchers.Main.immediate) {
+        val activity = this@MainActivity
         val result = suspendCancellableCoroutine<BiometricResult?> { continuation ->
             // A prompt started after onSaveInstanceState is dropped without a callback.
             if (biometricPromptActive || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) || supportFragmentManager.isStateSaved) {
@@ -69,7 +74,7 @@ class MainActivity : FragmentActivity() {
             }
             biometricPromptActive = true
             val prompt = container.biometricGate.authenticate(
-                this, ContextCompat.getMainExecutor(this), title, description = reason, cryptoObject = cryptoObject,
+                activity, ContextCompat.getMainExecutor(activity), title, description = reason, cryptoObject = cryptoObject,
             ) { result ->
                 // A rejected finger or face keeps the prompt open for another try.
                 if (result == BiometricResult.Failed) return@authenticate
@@ -78,7 +83,7 @@ class MainActivity : FragmentActivity() {
             }
             continuation.invokeOnCancellation { runOnUiThread { prompt?.cancelAuthentication(); biometricPromptActive = false } }
         }
-        return try {
+        try {
             result?.takeIf { lifecycle.withResumed { !isFinishing && !isDestroyed } }
         } catch (_: LifecycleDestroyedException) {
             null // This Activity was recreated while the prompt was open.

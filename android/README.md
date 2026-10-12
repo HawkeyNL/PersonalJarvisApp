@@ -107,11 +107,13 @@ with the cipher a `BiometricPrompt` `CryptoObject` authorised, for one signature
 (login, pairing approval, model change), and the buffer is cleared afterward.
 Showing the public key or fingerprint never prompts.
 
-A new seed, or one from an older version, sits under the shared secrets key
-until its first signature, which moves it behind the biometric key in the same
-prompt. If biometrics change, the key is invalidated and the seed is lost: the
-next sign-in clears the pairing so the phone can pair again, and the old device
-should be revoked on the Home Node.
+A new seed is created behind the biometric key when pairing starts (one
+prompt). A seed from an older version, kept under the shared secrets key, moves
+behind the biometric key on its next signature in the same prompt. If biometrics
+change, Keystore invalidates the key and the seed is lost. The app then offers
+"Erase this device and pair again"; nothing is erased until the user taps it.
+Revoke the old device on the Home Node. The key material is excluded from
+backups and device-to-device transfer.
 
 A separate Keystore key without user authentication, also unusable while the
 device is locked, protects bearer tokens, device ids and pending pairing nonces. Storage decryption failures fail clearly and never create a new

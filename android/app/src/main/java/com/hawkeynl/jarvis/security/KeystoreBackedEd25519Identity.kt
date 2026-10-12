@@ -1,20 +1,23 @@
 package com.hawkeynl.jarvis.security
 
 import com.hawkeynl.jarvis.storage.SecureValueStore
-import java.nio.ByteBuffer
 import java.security.SecureRandom
 import javax.crypto.Cipher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
 
 /** Signing stopped before a signature existed; the message is safe to show. */
 open class DeviceSigningException(message: String) : IllegalStateException(message)
 
-/** The biometric-bound key is gone (biometrics or screen lock changed), and with it the seed. */
+/** Keystore reports the biometric-bound key permanently invalidated (biometrics or screen
+ *  lock changed), so the seed cannot be recovered. Nothing is erased until the user asks. */
 class DeviceKeyInvalidatedException : DeviceSigningException(
-    "Fingerprint or face data on this phone changed, so its Jarvis device key no longer works. Pair this phone again.",
+    "Fingerprint or face data on this phone changed, so its Jarvis device key no longer works. Erase this device and pair it again.",
 )
 
 /** Android Keystore side of the device key, replaced by a fake in JVM tests. */
@@ -24,11 +27,17 @@ interface DeviceKeyVault {
     fun store(name: String, value: ByteArray)
     fun remove(name: String)
 
-    /** Encrypt cipher on the biometric-bound key, replacing an invalidated key. Usable only after a prompt. */
+    /** Encrypt cipher on the biometric-bound key. Called only while no ciphertext uses
+     *  the key, so a key that cannot be loaded or used is replaced. */
     fun encrypter(): Cipher
 
-    /** Decrypt cipher; throws [DeviceKeyInvalidatedException] when the key was invalidated. Usable only after a prompt. */
+    /** Decrypt cipher; throws [DeviceKeyInvalidatedException] only when Keystore reports
+     *  the key permanently invalidated. */
     fun decrypter(iv: ByteArray): Cipher
+
+    /** Runs a cipher the prompt authorised (AAD, then doFinal); maps permanent
+     *  invalidation to [DeviceKeyInvalidatedException]. */
+    fun finish(cipher: Cipher, aad: ByteArray, input: ByteArray): ByteArray
     fun deleteKey()
 }
 
@@ -40,8 +49,8 @@ interface DeviceKeyVault {
  * that prompt authorised and is cleared after signing. The public key is stored in
  * plain form so showing it never prompts.
  *
- * Until its first signature a seed sits under the shared secrets key, as every seed
- * did before this key existed; the first signature moves it (one prompt).
+ * A seed from an older version, kept under the shared secrets key, moves behind the
+ * biometric key on its next signature (one prompt). New seeds start there directly.
  */
 class KeystoreBackedEd25519Identity(
     private val legacy: SecureValueStore,
@@ -53,17 +62,30 @@ class KeystoreBackedEd25519Identity(
     @Volatile
     var prompt: (suspend (reason: String, cipher: Cipher) -> Cipher?)? = null
     private val signing = Mutex()
+    private val lock = Any()
 
-    @Synchronized
-    override fun publicKeyHex(): String {
+    override fun publicKeyHex(): String = synchronized(lock) {
         vault.load(PUBLIC_KEY)?.let { return Hex.encode(it) }
-        check(vault.load(SEED) == null) { "Device public key missing; explicitly re-enroll this device." }
-        val seed = legacy.read(LEGACY_SEED) ?: ByteArray(Ed25519PrivateKeyParameters.KEY_SIZE).also {
-            random.nextBytes(it)
-            legacy.write(LEGACY_SEED, it)
+        val seed = legacy.read(LEGACY_SEED) ?: throw IllegalStateException("No device key; pair this device first.")
+        try {
+            Hex.encode(publicKey(seed).also { vault.store(PUBLIC_KEY, it) })
+        } finally {
+            seed.fill(0)
         }
-        return try {
-            publicKey(seed).also { vault.store(PUBLIC_KEY, it) }.let(Hex::encode)
+    }
+
+    override suspend fun enrollmentKeyHex(reason: String): String = signing.withLock {
+        val existing = io {
+            synchronized(lock) {
+                check(vault.load(PUBLIC_KEY) != null || vault.load(SEED) == null) { "Device key storage is damaged; erase this device and pair again." }
+                if (vault.load(PUBLIC_KEY) != null || legacy.exists(LEGACY_SEED)) publicKeyHex() else null
+            }
+        }
+        if (existing != null) return@withLock existing
+        val seed = ByteArray(Ed25519PrivateKeyParameters.KEY_SIZE).also(random::nextBytes)
+        try {
+            seal(seed, reason)
+            Hex.encode(publicKey(seed))
         } finally {
             seed.fill(0)
         }
@@ -71,10 +93,11 @@ class KeystoreBackedEd25519Identity(
 
     override suspend fun signHex(messageHex: String, reason: String): String = signing.withLock {
         val message = Hex.decode(messageHex)
-        val authenticate = prompt ?: throw DeviceSigningException("Open Jarvis to confirm with biometrics.")
-        val sealed = synchronized(this) { vault.load(SEED) }
-        val seed = if (sealed != null) unseal(sealed, reason, authenticate) else migrate(reason, authenticate)
+        val sealed = io { synchronized(lock) { vault.load(SEED) } }
+        val seed = if (sealed != null) unseal(sealed, reason) else migrate(reason)
         try {
+            // Known limit: BouncyCastle keeps its own copy of the seed inside the key
+            // parameters, which cannot be cleared; it is garbage once signing returns.
             val signer = Ed25519Signer()
             signer.init(true, Ed25519PrivateKeyParameters(seed, 0))
             signer.update(message, 0, message.size)
@@ -85,26 +108,29 @@ class KeystoreBackedEd25519Identity(
     }
 
     override suspend fun reset() = signing.withLock {
-        synchronized(this) {
-            legacy.remove(LEGACY_SEED)
-            vault.remove(SEED)
-            vault.remove(PUBLIC_KEY)
-            vault.deleteKey()
+        io {
+            synchronized(lock) {
+                legacy.remove(LEGACY_SEED)
+                vault.remove(SEED)
+                vault.remove(PUBLIC_KEY)
+                vault.deleteKey()
+            }
         }
     }
 
-    private suspend fun unseal(sealed: ByteArray, reason: String, authenticate: suspend (String, Cipher) -> Cipher?): ByteArray {
-        val buffer = ByteBuffer.wrap(sealed)
-        val ivLength = buffer.get().toInt() and 0xff
-        check(ivLength in 12..16 && sealed.size > ivLength + 1) { "Device key storage is damaged; explicitly re-enroll this device." }
-        val iv = ByteArray(ivLength).also { buffer.get(it) }
-        val ciphertext = ByteArray(buffer.remaining()).also { buffer.get(it) }
-        val cipher = authorised(reason, vault.decrypter(iv), authenticate)
-        cipher.updateAAD(SEED.toByteArray(Charsets.UTF_8))
-        val seed = cipher.doFinal(ciphertext)
+    private suspend fun unseal(sealed: ByteArray, reason: String): ByteArray {
+        val ivLength = sealed[0].toInt() and 0xff
+        check(ivLength in 12..16 && sealed.size >= 1 + ivLength + TAG_BYTES + Ed25519PrivateKeyParameters.KEY_SIZE) {
+            "Device key storage is damaged; erase this device and pair again."
+        }
+        val iv = sealed.copyOfRange(1, 1 + ivLength)
+        val ciphertext = sealed.copyOfRange(1 + ivLength, sealed.size)
+        val cipher = io { vault.decrypter(iv) }
+        authorise(reason, cipher)
+        val seed = io { vault.finish(cipher, AAD, ciphertext) }
         try {
             // A copy left by an interrupted move is the same seed without biometric protection.
-            synchronized(this) { if (legacy.exists(LEGACY_SEED)) legacy.remove(LEGACY_SEED) }
+            io { synchronized(lock) { if (legacy.exists(LEGACY_SEED)) legacy.remove(LEGACY_SEED) } }
         } catch (error: Exception) {
             seed.fill(0)
             throw error
@@ -112,22 +138,13 @@ class KeystoreBackedEd25519Identity(
         return seed
     }
 
-    /** One prompt authorises encrypting the legacy seed under the biometric key; the
-     *  legacy copy is deleted only after the new ciphertext and public key are stored. */
-    private suspend fun migrate(reason: String, authenticate: suspend (String, Cipher) -> Cipher?): ByteArray {
-        val seed = synchronized(this) { legacy.read(LEGACY_SEED) }
+    /** Moves the legacy seed behind the biometric key; [seal] deletes the legacy copy
+     *  only after the new ciphertext and public key are stored. */
+    private suspend fun migrate(reason: String): ByteArray {
+        val seed = io { synchronized(lock) { legacy.read(LEGACY_SEED) } }
             ?: throw IllegalStateException("Original device key unavailable; explicitly re-enroll this device.")
         try {
-            val cipher = authorised(reason, vault.encrypter(), authenticate)
-            cipher.updateAAD(SEED.toByteArray(Charsets.UTF_8))
-            val ciphertext = cipher.doFinal(seed)
-            val sealed = ByteBuffer.allocate(1 + cipher.iv.size + ciphertext.size)
-                .put(cipher.iv.size.toByte()).put(cipher.iv).put(ciphertext).array()
-            synchronized(this) {
-                vault.store(PUBLIC_KEY, publicKey(seed))
-                vault.store(SEED, sealed)
-                legacy.remove(LEGACY_SEED)
-            }
+            seal(seed, reason)
             return seed
         } catch (error: Throwable) {
             seed.fill(0)
@@ -135,17 +152,46 @@ class KeystoreBackedEd25519Identity(
         }
     }
 
-    /** Only the Keystore cipher handed to the prompt may touch the seed. */
-    private suspend fun authorised(reason: String, cipher: Cipher, authenticate: suspend (String, Cipher) -> Cipher?): Cipher =
-        authenticate(reason, cipher)?.takeIf { it === cipher } ?: throw cancelled()
+    /** One prompt authorises encrypting [seed]. Only runs while no v2 ciphertext exists. */
+    private suspend fun seal(seed: ByteArray, reason: String) {
+        val cipher = io { vault.encrypter() }
+        authorise(reason, cipher)
+        val ciphertext = try {
+            io { vault.finish(cipher, AAD, seed) }
+        } catch (_: DeviceKeyInvalidatedException) {
+            // Nothing is sealed under this key yet: drop it so the next try makes a new one.
+            io { vault.deleteKey() }
+            throw DeviceSigningException("The device key could not be stored; try again.")
+        }
+        val sealed = byteArrayOf(cipher.iv.size.toByte()) + cipher.iv + ciphertext
+        io {
+            synchronized(lock) {
+                vault.store(PUBLIC_KEY, publicKey(seed))
+                vault.store(SEED, sealed)
+                if (legacy.exists(LEGACY_SEED)) legacy.remove(LEGACY_SEED)
+            }
+        }
+    }
+
+    /** Only the Keystore cipher handed to the prompt may touch the seed. A prompt that
+     *  never answers must not hold the signing lock for good. */
+    private suspend fun authorise(reason: String, cipher: Cipher) {
+        val authenticate = prompt ?: throw DeviceSigningException("Open Jarvis to confirm with biometrics.")
+        val result = withTimeoutOrNull(PROMPT_TIMEOUT_MS) { authenticate(reason, cipher) }
+        if (result !== cipher) throw DeviceSigningException("Cancelled; fingerprint or face unlock is required.")
+    }
 
     private fun publicKey(seed: ByteArray): ByteArray = Ed25519PrivateKeyParameters(seed, 0).generatePublicKey().encoded
 
-    private fun cancelled() = DeviceSigningException("Cancelled; fingerprint or face unlock is required.")
+    /** Keystore and preference I/O stays off the main thread. */
+    private suspend fun <T> io(block: () -> T): T = withContext(Dispatchers.IO) { block() }
 
     private companion object {
         const val LEGACY_SEED = "device-ed25519-seed.v1"
         const val SEED = "device-ed25519-seed.v2"
         const val PUBLIC_KEY = "device-ed25519-public.v2"
+        const val TAG_BYTES = 16
+        const val PROMPT_TIMEOUT_MS = 120_000L
+        val AAD = SEED.toByteArray(Charsets.UTF_8)
     }
 }
