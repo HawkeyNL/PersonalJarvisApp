@@ -323,7 +323,7 @@ onBeforeUnmount(() => {
 
     <div v-else ref="fitRoom" class="body" :style="{ '--fit': scale }">
       <p v-if="auth === 'wachten'" class="pairing-wait" role="status">
-        Waiting for approval from a trusted Jarvis device.
+        Waiting for approval from your phone or Core Admin.
         <template v-if="ownFingerprint"><br />Check that it shows this key fingerprint: <code>{{ ownFingerprint }}</code></template>
       </p>
       <p v-else-if="authError" class="connection-error" role="alert">{{ authError }}</p>

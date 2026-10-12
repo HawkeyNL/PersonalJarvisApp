@@ -6,7 +6,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { chatSession } from "./chatSession";
 import { homeNodeOrigin } from "./homeNode";
-import { getJson, getJsonAuth, getJsonWithHeaders, postAuth, postJson, postJsonAuth, postJsonWithHeaders } from "./api";
+import { getJson, getJsonAuth, getJsonWithHeaders, postAuth, postJson, postJsonWithHeaders } from "./api";
 import { scheduleAutomaticUpdateCheck } from "./updates";
 import { groupFingerprint, keyFingerprint } from "./pairingFingerprint";
 
@@ -30,7 +30,7 @@ export function currentAuthStatus(): Promise<AuthStatus> {
 const PAIRING_WAIT_KEY = "jarvis.pairing.wait";
 type PairingWait = { request_id: string; nonce: string; expires_at: number };
 export class PairingPending extends Error {
-  constructor() { super("Waiting for approval from a trusted Jarvis device."); }
+  constructor() { super("Waiting for approval from your phone or Core Admin."); }
 }
 
 export type AccountStatus = { protocol: number; password_required: boolean; bootstrap_required: boolean };
@@ -136,41 +136,11 @@ export async function logout(): Promise<void> {
   await invoke("auth_logout");
 }
 
-type AccountApproval = {
-  request_id: string; user_id: string; device_id: string;
-  action: "password-set" | "device-revoke"; target: string; nonce: string; expires_at: number;
-};
-
-async function approveAccount(approval: AccountApproval): Promise<void> {
-  const signature = await invoke<string>("auth_sign_account_approval", { approval });
-  await postJsonAuth(`/v1/auth/account/requests/${approval.request_id}/approve`, { signature });
-}
-
-export async function revokeDevice(deviceId: string): Promise<void> {
-  const approval = await postJsonAuth<AccountApproval>(`/v1/devices/${deviceId}/revoke-request`, {});
-  if (approval.action !== "device-revoke" || approval.target !== deviceId) throw new Error("Invalid revocation request");
-  await approveAccount(approval);
-}
-
-export async function setAccountPassword(password: string, currentPassword?: string): Promise<void> {
-  const approval = await postJsonAuth<AccountApproval>("/v1/auth/account/password/requests", {
-    password, current_password: currentPassword,
-  });
-  if (approval.action !== "password-set" || approval.target !== approval.user_id) throw new Error("Invalid password request");
-  await approveAccount(approval);
-  await clearSession();
-}
-
-/** Confirm remote revocation before deleting the local signing identity. */
+/** Sign out, then erase the local signing identity. Core accepts device
+ *  revocation only from a phone, so the device record stays listed until it
+ *  is revoked there or in Core Admin on the Home Node. */
 export async function deregisterDevice(): Promise<void> {
-  chatSession.invalidate();
-  await invoke("realtime_stop").catch(()=>{});
-  const status = await currentAuthStatus();
-  if (status.authenticated && status.device_id) {
-    await revokeDevice(status.device_id);
-  } else {
-    throw new Error("Sign in to revoke this device safely.");
-  }
+  await logout();
   await invoke("auth_reset");
 }
 

@@ -84,22 +84,23 @@ test("no exposed command signs a caller-supplied login challenge", async () => {
   assert.doesNotMatch(auth, /\/v1\/auth\/challenge|auth_sign_login|auth_complete_login/);
 });
 
-test("approvals are signed natively by id, never from webview-supplied data", async () => {
+test("desktop signs no approvals and model changes are biometric only", async () => {
   const native = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+  const models = await readFile(new URL("../src-tauri/src/model_control.rs", import.meta.url), "utf8");
   const handlers = native.match(/generate_handler!\[([\s\S]*?)\]/)?.[1];
   assert.ok(handlers);
-  for (const command of ["auth_approve_pairing", "auth_approve_unlock", "auth_approve_agent"]) {
-    assert.match(handlers, new RegExp(`approvals::${command},`));
-  }
-  assert.deepEqual(handlers.match(/auth_sign_\w+/g), ["auth_sign_account_approval"]);
-  const approvals = await readFile(new URL("../src-tauri/src/approvals.rs", import.meta.url), "utf8");
-  const commands = approvals.match(/async fn auth_approve_\w+\([^)]*\)/g);
-  assert.equal(commands?.length, 3);
-  for (const command of commands) assert.match(command, /^async fn auth_approve_\w+\(app: AppHandle, \w+_id: String\)$/);
+  assert.doesNotMatch(handlers, /approve|auth_sign_/);
+  assert.doesNotMatch(native, /mod approvals|try_prompt/);
+  // Only the app lock may offer the computer password; it signs nothing.
   assert.match(native, /fn biometric_unlock\(allow_password: bool\)/);
-  for (const file of ["pairingApprovals.ts", "unlockApprovals.ts", "agentApprovals.ts"]) {
+  assert.deepEqual(native.match(/authenticate_owner\([^)]*\)/g),
+    ['authenticate_owner("Unlock Jarvis", allow_password)', "authenticate_owner(reason: &str, allow_password: bool)"]);
+  assert.deepEqual(models.match(/authenticate_owner\([^)]*\)/g), ["authenticate_owner(&prompt, false)"]);
+  assert.match(models, /biometric_signing\(cfg!\(target_os = "macos"\)\)\?;\s*let _prompt = model_authorization::prompt\(\);\s*authenticate_owner/);
+  assert.doesNotMatch(models, /five minutes|model_authorization::(valid|remember)/);
+  for (const file of ["pairingApprovals.ts", "unlockApprovals.ts", "agentApprovals.ts", "auth.ts"]) {
     const web = await readFile(new URL(`../src/${file}`, import.meta.url), "utf8");
-    assert.doesNotMatch(web, /auth_sign_|\{ signature|\/approve\b/, file);
+    assert.doesNotMatch(web, /auth_approve_|auth_sign_|\{ signature|\/approve\b/, file);
   }
 });
 

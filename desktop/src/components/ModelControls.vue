@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getJsonAuth } from "../api";
+import { platformCapabilities } from "../platform";
 type Model = { provider: string; model: string; enabled: boolean; source: string; route?: string };
 type Policy = { models: Model[]; mutation: string; policy_sha256: string | null };
 const policy = ref<Policy | null>(null);
@@ -17,6 +18,7 @@ const matches = computed(() => policy.value?.models.filter(m =>
   && `${m.provider} ${m.model}`.toLowerCase().includes(search.value.toLowerCase()),
 ) ?? []);
 const rows = computed(() => matches.value.slice(page.value * 25, page.value * 25 + 25));
+const signer = computed(() => platformCapabilities.value.supportsBiometricSigning);
 const mutable = computed(() => policy.value?.mutation === "device-signed-model-toggle-v1" && !!policy.value.policy_sha256);
 async function refresh() {
   policy.value = await getJsonAuth<Policy>("/v1/system/models");
@@ -49,7 +51,8 @@ onMounted(reload);
 <template>
   <section class="model-controls">
     <h3>Model access</h3>
-    <p>"Allowed" means Jarvis may choose this model, not that it is handling a request right now. A working provider and the existing budget are still required. OS authentication lasts five minutes, until you lock or sign out; you confirm every change separately.</p>
+    <p>"Allowed" means Jarvis may choose this model, not that it is handling a request right now. A working provider and the existing budget are still required. On a Mac every change needs its own Touch ID check, never the computer password.</p>
+    <p v-if="!signer">Change models from your phone or the Home Node.</p>
     <p v-if="policy" class="model-summary">{{ enabledCount }} allowed · {{ policy.models.length - enabledCount }} blocked</p>
     <div class="model-toolbar">
       <input v-model="search" aria-label="Search models" placeholder="Search provider or model" @input="page = 0" />
@@ -66,7 +69,7 @@ onMounted(reload);
       <li v-for="model in rows" :key="model.provider + '/' + model.model">
         <div><strong>{{ model.model }}</strong><small>{{ model.provider }}<template v-if="model.route"> · route {{ model.route }}</template></small></div>
         <span class="access-badge" :class="model.enabled ? 'access-enabled' : 'access-disabled'">{{ model.enabled ? "Allowed" : "Blocked" }}</span>
-        <button :disabled="busy || !mutable" @click="selected = model">{{ model.enabled ? "Disable" : "Enable" }}</button>
+        <button :disabled="busy || !mutable || !signer" @click="selected = model">{{ model.enabled ? "Disable" : "Enable" }}</button>
       </li>
     </ul>
     <p v-if="policy && !matches.length">No models match this search or filter.</p>

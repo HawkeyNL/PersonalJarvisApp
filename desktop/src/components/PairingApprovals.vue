@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { pairingError, pairingRequests, approvePairing, denyPairing } from "../pairingApprovals";
+import { pairingRequests, denyPairing } from "../pairingApprovals";
 import { displayHint, groupFingerprint } from "../pairingFingerprint";
 
 const time = (seconds: number) => new Date(seconds * 1000).toLocaleString();
@@ -20,13 +20,11 @@ const time = (seconds: number) => new Date(seconds * 1000).toLocaleString();
         <dd v-if="request.verified_fingerprint" class="fingerprint">{{ groupFingerprint(request.verified_fingerprint) }}</dd>
         <dd v-else class="error">Does not match the candidate key. Do not approve.</dd>
       </dl>
-      <small>Compare the fingerprint with the one the new device shows. Model, version, IP and user agent are unverified hints.</small>
+      <small>Approve from your phone. Compare the fingerprint with the one the new device shows. Model, version, IP and user agent are unverified hints.</small>
       <div>
-        <button :disabled="!request.verified_fingerprint" @click="approvePairing(request)">Approve</button>
         <button @click="denyPairing(request)">Deny</button>
       </div>
     </section>
-    <small v-if="pairingError" class="error">{{ pairingError }}</small>
   </aside>
 </template>
 <style scoped>

@@ -1,8 +1,6 @@
-// Pending device pairing approvals. Approving passes only the request id: the
-// native layer re-fetches the request, checks its key fingerprint, shows it in
-// the OS prompt, signs the pairing protocol and posts the approval.
+// Pending device pairing requests. Core accepts approvals only from a phone,
+// so this app shows them and can deny them.
 import { ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
 import { currentAuthStatus } from "./auth";
 import { getJsonAuth, postJsonAuth } from "./api";
 import { createSerialPoller } from "./serialPoller";
@@ -26,10 +24,9 @@ export type PairingRequest = {
   model?: string | null;
 };
 /** A request plus the fingerprint computed here from its candidate key, or
- *  null when the server's fingerprint disagrees (approval is then refused). */
+ *  null when the server's fingerprint disagrees. */
 export type CheckedPairingRequest = PairingRequest & { verified_fingerprint: string | null };
 export const pairingRequests = ref<CheckedPairingRequest[]>([]);
-export const pairingError = ref<string | null>(null);
 // Core allows five pairing-list reads per source IP per minute. Leave room for
 // manual/other-device requests and never overlap requests across app restarts.
 const pairingPoller = createSerialPoller(refresh, 60_000);
@@ -45,16 +42,6 @@ async function refresh(): Promise<boolean> {
     })));
     return true;
   } catch { return false; }
-}
-
-export async function approvePairing(request: PairingRequest): Promise<void> {
-  const status = await currentAuthStatus();
-  if (!status.authenticated) throw new Error("not signed in");
-  pairingError.value = null;
-  try {
-    await invoke("auth_approve_pairing", { requestId: request.id });
-    pairingRequests.value = pairingRequests.value.filter((item) => item.id !== request.id);
-  } catch (error) { pairingError.value = error instanceof Error ? error.message : String(error); }
 }
 
 export async function denyPairing(request: PairingRequest): Promise<void> {

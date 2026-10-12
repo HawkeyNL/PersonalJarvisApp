@@ -143,15 +143,8 @@ struct Relaxation {
 }
 
 impl Relaxation {
-    fn any(&self) -> bool {
-        self.paid_api || self.paid_fallback || self.paid_models || self.research_web_search
-    }
-
     fn prompt(&self) -> String {
         let mut prompt = String::from("Jarvis: replace model routing");
-        if !self.any() {
-            prompt.push_str("; allow model changes for five minutes");
-        }
         for (relaxed, text) in [
             (self.paid_api, "; allow paid APIs"),
             (
@@ -184,7 +177,7 @@ fn current_routing(snapshot: &Snapshot) -> Option<RoutingDocument> {
 
 fn relaxation(current: Option<&RoutingDocument>, next: &RoutingDocument) -> Relaxation {
     // Web search sends research questions to a provider tool, whatever the
-    // paid API setting, so switching it on always needs a fresh prompt.
+    // paid API setting, so switching it on is always named in the prompt.
     let research_web_search = next.research_web_search == ResearchWebSearch::On
         && current.is_none_or(|current| current.research_web_search != ResearchWebSearch::On);
     if next.paid_api == PaidApi::Off {
@@ -243,6 +236,16 @@ const ROUTING_APPROVAL_SECONDS: i64 = 240;
 /// Broker frame limit; the broker counts the trailing newline.
 const BROKER_FRAME_BYTES: usize = 16 * 1024;
 
+/// Signing prompts are biometric only, never the device password. Only macOS
+/// (Touch ID) can enforce that: Windows Hello always offers its PIN and Linux
+/// has no biometric prompt, so both refuse to sign.
+fn biometric_signing(macos: bool) -> Result<(), String> {
+    if !macos {
+        return Err("Change models from your phone or the Home Node".into());
+    }
+    Ok(())
+}
+
 /// Login binding captured before any network call; revalidated before signing
 /// and before posting.
 pub(super) struct Session {
@@ -290,13 +293,11 @@ impl Session {
         serde_json::from_slice(&bytes).map_err(|_| "Invalid model policy".into())
     }
 
-    /// Require fresh OS authentication (or the current five-minute model
-    /// window unless `always_prompt`), revalidate the login binding, sign the
-    /// fixed approval and post it to the fixed privileged route.
+    /// Require a fresh biometric prompt, revalidate the login binding, sign
+    /// the fixed approval and post it to the fixed privileged route.
     async fn approve<F>(
         self,
         prompt: String,
-        always_prompt: bool,
         message: Vec<u8>,
         expires_at: i64,
         signed_request: F,
@@ -317,11 +318,9 @@ impl Session {
         let signing_origin = origin.clone();
         let body =
             tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
+                biometric_signing(cfg!(target_os = "macos"))?;
                 let _prompt = model_authorization::prompt();
-                let fresh = always_prompt || !model_authorization::valid(epoch)?;
-                if fresh {
-                    authenticate_owner(&prompt, true)?;
-                }
+                authenticate_owner(&prompt, false)?;
                 let guard = auth_storage()?;
                 let current = load_metadata(&signing_app)?;
                 validate_login_binding(
@@ -334,17 +333,6 @@ impl Session {
                     || time::OffsetDateTime::now_utc().unix_timestamp() >= expires_at
                 {
                     return Err("Approval expired or device changed".into());
-                }
-                // Only a real OS prompt grants a new fixed window, after binding
-                // revalidation. Reused grants never slide the deadline forward.
-                // A cost-relaxing prompt is single-use and grants no window.
-                if !always_prompt {
-                    if fresh {
-                        model_authorization::remember(epoch)?;
-                    }
-                    if !model_authorization::valid(epoch)? {
-                        return Err("Model authorization expired; try again".into());
-                    }
                 }
                 let signature = hex::encode(
                     signing_key_unlocked(&signing_app, false)?
@@ -436,7 +424,7 @@ pub(super) async fn set_model_enabled(
     };
     let message = approval.message().map_err(str::to_string)?;
     let prompt = format!(
-        "Jarvis: {} {}/{}; allow model changes for five minutes",
+        "Jarvis: {} {}/{}",
         if approval.enabled {
             "enable"
         } else {
@@ -448,7 +436,6 @@ pub(super) async fn set_model_enabled(
     session
         .approve(
             prompt,
-            false,
             message,
             approval.expires_at,
             move |signature| approval.signed_request(signature),
@@ -498,7 +485,6 @@ pub(super) async fn set_model_routing(
     session
         .approve(
             relaxed.prompt(),
-            relaxed.any(),
             message,
             approval.expires_at,
             move |signature| approval.signed_request(signature),
@@ -741,7 +727,7 @@ mod tests {
     }
 
     #[test]
-    fn cost_relaxing_routing_is_classified_for_a_fresh_prompt() {
+    fn cost_relaxing_routing_is_named_in_the_prompt() {
         let sub = serde_json::json!({"provider": "claude-cli", "model": "claude-opus-5"});
         let paid = serde_json::json!({"provider": "anthropic-api", "model": "claude-opus-5"});
         let local = serde_json::json!({"provider": "ollama", "model": "llama3.2"});
@@ -789,7 +775,7 @@ mod tests {
             relaxed(false, false, true)
         );
 
-        // Tightening or neutral: may reuse the window.
+        // Tightening or neutral: nothing extra to name.
         for (current, next) in [
             (&with_paid, &off),
             (&with_paid, &only_sub),
@@ -803,22 +789,25 @@ mod tests {
                 &routed("allowed", serde_json::json!([sub, local]), false),
             ),
         ] {
-            assert!(!relaxation(Some(current), next).any(), "{next:?}");
+            assert_eq!(
+                relaxation(Some(current), next),
+                Relaxation::default(),
+                "{next:?}"
+            );
         }
-        assert!(!relaxation(None, &off).any());
+        assert_eq!(relaxation(None, &off), Relaxation::default());
 
         assert_eq!(
             relaxed(false, false, false).prompt(),
-            "Jarvis: replace model routing; allow model changes for five minutes"
+            "Jarvis: replace model routing"
         );
         let prompt = relaxed(true, true, true).prompt();
         assert!(prompt.contains("allow paid APIs"));
         assert!(prompt.contains("allow paid fallback after subscription"));
-        assert!(!prompt.contains("five minutes"));
     }
 
     #[test]
-    fn resetting_a_tier_to_the_built_in_order_needs_a_fresh_prompt() {
+    fn resetting_a_tier_to_the_built_in_order_is_named_in_the_prompt() {
         let pinned = doc(serde_json::json!({"version": 1, "tiers": {"hard": {
             "chain": [{"provider": "claude-cli", "model": "claude-opus-5"}],
             "metered_after_subscription": false}}}));
@@ -826,14 +815,17 @@ mod tests {
         let relaxed = relaxation(Some(&pinned), &built_in);
         assert!(relaxed.paid_fallback && relaxed.paid_models);
         // Nothing to reset: built-in stays built-in.
-        assert!(!relaxation(Some(&built_in), &built_in).any());
+        assert_eq!(
+            relaxation(Some(&built_in), &built_in),
+            Relaxation::default()
+        );
         // Paid APIs off: the built-in order cannot reach a metered backend.
         let off = doc(serde_json::json!({"version": 1, "paid_api": "off"}));
         assert!(!relaxation(Some(&pinned), &off).paid_fallback);
     }
 
     #[test]
-    fn switching_research_web_search_on_always_needs_a_fresh_prompt() {
+    fn switching_research_web_search_on_is_always_named_in_the_prompt() {
         let research = |paid_api: &str, on: &str| {
             doc(serde_json::json!({"version": 1, "paid_api": paid_api, "research_web_search": on}))
         };
@@ -853,8 +845,12 @@ mod tests {
                 .ends_with("; allow research web search")
         );
         // Already on, or switched off: no research relaxation.
-        assert!(!relaxation(Some(&research("off", "on")), &research("off", "on")).any());
-        assert!(!relaxation(Some(&research("off", "on")), &research("off", "off")).any());
+        for next in [research("off", "on"), research("off", "off")] {
+            assert_eq!(
+                relaxation(Some(&research("off", "on")), &next),
+                Relaxation::default()
+            );
+        }
     }
 
     #[test]
@@ -884,6 +880,15 @@ mod tests {
         snapshot.routing = None;
         snapshot.routing_unavailable_reason = Some("routing_invalid".into());
         assert!(current_routing(&snapshot).is_none());
+    }
+
+    #[test]
+    fn signing_is_biometric_only_and_refused_off_macos() {
+        assert!(biometric_signing(true).is_ok());
+        assert_eq!(
+            biometric_signing(false).unwrap_err(),
+            "Change models from your phone or the Home Node"
+        );
     }
 
     #[test]

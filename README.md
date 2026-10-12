@@ -93,16 +93,14 @@ Never replace the pin with a branch, sibling path, or copied crate.
 ## Model access controls
 
 Desktop and mobile model controls require an enrolled, approved device and a
-Home Node advertising `device-signed-model-toggle-v1`. Confirming a change
-opens native OS authentication: biometrics with the platform's credential
-fallback where supported. Successful model authorization is remembered only in
-native memory for a fixed five minutes (not extended by subsequent changes).
-Each change still requires confirmation and its own fresh, action-bound signed
-approval. Lock, logout, device reset and Home Node/session changes revoke the
-window, including pending authentication. App restart also clears it. Wall-clock
-changes cannot extend the monotonic limit; suspend beyond five minutes expires it.
-No device password or private signing key is sent
-to the Home Node or exposed to the desktop frontend.
+Home Node advertising `device-signed-model-toggle-v1`. On macOS, every model or
+routing change opens its own Touch ID prompt (no computer-password fallback)
+before the device key signs that one action-bound approval; there is no window.
+Windows Hello always offers its PIN and Linux has no biometric prompt, so both
+refuse to sign: change models from your phone or the Home Node. Lock, logout,
+device reset and Home Node/session changes cancel a change still waiting for
+its prompt. No device password or private signing key is sent to the Home Node
+or exposed to the desktop frontend.
 
 On iOS there is no window: every model or routing change, like sign-in and
 pairing approval, needs its own Face ID / Touch ID prompt (no passcode), and
@@ -114,9 +112,8 @@ state after a change; it does not optimistically claim success. Older Core
 versions without the capability remain read-only. Core and client product
 versions remain independent.
 
-Android differs: every model change needs its own `BIOMETRIC_STRONG` prompt that
-unlocks the device signing key, with no device-credential fallback and no
-five-minute window.
+Android likewise: every model change needs its own `BIOMETRIC_STRONG` prompt that
+unlocks the device signing key, with no device-credential fallback.
 
 ## Pairing approvals
 
@@ -143,12 +140,14 @@ with the one the new device shows before approving.
 |--------|-------|---------------------------------------|
 | iOS | Context › Devices › Pairing requests, or `jarvis://approvals/pairing` | Face ID / Touch ID only (`deviceOwnerAuthenticationWithBiometrics`, no passcode fallback) for approve and deny |
 | Android | Context › Devices › Pairing requests, or `jarvis://approvals/pairing` | `BiometricPrompt` with `BIOMETRIC_STRONG` only (no device credential) for approve and deny |
-| Desktop | Overlay on every page | OS authentication in the native layer before signing an approval |
+| Desktop | Overlay on every page | Shows requests and can deny them; approve from your phone |
 
-Approving signs the v1 `pairing_approval_message` of `jarvis-client-core`
-(desktop in Rust; iOS and Android re-implement it and test against the same
-golden vector). Without usable biometrics the mobile apps say "Biometrics
-required" and offer no approve or deny buttons. The mobile list refreshes every
+Core accepts pairing, unlock, account and agent approvals only from iOS and
+Android devices, so the desktop app signs none of them. Approving signs the v1
+`pairing_approval_message` of `jarvis-client-core` (iOS and Android
+re-implement it and test against its golden vector). Without usable
+biometrics the mobile apps say "Biometrics required" and offer no approve or
+deny buttons. The mobile list refreshes every
 30 seconds while open (Core allows five list reads per source IP per minute).
 The pairing request does not yet send `app_version` or `model`: Core rejects
 unknown fields and exposes no version before sign-in, so a candidate cannot tell

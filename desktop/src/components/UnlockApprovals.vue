@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import NavIcon from "./NavIcon.vue";
-import { pending, approve, deny, approving, approvalError } from "../unlockApprovals";
+import { pending, deny, approvalError } from "../unlockApprovals";
 </script>
 
 <template>
@@ -15,14 +15,11 @@ import { pending, approve, deny, approving, approvalError } from "../unlockAppro
             wants to unlock
           </div>
           <div class="actions">
-            <button class="deny" :disabled="approving === r.id" @click="deny(r)">Deny</button>
-            <button class="approve" :disabled="approving === r.id" @click="approve(r)">
-              {{ approving === r.id ? "Verifying…" : "Approve" }}
-            </button>
+            <button class="deny" @click="deny(r)">Deny</button>
           </div>
         </div>
         <p v-if="approvalError" class="err">{{ approvalError }}</p>
-        <p class="hint">Confirm with Face ID / Touch ID on this device.</p>
+        <p class="hint">Approve from your phone.</p>
       </div>
     </div>
   </Transition>
@@ -87,7 +84,6 @@ import { pending, approve, deny, approving, approvalError } from "../unlockAppro
   display: flex;
   gap: 8px;
 }
-.approve,
 .deny {
   border-radius: 11px;
   padding: 9px 16px;
@@ -95,11 +91,6 @@ import { pending, approve, deny, approving, approvalError } from "../unlockAppro
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-}
-.approve {
-  background: linear-gradient(180deg, var(--accent), var(--accent-2));
-  color: #04140c;
-  border: none;
 }
 .deny {
   background: transparent;
@@ -110,11 +101,6 @@ import { pending, approve, deny, approving, approvalError } from "../unlockAppro
 .deny:hover:not(:disabled) {
   border-color: #f87171;
   color: #f87171;
-}
-.approve:disabled,
-.deny:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 .err {
   color: #f87171;

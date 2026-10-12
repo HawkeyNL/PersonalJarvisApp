@@ -76,7 +76,7 @@ async function doUnlink() {
     await deregisterDevice();
     session.value = await currentAuthStatus();
   } catch {
-    homeNodeMessage.value = "Unlinking did not finish. Confirm on your device and try again.";
+    homeNodeMessage.value = "Unlinking did not finish. Try again.";
   } finally {
     unlinking.value = false;
     confirmUnlink.value = false;
@@ -362,8 +362,9 @@ onMounted(async () => {
         <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="unlink-title">
           <h2 id="unlink-title">Unlink this device?</h2>
           <p>
-            This revokes the device on the server and erases its device key here.
-            You then have to pair (enroll) this device again to sign in.
+            This signs the device out and erases its device key here. It stays
+            in your device list until you revoke it from your phone or Core
+            Admin. You then have to pair (enroll) this device again to sign in.
             Your data on the server stays.
           </p>
           <div class="modal-actions">
