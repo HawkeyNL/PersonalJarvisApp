@@ -267,21 +267,6 @@ fn auth_public_key(app: AppHandle) -> Result<String, String> {
     Ok(hex::encode(key.verifying_key().to_bytes()))
 }
 
-/// Sign the v1 login message for one challenge as this enrolled device.
-#[tauri::command]
-fn auth_sign_login(
-    app: AppHandle,
-    challenge_id: String,
-    nonce_hex: String,
-) -> Result<String, String> {
-    sign_challenge(
-        &app,
-        &challenge_id,
-        &nonce_hex,
-        jarvis_client_core::login_message,
-    )
-}
-
 /// Sign the v1 approval of one pending unlock request as this device. The OS
 /// prompt runs here, not in the webview, so a compromised page cannot approve
 /// an unlock silently.
@@ -606,7 +591,39 @@ struct LoginResponse {
 
 #[cfg(test)]
 mod login_response_tests {
-    use super::LoginResponse;
+    use super::{parse_login_challenge, LoginResponse};
+
+    #[test]
+    fn accepts_canonical_login_challenge() {
+        let nonce = "ab".repeat(32);
+        let body = format!(
+            r#"{{"challenge_id":"10213243-5465-7687-98a9-bacbdcedfe0f","nonce":"{nonce}"}}"#
+        );
+        let challenge = parse_login_challenge(body.as_bytes()).expect("canonical challenge");
+        assert_eq!(
+            challenge.challenge_id.to_string(),
+            "10213243-5465-7687-98a9-bacbdcedfe0f"
+        );
+        assert_eq!(challenge.nonce, nonce);
+    }
+
+    #[test]
+    fn rejects_malformed_login_challenges() {
+        let id = "10213243-5465-7687-98a9-bacbdcedfe0f";
+        for body in [
+            format!(
+                r#"{{"challenge_id":"not-a-uuid","nonce":"{}"}}"#,
+                "ab".repeat(32)
+            ),
+            format!(r#"{{"challenge_id":"{id}","nonce":"{}"}}"#, "ab".repeat(31)),
+            format!(r#"{{"challenge_id":"{id}","nonce":"{}"}}"#, "ab".repeat(33)),
+            format!(r#"{{"challenge_id":"{id}","nonce":"{}"}}"#, "zz".repeat(32)),
+            format!(r#"{{"challenge_id":"{id}"}}"#),
+            "not json".to_string(),
+        ] {
+            assert!(parse_login_challenge(body.as_bytes()).is_err(), "{body}");
+        }
+    }
 
     #[test]
     fn accepts_canonical_core_login_response() {
@@ -652,12 +669,23 @@ fn auth_remember_enrolled_device(
     save_metadata(&app, &metadata)
 }
 
+/// Parse the Home Node's login challenge. Only the server's id and a 32-byte
+/// nonce are accepted, so the signed bytes stay the canonical login message.
+fn parse_login_challenge(bytes: &[u8]) -> Result<jarvis_client_core::ChallengeResponse, String> {
+    let challenge: jarvis_client_core::ChallengeResponse = serde_json::from_slice(bytes)
+        .map_err(|_| "Home Node login challenge is invalid".to_string())?;
+    if !jarvis_client_core::is_hex_of_len(&challenge.nonce, 64) {
+        return Err("Home Node login challenge is invalid".to_string());
+    }
+    Ok(challenge)
+}
+
+/// Run the whole device login natively: fetch a challenge from the stored
+/// Home Node, sign it, post the login and persist the bearer. The signature
+/// and the bearer never cross Tauri IPC.
 #[tauri::command]
-async fn auth_complete_login(
+async fn auth_login(
     app: AppHandle,
-    device_id: String,
-    challenge_id: String,
-    signature: String,
     password: Option<String>,
     expected_origin: String,
 ) -> Result<(), String> {
@@ -667,23 +695,43 @@ async fn auth_complete_login(
     {
         return Err("account password is invalid".to_string());
     }
-    uuid::Uuid::parse_str(&device_id).map_err(|_| "login device id is invalid".to_string())?;
-    uuid::Uuid::parse_str(&challenge_id)
-        .map_err(|_| "login challenge id is invalid".to_string())?;
-    if signature.len() != 128 || !signature.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err("login signature is invalid".to_string());
-    }
-    let (origin, epoch) = {
+    let (origin, device_id, epoch) = {
         let guard = auth_storage()?;
-        let origin = load_metadata(&app)?
+        let metadata = load_metadata(&app)?;
+        let origin = metadata
             .home_node_origin
             .ok_or_else(|| "Home Node is not configured".to_string())?;
         if origin != expected_origin {
             return Err("Home Node changed; sign in again".into());
         }
-        (origin, *guard)
+        let device_id = metadata
+            .device_id
+            .and_then(|device_id| uuid::Uuid::parse_str(&device_id).ok())
+            .ok_or("this device is not enrolled")?;
+        (origin, device_id.to_string(), *guard)
     };
-    let response = native_http_client()?
+    let client = native_http_client()?;
+    let response = client
+        .post(format!("{origin}/v1/auth/challenge"))
+        .json(&serde_json::json!({ "device_id": device_id }))
+        .send()
+        .await
+        .map_err(|_| "Home Node login is unavailable".to_string())?;
+    if !response.status().is_success() {
+        return Err("Home Node rejected the login challenge".to_string());
+    }
+    let bytes = native_response::bounded(response, 16 * 1024)
+        .await
+        .map_err(|_| "Home Node login challenge is invalid".to_string())?;
+    let challenge = parse_login_challenge(&bytes)?;
+    let challenge_id = challenge.challenge_id.to_string();
+    let signature = sign_challenge(
+        &app,
+        &challenge_id,
+        &challenge.nonce,
+        jarvis_client_core::login_message,
+    )?;
+    let response = client
         .post(format!("{origin}/v1/auth/login"))
         .json(&serde_json::json!({
             "device_id": device_id,
@@ -1000,7 +1048,6 @@ pub fn run() {
             realtime::realtime_stop_speech,
             device_info,
             auth_public_key,
-            auth_sign_login,
             auth_sign_unlock_approval,
             auth_sign_pairing_approval,
             auth_sign_agent_approval,
@@ -1008,7 +1055,7 @@ pub fn run() {
             model_control::set_model_enabled,
             model_control::set_model_routing,
             auth_remember_enrolled_device,
-            auth_complete_login,
+            auth_login,
             auth_request,
             auth_status,
             auth_logout,

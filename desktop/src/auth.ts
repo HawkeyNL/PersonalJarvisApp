@@ -86,22 +86,8 @@ export async function login(enrolledDeviceId?: string, password?: string, boundO
   }
 
   if (account.password_required && !password) throw new AccountPasswordRequired();
-  const challenge = await postJson<{ challenge_id: string; nonce: string }>(
-    "/v1/auth/challenge",
-    { device_id: deviceId },
-    expectedOrigin,
-  );
-  const signature = await invoke<string>("auth_sign_login", {
-    challengeId: challenge.challenge_id,
-    nonceHex: challenge.nonce,
-  });
-  await invoke("auth_complete_login", {
-    deviceId,
-    challengeId: challenge.challenge_id,
-    signature,
-    password,
-    expectedOrigin,
-  });
+  // Challenge, signature and login run natively; the signature never reaches JS.
+  await invoke("auth_login", { password, expectedOrigin });
   sessionStorage.removeItem(PAIRING_WAIT_KEY);
   scheduleAutomaticUpdateCheck(true, true);
 }
