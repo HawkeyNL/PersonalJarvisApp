@@ -1,4 +1,5 @@
 import CryptoKit
+import LocalAuthentication
 import XCTest
 @testable import Jarvis
 
@@ -37,7 +38,7 @@ final class ModelAuthorizationTests: XCTestCase {
         XCTAssertFalse(invalid.hasPrice)
     }
 
-    func testControllerReusesOnlyOSAuthorizationNotSignedRequests() async throws {
+    func testEveryModelChangeNeedsItsOwnBiometricPrompt() async throws {
         let store = FixtureSecureStorage()
         let credentials = SecureCredentialStore(keychain: store)
         let identity = DeviceIdentityStore(keychain: store)
@@ -51,59 +52,29 @@ final class ModelAuthorizationTests: XCTestCase {
         let api = JarvisAPIClient(baseURL: URL(string: "https://jarvis.example.com")!, session: transport)
         let prompts = ModelPromptCounter()
         let auth = AuthService(api: api, identity: identity, credentials: credentials,
-                               authenticateOwner: { _ in await prompts.authenticate() })
+                               authenticateBiometric: { _ in store.prompt(await prompts.authenticate()) })
         ModelLeaseProtocol.reset()
         let entry = ModelAccessEntry(provider: "huggingface", model: "org/fixture", enabled: false)
         try await auth.setModelEnabled(entry, policyHash: ModelLeaseProtocol.hash)
         try await auth.setModelEnabled(entry, policyHash: ModelLeaseProtocol.hash)
-        let initialCount = await prompts.count
-        XCTAssertEqual(initialCount, 1)
-        auth.modelAuthorization.invalidate()
-        try await auth.setModelEnabled(entry, policyHash: ModelLeaseProtocol.hash)
-        let afterLock = await prompts.count
-        XCTAssertEqual(afterLock, 2)
-        await api.configure(baseURL: URL(string: "https://home.example.org")!)
-        try await auth.setModelEnabled(entry, policyHash: ModelLeaseProtocol.hash)
-        let afterOrigin = await prompts.count
-        XCTAssertEqual(afterOrigin, 3)
+        let afterTwo = await prompts.count
+        XCTAssertEqual(afterTwo, 2)
         let requests = ModelLeaseProtocol.requests()
-        XCTAssertEqual(requests.count, 4)
+        XCTAssertEqual(requests.count, 2)
         for field in ["request_id", "nonce_hex", "signature_hex"] {
-            XCTAssertEqual(Set(requests.compactMap { $0[field] as? String }).count, 4)
+            XCTAssertEqual(Set(requests.compactMap { $0[field] as? String }).count, 2)
         }
         XCTAssertTrue(requests.allSatisfy { $0["token"] == nil && $0["password"] == nil })
-        auth.modelAuthorization.invalidate()
         await prompts.deny()
         for _ in 0..<2 {
             do {
                 try await auth.setModelEnabled(entry, policyHash: ModelLeaseProtocol.hash)
-                XCTFail("Denied OS authentication must not sign or send")
+                XCTFail("Denied biometrics must not sign or send")
             } catch { }
         }
         let afterDenial = await prompts.count
-        XCTAssertEqual(afterDenial, 5)
-        XCTAssertEqual(ModelLeaseProtocol.requests().count, 4)
-    }
-
-    func testFixedExpiryBindingAndClockChanges() {
-        let lease = ModelAuthorization()
-        let ticket = lease.ticket()
-        XCTAssertFalse(lease.valid("session", ticket: ticket, uptime: 10, wall: 100))
-        XCTAssertTrue(lease.remember("session", ticket: ticket, uptime: 10, wall: 100))
-        XCTAssertTrue(lease.valid("session", ticket: ticket, uptime: 309, wall: 399))
-        XCTAssertFalse(lease.valid("session", ticket: ticket, uptime: 310, wall: 400))
-        XCTAssertFalse(lease.valid("other", ticket: ticket, uptime: 11, wall: 101))
-        XCTAssertFalse(lease.valid("session", ticket: ticket, uptime: 11, wall: 99))
-        XCTAssertFalse(lease.valid("session", ticket: ticket, uptime: 11, wall: 401))
-    }
-
-    func testLockDuringPromptCannotRestoreLease() {
-        let lease = ModelAuthorization()
-        let ticket = lease.ticket()
-        lease.invalidate()
-        XCTAssertFalse(lease.accepts(ticket))
-        XCTAssertFalse(lease.remember("session", ticket: ticket))
-        XCTAssertFalse(lease.valid("session", ticket: lease.ticket()))
+        XCTAssertEqual(afterDenial, 4)
+        XCTAssertEqual(ModelLeaseProtocol.requests().count, 2)
     }
 }
 
@@ -228,7 +199,7 @@ final class ModelRoutingTests: XCTestCase {
     }
 
     func testApprovalLifetimeStaysWithinCoreLimits() throws {
-        // authenticateOwner can wait up to 120 s; Core accepts at most 300 s.
+        // The biometric prompt can wait up to 120 s; Core accepts at most 300 s.
         XCTAssertGreaterThan(RoutingRules.approvalSeconds, 120 + 60)
         XCTAssertNoThrow(try approval(RoutingDocument(), issued: 1, expires: 1 + RoutingRules.approvalSeconds).message())
         XCTAssertNoThrow(try approval(RoutingDocument(), issued: 1, expires: 301).message())
@@ -258,10 +229,9 @@ final class ModelRoutingTests: XCTestCase {
             XCTAssertFalse(RoutingRules.relaxation(current: current, next: next).any)
         }
         XCTAssertFalse(RoutingRules.relaxation(current: nil, next: off).any)
-        XCTAssertEqual(relaxed(false, false, false).prompt, "Jarvis: replace model routing; allow model changes for five minutes")
+        XCTAssertEqual(relaxed(false, false, false).prompt, "Jarvis: replace model routing")
         let prompt = relaxed(true, true, true).prompt
         XCTAssertTrue(prompt.contains("allow paid APIs") && prompt.contains("allow paid fallback after subscription"))
-        XCTAssertFalse(prompt.contains("five minutes"))
     }
 
     func testResettingATierToTheBuiltInOrderNeedsAFreshPrompt() throws {

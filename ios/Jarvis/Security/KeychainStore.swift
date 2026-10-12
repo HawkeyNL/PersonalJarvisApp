@@ -1,10 +1,12 @@
 import Foundation
+import LocalAuthentication
 import Security
 
 enum KeychainError: LocalizedError {
     case status(OSStatus)
     case invalidData
     case unsafeAcceptanceIdentity
+    case biometryRequired
 
     var errorDescription: String? {
         switch self {
@@ -14,6 +16,8 @@ enum KeychainError: LocalizedError {
             "Secure data could not be decoded."
         case .unsafeAcceptanceIdentity:
             "Realtime test build requires its separate application identity."
+        case .biometryRequired:
+            "Set up Face ID or Touch ID on this device to protect the Jarvis device key."
         }
     }
 }
@@ -39,6 +43,14 @@ protocol SecureValueStorage: Sendable {
     func read(account: String) throws -> Data?
     func save(_ data: Data, account: String) throws
     func delete(account: String) throws
+    /// Stores a device-only item that only Face ID / Touch ID with the biometrics
+    /// enrolled now can read; the device passcode alone never unlocks it.
+    func saveProtected(_ data: Data, account: String) throws
+    /// Reads a protected item with an already evaluated context and never shows a
+    /// second prompt. `nil` when the item is missing or invalidated.
+    func readProtected(account: String, context: LAContext) throws -> Data?
+    /// Whether a protected item exists, without reading it or prompting.
+    func containsProtected(account: String) throws -> Bool
 }
 
 struct KeychainStore: SecureValueStorage {
@@ -46,8 +58,45 @@ struct KeychainStore: SecureValueStorage {
 
     init(service: String = CredentialBuildIdentity.service) { self.service = service }
 
-    func read(account: String) throws -> Data? {
+    func read(account: String) throws -> Data? { try copyData(account: account, context: nil) }
+
+    func readProtected(account: String, context: LAContext) throws -> Data? {
+        // Fail instead of a second system prompt if the context does not satisfy the item.
+        context.interactionNotAllowed = true
+        return try copyData(account: account, context: context)
+    }
+
+    func containsProtected(account: String) throws -> Bool {
         var query = try baseQuery(account: account)
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        query[kSecUseAuthenticationContext as String] = context
+        // No kSecReturn* key: an existence check that never decrypts the item.
+        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        if status == errSecItemNotFound { return false }
+        guard status == errSecSuccess || status == errSecInteractionNotAllowed else { throw KeychainError.status(status) }
+        return true
+    }
+
+    func saveProtected(_ data: Data, account: String) throws {
+        guard LAContext().canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil) else {
+            throw KeychainError.biometryRequired
+        }
+        guard let access = SecAccessControlCreateWithFlags(
+            nil, kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly, .biometryCurrentSet, nil
+        ) else { throw KeychainError.biometryRequired }
+        // Updating a protected item would prompt; replace it instead.
+        try delete(account: account)
+        var item = try baseQuery(account: account)
+        item[kSecValueData as String] = data
+        item[kSecAttrAccessControl as String] = access
+        let status = SecItemAdd(item as CFDictionary, nil)
+        guard status == errSecSuccess else { throw KeychainError.status(status) }
+    }
+
+    private func copyData(account: String, context: LAContext?) throws -> Data? {
+        var query = try baseQuery(account: account)
+        if let context { query[kSecUseAuthenticationContext as String] = context }
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?

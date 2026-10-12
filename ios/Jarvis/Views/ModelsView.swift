@@ -22,7 +22,7 @@ struct ModelsView: View {
     var body: some View {
         List {
             Section {
-                Text("Changes apply to every device. Face ID, Touch ID or your passcode authorizes model changes for five minutes, until lock or logout. Each change still needs confirmation. Budget limits remain in effect.")
+                Text("Changes apply to every device. Every change needs Face ID or Touch ID. Budget limits remain in effect.")
                     .font(.footnote)
                 if let notice { Text(notice).foregroundStyle(JarvisTheme.accent) }
                 Button("Refresh") { Task { await reload() } }.disabled(busy)
@@ -99,7 +99,7 @@ struct ModelsView: View {
             Button("Confirm model change") { Task { await change() } }
             Button("Cancel", role: .cancel) { selected = nil }
         } message: {
-            if let selected { Text("\(selected.enabled ? "Disable" : "Enable") \(selected.provider)/\(selected.model)? Device authentication is remembered for five minutes, until lock or logout. Running requests will not be cancelled.") }
+            if let selected { Text("\(selected.enabled ? "Disable" : "Enable") \(selected.provider)/\(selected.model)? Face ID or Touch ID is required. Running requests will not be cancelled.") }
         }
     }
 
@@ -203,7 +203,7 @@ struct RoutingEditorView: View {
 
     @ViewBuilder private func intro(_ policy: ModelPolicySnapshot) -> some View {
         Section {
-            Text("Routing only orders models per tier. A model still has to be allowed, within budget and healthy; a tier on the built-in order keeps Core's own choice. Changes apply to all devices and need device authentication.")
+            Text("Routing only orders models per tier. A model still has to be allowed, within budget and healthy; a tier on the built-in order keeps Core's own choice. Changes apply to all devices and need Face ID or Touch ID.")
                 .font(.footnote)
             if let reason = policy.routingReasonText { Text(reason).foregroundStyle(JarvisTheme.warn) }
             if mode == .readonly {
@@ -280,7 +280,7 @@ struct RoutingEditorView: View {
         if draft.paidApi == .off { text += " and turns paid APIs off" }
         if draft.researchWebSearch { text += ". Research may use web search" }
         text += ". Running requests are not cancelled."
-        if relaxed { text += " This change can increase spending or use web search, so device authentication is requested again." }
+        if relaxed { text += " This change can increase spending or use web search." }
         for tier in RoutingTier.allCases {
             let chain = draft.tiers[tier].map { $0.chain.map(\.id).joined(separator: " → ") } ?? "built-in order"
             text += "\n\(tier.title): \(chain)"

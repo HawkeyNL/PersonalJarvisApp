@@ -6,9 +6,7 @@ import UIKit
 final class JarvisAppModel: ObservableObject {
     @Published private(set) var connectionState: ConnectionState = .unconfigured
     @Published private(set) var enrollmentState: EnrollmentState = .notStarted
-    @Published private(set) var lockState: AppLockState = .unlocked {
-        didSet { if lockState != .unlocked { auth.modelAuthorization.invalidate() } }
-    }
+    @Published private(set) var lockState: AppLockState = .unlocked
     @Published private(set) var isUnlocking = false
     private var needsForegroundUnlock = false
     /// Informational "update available" notice; nil when none, dismissed or invalid.
@@ -49,7 +47,6 @@ final class JarvisAppModel: ObservableObject {
     private var voiceReleaseTask: Task<Void, Never>?
     private var presentation = ChatPresentationLifetime()
     private func invalidatePresentation(clearIdentity: Bool) {
-        auth.modelAuthorization.invalidate()
         presentation.invalidate()
         messages = []; conversations = []; isSending = false; realtimeAvailable = false
         if clearIdentity { pendingRequests.clear(); currentConversationId = nil; currentConversationTitle = "New conversation" }
@@ -205,6 +202,8 @@ final class JarvisAppModel: ObservableObject {
     }
 
     func start() async {
+        // Retried by every identity use; signing fails closed until it succeeds.
+        do { try await auth.migrateIdentity() } catch { notice = safeMessage(error) }
         guard let endpoint = endpointStore.endpoint else {
             connectionState = .unconfigured
             return
