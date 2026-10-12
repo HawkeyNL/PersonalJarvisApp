@@ -11,9 +11,7 @@ use sha2::{Digest, Sha256};
 const LIST_BYTES: usize = 1024 * 1024;
 const NAME_CHARS: usize = 40;
 const PLATFORM_CHARS: usize = 16;
-const PREVIEW_CHARS: usize = 60;
-/// One approval prompt at a time, so a page cannot stack lookalike prompts.
-static APPROVAL_PROMPT: Mutex<()> = Mutex::new(());
+const PREVIEW_CHARS: usize = 80;
 
 #[derive(Deserialize)]
 struct Me {
@@ -95,6 +93,17 @@ fn is_hidden(c: char) -> bool {
             | 0x202A..=0x202E
             | 0x2060..=0x2064
             | 0x2066..=0x206F
+            // Quotation marks (Pi/Pf and fullwidth): prompts quote server text.
+            | 0xAB
+            | 0xBB
+            | 0x2018..=0x201F
+            | 0x2039..=0x203A
+            | 0x2E02..=0x2E05
+            | 0x2E09..=0x2E0A
+            | 0x2E0C..=0x2E0D
+            | 0x2E1C..=0x2E1D
+            | 0x2E20..=0x2E21
+            | 0xFF02
             | 0x2800
             | 0x3164
             | 0xE000..=0xF8FF
@@ -112,26 +121,48 @@ fn is_hidden(c: char) -> bool {
     )
 }
 
+/// Common combining-mark blocks. ponytail: script-specific marks (for
+/// example Devanagari) are not counted; add a table if names need them.
+fn is_combining(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x300..=0x36F | 0x1AB0..=0x1AFF | 0x1DC0..=0x1DFF | 0x20D0..=0x20FF | 0xFE20..=0xFE2F
+    )
+}
+
 /// Server text for an OS prompt: control, hidden and quote characters
-/// dropped (prompts quote it), whitespace collapsed, at most `max` characters.
+/// dropped (prompts quote it), at most two combining marks per character,
+/// whitespace collapsed, at most `max` characters. Longer text keeps its
+/// start and end, so a long path cannot push its outcome out of view.
 fn display_name(value: &str, max: usize) -> String {
+    let mut marks = 0;
     let clean: String = value
         .chars()
         .map(|c| if c.is_whitespace() { ' ' } else { c })
         .filter(|c| !c.is_control() && !is_hidden(*c) && *c != '"')
+        .filter(|c| {
+            marks = if is_combining(*c) { marks + 1 } else { 0 };
+            marks <= 2
+        })
         .collect();
-    let clean = clean.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut chars = clean.chars();
-    let mut name: String = chars.by_ref().take(max).collect();
-    if chars.next().is_some() {
-        name.pop();
-        name.push('…');
+    let chars: Vec<char> = clean
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .collect();
+    if chars.is_empty() {
+        return "unknown".into();
     }
-    if name.is_empty() {
-        "unknown".into()
-    } else {
-        name
+    if chars.len() <= max {
+        return chars.into_iter().collect();
     }
+    let head = max / 2;
+    let tail = max - head - 1;
+    let mut name: String = chars[..head].iter().collect();
+    name.push('…');
+    name.extend(&chars[chars.len() - tail..]);
+    name
 }
 
 fn hex32(value: &str) -> Option<[u8; 32]> {
@@ -251,7 +282,8 @@ fn agent_approval(
     Ok(Approval {
         prompt: format!(
             "Approve agent action {action}: \"{}\"",
-            display_name(&item.preview, PREVIEW_CHARS)
+            // Core puts the summary (path, verb, size) on the first line.
+            display_name(item.preview.lines().next().unwrap_or(""), PREVIEW_CHARS)
         ),
         message,
         expires_at: None,
@@ -306,9 +338,7 @@ async fn sign_and_post(session: Session, approval: Approval, path: String) -> Re
         expires_at,
     } = approval;
     let signature = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
-        let _prompt = APPROVAL_PROMPT
-            .try_lock()
-            .map_err(|_| "Another approval is in progress")?;
+        let _prompt = model_authorization::try_prompt()?;
         authenticate_owner(&prompt, true)?;
         let guard = auth_storage()?;
         let current = load_metadata(&signing_app)?;
@@ -434,9 +464,21 @@ mod tests {
             ),
             "AB"
         );
-        let long = display_name(&"x".repeat(100), 40);
+        assert_eq!(
+            display_name(
+                "\u{201C}A\u{2019}\u{AB}B\u{BB}\u{FF02}\u{2039}C\u{203A}",
+                40
+            ),
+            "ABC"
+        );
+        // At most two combining marks per base character.
+        assert_eq!(
+            display_name("e\u{301}\u{302}\u{303}\u{304} o\u{308}", 40),
+            "e\u{301}\u{302} o\u{308}"
+        );
+        let long = display_name(&format!("{}{}", "a".repeat(60), "z".repeat(40)), 40);
         assert_eq!(long.chars().count(), 40);
-        assert!(long.ends_with('…'));
+        assert_eq!(long, format!("{}…{}", "a".repeat(20), "z".repeat(19)));
         assert_eq!(display_name(&"x".repeat(40), 40), "x".repeat(40));
     }
 
@@ -542,6 +584,25 @@ mod tests {
         serde_json::from_value::<AgentList>(serde_json::json!({ "pending": items }))
             .unwrap()
             .pending
+    }
+
+    #[test]
+    fn agent_prompt_keeps_the_outcome_of_a_long_preview_visible() {
+        let mut item = agent("write_file");
+        item["preview"] = format!(
+            "WriteFile notes/{}/plan.md (OVERWRITES, 512 bytes)\n--- content ---\nsecret",
+            "deep/".repeat(30)
+        )
+        .into();
+        let prompt = agent_approval(&agents(vec![item]), id(REQUEST), id(DEVICE))
+            .unwrap()
+            .prompt;
+        assert!(prompt.starts_with("Approve agent action write_file: \"WriteFile notes/deep/"));
+        assert!(
+            prompt.ends_with("/plan.md (OVERWRITES, 512 bytes)\""),
+            "{prompt}"
+        );
+        assert!(!prompt.contains("content"));
     }
 
     #[test]

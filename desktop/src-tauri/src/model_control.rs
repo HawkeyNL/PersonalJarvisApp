@@ -317,9 +317,7 @@ impl Session {
         let signing_origin = origin.clone();
         let body =
             tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
-                let _prompt = model_authorization::PROMPT
-                    .lock()
-                    .map_err(|_| "Model authorization unavailable")?;
+                let _prompt = model_authorization::prompt();
                 let fresh = always_prompt || !model_authorization::valid(epoch)?;
                 if fresh {
                     authenticate_owner(&prompt, true)?;

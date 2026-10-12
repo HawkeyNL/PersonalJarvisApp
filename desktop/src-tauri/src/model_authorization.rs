@@ -1,11 +1,27 @@
 //! In-memory, model-only OS authorization. Never stores passwords or signatures.
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
 use std::time::{Duration, Instant, SystemTime};
 
 const TTL: Duration = Duration::from_secs(300);
 static GRANT: Mutex<Option<Grant>> = Mutex::new(None);
-// Avoid overlapping OS prompts. This is never acquired by lock/logout paths.
-pub(super) static PROMPT: Mutex<()> = Mutex::new(());
+// One OS prompt at a time for every signing path. Taken before AUTH_STORAGE
+// and never acquired by lock/logout paths. It guards no data, so a poisoned
+// lock is still usable.
+static PROMPT: Mutex<()> = Mutex::new(());
+
+/// Wait for the OS prompt (model changes queue behind an open prompt).
+pub(super) fn prompt() -> MutexGuard<'static, ()> {
+    PROMPT.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Claim the OS prompt without waiting, so a page cannot stack prompts.
+pub(super) fn try_prompt() -> Result<MutexGuard<'static, ()>, String> {
+    match PROMPT.try_lock() {
+        Ok(guard) => Ok(guard),
+        Err(TryLockError::Poisoned(poisoned)) => Ok(poisoned.into_inner()),
+        Err(TryLockError::WouldBlock) => Err("Another approval is in progress".into()),
+    }
+}
 
 struct Grant {
     epoch: u64,

@@ -332,6 +332,7 @@ fn auth_sign_account_approval(
         AccountAction::DeviceRevoke => format!("Revoke Jarvis device {}", approval.target),
     };
     let message = account_approval_message(&approval).map_err(str::to_string)?;
+    let _prompt = model_authorization::try_prompt()?;
     authenticate_owner(&reason, true)?;
     let guard = auth_storage()?;
     let current = load_metadata(&app)?;
@@ -425,6 +426,19 @@ fn authenticated_api_path(path: &str) -> bool {
                 .strip_prefix(prefix)
                 .is_some_and(|remainder| remainder.starts_with('/'))
     })
+}
+
+/// Approve routes that only native code may call, with a signature it made.
+fn native_only_route(path: &str) -> bool {
+    let route = path.split('?').next().unwrap_or(path);
+    route.ends_with("/approve")
+        && [
+            "/v1/auth/pairing/requests/",
+            "/v1/auth/unlock/",
+            "/v1/agent/pending/",
+        ]
+        .iter()
+        .any(|prefix| route.starts_with(prefix))
 }
 
 fn api_url(origin: Option<&str>, path: &str) -> Result<String, String> {
@@ -654,6 +668,9 @@ async fn auth_request(
         "DELETE" => reqwest::Method::DELETE,
         _ => return Err("authenticated API method is invalid".to_string()),
     };
+    if native_only_route(&path) {
+        return Err("authenticated API path is invalid".to_string());
+    }
     if method != reqwest::Method::POST && body.is_some() {
         return Err("authenticated API body is invalid".to_string());
     }
@@ -1132,6 +1149,28 @@ mod tests {
         assert!(!authenticated_api_path("/v1/agent/action"));
         assert!(!authenticated_api_path("/v1/coding/sessions/fixture/start"));
         assert!(!authenticated_api_path("/v1/agents/fixture"));
+    }
+
+    #[test]
+    fn webview_proxy_cannot_post_native_only_approvals() {
+        for path in [
+            "/v1/auth/pairing/requests/fixture/approve",
+            "/v1/auth/unlock/fixture/approve",
+            "/v1/agent/pending/fixture/approve",
+            "/v1/agent/pending/fixture/approve?x=1",
+        ] {
+            assert!(native_only_route(path), "{path}");
+        }
+        for path in [
+            "/v1/auth/pairing/requests/fixture/deny",
+            "/v1/auth/unlock/fixture/deny",
+            "/v1/agent/pending/fixture/deny",
+            "/v1/agent/pending",
+            // Account approvals are still signed natively and posted by the page.
+            "/v1/auth/account/requests/fixture/approve",
+        ] {
+            assert!(!native_only_route(path), "{path}");
+        }
     }
 
     #[test]
