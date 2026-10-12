@@ -70,8 +70,18 @@ test("session bearer is never exposed through the desktop JavaScript API", async
   assert.doesNotMatch(api, /Authorization|Bearer/);
   assert.doesNotMatch(auth, /auth_session|auth_save|token:\s*string/);
   assert.doesNotMatch(native, /generate_handler![\s\S]*auth_session/);
-  assert.match(native, /auth_complete_login/);
+  assert.match(native, /async fn auth_login\(/);
   assert.match(native, /async fn auth_request/);
+});
+
+test("no exposed command signs a caller-supplied login challenge", async () => {
+  const native = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+  const handlers = native.match(/generate_handler!\[([\s\S]*?)\]/)?.[1];
+  assert.ok(handlers);
+  assert.match(handlers, /\bauth_login,/);
+  assert.doesNotMatch(handlers, /auth_sign_login|auth_complete_login/);
+  const auth = await readFile(new URL("../src/auth.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(auth, /\/v1\/auth\/challenge|auth_sign_login|auth_complete_login/);
 });
 
 test("webview listens to the native update status event and reports session activity", async () => {
