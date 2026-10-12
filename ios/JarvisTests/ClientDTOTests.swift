@@ -166,6 +166,8 @@ final class FixtureSecureStorage: SecureValueStorage, @unchecked Sendable {
     private var values: [String: Data] = [:]
     private var protected: [String: Data] = [:]
     private var evaluated: [LAContext] = []
+    /// Forces protected reads to fail with this Keychain status.
+    var protectedReadStatus: OSStatus?
     func read(account: String) throws -> Data? {
         lock.lock(); defer { lock.unlock() }; return values[account]
     }
@@ -182,7 +184,9 @@ final class FixtureSecureStorage: SecureValueStorage, @unchecked Sendable {
     func readProtected(account: String, context: LAContext) throws -> Data? {
         lock.lock(); defer { lock.unlock() }
         guard let data = protected[account] else { return nil }
-        guard evaluated.contains(where: { $0 === context }) else { throw KeychainError.status(errSecAuthFailed) }
+        if let status = protectedReadStatus { throw KeychainError.status(status) }
+        // A context that does not satisfy the item fails rather than prompting again.
+        guard evaluated.contains(where: { $0 === context }) else { throw KeychainError.status(errSecInteractionNotAllowed) }
         return data
     }
     func containsProtected(account: String) throws -> Bool {
@@ -219,19 +223,66 @@ final class DeviceKeyProtectionTests: XCTestCase {
         XCTAssertTrue(legacy.publicKey.isValidSignature(try XCTUnwrap(Data(hexEncoded: signature)), for: message))
     }
 
-    func testProtectedKeyWinsWhenBothExist() async throws {
+    func testDifferingLegacyKeyWinsAfterDowngradeAndRepair() async throws {
+        let store = FixtureSecureStorage()
+        let identity = DeviceIdentityStore(keychain: store)
+        let older = try await identity.publicKeyHex()
+        let repaired = Curve25519.Signing.PrivateKey()
+        try store.save(repaired.rawRepresentation, account: seedV1)
+        try await identity.migrateIfNeeded()
+        XCTAssertNil(try store.read(account: seedV1))
+        let current = try await identity.existingPublicKeyHex()
+        XCTAssertNotEqual(current, older)
+        XCTAssertEqual(current, repaired.publicKey.rawRepresentation.hexEncodedString())
+        let context = try XCTUnwrap(store.prompt(.unlocked).context)
+        let seed = try XCTUnwrap(store.readProtected(account: seedV2, context: context))
+        XCTAssertEqual(seed, repaired.rawRepresentation)
+    }
+
+    func testMatchingLegacyKeyKeepsProtectedKey() async throws {
         let store = FixtureSecureStorage()
         let identity = DeviceIdentityStore(keychain: store)
         let current = try await identity.publicKeyHex()
-        try store.save(Curve25519.Signing.PrivateKey().rawRepresentation, account: seedV1)
+        let context = try XCTUnwrap(store.prompt(.unlocked).context)
+        let seed = try XCTUnwrap(store.readProtected(account: seedV2, context: context))
+        try store.save(seed, account: seedV1)
         try await identity.migrateIfNeeded()
         XCTAssertNil(try store.read(account: seedV1))
         let kept = try await identity.existingPublicKeyHex()
         XCTAssertEqual(kept, current)
-        // A damaged legacy seed never blocks a working protected key.
+        // A damaged legacy seed never replaces a complete protected key.
         try store.save(Data([1, 2, 3]), account: seedV1)
         try await identity.migrateIfNeeded()
         XCTAssertNil(try store.read(account: seedV1))
+        let stillKept = try await identity.existingPublicKeyHex()
+        XCTAssertEqual(stillKept, current)
+    }
+
+    func testUnreadableKnownKeyIsReportedAsRetryable() async throws {
+        let store = FixtureSecureStorage()
+        let identity = DeviceIdentityStore(keychain: store)
+        _ = try await identity.publicKeyHex()
+        let context = try XCTUnwrap(store.prompt(.unlocked).context)
+        for status in [errSecAuthFailed, errSecUserCanceled, errSecInteractionNotAllowed] {
+            store.protectedReadStatus = status
+            do {
+                _ = try await identity.signLogin(challengeId: UUID(), deviceId: UUID(), nonceHex: nonce, context: context)
+                XCTFail("Status \(status) must not sign")
+            } catch DeviceIdentityError.keyLocked { }
+        }
+    }
+
+    func testEnrolmentReplacesAPublicKeyWithoutItsSeed() async throws {
+        let store = FixtureSecureStorage()
+        let stale = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation
+        try store.save(stale, account: publicV2)
+        let identity = DeviceIdentityStore(keychain: store)
+        let fresh = try await identity.publicKeyHex()
+        XCTAssertNotEqual(fresh, stale.hexEncodedString())
+        XCTAssertTrue(try store.containsProtected(account: seedV2))
+        let context = try XCTUnwrap(store.prompt(.unlocked).context)
+        let seed = try XCTUnwrap(store.readProtected(account: seedV2, context: context))
+        XCTAssertEqual(try Curve25519.Signing.PrivateKey(rawRepresentation: seed).publicKey.rawRepresentation.hexEncodedString(), fresh)
     }
 
     func testLegacySeedReplacesAnInterruptedProtectedWrite() async throws {

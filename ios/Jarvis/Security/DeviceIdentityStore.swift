@@ -15,7 +15,7 @@ enum DeviceIdentityError: LocalizedError {
         case .invalidChallenge: "The Home Node supplied an invalid signing challenge."
         case .invalidStoredKey: "The secure device identity is damaged and must be reset."
         case .missingStoredKey: "This installation cannot access the original device key. Use the same signing team and app identity as before, or explicitly reset and re-enroll this device. Your password alone cannot replace the device key."
-        case .biometryChanged: "This device key can no longer be used, usually because Face ID or Touch ID changed. Open Settings, choose Reset this device, then pair this device again and approve it from a trusted device."
+        case .biometryChanged: "This device key can no longer be used, usually because Face ID or Touch ID changed or the device passcode was removed. Open Settings, choose Reset this device, then pair this device again and approve it from a trusted device."
         case .keyLocked: "Face ID or Touch ID could not unlock the device key. Try again. If Face ID or Touch ID was changed, reset this device in Settings and pair it again."
         }
     }
@@ -32,10 +32,14 @@ actor DeviceIdentityStore {
 
     init(keychain: any SecureValueStorage = KeychainStore()) { self.keychain = keychain }
 
-    /// Public key for enrolment: the stored one, or a new protected key.
+    /// Public key for enrolment: the stored one, or a new protected key. A public
+    /// item without its seed is unusable, so enrolment replaces it.
     func publicKeyHex() throws -> String {
         try migrateIfNeeded()
-        if let stored = try keychain.read(account: publicAccount) { return try Self.publicKey(stored).hexEncodedString() }
+        if try keychain.containsProtected(account: account), let stored = try keychain.read(account: publicAccount) {
+            return try Self.publicKey(stored).hexEncodedString()
+        }
+        try keychain.delete(account: publicAccount)
         let key = Curve25519.Signing.PrivateKey()
         try keychain.saveProtected(key.rawRepresentation, account: account)
         try keychain.save(key.publicKey.rawRepresentation, account: publicAccount)
@@ -49,17 +53,22 @@ actor DeviceIdentityStore {
     }
 
     /// Moves a pre-biometry seed behind Face ID / Touch ID without prompting and
-    /// keeps its public key, so the Home Node registration stays valid. If both
-    /// exist, the protected key wins unless it never got its public item (an
-    /// interrupted write that was never handed out). The old item is deleted only
-    /// once the new items are stored.
+    /// keeps its public key, so the Home Node registration stays valid. Builds
+    /// with the protected key never write the old item, so an old key that differs
+    /// from the stored public key is newer (an older build paired again) and wins.
+    /// A damaged old key never replaces a complete protected key. The old item is
+    /// deleted only once the new items are stored.
     func migrateIfNeeded() throws {
         guard let seed = try keychain.read(account: legacyAccount) else { return }
-        let key = try? Curve25519.Signing.PrivateKey(rawRepresentation: seed)
-        if try !keychain.containsProtected(account: account) || keychain.read(account: publicAccount) == nil {
-            guard let key else { throw DeviceIdentityError.invalidStoredKey }
-            try keychain.saveProtected(seed, account: account)
-            try keychain.save(key.publicKey.rawRepresentation, account: publicAccount)
+        let stored = try keychain.read(account: publicAccount)
+        let complete = try keychain.containsProtected(account: account) && stored != nil
+        if let key = try? Curve25519.Signing.PrivateKey(rawRepresentation: seed) {
+            if !complete || stored != key.publicKey.rawRepresentation {
+                try keychain.saveProtected(seed, account: account)
+                try keychain.save(key.publicKey.rawRepresentation, account: publicAccount)
+            }
+        } else if !complete {
+            throw DeviceIdentityError.invalidStoredKey
         }
         try keychain.delete(account: legacyAccount)
     }
@@ -121,7 +130,10 @@ actor DeviceIdentityStore {
         let publicKey = try keychain.read(account: publicAccount)
         let read: Data?
         do { read = try keychain.readProtected(account: account, context: context) }
-        catch KeychainError.status(errSecAuthFailed) where publicKey != nil { throw DeviceIdentityError.keyLocked }
+        catch let KeychainError.status(status) where publicKey != nil
+                && [errSecAuthFailed, errSecUserCanceled, errSecInteractionNotAllowed].contains(status) {
+            throw DeviceIdentityError.keyLocked
+        }
         guard let stored = read else {
             // A known key that no longer reads was invalidated by a biometry change.
             throw publicKey == nil ? DeviceIdentityError.missingStoredKey : DeviceIdentityError.biometryChanged

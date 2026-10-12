@@ -82,10 +82,11 @@ or Touch ID set up; otherwise the old key is kept and Jarvis asks to set it up.
 
 - **Downgrade:** an older build cannot read the protected key. Installing a
   version from before this change requires resetting and re-pairing the device.
-  After upgrading again, the protected key from before the downgrade wins, so
-  reset and re-pair again if the downgraded build was paired.
-- **Biometrics changed:** adding or removing a face or fingerprint invalidates
-  the key by design. Jarvis then says so; open Settings, choose
+  After upgrading again, the key from that re-pairing is moved behind
+  Face ID / Touch ID and replaces the older protected key, so no further
+  re-pairing is needed.
+- **Biometrics changed:** adding or removing a face or fingerprint, or removing
+  the device passcode, invalidates the key by design. Jarvis then says so; open Settings, choose
   **Reset this device**, pair again, approve it from a trusted device and
   revoke the old registration.
 

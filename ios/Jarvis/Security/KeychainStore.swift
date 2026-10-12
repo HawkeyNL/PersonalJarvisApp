@@ -46,8 +46,8 @@ protocol SecureValueStorage: Sendable {
     /// Stores a device-only item that only Face ID / Touch ID with the biometrics
     /// enrolled now can read; the device passcode alone never unlocks it.
     func saveProtected(_ data: Data, account: String) throws
-    /// Reads a protected item with an already evaluated context, so the system
-    /// shows no second prompt. `nil` when the item is missing or invalidated.
+    /// Reads a protected item with an already evaluated context and never shows a
+    /// second prompt. `nil` when the item is missing or invalidated.
     func readProtected(account: String, context: LAContext) throws -> Data?
     /// Whether a protected item exists, without reading it or prompting.
     func containsProtected(account: String) throws -> Bool
@@ -61,7 +61,9 @@ struct KeychainStore: SecureValueStorage {
     func read(account: String) throws -> Data? { try copyData(account: account, context: nil) }
 
     func readProtected(account: String, context: LAContext) throws -> Data? {
-        try copyData(account: account, context: context)
+        // Fail instead of a second system prompt if the context does not satisfy the item.
+        context.interactionNotAllowed = true
+        return try copyData(account: account, context: context)
     }
 
     func containsProtected(account: String) throws -> Bool {
