@@ -245,17 +245,17 @@ const BROKER_FRAME_BYTES: usize = 16 * 1024;
 
 /// Login binding captured before any network call; revalidated before signing
 /// and before posting.
-struct Session {
-    app: AppHandle,
-    origin: String,
-    device: String,
-    token: String,
-    epoch: u64,
-    client: reqwest::Client,
+pub(super) struct Session {
+    pub(super) app: AppHandle,
+    pub(super) origin: String,
+    pub(super) device: String,
+    pub(super) token: String,
+    pub(super) epoch: u64,
+    pub(super) client: reqwest::Client,
 }
 
 impl Session {
-    fn load(app: AppHandle) -> Result<Self, String> {
+    pub(super) fn load(app: AppHandle) -> Result<Self, String> {
         let (auth, epoch) = {
             let guard = auth_storage()?;
             (load_secure_auth_unlocked(&app)?, *guard)
@@ -317,9 +317,7 @@ impl Session {
         let signing_origin = origin.clone();
         let body =
             tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
-                let _prompt = model_authorization::PROMPT
-                    .lock()
-                    .map_err(|_| "Model authorization unavailable")?;
+                let _prompt = model_authorization::prompt();
                 let fresh = always_prompt || !model_authorization::valid(epoch)?;
                 if fresh {
                     authenticate_owner(&prompt, true)?;
