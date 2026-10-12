@@ -8,6 +8,7 @@ import com.hawkeynl.jarvis.network.PairingCreateRequest
 import com.hawkeynl.jarvis.network.PairingRequestItem
 import com.hawkeynl.jarvis.network.PairingRequestList
 import com.hawkeynl.jarvis.storage.SessionRepository
+import com.hawkeynl.jarvis.testing.FakeDeviceKeyVault
 import com.hawkeynl.jarvis.testing.InMemorySecureValueStore
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -110,11 +111,12 @@ class PairingApprovalTest {
             }
         })
         val store = InMemorySecureValueStore()
-        val identity = KeystoreBackedEd25519Identity(store)
+        val identity = KeystoreBackedEd25519Identity(store, FakeDeviceKeyVault())
         val publicKey = identity.publicKeyHex()
         val sessions = SessionRepository(store).apply { saveLogin(DEVICE_ID, "fixture-session-not-a-secret", Long.MAX_VALUE) }
         var accept = false
         var prompts = 0
+        identity.prompt = { _, cipher -> prompts++; cipher.takeIf { accept } }
         val service = PairingApprovalService(
             api, sessions, { endpoint }, identity,
             authenticate = { prompts++; accept }, biometricsAvailable = { true }, unlocked = { true }, now = { 1_000 },

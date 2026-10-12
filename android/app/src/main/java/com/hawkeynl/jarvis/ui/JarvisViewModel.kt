@@ -186,7 +186,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 
     fun retryUnlockResult(result: BiometricResult) {
         when (result) {
-            BiometricResult.Authenticated -> {
+            is BiometricResult.Authenticated -> {
                 _state.update { it.copy(locked = false, biometricMessage = null) }
                 _state.value.endpoint?.let { endpoint ->
                     viewModelScope.launch { refreshAfterUnlock(endpoint) }
@@ -375,7 +375,8 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             }
             EnrollmentOutcome.ActivationRequired -> _state.update { it.copy(busy = false, pairingPending = false, activationRequired = true, error = null) }
             is EnrollmentOutcome.Pending -> {
-                val fingerprint = _state.value.ownFingerprint ?: runCatching {
+                // Read every time: a re-pair after a lost device key has a new key.
+                val fingerprint = runCatching {
                     PairingApproval.grouped(PairingApproval.fingerprint(container.identity.publicKeyHex()))
                 }.getOrNull()
                 _state.update {

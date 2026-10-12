@@ -1,7 +1,10 @@
 package com.hawkeynl.jarvis.security
 
 interface DeviceIdentity {
+    /** Never prompts. */
     fun publicKeyHex(): String
-    fun signHex(messageHex: String): String
-    fun reset()
+
+    /** Signs after one strong-biometric prompt that shows [reason]. */
+    suspend fun signHex(messageHex: String, reason: String): String
+    suspend fun reset()
 }

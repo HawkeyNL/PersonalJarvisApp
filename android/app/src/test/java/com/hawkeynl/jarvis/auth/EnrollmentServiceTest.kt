@@ -23,6 +23,7 @@ import com.hawkeynl.jarvis.network.PairingCreateRequest
 import com.hawkeynl.jarvis.network.PairingStatusResponse
 import com.hawkeynl.jarvis.network.PairingTicket
 import com.hawkeynl.jarvis.security.DeviceIdentity
+import com.hawkeynl.jarvis.security.DeviceKeyInvalidatedException
 import com.hawkeynl.jarvis.storage.SessionRepository
 import com.hawkeynl.jarvis.testing.InMemorySecureValueStore
 import java.io.File
@@ -83,6 +84,20 @@ class EnrollmentServiceTest {
     }
 
     @Test
+    fun `invalidated device key returns to pairing with a clear message`() = runTest {
+        val api = FakeApi()
+        val sessions = SessionRepository(InMemorySecureValueStore())
+        sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
+        val identity = FakeIdentity().apply { invalidated = true }
+        val result = EnrollmentService(api, identity, sessions).login(endpoint)
+        assertEquals(EnrollmentOutcome.InvalidResponse(DeviceKeyInvalidatedException().message!!), result)
+        assertEquals(null, sessions.session().deviceId)
+        assertEquals(null, sessions.session().token)
+        assertEquals(1, identity.resets)
+        assertEquals(null, api.loginRequest)
+    }
+
+    @Test
     fun `first account reports activation rather than creating pairing`() = runTest {
         val api = FakeApi().apply { account = AccountStatus(1, false, true) }
         val service = EnrollmentService(api, FakeIdentity(), SessionRepository(InMemorySecureValueStore()))
@@ -117,12 +132,15 @@ private const val CHALLENGE_ID = "00112233-4455-6677-8899-aabbccddeeff"
 
 private class FakeIdentity : DeviceIdentity {
     var signedHex: String? = null
+    var invalidated = false
+    var resets = 0
     override fun publicKeyHex() = "ab".repeat(32)
-    override fun signHex(messageHex: String): String {
+    override suspend fun signHex(messageHex: String, reason: String): String {
+        if (invalidated) throw DeviceKeyInvalidatedException()
         signedHex = messageHex
         return "cd".repeat(64)
     }
-    override fun reset() = Unit
+    override suspend fun reset() { resets++ }
 }
 
 private class FakeApi : JarvisApi {

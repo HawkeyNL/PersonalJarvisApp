@@ -2,12 +2,8 @@ package com.hawkeynl.jarvis
 
 import android.content.Intent
 import android.os.Bundle
-import android.os.Build
-import android.app.KeyguardManager
-import android.app.Activity
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricPrompt
-import androidx.biometric.BiometricManager
+import javax.crypto.Cipher
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import com.hawkeynl.jarvis.security.BiometricAvailability
@@ -38,19 +34,14 @@ class MainActivity : FragmentActivity() {
     private val viewModel: JarvisViewModel by viewModels { JarvisViewModel.factory(container) }
     private val coreViewModel: CoreViewModel by viewModels { CoreViewModel.factory(container) }
     private var biometricPromptActive = false
-    private var modelAuthenticationActive = false
-    private var modelCredentialResult: ((Boolean) -> Unit)? = null
-    private val modelCredentialLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val callback = modelCredentialResult
-        modelCredentialResult = null
-        modelAuthenticationActive = false
-        if (result.resultCode != Activity.RESULT_OK && !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
-            viewModel.lockForBackground()
-        }
-        callback?.invoke(result.resultCode == Activity.RESULT_OK)
-    }
-    private val modelControls by lazy { ModelControlService(container.api, container.sessions, container.settings, container.identity, ::authenticateModelChange,
+    private val modelControls by lazy { ModelControlService(container.api, container.sessions, container.settings, container.identity,
         { !viewModel.state.value.locked && viewModel.state.value.authenticated }) }
+
+    // Every device signature: one strong-biometric prompt that authorises the device key's cipher.
+    private val signingPrompt: suspend (String, Cipher) -> Cipher? = { reason, cipher ->
+        val result = strongBiometric("Jarvis device key", reason, BiometricPrompt.CryptoObject(cipher))
+        (result as? BiometricResult.Authenticated)?.cryptoObject?.cipher
+    }
 
     // Pairing decisions accept only strong biometrics: no device credential fallback.
     private val pairingApprovals by lazy {
@@ -62,66 +53,31 @@ class MainActivity : FragmentActivity() {
         )
     }
 
-    private suspend fun authenticatePairing(reason: String): Boolean {
-        val accepted = suspendCancellableCoroutine<Boolean> { continuation ->
-            if (biometricPromptActive || modelAuthenticationActive) { continuation.resume(false); return@suspendCancellableCoroutine }
+    private suspend fun authenticatePairing(reason: String): Boolean =
+        strongBiometric("Pairing request", reason) is BiometricResult.Authenticated
+
+    /** One BIOMETRIC_STRONG prompt, no device credential. Null while another prompt is
+     *  open; the result is handed back only once this Activity is resumed again. */
+    private suspend fun strongBiometric(title: String, reason: String, cryptoObject: BiometricPrompt.CryptoObject? = null): BiometricResult? {
+        val result = suspendCancellableCoroutine<BiometricResult?> { continuation ->
+            if (biometricPromptActive) { continuation.resume(null); return@suspendCancellableCoroutine }
             biometricPromptActive = true
             val prompt = container.biometricGate.authenticate(
-                this, ContextCompat.getMainExecutor(this), "Pairing request", description = reason,
+                this, ContextCompat.getMainExecutor(this), title, description = reason, cryptoObject = cryptoObject,
             ) { result ->
                 // A rejected finger or face keeps the prompt open for another try.
                 if (result == BiometricResult.Failed) return@authenticate
                 biometricPromptActive = false
-                if (continuation.isActive) continuation.resume(result == BiometricResult.Authenticated)
+                if (continuation.isActive) continuation.resume(result)
             }
             continuation.invokeOnCancellation { runOnUiThread { prompt?.cancelAuthentication(); biometricPromptActive = false } }
         }
-        return accepted && lifecycle.withResumed { !isFinishing && !isDestroyed }
-    }
-
-    private suspend fun authenticateModelChange(reason: String): Boolean {
-        val accepted = suspendCancellableCoroutine<Boolean> { continuation ->
-        if (biometricPromptActive || modelCredentialResult != null) { continuation.resume(false); return@suspendCancellableCoroutine }
-        modelAuthenticationActive = true
-        if (Build.VERSION.SDK_INT < 30) {
-            // Strong biometric + credential fallback is unsupported as a
-            // combined BiometricPrompt policy on API 28/29; use OS credentials.
-            val manager = getSystemService(KeyguardManager::class.java)
-            @Suppress("DEPRECATION")
-            val intent = manager.createConfirmDeviceCredentialIntent("Jarvis-modelbeleid", reason)
-            if (intent == null) { modelAuthenticationActive = false; continuation.resume(false); return@suspendCancellableCoroutine }
-            modelCredentialResult = { if (continuation.isActive) continuation.resume(it) }
-            continuation.invokeOnCancellation { runOnUiThread { modelCredentialResult = null; modelAuthenticationActive = false; viewModel.lockForBackground() } }
-            modelCredentialLauncher.launch(intent)
-        } else {
-            biometricPromptActive = true
-            val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    biometricPromptActive = false
-                    modelAuthenticationActive = false
-                    if (continuation.isActive) continuation.resume(true)
-                }
-                override fun onAuthenticationError(code: Int, message: CharSequence) {
-                    biometricPromptActive = false
-                    modelAuthenticationActive = false
-                    if (!lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) viewModel.lockForBackground()
-                    if (continuation.isActive) continuation.resume(false)
-                }
-            })
-            continuation.invokeOnCancellation { runOnUiThread { prompt.cancelAuthentication(); biometricPromptActive = false; modelAuthenticationActive = false; viewModel.lockForBackground() } }
-            prompt.authenticate(BiometricPrompt.PromptInfo.Builder().setTitle("Jarvis-modelbeleid")
-                .setDescription(reason).setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL).build())
-        }
-        }
-        // OS credential screens can finish before our Activity resumes. Never
-        // hand the approval back to the signer while the app is backgrounded;
-        // lifecycle destruction/cancellation aborts this wait, and the native
-        // controller checks session binding and expiry afterwards.
-        return accepted && lifecycle.withResumed { !isFinishing && !isDestroyed }
+        return result?.takeIf { lifecycle.withResumed { !isFinishing && !isDestroyed } }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        container.identity.prompt = signingPrompt
         // Jarvis is dark only: keep light system bar icons in every system theme.
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
@@ -157,12 +113,14 @@ class MainActivity : FragmentActivity() {
         parseDeepLink(intent?.dataString)?.let(viewModel::openDeepLink)
     }
 
+    override fun onDestroy() {
+        if (container.identity.prompt === signingPrompt) container.identity.prompt = null
+        super.onDestroy()
+    }
+
     override fun onStop() {
         super.onStop()
-        // Android's own credential confirmation may temporarily cover this
-        // Activity. Cancelling it still fails closed; do not cancel the signed
-        // operation solely because the OS password screen takes foreground.
-        if (!isChangingConfigurations && !modelAuthenticationActive) {
+        if (!isChangingConfigurations) {
             viewModel.lockForBackground()
             // Drop Core data now; the UI stops recomposing while stopped.
             coreViewModel.clear()
@@ -170,7 +128,7 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun requestBiometricUnlock() {
-        if (biometricPromptActive || modelAuthenticationActive) return
+        if (biometricPromptActive) return
         biometricPromptActive = true
         container.biometricGate.authenticate(
             activity = this,

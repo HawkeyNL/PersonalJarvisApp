@@ -15,7 +15,8 @@ sealed interface BiometricAvailability {
 }
 
 sealed interface BiometricResult {
-    data object Authenticated : BiometricResult
+    /** [cryptoObject] is the one passed in, now authorised for a single operation. */
+    data class Authenticated(val cryptoObject: BiometricPrompt.CryptoObject? = null) : BiometricResult
     data object Cancelled : BiometricResult
     data object LockedOut : BiometricResult
     data class Unavailable(val availability: BiometricAvailability) : BiometricResult
@@ -39,6 +40,7 @@ class BiometricGate {
         title: String = "Unlock Jarvis",
         subtitle: String = "Confirm with strong biometrics",
         description: String? = null,
+        cryptoObject: BiometricPrompt.CryptoObject? = null,
         callback: (BiometricResult) -> Unit,
     ): BiometricPrompt? {
         val availability = availability(activity)
@@ -52,7 +54,7 @@ class BiometricGate {
             executor,
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    callback(BiometricResult.Authenticated)
+                    callback(BiometricResult.Authenticated(result.cryptoObject))
                 }
 
                 override fun onAuthenticationFailed() {
@@ -75,15 +77,14 @@ class BiometricGate {
                 }
             },
         )
-        prompt.authenticate(
-            BiometricPrompt.PromptInfo.Builder()
-                .setTitle(title)
-                .setSubtitle(subtitle)
-                .setDescription(description)
-                .setAllowedAuthenticators(AUTHENTICATORS)
-                .setNegativeButtonText("Cancel")
-                .build(),
-        )
+        val info = BiometricPrompt.PromptInfo.Builder()
+            .setTitle(title)
+            .setSubtitle(subtitle)
+            .setDescription(description)
+            .setAllowedAuthenticators(AUTHENTICATORS)
+            .setNegativeButtonText("Cancel")
+            .build()
+        if (cryptoObject == null) prompt.authenticate(info) else prompt.authenticate(info, cryptoObject)
         return prompt
     }
 

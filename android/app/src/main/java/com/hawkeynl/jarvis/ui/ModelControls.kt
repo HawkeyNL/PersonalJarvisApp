@@ -31,7 +31,7 @@ fun ModelControls(controller: ModelControlService) {
     if (open) AlertDialog(onDismissRequest = { if (!busy) open = false }, title = { Text("Models") },
         text = {
             Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
-                Text("Android authentication lasts five minutes, until the app locks or you sign out. Every change is confirmed separately and applies to all devices. Budget limits stay active.")
+                Text("Every change needs your fingerprint or face and applies to all devices. Budget limits stay active.")
                 OutlinedTextField(value = search, onValueChange = { search = it; page = 0 }, label = { Text("Search") })
                 Text(notice)
                 val entries = policy?.models?.filter { "${it.provider}/${it.model}".contains(search, ignoreCase = true) }.orEmpty()

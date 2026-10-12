@@ -162,7 +162,7 @@ class ModelRoutingTest {
             allowed to routed(true, listOf(sub, local), false),
         )) assertFalse(next.toString(), relaxation(current, next).any())
         assertFalse(relaxation(null, off).any())
-        assertEquals("Jarvis: replace model routing; allow model changes for five minutes", Relaxation().prompt())
+        assertEquals("Jarvis: replace model routing", Relaxation().prompt())
         val prompt = Relaxation(true, true, true).prompt()
         assertTrue(prompt.contains("allow paid APIs") && prompt.contains("allow paid fallback after subscription"))
         assertFalse(prompt.contains("five minutes"))

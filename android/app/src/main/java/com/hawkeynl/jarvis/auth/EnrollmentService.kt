@@ -10,10 +10,13 @@ import com.hawkeynl.jarvis.network.PairingCreateRequest
 import com.hawkeynl.jarvis.network.PairingTicket
 import com.hawkeynl.jarvis.network.UnreachableReason
 import com.hawkeynl.jarvis.security.DeviceIdentity
+import com.hawkeynl.jarvis.security.DeviceKeyInvalidatedException
+import com.hawkeynl.jarvis.security.DeviceSigningException
 import com.hawkeynl.jarvis.security.Hex
 import com.hawkeynl.jarvis.security.LoginMessage
 import com.hawkeynl.jarvis.storage.ProtectedSession
 import com.hawkeynl.jarvis.storage.SessionRepository
+import kotlin.coroutines.cancellation.CancellationException
 
 sealed interface EnrollmentOutcome {
     data object PasswordRequired : EnrollmentOutcome
@@ -151,8 +154,20 @@ class EnrollmentService(
         if (challenge.nonce.length != 64) {
             return EnrollmentOutcome.InvalidResponse("Login challenge has an invalid nonce.")
         }
-        val signature = runCatching { identity.signHex(Hex.encode(LoginMessage.build(challenge.challenge_id, deviceId, challenge.nonce))) }
-            .getOrElse { return EnrollmentOutcome.InvalidResponse("Device identity cannot sign.") }
+        val signature = try {
+            identity.signHex(Hex.encode(LoginMessage.build(challenge.challenge_id, deviceId, challenge.nonce)), "Sign in to Jarvis")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (invalidated: DeviceKeyInvalidatedException) {
+            // The seed cannot be recovered: forget this pairing so the app offers a new one.
+            sessions.reset()
+            identity.reset()
+            return EnrollmentOutcome.InvalidResponse(invalidated.message.orEmpty())
+        } catch (refused: DeviceSigningException) {
+            return EnrollmentOutcome.InvalidResponse(refused.message.orEmpty())
+        } catch (_: Exception) {
+            return EnrollmentOutcome.InvalidResponse("Device identity cannot sign.")
+        }
         return when (val result = api.login(
             endpoint,
             LoginRequest(deviceId, challenge.challenge_id, signature, password),
