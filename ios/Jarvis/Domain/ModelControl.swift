@@ -325,7 +325,6 @@ struct RoutingRelaxation: Equatable {
     var any: Bool { paidApi || paidFallback || paidModels || researchWebSearch }
     var prompt: String {
         var text = "Jarvis: replace model routing"
-        if !any { text += "; allow model changes for five minutes" }
         if paidApi { text += "; allow paid APIs" }
         if paidFallback { text += "; allow paid fallback after subscription" }
         if paidModels { text += "; add paid API models" }
