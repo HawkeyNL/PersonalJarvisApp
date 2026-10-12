@@ -147,6 +147,10 @@ fn validate_acceptance_identity(identifier: &str) -> Result<(), &'static str> {
 }
 const KEY_ACCOUNT: &str = "device-private-key";
 const TOKEN_ACCOUNT: &str = "session-token";
+/// Both the device key and the bearer belong to one Home Node. Reusing the key
+/// for another origin would let that host obtain login signatures it can
+/// replay to the original node, so an origin change drops both.
+const ORIGIN_BOUND_CREDENTIALS: [&str; 2] = [KEY_ACCOUNT, TOKEN_ACCOUNT];
 
 fn credential(account: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(KEY_SERVICE, account)
@@ -288,6 +292,7 @@ fn auth_sign_unlock_approval(
         &request_id,
         &nonce_hex,
         jarvis_client_core::unlock_approval_message,
+        None,
     )
 }
 
@@ -301,6 +306,7 @@ fn sign_challenge(
     id: &str,
     nonce_hex: &str,
     message: ChallengeMessage,
+    expected_device_id: Option<&str>,
 ) -> Result<String, String> {
     let _guard = auth_storage()?;
     let id = uuid::Uuid::parse_str(id).map_err(|_| "invalid challenge".to_string())?;
@@ -308,6 +314,9 @@ fn sign_challenge(
         .device_id
         .and_then(|device_id| uuid::Uuid::parse_str(&device_id).ok())
         .ok_or("this device is not enrolled")?;
+    if expected_device_id.is_some_and(|expected| expected != device_id.to_string()) {
+        return Err("device login session changed".into());
+    }
     let nonce = hex::decode(nonce_hex).map_err(|_| "invalid challenge".to_string())?;
     let message = message(id, device_id, &nonce).map_err(|_| "invalid challenge".to_string())?;
     let key = signing_key_unlocked(app, false)?;
@@ -730,6 +739,7 @@ async fn auth_login(
         &challenge_id,
         &challenge.nonce,
         jarvis_client_core::login_message,
+        Some(&device_id),
     )?;
     let response = client
         .post(format!("{origin}/v1/auth/login"))
@@ -891,12 +901,15 @@ fn home_node_configure(app: AppHandle, origin: String) -> Result<HomeNodeConfig,
     advance_auth_epoch(&mut guard)?;
     let mut metadata = load_metadata(&app)?;
     if origin_changed(metadata.home_node_origin.as_deref(), &origin) {
-        // A bearer is scoped to the Home Node that minted it. Clear both the
-        // token and server-side device id before persisting a different origin
-        // so the old credential can never be sent to a newly entered host.
+        // The bearer and the device key are scoped to the Home Node that
+        // enrolled them. Clear both, and the server-side device id, before
+        // persisting a different origin so neither can be used against a
+        // newly entered host. The next enrolment generates a fresh key.
         #[cfg(desktop)]
         app_updates::forget(&app);
-        delete_credential(TOKEN_ACCOUNT)?;
+        for account in ORIGIN_BOUND_CREDENTIALS {
+            delete_credential(account)?;
+        }
         metadata.device_id = None;
     }
     metadata.home_node_origin = Some(origin.clone());
@@ -1235,6 +1248,10 @@ mod tests {
             "https://new.example"
         ));
         assert!(origin_changed(None, "https://home.example"));
+        // Without the device key, signing for a re-entered device id fails
+        // ("Original device key unavailable") instead of serving the new host.
+        assert!(super::ORIGIN_BOUND_CREDENTIALS.contains(&super::KEY_ACCOUNT));
+        assert!(super::ORIGIN_BOUND_CREDENTIALS.contains(&super::TOKEN_ACCOUNT));
     }
 
     #[test]
