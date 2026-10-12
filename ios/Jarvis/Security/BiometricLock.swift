@@ -9,7 +9,7 @@ enum LocalUnlockResult: Equatable {
 }
 
 struct BiometricLock {
-    static let biometricsRequired = "Biometrics required. Set up Face ID or Touch ID to approve or deny pairing requests."
+    static let biometricsRequired = "Biometrics required. Set up Face ID or Touch ID to sign in, change models or decide pairing requests."
 
     /// Whether Face ID / Touch ID is enrolled and usable right now.
     static var biometricsAvailable: Bool {
@@ -17,27 +17,28 @@ struct BiometricLock {
         return LAContext().canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
     }
 
-    /// Face ID / Touch ID only, for pairing decisions: no device passcode
-    /// fallback and no fallback button. Lockout fails closed.
-    func biometricOnly(reason: String) async -> LocalUnlockResult {
+    /// Face ID / Touch ID only, for every signature: no device passcode fallback
+    /// and no fallback button. Lockout fails closed. On success it returns the
+    /// evaluated context, which unlocks the device key without a second prompt.
+    func biometricOnly(reason: String) async -> (result: LocalUnlockResult, context: LAContext?) {
         let context = LAContext()
         context.localizedFallbackTitle = ""
         context.localizedCancelTitle = "Cancel"
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
-            return .unavailable(Self.biometricsRequired)
+            return (.unavailable(Self.biometricsRequired), nil)
         }
         do {
             return try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason)
-                ? .unlocked : .denied
+                ? (.unlocked, context) : (.denied, nil)
         } catch let error as LAError {
             switch error.code {
-            case .appCancel, .systemCancel, .userCancel, .userFallback: return .cancelled
-            case .biometryNotAvailable, .biometryNotEnrolled, .biometryLockout: return .unavailable(Self.biometricsRequired)
-            default: return .denied
+            case .appCancel, .systemCancel, .userCancel, .userFallback: return (.cancelled, nil)
+            case .biometryNotAvailable, .biometryNotEnrolled, .biometryLockout: return (.unavailable(Self.biometricsRequired), nil)
+            default: return (.denied, nil)
             }
         } catch {
-            return .denied
+            return (.denied, nil)
         }
     }
 

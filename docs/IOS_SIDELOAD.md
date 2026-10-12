@@ -61,7 +61,33 @@ app first. Use the same signing account/team and the same effective bundle ID
 and Keychain access group in the sideload tool. Keep these stable across versions.
 The runtime Home Node address and preferences live in the app's UserDefaults;
 the registered device ID, private key and session live in the device-only Keychain.
-None of these storage names depend on the application version.
+None of these storage names depend on the application version, except the
+device key described below.
+
+## Device key behind Face ID / Touch ID
+
+The device's Ed25519 private key is stored in a Keychain item that only
+Face ID or Touch ID can read (`device-ed25519-seed-v2`, device-only, requires a
+device passcode, bound to the currently enrolled biometrics). Its public key is
+kept as a separate plain item so fingerprints and enrollment never prompt.
+Signing in, every model or routing change and every pairing approval show a
+Face ID / Touch ID prompt; the device passcode is not accepted for these. The
+app lock keeps its passcode fallback.
+
+On first launch after the update, Jarvis moves the older key
+(`device-ed25519-seed-v1`) into the protected item without prompting and then
+deletes the old item. The public key and the Home Node registration stay the
+same, so no re-pairing is needed for the upgrade. The device must have Face ID
+or Touch ID set up; otherwise the old key is kept and Jarvis asks to set it up.
+
+- **Downgrade:** an older build cannot read the protected key. Installing a
+  version from before this change requires resetting and re-pairing the device.
+  After upgrading again, the protected key from before the downgrade wins, so
+  reset and re-pair again if the downgraded build was paired.
+- **Biometrics changed:** adding or removing a face or fingerprint invalidates
+  the key by design. Jarvis then says so; open Settings, choose
+  **Reset this device**, pair again, approve it from a trusted device and
+  revoke the old registration.
 
 Changing the signing identity/access group is not a normal app update: iOS can
 deny access to the old Keychain. Jarvis cannot and must not bypass that isolation.

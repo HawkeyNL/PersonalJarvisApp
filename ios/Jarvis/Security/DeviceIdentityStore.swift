@@ -1,33 +1,66 @@
 import CryptoKit
 import Foundation
+import LocalAuthentication
 
 enum DeviceIdentityError: LocalizedError {
     case invalidChallenge
     case invalidStoredKey
     case missingStoredKey
+    case biometryChanged
 
     var errorDescription: String? {
         switch self {
         case .invalidChallenge: "The Home Node supplied an invalid signing challenge."
         case .invalidStoredKey: "The secure device identity is damaged and must be reset."
         case .missingStoredKey: "This installation cannot access the original device key. Use the same signing team and app identity as before, or explicitly reset and re-enroll this device. Your password alone cannot replace the device key."
+        case .biometryChanged: "This device key can no longer be used, usually because Face ID or Touch ID changed. Open Settings, choose Reset this device, then pair this device again and approve it from a trusted device."
         }
     }
 }
 
+/// The Ed25519 seed lives in a Keychain item that only Face ID / Touch ID can
+/// read; the public key is kept beside it as a plain item so fingerprints and
+/// enrolment never prompt.
 actor DeviceIdentityStore {
     private let keychain: any SecureValueStorage
-    private let account = "device-ed25519-seed-v1"
+    private let account = "device-ed25519-seed-v2"
+    private let publicAccount = "device-ed25519-public-v2"
+    private let legacyAccount = "device-ed25519-seed-v1"
 
     init(keychain: any SecureValueStorage = KeychainStore()) { self.keychain = keychain }
 
+    /// Public key for enrolment: the stored one, or a new protected key.
     func publicKeyHex() throws -> String {
-        let key = try signingKey()
+        try migrateIfNeeded()
+        if let stored = try keychain.read(account: publicAccount) { return try Self.publicKey(stored).hexEncodedString() }
+        let key = Curve25519.Signing.PrivateKey()
+        try keychain.saveProtected(key.rawRepresentation, account: account)
+        try keychain.save(key.publicKey.rawRepresentation, account: publicAccount)
         return key.publicKey.rawRepresentation.hexEncodedString()
     }
 
     func existingPublicKeyHex() throws -> String {
-        try signingKey(createIfMissing: false).publicKey.rawRepresentation.hexEncodedString()
+        try migrateIfNeeded()
+        guard let stored = try keychain.read(account: publicAccount) else { throw DeviceIdentityError.missingStoredKey }
+        return try Self.publicKey(stored).hexEncodedString()
+    }
+
+    /// Moves a pre-biometry seed behind Face ID / Touch ID without prompting and
+    /// keeps its public key, so the Home Node registration stays valid. If both
+    /// exist, the protected key wins. The old item is deleted only once the new
+    /// items are stored.
+    func migrateIfNeeded() throws {
+        guard let seed = try keychain.read(account: legacyAccount) else { return }
+        let key = try? Curve25519.Signing.PrivateKey(rawRepresentation: seed)
+        if try !keychain.containsProtected(account: account) {
+            guard let key else { throw DeviceIdentityError.invalidStoredKey }
+            try keychain.saveProtected(seed, account: account)
+            try keychain.save(key.publicKey.rawRepresentation, account: publicAccount)
+        } else if let key, try keychain.read(account: publicAccount) == nil {
+            // Interrupted migration: the protected item holds this same seed.
+            try keychain.save(key.publicKey.rawRepresentation, account: publicAccount)
+        }
+        try keychain.delete(account: legacyAccount)
     }
 
     /// Exact v1 client-core `login_message`: domain, challenge id, device id, 32-byte nonce.
@@ -57,36 +90,46 @@ actor DeviceIdentityStore {
         return result
     }
 
-    func signPairingApproval(_ message: Data) throws -> String {
-        // Approving must never create a replacement key for this registration.
-        try signingKey(createIfMissing: false).signature(for: message).hexEncodedString()
+    // Signing never creates a replacement key for an existing registration and
+    // reads the seed only with a context Face ID / Touch ID has just evaluated.
+    func signPairingApproval(_ message: Data, context: LAContext) throws -> String {
+        try signingKey(context: context).signature(for: message).hexEncodedString()
     }
 
-    func signLogin(challengeId: UUID, deviceId: UUID, nonceHex: String) throws -> String {
+    func signLogin(challengeId: UUID, deviceId: UUID, nonceHex: String, context: LAContext) throws -> String {
         let message = try Self.loginMessage(challengeId: challengeId, deviceId: deviceId, nonceHex: nonceHex)
-        // Login must never create a replacement key for an existing registration.
-        return try signingKey(createIfMissing: false).signature(for: message).hexEncodedString()
+        return try signingKey(context: context).signature(for: message).hexEncodedString()
     }
 
-    func reset() throws { try keychain.delete(account: account) }
-
-    func signModelToggle(_ approval: ModelToggleApproval) throws -> String {
-        try signingKey(createIfMissing: false).signature(for: approval.message()).hexEncodedString()
+    func reset() throws {
+        try keychain.delete(account: account)
+        try keychain.delete(account: publicAccount)
+        try keychain.delete(account: legacyAccount)
     }
 
-    func signModelRouting(_ approval: ModelRoutingApproval) throws -> String {
-        try signingKey(createIfMissing: false).signature(for: approval.message()).hexEncodedString()
+    func signModelToggle(_ approval: ModelToggleApproval, context: LAContext) throws -> String {
+        try signingKey(context: context).signature(for: approval.message()).hexEncodedString()
     }
 
-    private func signingKey(createIfMissing: Bool = true) throws -> Curve25519.Signing.PrivateKey {
-        if let stored = try keychain.read(account: account) {
-            do { return try Curve25519.Signing.PrivateKey(rawRepresentation: stored) }
-            catch { throw DeviceIdentityError.invalidStoredKey }
+    func signModelRouting(_ approval: ModelRoutingApproval, context: LAContext) throws -> String {
+        try signingKey(context: context).signature(for: approval.message()).hexEncodedString()
+    }
+
+    private func signingKey(context: LAContext) throws -> Curve25519.Signing.PrivateKey {
+        try migrateIfNeeded()
+        let publicKey = try keychain.read(account: publicAccount)
+        guard let stored = try keychain.readProtected(account: account, context: context) else {
+            // A known key that no longer reads was invalidated by a biometry change.
+            throw publicKey == nil ? DeviceIdentityError.missingStoredKey : DeviceIdentityError.biometryChanged
         }
-        guard createIfMissing else { throw DeviceIdentityError.missingStoredKey }
-        let key = Curve25519.Signing.PrivateKey()
-        try keychain.save(key.rawRepresentation, account: account)
+        guard let key = try? Curve25519.Signing.PrivateKey(rawRepresentation: stored),
+              key.publicKey.rawRepresentation == publicKey else { throw DeviceIdentityError.invalidStoredKey }
         return key
+    }
+
+    private static func publicKey(_ raw: Data) throws -> Data {
+        guard (try? Curve25519.Signing.PublicKey(rawRepresentation: raw)) != nil else { throw DeviceIdentityError.invalidStoredKey }
+        return raw
     }
 }
 

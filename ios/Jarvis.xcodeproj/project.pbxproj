@@ -17,7 +17,6 @@
         A00000000000000000000063 /* Rajdhani-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000063 /* Rajdhani-SemiBold.ttf */; };
         A00000000000000000000064 /* OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000064 /* OFL.txt */; };
         A00000000000000000000055 /* HubModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000055 /* HubModelTests.swift */; };
-        A00000000000000000000042 /* ModelAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000042; };
         A00000000000000000000043 /* ModelAuthorizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000043; };
         A00000000000000000000040 /* ModelControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000040; };
         A00000000000000000000041 /* ModelsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000041; };
@@ -67,7 +66,6 @@
         B00000000000000000000063 /* Rajdhani-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/Rajdhani-SemiBold.ttf; sourceTree = "<group>"; };
         B00000000000000000000064 /* OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = Fonts/OFL.txt; sourceTree = "<group>"; };
         B00000000000000000000055 /* HubModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubModelTests.swift; sourceTree = "<group>"; };
-        B00000000000000000000042 /* ModelAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/ModelAuthorization.swift; sourceTree = "<group>"; };
         B00000000000000000000043 /* ModelAuthorizationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAuthorizationTests.swift; sourceTree = "<group>"; };
         B00000000000000000000040 /* ModelControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Jarvis/Domain/ModelControl.swift; sourceTree = SOURCE_ROOT; };
         B00000000000000000000041 /* ModelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Jarvis/Views/ModelsView.swift; sourceTree = SOURCE_ROOT; };
@@ -130,7 +128,6 @@
 				B0000000000000000000000C /* ChatService.swift */,
                 B00000000000000000000030 /* RealtimeService.swift */,
                 B00000000000000000000040 /* ModelControl.swift */,
-                B00000000000000000000042 /* ModelAuthorization.swift */,
                 B00000000000000000000041 /* ModelsView.swift */,
 				B0000000000000000000000D /* RootView.swift */,
 				B0000000000000000000000E /* LockView.swift */,
@@ -258,7 +255,6 @@
 				A0000000000000000000000C /* ChatService.swift in Sources */,
                 A00000000000000000000020 /* RealtimeService.swift in Sources */,
                 A00000000000000000000040 /* ModelControl.swift in Sources */,
-                A00000000000000000000042 /* ModelAuthorization.swift in Sources */,
                 A00000000000000000000041 /* ModelsView.swift in Sources */,
 				A0000000000000000000000D /* RootView.swift in Sources */,
 				A0000000000000000000000E /* LockView.swift in Sources */,
