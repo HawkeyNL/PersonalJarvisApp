@@ -236,14 +236,20 @@ const ROUTING_APPROVAL_SECONDS: i64 = 240;
 /// Broker frame limit; the broker counts the trailing newline.
 const BROKER_FRAME_BYTES: usize = 16 * 1024;
 
+const USE_PHONE: &str = "Change models from your phone or the Home Node";
+
 /// Signing prompts are biometric only, never the device password. Only macOS
 /// (Touch ID) can enforce that: Windows Hello always offers its PIN and Linux
-/// has no biometric prompt, so both refuse to sign.
-fn biometric_signing(macos: bool) -> Result<(), String> {
+/// has no biometric prompt, so both refuse to sign. A Mac without Touch ID,
+/// or a cancelled prompt, gets the same hint.
+fn biometric_signing(
+    macos: bool,
+    authenticate: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
     if !macos {
-        return Err("Change models from your phone or the Home Node".into());
+        return Err(USE_PHONE.into());
     }
-    Ok(())
+    authenticate().map_err(|_| format!("Touch ID did not confirm the change. {USE_PHONE}"))
 }
 
 /// Login binding captured before any network call; revalidated before signing
@@ -318,9 +324,10 @@ impl Session {
         let signing_origin = origin.clone();
         let body =
             tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
-                biometric_signing(cfg!(target_os = "macos"))?;
                 let _prompt = model_authorization::prompt();
-                authenticate_owner(&prompt, false)?;
+                biometric_signing(cfg!(target_os = "macos"), || {
+                    authenticate_owner(&prompt, false)
+                })?;
                 let guard = auth_storage()?;
                 let current = load_metadata(&signing_app)?;
                 validate_login_binding(
@@ -884,9 +891,14 @@ mod tests {
 
     #[test]
     fn signing_is_biometric_only_and_refused_off_macos() {
-        assert!(biometric_signing(true).is_ok());
+        assert!(biometric_signing(true, || Ok(())).is_ok());
         assert_eq!(
-            biometric_signing(false).unwrap_err(),
+            biometric_signing(true, || Err("biometrics not supported".into())).unwrap_err(),
+            "Touch ID did not confirm the change. Change models from your phone or the Home Node"
+        );
+        // Off macOS the OS prompt is never shown.
+        assert_eq!(
+            biometric_signing(false, || panic!("prompted")).unwrap_err(),
             "Change models from your phone or the Home Node"
         );
     }

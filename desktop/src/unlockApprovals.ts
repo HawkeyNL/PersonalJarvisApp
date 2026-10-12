@@ -1,6 +1,6 @@
 // Unlock requests. This device long-polls for pending unlock requests from
-// the user's other devices. Core accepts approvals only from a phone, so this
-// app shows them and can deny them.
+// the user's other devices. Core accepts approvals only from a phone and no
+// phone approves unlocks yet, so this app shows them and can deny them.
 import { ref } from "vue";
 import { currentAuthStatus } from "./auth";
 import { getJsonAuth, postJsonAuth } from "./api";

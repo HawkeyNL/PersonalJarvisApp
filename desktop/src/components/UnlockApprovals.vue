@@ -19,7 +19,7 @@ import { pending, deny, approvalError } from "../unlockApprovals";
           </div>
         </div>
         <p v-if="approvalError" class="err">{{ approvalError }}</p>
-        <p class="hint">Approve from your phone.</p>
+        <p class="hint">Approving unlocks is not available yet; you can deny here.</p>
       </div>
     </div>
   </Transition>

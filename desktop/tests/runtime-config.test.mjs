@@ -96,7 +96,7 @@ test("desktop signs no approvals and model changes are biometric only", async ()
   assert.deepEqual(native.match(/authenticate_owner\([^)]*\)/g),
     ['authenticate_owner("Unlock Jarvis", allow_password)', "authenticate_owner(reason: &str, allow_password: bool)"]);
   assert.deepEqual(models.match(/authenticate_owner\([^)]*\)/g), ["authenticate_owner(&prompt, false)"]);
-  assert.match(models, /biometric_signing\(cfg!\(target_os = "macos"\)\)\?;\s*let _prompt = model_authorization::prompt\(\);\s*authenticate_owner/);
+  assert.match(models, /let _prompt = model_authorization::prompt\(\);\s*biometric_signing\(cfg!\(target_os = "macos"\), \|\| \{\s*authenticate_owner\(&prompt, false\)/);
   assert.doesNotMatch(models, /five minutes|model_authorization::(valid|remember)/);
   for (const file of ["pairingApprovals.ts", "unlockApprovals.ts", "agentApprovals.ts", "auth.ts"]) {
     const web = await readFile(new URL(`../src/${file}`, import.meta.url), "utf8");

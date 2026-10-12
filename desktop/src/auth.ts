@@ -30,7 +30,7 @@ export function currentAuthStatus(): Promise<AuthStatus> {
 const PAIRING_WAIT_KEY = "jarvis.pairing.wait";
 type PairingWait = { request_id: string; nonce: string; expires_at: number };
 export class PairingPending extends Error {
-  constructor() { super("Waiting for approval from your phone or Core Admin."); }
+  constructor() { super("Waiting for approval from your phone or the Home Node."); }
 }
 
 export type AccountStatus = { protocol: number; password_required: boolean; bootstrap_required: boolean };
@@ -136,9 +136,8 @@ export async function logout(): Promise<void> {
   await invoke("auth_logout");
 }
 
-/** Sign out, then erase the local signing identity. Core accepts device
- *  revocation only from a phone, so the device record stays listed until it
- *  is revoked there or in Core Admin on the Home Node. */
+/** Sign out, then erase the local signing identity. The device stays active
+ *  on the Home Node until `jarvis devices revoke <id>` runs there. */
 export async function deregisterDevice(): Promise<void> {
   await logout();
   await invoke("auth_reset");

@@ -102,6 +102,16 @@ device reset and Home Node/session changes cancel a change still waiting for
 its prompt. No device password or private signing key is sent to the Home Node
 or exposed to the desktop frontend.
 
+The desktop Touch ID requirement is a prompt gate in the native layer: the
+macOS device key itself is stored in the keychain without biometric access
+control. Binding the key to biometry is a follow-up.
+
+The desktop app lock is a privacy screen and signs nothing. It unlocks with
+the local OS prompt (Touch ID, Windows Hello or the computer password); where
+that prompt is unavailable, "Sign out instead" ends the session and signing in
+again needs the account password. Linux has no such prompt, so the lock is off
+there.
+
 On iOS there is no window: every model or routing change, like sign-in and
 pairing approval, needs its own Face ID / Touch ID prompt (no passcode), and
 the device key itself can only be read after that prompt.
@@ -143,7 +153,10 @@ with the one the new device shows before approving.
 | Desktop | Overlay on every page | Shows requests and can deny them; approve from your phone |
 
 Core accepts pairing, unlock, account and agent approvals only from iOS and
-Android devices, so the desktop app signs none of them. Approving signs the v1
+Android devices, so the desktop app signs none of them. Today the phones
+approve pairing requests (and model changes); unlock, account-password and
+agent approvals are not available on any client yet. A device is revoked on
+the Home Node with `sudo jarvis devices revoke <id>`. Approving signs the v1
 `pairing_approval_message` of `jarvis-client-core` (iOS and Android
 re-implement it and test against its golden vector). Without usable
 biometrics the mobile apps say "Biometrics required" and offer no approve or

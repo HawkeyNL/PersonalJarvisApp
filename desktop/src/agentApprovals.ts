@@ -1,6 +1,6 @@
 // Agent actions waiting for the owner (ADR-029 4b). Core accepts approvals
-// only from a phone; this app can deny, which only cancels and needs no
-// signature.
+// only from a phone, and no phone approves them yet. This app can deny, which
+// only cancels and needs no signature.
 import { currentAuthStatus } from "./auth";
 import { postJsonAuth } from "./api";
 

@@ -6,7 +6,7 @@ import JvTopBar from "../components/jv/JvTopBar.vue";
 import { ACCENTS, PRESETS, currentAccent, applyAccent, type Accent } from "../theme";
 import { currentAuthStatus, deregisterDevice, type AuthStatus } from "../auth";
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
-import { lockEnabled, isDesktop, setLockEnabled, initLock } from "../lock";
+import { lockEnabled, lockAvailable, setLockEnabled, initLock } from "../lock";
 import {
   voiceSupported,
   enrolled,
@@ -103,7 +103,7 @@ onMounted(async () => {
   const homeNode = await loadHomeNodeConfig();
   homeNodeOriginInput.value = homeNode.origin ?? "";
   await loadUpdateStatus();
-  await initLock(); // resolves isDesktop for the lock toggle
+  await initLock(); // resolves lockAvailable for the lock toggle
   await refreshVoiceStatus();
   await listMics();
 });
@@ -190,24 +190,25 @@ onMounted(async () => {
 
     <div v-if="section === 'Account & security'" class="panel glass">
       <div class="panel-head">SECURITY <span class="hint">app lock</span></div>
-      <label class="toggle" :class="{ off: !isDesktop }">
+      <label class="toggle" :class="{ off: !lockAvailable }">
         <span class="tl">
           <span class="tt">Lock on open</span>
           <span class="td">
             When Jarvis opens and after 15 minutes without input: Touch ID,
-            Face ID or your computer password, or approve from your phone.
+            Windows Hello or your computer password. It hides the app; it signs
+            nothing.
           </span>
         </span>
         <input
           type="checkbox"
           :checked="lockEnabled"
-          :disabled="!isDesktop"
+          :disabled="!lockAvailable"
           @change="setLockEnabled(($event.target as HTMLInputElement).checked)"
         />
         <span class="sw"></span>
       </label>
-      <p v-if="!isDesktop" class="muted small">
-        This device approves unlocks for your desktop, so it needs no lock of its own.
+      <p v-if="!lockAvailable" class="muted small">
+        This computer has no local unlock prompt, so the app lock is off.
       </p>
     </div>
 
@@ -362,11 +363,15 @@ onMounted(async () => {
         <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="unlink-title">
           <h2 id="unlink-title">Unlink this device?</h2>
           <p>
-            This signs the device out and erases its device key here. It stays
-            in your device list until you revoke it from your phone or Core
-            Admin. You then have to pair (enroll) this device again to sign in.
-            Your data on the server stays.
+            This signs the device out and erases its device key here. You then
+            have to pair (enroll) this device again to sign in. Your data on the
+            server stays.
           </p>
+          <p>
+            The device stays active on the Home Node (and trusted for model
+            changes, if its key is pinned) until you revoke it there:
+          </p>
+          <pre class="mono">sudo jarvis devices revoke {{ session?.device_id ?? "<device id>" }}</pre>
           <div class="modal-actions">
             <button class="ghost" :disabled="unlinking" @click="confirmUnlink = false">
               Cancel
@@ -456,6 +461,7 @@ onMounted(async () => {
 }
 .modal h2 { margin: 0 0 10px; font-size: 16px; }
 .modal p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.modal pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 .modal-actions .ghost { margin-top: 0; }
 

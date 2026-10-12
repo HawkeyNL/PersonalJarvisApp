@@ -65,7 +65,7 @@ const SUB_TABS: SegmentItem[] = [{ id: "overview", label: "Sessions", icon: "cod
 
 const DETAILS: Record<string, string> = {
   active: "Coding sessions Jarvis is running or has paused on your Home Node.",
-  waiting: "Changes an agent proposed. Nothing runs until you approve it on your phone.",
+  waiting: "Changes an agent proposed. Nothing runs until it is approved; approving agent actions is not available yet.",
   completed: "Coding sessions that ended, and every agent action Core recorded.",
   scheduled: "Core cannot run tasks at a set time yet.",
   recurring: "Core cannot repeat tasks on a schedule yet.",
@@ -92,7 +92,7 @@ const lastUpdate = computed(() => {
   return first?.updated_at ? relativeTime(first.updated_at, now.value) || "—" : "—";
 });
 
-// --- Deny (approvals happen on the phone) ---------------------------------------
+// --- Deny (no client can approve agent actions yet) ------------------------------
 const deciding = ref<string | null>(null);
 const decisionError = ref<string | null>(null);
 async function deny(id: string) {
@@ -147,7 +147,7 @@ async function deny(id: string) {
           :kind="pending.state === 'unsupported' ? 'core-update' : 'error'" :detail="why(pending)" icon="alert" />
         <p v-else-if="pending.state === 'loading'" class="muted" role="status">Loading approvals…</p>
         <template v-else>
-          <p class="muted small">Approve from your phone. Read the full preview first; you can deny here.</p>
+          <p class="muted small">Approving agent actions is not available yet. Read the full preview; you can deny here.</p>
           <p v-if="decisionError" class="err" role="alert">{{ decisionError }}</p>
           <JvActivityList title="Waiting for approval" :items="pendingRows" empty="Nothing is waiting for you." full-detail>
             <template #actions="{ item }">

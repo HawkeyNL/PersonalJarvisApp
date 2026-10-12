@@ -349,16 +349,22 @@ fn authenticated_api_path(path: &str) -> bool {
     {
         return false;
     }
-    // Owner read models used by the Agents and Tasks pages. Exact routes only:
+    // Owner read models used by the Agents, Tasks and device pages. Exact routes only:
     // coding session lifecycle and agent actions stay outside this proxy.
-    if ["/v1/agents", "/v1/coding/sessions", "/v1/agent/audit"].contains(&route) {
+    if [
+        "/v1/agents",
+        "/v1/coding/sessions",
+        "/v1/agent/audit",
+        "/v1/devices",
+    ]
+    .contains(&route)
+    {
         return true;
     }
     [
         "/v1/assistant",
         "/v1/events/capability",
         "/v1/conversations",
-        "/v1/devices",
         "/v1/auth/logout",
         "/v1/auth/me",
         "/v1/auth/pairing/requests",
@@ -376,6 +382,12 @@ fn authenticated_api_path(path: &str) -> bool {
                 .strip_prefix(prefix)
                 .is_some_and(|remainder| remainder.starts_with('/'))
     })
+}
+
+/// Routes the webview proxy may only read. Device revocation is done on the
+/// Home Node, never from this app.
+fn read_only_route(path: &str) -> bool {
+    path.split('?').next() == Some("/v1/devices")
 }
 
 /// Approve routes the webview proxy may never call. This app signs no
@@ -619,7 +631,7 @@ async fn auth_request(
         "DELETE" => reqwest::Method::DELETE,
         _ => return Err("authenticated API method is invalid".to_string()),
     };
-    if native_only_route(&path) {
+    if native_only_route(&path) || (read_only_route(&path) && method != reqwest::Method::GET) {
         return Err("authenticated API path is invalid".to_string());
     }
     if method != reqwest::Method::POST && body.is_some() {
@@ -686,8 +698,8 @@ fn auth_logout(app: AppHandle) -> Result<(), String> {
 
 /// Fully deregister this device locally: wipe the device key (keychain + file),
 /// the device id, and the session token. The next `login()` enrolls a fresh
-/// device. The device record stays listed on the Home Node until it is
-/// revoked from a phone or Core Admin.
+/// device. The device stays active on the Home Node until
+/// `jarvis devices revoke <id>` runs there.
 #[tauri::command]
 fn auth_reset(app: AppHandle) -> Result<(), String> {
     realtime::stop(&app);
@@ -1100,6 +1112,17 @@ mod tests {
         assert!(!authenticated_api_path("/v1/agent/action"));
         assert!(!authenticated_api_path("/v1/coding/sessions/fixture/start"));
         assert!(!authenticated_api_path("/v1/agents/fixture"));
+    }
+
+    #[test]
+    fn webview_proxy_only_lists_devices() {
+        assert!(authenticated_api_path("/v1/devices"));
+        assert!(read_only_route("/v1/devices"));
+        assert!(read_only_route("/v1/devices?x=1"));
+        assert!(!read_only_route("/v1/conversations"));
+        for path in ["/v1/devices/fixture", "/v1/devices/fixture/revoke-request"] {
+            assert!(!authenticated_api_path(path), "{path}");
+        }
     }
 
     #[test]

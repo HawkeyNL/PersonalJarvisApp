@@ -14,12 +14,12 @@ onMounted(refresh);
 <template>
   <section class="panel glass account-administration">
     <h2>Account and devices</h2>
-    <p>Approve from your phone: password changes and device revocation need a phone approval. Core Admin on the Home Node can also revoke devices.</p>
+    <p>Changing the account password is not available yet. To revoke a device, run <code>sudo jarvis devices revoke &lt;id&gt;</code> on the Home Node.</p>
     <h3>Trusted devices</h3>
     <button @click="refresh">Refresh</button>
     <ul>
       <li v-for="device in devices" :key="device.id">
-        <span>{{ device.name }} · {{ device.platform }} · {{ device.status }}</span>
+        <span>{{ device.name }} · {{ device.platform }} · {{ device.status }} · <code>{{ device.id }}</code></span>
       </li>
     </ul>
     <p v-if="message" role="status">{{ message }}</p>
