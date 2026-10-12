@@ -89,9 +89,9 @@ object PairingApproval {
     }
 }
 
-/** Approve or deny pending pairing requests. [authenticate] is wired by the Activity
- *  to a BIOMETRIC_STRONG-only prompt (no device credential); nothing is signed or
- *  sent unless it returns true. */
+/** Approve or deny pending pairing requests. Approval signs with [identity], whose
+ *  BIOMETRIC_STRONG-only prompt unlocks the device key; deny needs [authenticate],
+ *  the same kind of prompt without a key. Nothing is sent without a prompt. */
 class PairingApprovalService(
     private val api: JarvisApi,
     private val sessions: SessionRepository,
@@ -121,10 +121,9 @@ class PairingApprovalService(
         val message = PairingApproval.message(item.id, item.nonce, item.candidate_public_key, me.user_id, device, item.expires_at)
         check(item.expires_at > now()) { EXPIRED }
         val name = PairingApproval.hint(item.device_name, 40)
-        if (!authenticate("Approve $name with key ${PairingApproval.grouped(fingerprint.take(16))}")) error(CANCELLED)
+        val signature = identity.signHex(Hex.encode(message), "Approve $name with key ${PairingApproval.grouped(fingerprint.take(16))}")
         currentCoroutineContext().ensureActive()
         check(unlocked() && endpoint() == origin && sessions.session() == session && item.expires_at > now()) { "Approval expired or session changed" }
-        val signature = identity.signHex(Hex.encode(message))
         decide(origin, token, "/v1/auth/pairing/requests/${item.id}/approve", JsonObject(mapOf("signature" to JsonPrimitive(signature))))
     }
 

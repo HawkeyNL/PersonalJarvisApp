@@ -10,10 +10,13 @@ import com.hawkeynl.jarvis.network.PairingCreateRequest
 import com.hawkeynl.jarvis.network.PairingTicket
 import com.hawkeynl.jarvis.network.UnreachableReason
 import com.hawkeynl.jarvis.security.DeviceIdentity
+import com.hawkeynl.jarvis.security.DeviceKeyInvalidatedException
+import com.hawkeynl.jarvis.security.DeviceSigningException
 import com.hawkeynl.jarvis.security.Hex
 import com.hawkeynl.jarvis.security.LoginMessage
 import com.hawkeynl.jarvis.storage.ProtectedSession
 import com.hawkeynl.jarvis.storage.SessionRepository
+import kotlin.coroutines.cancellation.CancellationException
 
 sealed interface EnrollmentOutcome {
     data object PasswordRequired : EnrollmentOutcome
@@ -26,6 +29,9 @@ sealed interface EnrollmentOutcome {
     data class Unreachable(val reason: UnreachableReason) : EnrollmentOutcome
     data class Rejected(val status: Int, val message: String?) : EnrollmentOutcome
     data class InvalidResponse(val message: String) : EnrollmentOutcome
+
+    /** Keystore invalidated the device key; only the user's "erase and pair again" clears it. */
+    data object DeviceKeyLost : EnrollmentOutcome
 }
 
 class EnrollmentService(
@@ -43,7 +49,8 @@ class EnrollmentService(
         activationCode: String? = null,
     ): EnrollmentOutcome {
         if (activationCode != null) {
-            return when (val result = api.activateFirstDevice(endpoint, BootstrapRequest(deviceName.take(80), "android", identity.publicKeyHex(), password), activationCode)) {
+            val publicKey = enrollmentKey().getOrElse { return it.keyFailure() }
+            return when (val result = api.activateFirstDevice(endpoint, BootstrapRequest(deviceName.take(80), "android", publicKey, password), activationCode)) {
                 is ApiResult.Success -> {
                     sessions.saveDeviceId(result.value.device_id)
                     login(endpoint, result.value.device_id, password)
@@ -69,12 +76,13 @@ class EnrollmentService(
             }
             else -> return status.toEnrollmentFailure()
         }
+        val publicKey = enrollmentKey().getOrElse { return it.keyFailure() }
         return when (val result = api.createPairing(
             endpoint,
             PairingCreateRequest(
                 name = deviceName.take(80),
                 platform = "android",
-                public_key = identity.publicKeyHex(),
+                public_key = publicKey,
                 password = password,
             ),
         )) {
@@ -110,6 +118,15 @@ class EnrollmentService(
         }
         sessions.reset()
         identity.reset()
+    }
+
+    /** A new device creates its key here, while the user is starting enrolment. */
+    private suspend fun enrollmentKey(): Result<String> = try {
+        Result.success(identity.enrollmentKeyHex("Create this phone's Jarvis device key"))
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        Result.failure(error)
     }
 
     private suspend fun poll(endpoint: HomeNodeEndpoint, ticket: PairingTicket): EnrollmentOutcome {
@@ -151,8 +168,18 @@ class EnrollmentService(
         if (challenge.nonce.length != 64) {
             return EnrollmentOutcome.InvalidResponse("Login challenge has an invalid nonce.")
         }
-        val signature = runCatching { identity.signHex(Hex.encode(LoginMessage.build(challenge.challenge_id, deviceId, challenge.nonce))) }
-            .getOrElse { return EnrollmentOutcome.InvalidResponse("Device identity cannot sign.") }
+        val signature = try {
+            identity.signHex(Hex.encode(LoginMessage.build(challenge.challenge_id, deviceId, challenge.nonce)), "Sign in to Jarvis")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: DeviceKeyInvalidatedException) {
+            // Erasing is the user's decision; this may be a background sign-in.
+            return EnrollmentOutcome.DeviceKeyLost
+        } catch (refused: DeviceSigningException) {
+            return EnrollmentOutcome.InvalidResponse(refused.message.orEmpty())
+        } catch (_: Exception) {
+            return EnrollmentOutcome.InvalidResponse("Device identity cannot sign.")
+        }
         return when (val result = api.login(
             endpoint,
             LoginRequest(deviceId, challenge.challenge_id, signature, password),
@@ -167,6 +194,9 @@ class EnrollmentService(
         }
     }
 }
+
+private fun Throwable.keyFailure() =
+    EnrollmentOutcome.InvalidResponse((this as? DeviceSigningException)?.message ?: "This phone's device key cannot be created.")
 
 private fun ApiResult<*>.toEnrollmentFailure(): EnrollmentOutcome = when (this) {
     ApiResult.Unauthorized -> EnrollmentOutcome.Unauthorized

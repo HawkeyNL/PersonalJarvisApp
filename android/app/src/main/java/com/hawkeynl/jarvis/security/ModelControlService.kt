@@ -8,17 +8,14 @@ import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.jsonPrimitive
 import java.security.SecureRandom
 import java.util.UUID
-import android.os.SystemClock
-import java.security.MessageDigest
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/** Native-only controller. The authentication callback is wired by the Activity
- * to the real OS prompt; it is never a network/JavaScript approval flag. */
+/** Native-only controller. Every change is signed with [identity], whose strong-biometric
+ * prompt unlocks the device key; there is no approval flag and no time window. */
 class ModelControlService(
     private val api: JarvisApi, private val sessions: SessionRepository,
     private val settings: EndpointSettingsRepository, private val identity: DeviceIdentity,
-    private val authenticate: suspend (String) -> Boolean,
     private val unlocked: () -> Boolean,
 ) {
     private val mutation = Mutex()
@@ -36,7 +33,6 @@ class ModelControlService(
         val session = sessions.session()
         val token = session.token ?: error("Sessie ontbreekt")
         val device = session.deviceId ?: error("Device not paired")
-        val context = Hex.encode(MessageDigest.getInstance("SHA-256").digest("${endpoint.baseUrl}|$device|$token".toByteArray()))
         val snapshot = (api.modelPolicy(endpoint, token) as? ApiResult.Success)?.value ?: error("Model policy unreachable")
         val now = System.currentTimeMillis() / 1000
         check(snapshot.mutation == "device-signed-model-toggle-v1" && snapshot.policy_sha256 == hash && snapshot.device_id == device
@@ -44,24 +40,18 @@ class ModelControlService(
         val approval = ModelApproval(UUID.randomUUID(), ByteArray(32).also { SecureRandom().nextBytes(it) }, UUID.fromString(snapshot.user_id),
             UUID.fromString(device), now, now + 120, entry.provider, entry.model, !entry.enabled, hash)
         val message = approval.message()
-        val fresh = !lease.valid(context, ticket, SystemClock.elapsedRealtime(), System.currentTimeMillis())
-        if (fresh && !authenticate("Allow Jarvis model changes for five minutes")) {
-            lease.invalidate()
-            error("Cancelled; OS authentication required")
-        }
+        val action = if (entry.enabled) "Disable" else "Enable"
+        val signature = identity.signHex(Hex.encode(message), "$action ${PairingApproval.hint("${entry.provider}/${entry.model}", 60)}")
         currentCoroutineContext().ensureActive()
         check(settings.endpoint.first() == endpoint && sessions.session() == session && System.currentTimeMillis() / 1000 < approval.expires) { "Approval expired or session changed" }
         check(unlocked() && lease.accepts(ticket)) { "App locked or authorization revoked" }
-        if (fresh) check(lease.remember(context, ticket, SystemClock.elapsedRealtime(), System.currentTimeMillis()))
-        check(lease.valid(context, ticket, SystemClock.elapsedRealtime(), System.currentTimeMillis())) { "Modelautorisatie verlopen" }
-        val signed = approval.signed(identity.signHex(Hex.encode(message)))
-        check(unlocked() && lease.accepts(ticket)) { "Authorization revoked" }
+        val signed = approval.signed(signature)
         val response = (api.modelToggle(endpoint, token, signed) as? ApiResult.Success)?.value ?: error("Change not confirmed; refresh the status")
         check(response["status"]?.jsonPrimitive?.content == "active") { "Activation not confirmed" }
     }
 
-    /** Replace the owner routing document. Validates, classifies cost relaxation, requires OS
-     *  authentication (always fresh when the change can spend more) and signs Core's canonical payload. */
+    /** Replace the owner routing document. Validates, classifies cost relaxation (named in
+     *  the prompt) and signs Core's canonical payload. */
     suspend fun setRouting(next: Routing, hash: String) = mutation.withLock {
         check(unlocked()) { "App locked" }
         val lease = sessions.modelAuthorization
@@ -70,7 +60,6 @@ class ModelControlService(
         val session = sessions.session()
         val token = session.token ?: error("Sessie ontbreekt")
         val device = session.deviceId ?: error("Device not paired")
-        val context = Hex.encode(MessageDigest.getInstance("SHA-256").digest("${endpoint.baseUrl}|$device|$token".toByteArray()))
         val snapshot = (api.modelPolicy(endpoint, token) as? ApiResult.Success)?.value ?: error("Model policy unreachable")
         val now = System.currentTimeMillis() / 1000
         check(snapshot.routing_mutation == ROUTING_MUTATION && snapshot.routing_sha256 == hash && snapshot.device_id == device
@@ -83,22 +72,11 @@ class ModelControlService(
         val message = approval.message()
         // The broker reads one 16 KiB frame; refuse before prompting.
         check(approval.signed("00".repeat(64)).let { """{"request":$it}""" }.toByteArray(Charsets.UTF_8).size + 1 < BROKER_FRAME_BYTES) { "Routing is too large to send" }
-        // A cost-relaxing change is single-use: always a fresh prompt, never a window.
-        val always = relaxed.any()
-        val fresh = always || !lease.valid(context, ticket, SystemClock.elapsedRealtime(), System.currentTimeMillis())
-        if (fresh && !authenticate(relaxed.prompt())) {
-            lease.invalidate()
-            error("Cancelled; OS authentication required")
-        }
+        val signature = identity.signHex(Hex.encode(message), relaxed.prompt())
         currentCoroutineContext().ensureActive()
         check(settings.endpoint.first() == endpoint && sessions.session() == session && System.currentTimeMillis() / 1000 < approval.expires) { "Approval expired or session changed" }
         check(unlocked() && lease.accepts(ticket)) { "App locked or authorization revoked" }
-        if (!always) {
-            if (fresh) check(lease.remember(context, ticket, SystemClock.elapsedRealtime(), System.currentTimeMillis()))
-            check(lease.valid(context, ticket, SystemClock.elapsedRealtime(), System.currentTimeMillis())) { "Model authorization expired; try again" }
-        }
-        val signed = approval.signed(identity.signHex(Hex.encode(message)))
-        check(unlocked() && lease.accepts(ticket)) { "Authorization revoked" }
+        val signed = approval.signed(signature)
         // Same fixed privileged route as model toggles.
         val response = when (val result = api.modelToggle(endpoint, token, signed)) {
             is ApiResult.Success -> result.value
