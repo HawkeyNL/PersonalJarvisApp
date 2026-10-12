@@ -84,6 +84,25 @@ test("no exposed command signs a caller-supplied login challenge", async () => {
   assert.doesNotMatch(auth, /\/v1\/auth\/challenge|auth_sign_login|auth_complete_login/);
 });
 
+test("approvals are signed natively by id, never from webview-supplied data", async () => {
+  const native = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+  const handlers = native.match(/generate_handler!\[([\s\S]*?)\]/)?.[1];
+  assert.ok(handlers);
+  for (const command of ["auth_approve_pairing", "auth_approve_unlock", "auth_approve_agent"]) {
+    assert.match(handlers, new RegExp(`approvals::${command},`));
+  }
+  assert.deepEqual(handlers.match(/auth_sign_\w+/g), ["auth_sign_account_approval"]);
+  const approvals = await readFile(new URL("../src-tauri/src/approvals.rs", import.meta.url), "utf8");
+  const commands = approvals.match(/async fn auth_approve_\w+\([^)]*\)/g);
+  assert.equal(commands?.length, 3);
+  for (const command of commands) assert.match(command, /^async fn auth_approve_\w+\(app: AppHandle, \w+_id: String\)$/);
+  assert.match(native, /fn biometric_unlock\(allow_password: bool\)/);
+  for (const file of ["pairingApprovals.ts", "unlockApprovals.ts", "agentApprovals.ts"]) {
+    const web = await readFile(new URL(`../src/${file}`, import.meta.url), "utf8");
+    assert.doesNotMatch(web, /auth_sign_|\{ signature|\/approve\b/, file);
+  }
+});
+
 test("webview listens to the native update status event and reports session activity", async () => {
   const web = await readFile(new URL("../src/updates.ts", import.meta.url), "utf8");
   const native = await readFile(new URL("../src-tauri/src/app_updates.rs", import.meta.url), "utf8");

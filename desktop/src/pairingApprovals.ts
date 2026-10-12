@@ -1,5 +1,6 @@
-// Pending device pairing approvals. The local OS authenticates the owner before
-// the native layer signs the narrowly-scoped pairing protocol.
+// Pending device pairing approvals. Approving passes only the request id: the
+// native layer re-fetches the request, checks its key fingerprint, shows it in
+// the OS prompt, signs the pairing protocol and posts the approval.
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { currentAuthStatus } from "./auth";
@@ -48,27 +49,12 @@ async function refresh(): Promise<boolean> {
 
 export async function approvePairing(request: PairingRequest): Promise<void> {
   const status = await currentAuthStatus();
-  if (!status.authenticated || !status.device_id) throw new Error("not signed in");
+  if (!status.authenticated) throw new Error("not signed in");
   pairingError.value = null;
   try {
-    // Recompute from the exact key that is signed; never trust the list state.
-    await verifiedFingerprint(request);
-    const signature = await invoke<string>("auth_sign_pairing_approval", {
-      candidateName: request.device_name,
-      requestId: request.id, nonceHex: request.nonce,
-      candidatePublicKeyHex: request.candidate_public_key,
-      userId: await ownerId(), approverDeviceId: status.device_id, expiresAt: request.expires_at,
-    });
-    await postJsonAuth(`/v1/auth/pairing/requests/${request.id}/approve`, { signature });
+    await invoke("auth_approve_pairing", { requestId: request.id });
     pairingRequests.value = pairingRequests.value.filter((item) => item.id !== request.id);
   } catch (error) { pairingError.value = error instanceof Error ? error.message : String(error); }
-}
-
-// The API intentionally owns the user binding. Devices learn it from the
-// authenticated session endpoint rather than a candidate-supplied field.
-async function ownerId(): Promise<string> {
-  const response = await getJsonAuth<{ user_id: string }>("/v1/auth/me");
-  return response.user_id;
 }
 
 export async function denyPairing(request: PairingRequest): Promise<void> {

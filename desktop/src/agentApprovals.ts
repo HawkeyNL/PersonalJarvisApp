@@ -1,8 +1,8 @@
-// Agent actions waiting for the owner (ADR-029 4b). Approving runs natively:
-// the Rust command asks the OS to confirm it is the owner (biometrics,
-// passcode fallback), then signs the domain-separated agent-approval-v1
-// message (pending id, nonce, action hash, this device). Denying only cancels
-// and needs no signature.
+// Agent actions waiting for the owner (ADR-029 4b). Approving runs natively
+// by id: the Rust command fetches the pending action from the Home Node, asks
+// the OS to confirm it is the owner (biometrics, passcode fallback), signs the
+// agent-approval-v1 message from that server data and posts it. Denying only
+// cancels and needs no signature.
 import { invoke } from "@tauri-apps/api/core";
 import { currentAuthStatus } from "./auth";
 import { postJsonAuth } from "./api";
@@ -21,13 +21,7 @@ async function requireAuth(): Promise<void> {
 export async function approveAction(item: PendingAction): Promise<void> {
   if (!canSignApproval(item)) throw new Error("Requires newer Core");
   await requireAuth();
-  const signature = await invoke<string>("auth_sign_agent_approval", {
-    pendingId: item.pending_id,
-    action: item.action,
-    nonceHex: item.nonce,
-    actionSha256Hex: item.action_sha256,
-  });
-  await postJsonAuth(`/v1/agent/pending/${encodeURIComponent(item.pending_id)}/approve`, { signature });
+  await invoke("auth_approve_agent", { pendingId: item.pending_id });
 }
 
 export async function denyAction(item: PendingAction): Promise<void> {

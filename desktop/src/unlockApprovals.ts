@@ -1,7 +1,7 @@
-// Phone-side unlock approvals. This device (typically the phone) long-polls for
-// pending unlock requests from the user's other devices and, on approval, does a
-// local biometric check (with device-passcode fallback) and signs the request
-// nonce with its device key — the same Ed25519 key used for login.
+// Unlock approvals. This device long-polls for pending unlock requests from
+// the user's other devices. Approving passes only the request id: the native
+// layer re-fetches the request, runs the OS check (biometrics, passcode
+// fallback), signs the v1 unlock approval with the device key and posts it.
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { currentAuthStatus } from "./auth";
@@ -52,14 +52,7 @@ export async function approve(req: UnlockReq): Promise<void> {
   try {
     const status = await currentAuthStatus();
     if (!status.authenticated) throw new Error("not signed in");
-    // The native command asks for biometrics (falling back to the passcode)
-    // and then signs the v1 unlock-approval message with the device key.
-    const signature = await invoke<string>("auth_sign_unlock_approval", {
-      requestId: req.id,
-      nonceHex: req.nonce,
-      deviceName: req.device_name,
-    });
-    await postJsonAuth(`/v1/auth/unlock/${req.id}/approve`, { signature });
+    await invoke("auth_approve_unlock", { requestId: req.id });
     pending.value = pending.value.filter((r) => r.id !== req.id);
   } catch (e) {
     approvalError.value = e instanceof Error ? e.message : String(e);
