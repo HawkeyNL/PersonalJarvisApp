@@ -4,6 +4,7 @@ import android.app.Application
 import com.hawkeynl.jarvis.auth.EnrollmentService
 import com.hawkeynl.jarvis.chat.ConversationService
 import com.hawkeynl.jarvis.network.KtorJarvisApi
+import com.hawkeynl.jarvis.security.AndroidDeviceKeyVault
 import com.hawkeynl.jarvis.security.BiometricGate
 import com.hawkeynl.jarvis.security.KeystoreBackedEd25519Identity
 import com.hawkeynl.jarvis.storage.AndroidKeystoreSecureValueStore
@@ -23,7 +24,7 @@ class AppContainer(application: Application) {
     val sessions = SessionRepository(secureValues)
     val realtime = com.hawkeynl.jarvis.chat.RealtimeService(sessions)
     init { localSpeech.onPlayback = realtime::reportPlayback }
-    val identity = KeystoreBackedEd25519Identity(secureValues)
+    val identity = KeystoreBackedEd25519Identity(secureValues, AndroidDeviceKeyVault(application))
     val api = KtorJarvisApi()
     val enrollment = EnrollmentService(api, identity, sessions)
     val conversations = ConversationService(api, sessions)

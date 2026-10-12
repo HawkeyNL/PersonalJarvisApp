@@ -64,6 +64,8 @@ data class JarvisUiState(
     val authenticated: Boolean = false,
     val pairingPending: Boolean = false,
     val pairingExpiresAt: Long? = null,
+    /** Keystore invalidated the device key; onboarding offers erase and pair again. */
+    val deviceKeyLost: Boolean = false,
     /** This device's key fingerprint, shown while waiting for approval. */
     val ownFingerprint: String? = null,
     val conversations: List<ConversationSummary> = emptyList(),
@@ -186,7 +188,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 
     fun retryUnlockResult(result: BiometricResult) {
         when (result) {
-            BiometricResult.Authenticated -> {
+            is BiometricResult.Authenticated -> {
                 _state.update { it.copy(locked = false, biometricMessage = null) }
                 _state.value.endpoint?.let { endpoint ->
                     viewModelScope.launch { refreshAfterUnlock(endpoint) }
@@ -375,7 +377,8 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             }
             EnrollmentOutcome.ActivationRequired -> _state.update { it.copy(busy = false, pairingPending = false, activationRequired = true, error = null) }
             is EnrollmentOutcome.Pending -> {
-                val fingerprint = _state.value.ownFingerprint ?: runCatching {
+                // Read every time: a re-pair after a lost device key has a new key.
+                val fingerprint = runCatching {
                     PairingApproval.grouped(PairingApproval.fingerprint(container.identity.publicKeyHex()))
                 }.getOrNull()
                 _state.update {
@@ -406,6 +409,9 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             is EnrollmentOutcome.Unreachable -> enrollmentError(result.reason.message())
             is EnrollmentOutcome.Rejected -> enrollmentError(result.message ?: "Home Node refused the request (${result.status}).")
             is EnrollmentOutcome.InvalidResponse -> enrollmentError(result.message)
+            EnrollmentOutcome.DeviceKeyLost -> _state.update {
+                it.copy(busy = false, pairingPending = false, authenticated = false, deviceKeyLost = true, error = null)
+            }
         }
     }
 

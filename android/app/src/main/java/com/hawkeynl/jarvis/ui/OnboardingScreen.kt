@@ -36,6 +36,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.hawkeynl.jarvis.R
+import com.hawkeynl.jarvis.security.DeviceKeyInvalidatedException
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -92,10 +93,17 @@ internal fun OnboardingScreen(state: JarvisUiState, actions: JarvisViewModel) {
             item {
                 Panel(
                     JvIcon.PHONE, "Pair this device",
-                    if (state.pairingPending) Tone.WARN else Tone.IDLE,
-                    if (state.pairingPending) "Waiting for approval" else "Not paired",
+                    if (state.pairingPending || state.deviceKeyLost) Tone.WARN else Tone.IDLE,
+                    when {
+                        state.deviceKeyLost -> "Device key lost"
+                        state.pairingPending -> "Waiting for approval"
+                        else -> "Not paired"
+                    },
                 ) {
-                    if (state.pairingPending) {
+                    if (state.deviceKeyLost) {
+                        Text(DeviceKeyInvalidatedException().message.orEmpty(), style = exo(13.5f, color = Jv.Text2))
+                        GhostButton("Erase this device and pair again", actions::resetDevice, Modifier.fillMaxWidth(), danger = true)
+                    } else if (state.pairingPending) {
                         Text("Waiting for approval from a trusted Jarvis device.", style = exo(13.5f, color = Jv.Text2))
                         Text("Expires: ${state.pairingExpiresAt?.let(::clockTime) ?: "—"}", style = exo(12f, color = Jv.Text5))
                         state.ownFingerprint?.let { fingerprint ->

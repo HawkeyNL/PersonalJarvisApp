@@ -23,6 +23,8 @@ import com.hawkeynl.jarvis.network.PairingCreateRequest
 import com.hawkeynl.jarvis.network.PairingStatusResponse
 import com.hawkeynl.jarvis.network.PairingTicket
 import com.hawkeynl.jarvis.security.DeviceIdentity
+import com.hawkeynl.jarvis.security.DeviceKeyInvalidatedException
+import com.hawkeynl.jarvis.security.DeviceSigningException
 import com.hawkeynl.jarvis.storage.SessionRepository
 import com.hawkeynl.jarvis.testing.InMemorySecureValueStore
 import java.io.File
@@ -83,6 +85,40 @@ class EnrollmentServiceTest {
     }
 
     @Test
+    fun `lost device key keeps everything until the user erases this device`() = runTest {
+        val api = FakeApi()
+        val sessions = SessionRepository(InMemorySecureValueStore())
+        sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
+        val identity = FakeIdentity().apply { failure = DeviceKeyInvalidatedException() }
+        val service = EnrollmentService(api, identity, sessions)
+        assertEquals(EnrollmentOutcome.DeviceKeyLost, service.login(endpoint))
+        assertEquals(DEVICE_ID, sessions.session().deviceId)
+        assertEquals(0, identity.resets)
+        assertEquals(null, api.loginRequest)
+
+        // The user taps "Erase this device and pair again".
+        service.resetDevice(endpoint)
+        assertEquals(DEVICE_ID, api.deletedDevice)
+        assertEquals(null, sessions.session().deviceId)
+        assertEquals(1, identity.resets)
+    }
+
+    @Test
+    fun `a temporary signing failure erases nothing`() = runTest {
+        for (failure in listOf(IllegalStateException("keystore busy"), DeviceSigningException("Unlock this phone and try again."))) {
+            val api = FakeApi()
+            val sessions = SessionRepository(InMemorySecureValueStore())
+            sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
+            val identity = FakeIdentity().apply { this.failure = failure }
+            val result = EnrollmentService(api, identity, sessions).login(endpoint)
+            assertTrue("$result", result is EnrollmentOutcome.InvalidResponse)
+            assertEquals(DEVICE_ID, sessions.session().deviceId)
+            assertEquals("fixture-session-not-a-secret", sessions.session().token)
+            assertEquals(0, identity.resets)
+        }
+    }
+
+    @Test
     fun `first account reports activation rather than creating pairing`() = runTest {
         val api = FakeApi().apply { account = AccountStatus(1, false, true) }
         val service = EnrollmentService(api, FakeIdentity(), SessionRepository(InMemorySecureValueStore()))
@@ -117,12 +153,16 @@ private const val CHALLENGE_ID = "00112233-4455-6677-8899-aabbccddeeff"
 
 private class FakeIdentity : DeviceIdentity {
     var signedHex: String? = null
+    var failure: Exception? = null
+    var resets = 0
     override fun publicKeyHex() = "ab".repeat(32)
-    override fun signHex(messageHex: String): String {
+    override suspend fun enrollmentKeyHex(reason: String) = publicKeyHex()
+    override suspend fun signHex(messageHex: String, reason: String): String {
+        failure?.let { throw it }
         signedHex = messageHex
         return "cd".repeat(64)
     }
-    override fun reset() = Unit
+    override suspend fun reset() { resets++ }
 }
 
 private class FakeApi : JarvisApi {
@@ -149,7 +189,11 @@ private class FakeApi : JarvisApi {
         return ApiResult.Success(LoginResponse("token", 900))
     }
     override suspend fun logout(endpoint: HomeNodeEndpoint, token: String) = ApiResult.Success(Unit)
-    override suspend fun deleteDevice(endpoint: HomeNodeEndpoint, token: String, deviceId: String) = ApiResult.Success(Unit)
+    var deletedDevice: String? = null
+    override suspend fun deleteDevice(endpoint: HomeNodeEndpoint, token: String, deviceId: String): ApiResult<Unit> {
+        deletedDevice = deviceId
+        return ApiResult.Success(Unit)
+    }
     override suspend fun conversations(endpoint: HomeNodeEndpoint, token: String): ApiResult<ConversationListResponse> = error("unused")
     override suspend fun conversation(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<ConversationDetailResponse> = error("unused")
     override suspend fun chat(endpoint: HomeNodeEndpoint, token: String, request: ChatRequest): ApiResult<ChatResponse> = error("unused")
