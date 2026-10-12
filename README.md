@@ -104,6 +104,10 @@ changes cannot extend the monotonic limit; suspend beyond five minutes expires i
 No device password or private signing key is sent
 to the Home Node or exposed to the desktop frontend.
 
+On iOS there is no window: every model or routing change, like sign-in and
+pairing approval, needs its own Face ID / Touch ID prompt (no passcode), and
+the device key itself can only be read after that prompt.
+
 Changing Home Node/session, cancelling authentication, an expired approval,
 or a changed policy requires a new confirmation. The UI refreshes authoritative
 state after a change; it does not optimistically claim success. Older Core
