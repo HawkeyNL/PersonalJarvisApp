@@ -234,6 +234,20 @@ final class DeviceKeyProtectionTests: XCTestCase {
         XCTAssertNil(try store.read(account: seedV1))
     }
 
+    func testLegacySeedReplacesAnInterruptedProtectedWrite() async throws {
+        let store = FixtureSecureStorage()
+        let legacy = Curve25519.Signing.PrivateKey()
+        try store.saveProtected(Curve25519.Signing.PrivateKey().rawRepresentation, account: seedV2)
+        try store.save(legacy.rawRepresentation, account: seedV1)
+        let identity = DeviceIdentityStore(keychain: store)
+        try await identity.migrateIfNeeded()
+        XCTAssertNil(try store.read(account: seedV1))
+        let publicKey = try await identity.existingPublicKeyHex()
+        XCTAssertEqual(publicKey, legacy.publicKey.rawRepresentation.hexEncodedString())
+        let context = try XCTUnwrap(store.prompt(.unlocked).context)
+        _ = try await identity.signLogin(challengeId: UUID(), deviceId: UUID(), nonceHex: nonce, context: context)
+    }
+
     func testDamagedLegacySeedIsKeptWhenNothingReplacesIt() async throws {
         let store = FixtureSecureStorage()
         try store.save(Data([1, 2, 3]), account: seedV1)
@@ -249,7 +263,7 @@ final class DeviceKeyProtectionTests: XCTestCase {
         do {
             _ = try await identity.signLogin(challengeId: UUID(), deviceId: UUID(), nonceHex: nonce, context: LAContext())
             XCTFail("An unevaluated context must not unlock the device key")
-        } catch { }
+        } catch DeviceIdentityError.keyLocked { }
         let context = try XCTUnwrap(store.prompt(.unlocked).context)
         _ = try await identity.signLogin(challengeId: UUID(), deviceId: UUID(), nonceHex: nonce, context: context)
     }

@@ -10,6 +10,7 @@ enum LocalUnlockResult: Equatable {
 
 struct BiometricLock {
     static let biometricsRequired = "Biometrics required. Set up Face ID or Touch ID to sign in, change models or decide pairing requests."
+    static let biometricsLocked = "Face ID or Touch ID is locked after failed attempts. Unlock the iPhone with its passcode, then try again."
 
     /// Whether Face ID / Touch ID is enrolled and usable right now.
     static var biometricsAvailable: Bool {
@@ -26,7 +27,8 @@ struct BiometricLock {
         context.localizedCancelTitle = "Cancel"
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
-            return (.unavailable(Self.biometricsRequired), nil)
+            let locked = error?.code == LAError.Code.biometryLockout.rawValue
+            return (.unavailable(locked ? Self.biometricsLocked : Self.biometricsRequired), nil)
         }
         do {
             return try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason)
@@ -34,7 +36,8 @@ struct BiometricLock {
         } catch let error as LAError {
             switch error.code {
             case .appCancel, .systemCancel, .userCancel, .userFallback: return (.cancelled, nil)
-            case .biometryNotAvailable, .biometryNotEnrolled, .biometryLockout: return (.unavailable(Self.biometricsRequired), nil)
+            case .biometryLockout: return (.unavailable(Self.biometricsLocked), nil)
+            case .biometryNotAvailable, .biometryNotEnrolled: return (.unavailable(Self.biometricsRequired), nil)
             default: return (.denied, nil)
             }
         } catch {
