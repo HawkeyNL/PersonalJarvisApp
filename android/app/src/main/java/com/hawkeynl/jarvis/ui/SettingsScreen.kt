@@ -113,7 +113,7 @@ private fun PasswordChange(actions: JarvisViewModel) {
     }
     @Composable
     fun field(label: String, value: String, onChange: (String) -> Unit) = OutlinedTextField(
-        value = value, onValueChange = { onChange(it.take(1024)) }, modifier = Modifier.fillMaxWidth(),
+        value = value, onValueChange = onChange, modifier = Modifier.fillMaxWidth(),
         label = { Text(label) }, singleLine = true, visualTransformation = PasswordVisualTransformation(),
         keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
     )

@@ -111,7 +111,7 @@ class AccountApprovalService(
         val body = JsonObject(mapOf("password" to JsonPrimitive(new), "current_password" to JsonPrimitive(current)))
         val approval = request(
             signedIn.origin, signedIn.token, "/v1/auth/account/password/requests", body,
-            unauthorized = "The current password was not accepted.",
+            unauthorized = "The current password was not accepted, or the session expired.",
         )
         // Sign only the request Core just issued for this account's own password.
         approval.requireFor(AccountApproval.PASSWORD_SET, signedIn.user, signedIn.device, signedIn.user, now())
@@ -175,6 +175,8 @@ class AccountApprovalService(
             is ApiResult.Success -> check(
                 runCatching { result.value.jsonObject["status"]?.jsonPrimitive?.content }.getOrNull() == "completed",
             ) { "Core did not confirm the change." }
+            // The signed approval may have reached Core before the connection failed.
+            is ApiResult.Unreachable -> error("Home Node unreachable; the outcome is unknown. Refresh, or sign in again if asked.")
             else -> error(refusal(result))
         }
     }

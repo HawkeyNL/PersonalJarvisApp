@@ -141,7 +141,7 @@ class AccountApprovalTest {
         assertTrue(short.paths.isEmpty())
         val wrong = Fixture(approvalJson(target = USER_ID, action = AccountApproval.PASSWORD_SET), revokeStatus = HttpStatusCode.Unauthorized)
         assertEquals(
-            "The current password was not accepted.",
+            "The current password was not accepted, or the session expired.",
             runCatching { wrong.service.changePassword(OLD_PASSWORD, NEW_PASSWORD) }.exceptionOrNull()?.message,
         )
         // A challenge for another target or action is never signed.

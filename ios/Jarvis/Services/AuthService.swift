@@ -371,13 +371,14 @@ actor AuthService {
                                    token: signedIn.token, expectedBinding: signedIn.binding)
             }
         } catch JarvisAPIError.rejected(let status, _) where status == 401 {
-            throw JarvisAPIError.rejected(status: 401, message: "The current password was not accepted.")
+            throw JarvisAPIError.rejected(status: 401, message: "The current password was not accepted, or the session expired.")
         }
         // Sign only the request Core just issued for this account's own password.
         try approval.require(action: AccountApproval.passwordSet, user: signedIn.user, device: signedIn.device,
                              target: signedIn.user, now: Int64(Date().timeIntervalSince1970))
         try await signAndApprove(approval, signedIn: signedIn, reason: "Change the Jarvis account password")
-        try await credentials.clearSession()
+        // Core already ended every session; a local clearing failure must not report "not changed".
+        try? await credentials.clearSession()
     } }
 
     /// Core's account password rules: at least 15 characters, at most 1024 UTF-8 bytes, no controls.
@@ -424,9 +425,15 @@ actor AuthService {
         }
         try Task.checkCancellation()
         let signature = try await identity.signAccountApproval(approval, context: context)
-        let result: StatusResponse = try await accountDecision {
-            try await api.post("/v1/auth/account/requests/\(approval.request_id.uuidString)/approve",
-                               body: ["signature": signature], token: signedIn.token, expectedBinding: signedIn.binding)
+        let result: StatusResponse
+        do {
+            result = try await accountDecision {
+                try await api.post("/v1/auth/account/requests/\(approval.request_id.uuidString)/approve",
+                                   body: ["signature": signature], token: signedIn.token, expectedBinding: signedIn.binding)
+            }
+        } catch JarvisAPIError.rejected(let status, _) where status == 503 {
+            // The signed approval may have reached Core before the connection failed.
+            throw JarvisAPIError.rejected(status: 503, message: "Home Node unreachable; the outcome is unknown. Refresh, or sign in again if asked.")
         }
         guard result.status == "completed" else { throw JarvisAPIError.rejected(status: 503, message: "Core did not confirm the change.") }
     }

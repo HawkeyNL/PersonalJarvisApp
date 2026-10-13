@@ -131,9 +131,9 @@ private struct PasswordChangeView: View {
     var body: some View {
         Form {
             Section {
-                SecureField("Current password", text: $current)
-                SecureField("New password (at least 15 characters)", text: $new)
-                SecureField("Repeat new password", text: $repeated)
+                SecureField("Current password", text: $current).textContentType(.password)
+                SecureField("New password (at least 15 characters)", text: $new).textContentType(.newPassword)
+                SecureField("Repeat new password", text: $repeated).textContentType(.newPassword)
             } footer: {
                 Text("Confirmed with Face ID or Touch ID. Every device is signed out after the change; sign in again with the new password.")
             }

@@ -1375,7 +1375,7 @@ final class AccountApprovalTests: XCTestCase {
         XCTAssertTrue(AccountDecisionProtocol.calls().isEmpty)
         let (wrong, _, _, _) = try await fixture(revoke: nil)
         do { try await wrong.changePassword(current: "fixture old password only", new: "fixture new password only"); XCTFail("Must refuse") }
-        catch { XCTAssertEqual((error as? LocalizedError)?.errorDescription, "The current password was not accepted.") }
+        catch { XCTAssertEqual((error as? LocalizedError)?.errorDescription, "The current password was not accepted, or the session expired.") }
         for swapped in [approval(action: AccountApproval.passwordSet), approval(target: AccountDecisionProtocol.user)] {
             let (auth, credentials, _, prompts) = try await fixture(revoke: AccountDecisionProtocol.json(swapped))
             do { try await auth.changePassword(current: "fixture old password only", new: "fixture new password only"); XCTFail("Must refuse") } catch { }

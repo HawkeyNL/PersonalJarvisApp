@@ -23,6 +23,7 @@ import com.hawkeynl.jarvis.update.AndroidUpdateDownload
 import com.hawkeynl.jarvis.update.InstallerHandoff
 import java.time.Instant
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -305,7 +306,8 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 
     /** Changes the account password (one strong-biometric prompt). Core then ends every
      *  session, so this phone signs in again with the new password. Returns why it failed. */
-    suspend fun changePassword(current: String, new: String): String? {
+    // Runs in viewModelScope: leaving Settings must not cut the flow off after Core changed it.
+    suspend fun changePassword(current: String, new: String): String? = viewModelScope.async {
         val failure = try {
             container.accountApprovals.changePassword(current, new)
             null
@@ -314,7 +316,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         } catch (error: Exception) {
             error
         }
-        if (failure != null) return PairingApproval.displayName(failure.message ?: "The password was not changed.", 160)
+        if (failure != null) return@async PairingApproval.displayName(failure.message ?: "The password was not changed.", 160)
         container.sessions.modelAuthorization.invalidate()
         pending.clear()
         container.realtime.stop(); speech.stop()
@@ -322,8 +324,8 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(),
                 error = "Password changed. Sign in with the new password.")
         }
-        return null
-    }
+        null
+    }.await()
 
     fun lockForBackground() {
         container.sessions.modelAuthorization.invalidate()
