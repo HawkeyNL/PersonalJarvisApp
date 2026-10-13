@@ -112,7 +112,7 @@ private struct SecuritySettingsView: View {
             Button("Erase locally only", role: .destructive) { Task { await model.eraseLocally() } }
             Button("Keep this device", role: .cancel) { model.localEraseOffer = nil }
         } message: {
-            Text(verbatim: "\(model.localEraseOffer ?? "")\n\nThis iPhone stays active on your Home Node until you revoke it from another device. Erase locally only if you will do that.")
+            Text(verbatim: "\(model.localEraseOffer ?? "")\n\nThis device may stay active on your Home Node until you revoke it from another device. Erase locally only if you will do that.")
         }
     }
 }

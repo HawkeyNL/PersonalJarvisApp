@@ -95,6 +95,8 @@ class PairingApprovalTest {
         assertEquals(40, long.codePointCount(0, long.length))
         assertEquals("a".repeat(20) + "…" + "z".repeat(19), long)
         assertEquals("x".repeat(40), name("x".repeat(40)))
+        // Kotlin strings, unlike Rust and Swift ones, can hold a lone surrogate.
+        assertEquals("AB", name("A\uD800B\uDC00"))
     }
 
     @Test fun approverPlatformsCarryAWarning() {

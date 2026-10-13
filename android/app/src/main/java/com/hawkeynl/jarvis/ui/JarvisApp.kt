@@ -63,7 +63,7 @@ private fun LocalEraseDialog(reason: String, onErase: () -> Unit, onKeep: () -> 
         title = { Text("Erase locally only?") },
         text = {
             Text(
-                "$reason\n\nThis phone stays active on your Home Node until you revoke it from another device. " +
+                "$reason\n\nThis phone may stay active on your Home Node until you revoke it from another device. " +
                     "Erase locally only if you will do that.",
             )
         },

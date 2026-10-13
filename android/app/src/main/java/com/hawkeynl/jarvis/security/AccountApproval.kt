@@ -60,7 +60,9 @@ data class AccountApproval(
 }
 
 /** Device-signed account actions. Core lets only the requesting device approve its own
- *  request: ask Core, check every bound field, one strong-biometric prompt, sign, approve. */
+ *  request: ask Core, check every bound field, one strong-biometric prompt, sign, approve.
+ *  Unlike the pairing and model services there is no app-unlocked check: unlinking is also
+ *  offered on the lock screen, and the biometric prompt gates the signature itself. */
 class AccountApprovalService(
     private val api: JarvisApi,
     private val sessions: SessionRepository,

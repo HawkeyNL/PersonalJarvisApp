@@ -16,6 +16,18 @@ enum DeviceLoginError: LocalizedError, Equatable {
     }
 }
 
+/// An approval stopped on this device before anything was signed or sent.
+enum ApprovalInterrupted: LocalizedError, Equatable {
+    case busy, cancelled
+
+    var errorDescription: String? {
+        switch self {
+        case .busy: "Another approval is in progress."
+        case .cancelled: "Cancelled; Face ID or Touch ID is required."
+        }
+    }
+}
+
 enum AuthServiceOutcome: Equatable {
     case needsEnrollment
     case needsPassword
@@ -184,7 +196,7 @@ actor AuthService {
     /// One approval (fetch, prompt, sign, send) at a time across the app. A second one
     /// is refused rather than queued, so prompts never stack up behind each other.
     private func exclusive<T>(_ body: () async throws -> T) async throws -> T {
-        guard !approvalRunning else { throw JarvisAPIError.rejected(status: 409, message: "Another approval is in progress.") }
+        guard !approvalRunning else { throw ApprovalInterrupted.busy }
         approvalRunning = true
         defer { approvalRunning = false }
         return try await body()
@@ -201,7 +213,7 @@ actor AuthService {
         let (result, context) = await authenticateBiometric(reason)
         if case let .unavailable(message) = result { throw JarvisAPIError.rejected(status: 403, message: message) }
         guard result == .unlocked, let context else {
-            throw JarvisAPIError.rejected(status: 403, message: "Cancelled; Face ID or Touch ID is required.")
+            throw ApprovalInterrupted.cancelled
         }
         return context
     }

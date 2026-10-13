@@ -54,7 +54,11 @@ object PairingApproval {
         var marks = 0
         val kept = value.codePoints().toArray().asSequence()
             .map { if (Character.isSpaceChar(it) || it in 9..13 || it == 0x85) ' '.code else it }
-            .filter { Character.getType(it) != Character.CONTROL.toInt() && !isHidden(it) && it != '"'.code }
+            // Lone surrogates cannot occur in Rust or Swift strings; drop them like controls.
+            .filter {
+                val type = Character.getType(it)
+                type != Character.CONTROL.toInt() && type != Character.SURROGATE.toInt() && !isHidden(it) && it != '"'.code
+            }
             .filter {
                 marks = if (isCombining(it)) marks + 1 else 0
                 marks <= 2

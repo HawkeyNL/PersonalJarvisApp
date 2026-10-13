@@ -21,13 +21,15 @@ interface DeviceIdentity {
     suspend fun reset()
 }
 
+class ApprovalBusyException : IllegalStateException("Another approval is in progress.")
+
 /** One approval (fetch, prompt, sign, send) at a time across the whole app. A second
  *  one is refused rather than queued, so prompts never stack up behind each other. */
 class ApprovalLock {
     private val mutex = Mutex()
 
     suspend fun <T> exclusive(block: suspend () -> T): T {
-        check(mutex.tryLock()) { "Another approval is in progress." }
+        if (!mutex.tryLock()) throw ApprovalBusyException()
         try {
             return block()
         } finally {

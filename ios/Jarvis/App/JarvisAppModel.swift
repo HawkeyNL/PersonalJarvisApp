@@ -400,8 +400,15 @@ final class JarvisAppModel: ObservableObject {
     /// does not confirm, nothing is erased: `localEraseOffer` asks the user instead.
     func resetDevice() async {
         do { try await auth.unlinkDevice() }
-        catch {
-            localEraseOffer = safeMessage(error)
+        catch let interrupted as ApprovalInterrupted {
+            // The user stopped, or another prompt is open: nothing to offer.
+            notice = safeMessage(interrupted)
+            return
+        } catch is CancellationError {
+            return
+        } catch {
+            // Server text is shown sanitised and bounded.
+            localEraseOffer = PairingFingerprint.displayName(safeMessage(error), max: 160)
             return
         }
         await eraseLocally()
