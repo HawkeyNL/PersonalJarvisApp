@@ -117,6 +117,42 @@ class AccountApprovalTest {
         }
     }
 
+    @Test fun passwordChangeSignsCoresPasswordChallengeAndClearsTheSession() = runTest {
+        val fixture = Fixture(approvalJson(target = USER_ID, action = AccountApproval.PASSWORD_SET))
+        fixture.service.changePassword(OLD_PASSWORD, NEW_PASSWORD)
+        assertEquals("/v1/auth/account/password/requests", fixture.paths[1])
+        val request = Json.parseToJsonElement(fixture.bodies[1]).jsonObject
+        assertEquals(NEW_PASSWORD, request["password"]!!.jsonPrimitive.content)
+        assertEquals(OLD_PASSWORD, request["current_password"]!!.jsonPrimitive.content)
+        val signature = Json.parseToJsonElement(fixture.bodies.last()).jsonObject["signature"]!!.jsonPrimitive.content
+        val message = approval(target = USER_ID, action = AccountApproval.PASSWORD_SET).message()
+        val verifier = Ed25519Signer().apply {
+            init(false, Ed25519PublicKeyParameters(Hex.decode(fixture.publicKey), 0))
+            update(message, 0, message.size)
+        }
+        assertTrue(verifier.verifySignature(Hex.decode(signature)))
+        assertEquals(null, fixture.sessions.session().token)
+        assertEquals(DEVICE_ID, fixture.sessions.session().deviceId)
+    }
+
+    @Test fun passwordChangeRefusesBeforeSigning() = runTest {
+        val short = Fixture(approvalJson(target = USER_ID, action = AccountApproval.PASSWORD_SET))
+        assertTrue(runCatching { short.service.changePassword(OLD_PASSWORD, "too short") }.isFailure)
+        assertTrue(short.paths.isEmpty())
+        val wrong = Fixture(approvalJson(target = USER_ID, action = AccountApproval.PASSWORD_SET), revokeStatus = HttpStatusCode.Unauthorized)
+        assertEquals(
+            "The current password was not accepted.",
+            runCatching { wrong.service.changePassword(OLD_PASSWORD, NEW_PASSWORD) }.exceptionOrNull()?.message,
+        )
+        // A challenge for another target or action is never signed.
+        for (json in listOf(approvalJson(target = DEVICE_ID, action = AccountApproval.PASSWORD_SET), approvalJson(target = USER_ID))) {
+            val swapped = Fixture(json)
+            assertTrue(runCatching { swapped.service.changePassword(OLD_PASSWORD, NEW_PASSWORD) }.isFailure)
+            assertEquals(0, swapped.prompts)
+            assertEquals("fixture-session-not-a-secret", swapped.sessions.session().token)
+        }
+    }
+
     @Test fun aSecondApprovalIsRefusedWhileOneIsRunning() = runTest {
         val lock = ApprovalLock()
         val inside = CompletableDeferred<Unit>()
@@ -156,7 +192,7 @@ class AccountApprovalTest {
                 bodies += request.body.toByteArray().decodeToString()
                 when {
                     path == "/v1/auth/me" -> respond("""{"user_id":"$USER_ID","device_id":"$DEVICE_ID"}""", HttpStatusCode.OK, JSON)
-                    path.endsWith("/revoke-request") -> respond(revokeBody, revokeStatus, JSON)
+                    path.endsWith("/revoke-request") || path == "/v1/auth/account/password/requests" -> respond(revokeBody, revokeStatus, JSON)
                     path == "/v1/devices" -> respond(devicesBody, HttpStatusCode.OK, JSON)
                     else -> respond(approveBody, HttpStatusCode.OK, JSON)
                 }
@@ -173,6 +209,8 @@ class AccountApprovalTest {
         const val USER_ID = "03030303-0303-0303-0303-030303030303"
         const val DEVICE_ID = "04040404-0404-0404-0404-040404040404"
         const val OTHER_ID = "05050505-0505-0505-0505-050505050505"
+        const val OLD_PASSWORD = "fixture old password only"
+        const val NEW_PASSWORD = "fixture new password only"
         const val THIRD_ID = "06060606-0606-0606-0606-060606060606"
         const val UNKNOWN_ID = "07070707-0707-0707-0707-070707070707"
         const val NONCE = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"

@@ -1355,6 +1355,37 @@ final class AccountApprovalTests: XCTestCase {
         }
     }
 
+    func testPasswordChangeSignsCoresPasswordChallengeAndClearsTheSession() async throws {
+        let challenge = approval(action: AccountApproval.passwordSet, target: AccountDecisionProtocol.user)
+        let (auth, credentials, publicKey, _) = try await fixture(revoke: AccountDecisionProtocol.json(challenge))
+        try await auth.changePassword(current: "fixture old password only", new: "fixture new password only")
+        let calls = AccountDecisionProtocol.calls()
+        XCTAssertEqual(calls.dropFirst().first?.path, "/v1/auth/account/password/requests")
+        XCTAssertEqual(calls.dropFirst().first?.body, ["password": "fixture new password only", "current_password": "fixture old password only"])
+        let signature = try XCTUnwrap(calls.last?.body["signature"].flatMap { Data(hexEncoded: $0) })
+        let verifier = try Curve25519.Signing.PublicKey(rawRepresentation: XCTUnwrap(Data(hexEncoded: publicKey)))
+        XCTAssertTrue(verifier.isValidSignature(signature, for: try challenge.message()))
+        let session = try await credentials.session()
+        XCTAssertNil(session)
+    }
+
+    func testPasswordChangeRefusesBeforeSigning() async throws {
+        let (short, _, _, _) = try await fixture(revoke: nil)
+        do { try await short.changePassword(current: "fixture old password only", new: "too short"); XCTFail("Must refuse") } catch { }
+        XCTAssertTrue(AccountDecisionProtocol.calls().isEmpty)
+        let (wrong, _, _, _) = try await fixture(revoke: nil)
+        do { try await wrong.changePassword(current: "fixture old password only", new: "fixture new password only"); XCTFail("Must refuse") }
+        catch { XCTAssertEqual((error as? LocalizedError)?.errorDescription, "The current password was not accepted.") }
+        for swapped in [approval(action: AccountApproval.passwordSet), approval(target: AccountDecisionProtocol.user)] {
+            let (auth, credentials, _, prompts) = try await fixture(revoke: AccountDecisionProtocol.json(swapped))
+            do { try await auth.changePassword(current: "fixture old password only", new: "fixture new password only"); XCTFail("Must refuse") } catch { }
+            let count = await prompts.count
+            XCTAssertEqual(count, 0)
+            let session = try await credentials.session()
+            XCTAssertNotNil(session)
+        }
+    }
+
     func testASecondApprovalIsRefusedWhileOneIsPrompting() async throws {
         let gate = PromptGate()
         let (auth, _, _, _) = try await fixture(revoke: AccountDecisionProtocol.json(approval()), prompt: { await gate.wait() })
@@ -1438,7 +1469,7 @@ private final class AccountDecisionProtocol: URLProtocol {
             respond(200, #"{"user_id":"\#(Self.user)","device_id":"\#(Self.device)"}"#)
         } else if path == "/v1/devices" {
             respond(200, Self.lock.withLock { Self.devices })
-        } else if path.hasSuffix("/revoke-request") {
+        } else if path.hasSuffix("/revoke-request") || path == "/v1/auth/account/password/requests" {
             // No configured answer: Core refuses.
             if let revoke = Self.lock.withLock({ Self.revoke }) { respond(200, revoke) } else { respond(401, #"{"error":"unauthorized"}"#) }
         } else {

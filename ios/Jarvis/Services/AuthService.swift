@@ -353,6 +353,39 @@ actor AuthService {
             + "(\(PairingFingerprint.displayName(target.platform, max: 16)))")
     } }
 
+    /// Changes the account password with the current one. Core binds the new verifier to
+    /// this device's signed approval and then ends every session, so this session is
+    /// cleared here and the user signs in again with the new password.
+    func changePassword(current: String, new: String) async throws { try await exclusive {
+        guard Self.acceptablePassword(current) else {
+            throw JarvisAPIError.rejected(status: 400, message: "Enter the current account password.")
+        }
+        guard Self.acceptablePassword(new) else {
+            throw JarvisAPIError.rejected(status: 400, message: "Choose a new password of at least 15 characters and at most 1024 bytes, without control characters.")
+        }
+        let signedIn = try await signedIn()
+        let approval: AccountApproval
+        do {
+            approval = try await accountDecision {
+                try await api.post("/v1/auth/account/password/requests", body: ["password": new, "current_password": current],
+                                   token: signedIn.token, expectedBinding: signedIn.binding)
+            }
+        } catch JarvisAPIError.rejected(let status, _) where status == 401 {
+            throw JarvisAPIError.rejected(status: 401, message: "The current password was not accepted.")
+        }
+        // Sign only the request Core just issued for this account's own password.
+        try approval.require(action: AccountApproval.passwordSet, user: signedIn.user, device: signedIn.device,
+                             target: signedIn.user, now: Int64(Date().timeIntervalSince1970))
+        try await signAndApprove(approval, signedIn: signedIn, reason: "Change the Jarvis account password")
+        try await credentials.clearSession()
+    } }
+
+    /// Core's account password rules: at least 15 characters, at most 1024 UTF-8 bytes, no controls.
+    static func acceptablePassword(_ password: String) -> Bool {
+        password.unicodeScalars.count >= 15 && password.utf8.count <= 1024
+            && !password.unicodeScalars.contains { $0.properties.generalCategory == .control }
+    }
+
     private struct SignedIn { let binding: UUID; let token: String; let device: UUID; let user: UUID }
 
     /// The signed-in session, confirmed by Core to belong to this device.

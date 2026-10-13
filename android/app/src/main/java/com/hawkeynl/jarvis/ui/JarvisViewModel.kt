@@ -303,6 +303,28 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** Changes the account password (one strong-biometric prompt). Core then ends every
+     *  session, so this phone signs in again with the new password. Returns why it failed. */
+    suspend fun changePassword(current: String, new: String): String? {
+        val failure = try {
+            container.accountApprovals.changePassword(current, new)
+            null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            error
+        }
+        if (failure != null) return PairingApproval.displayName(failure.message ?: "The password was not changed.", 160)
+        container.sessions.modelAuthorization.invalidate()
+        pending.clear()
+        container.realtime.stop(); speech.stop()
+        _state.update {
+            it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(),
+                error = "Password changed. Sign in with the new password.")
+        }
+        return null
+    }
+
     fun lockForBackground() {
         container.sessions.modelAuthorization.invalidate()
         container.realtime.stop(); speech.stop()
