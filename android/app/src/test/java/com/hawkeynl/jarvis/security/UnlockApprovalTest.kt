@@ -75,7 +75,8 @@ class UnlockApprovalTest {
         private val store = InMemorySecureValueStore()
         private val vault = FakeDeviceKeyVault()
         private val identity = KeystoreBackedEd25519Identity(store, vault).apply {
-            prompt = { text, cipher -> prompts++; reason = text; cipher.takeIf { accept }?.also(vault::authorise) }
+            // [accept] only drives the deny prompt; the key itself is always created.
+            prompt = { text, cipher -> prompts++; reason = text; cipher.also(vault::authorise) }
         }
         val publicKey: String = kotlinx.coroutines.runBlocking { identity.enrollmentKeyHex("fixture") }.also { prompts = 0; reason = null }
         private val sessions = SessionRepository(store).apply { saveLogin(DEVICE_ID, "fixture-session-not-a-secret", Long.MAX_VALUE) }
