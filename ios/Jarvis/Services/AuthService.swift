@@ -345,7 +345,8 @@ actor AuthService {
         let list: DeviceListResponse = try await accountDecision {
             try await api.get("/v1/devices", token: signedIn.token, expectedBinding: signedIn.binding)
         }
-        guard let target = list.devices.first(where: { UUID(uuidString: $0.id) == id && $0.status == "active" }) else {
+        let matches = list.devices.filter { UUID(uuidString: $0.id) == id && $0.status == "active" }
+        guard matches.count == 1, let target = matches.first else {
             throw JarvisAPIError.rejected(status: 404, message: "Core no longer lists this device as active.")
         }
         try await revoke(signedIn, target: id, reason: "Revoke \"\(PairingFingerprint.displayName(target.name, max: 40))\" "

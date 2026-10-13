@@ -416,7 +416,7 @@ final class JarvisAppModel: ObservableObject {
 
     /// Revokes another device of this account (one Face ID / Touch ID prompt).
     func revokeDevice(_ id: UUID) async throws {
-        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.rejected(status: 423, message: "Unlock Jarvis first.") }
         try await auth.revokeDevice(id)
     }
 

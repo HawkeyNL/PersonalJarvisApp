@@ -725,13 +725,15 @@ struct ContextPage: View {
                                                time: device.created_at.map { "linked \(relativeTime(Date(timeIntervalSince1970: $0), now: Date()))" },
                                                tone: device.status == "active" ? .ok : .idle, toneLabel: device.status)
                         }, emptyText: "No devices linked.")
-                        let others = list.filter { $0.status == "active" && $0.id.lowercased() != thisDevice }
+                        // Nothing is offered until this device's own id is known.
+                        let others = thisDevice == nil ? [] : list.filter { $0.status == "active" && $0.id.lowercased() != thisDevice }
                         if !others.isEmpty {
                             Eyebrow(text: "Revoke a device")
                             ForEach(others) { device in
                                 Button(role: .destructive) { confirming = device } label: {
-                                    Label(revoking == device.id ? "Revoking…" : "Revoke \(PairingFingerprint.displayName(device.name, max: 40))",
-                                          systemImage: "xmark.circle")
+                                    Label {
+                                        Text(verbatim: revoking == device.id ? "Revoking…" : "Revoke \(PairingFingerprint.displayName(device.name, max: 40))")
+                                    } icon: { Image(systemName: "xmark.circle") }
                                         .font(JarvisFont.body(14, 500))
                                 }
                                 .disabled(revoking != nil)
@@ -762,7 +764,9 @@ struct ContextPage: View {
         revoking = device.id
         revokeError = nil
         do { try await model.revokeDevice(id) }
-        catch { revokeError = "Not revoked: " + ((error as? LocalizedError)?.errorDescription ?? "Core did not confirm.") }
+        catch {
+            revokeError = "Not revoked: " + PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "Core did not confirm.", max: 160)
+        }
         revoking = nil
         await load()
     }

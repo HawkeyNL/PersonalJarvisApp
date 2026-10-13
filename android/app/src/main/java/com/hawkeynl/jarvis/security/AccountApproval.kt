@@ -64,7 +64,9 @@ data class AccountApproval(
 /** Device-signed account actions. Core lets only the requesting device approve its own
  *  request: ask Core, check every bound field, one strong-biometric prompt, sign, approve.
  *  Unlike the pairing and model services there is no app-unlocked check: unlinking is also
- *  offered on the lock screen, and the biometric prompt gates the signature itself. */
+ *  offered on the lock screen, and the biometric prompt gates the signature itself. Revoking
+ *  another device is only offered on the device list, which exists only while unlocked and
+ *  whose calls are cancelled when the app locks. */
 class AccountApprovalService(
     private val api: JarvisApi,
     private val sessions: SessionRepository,
@@ -88,8 +90,9 @@ class AccountApprovalService(
         check(!id.equals(signedIn.device, ignoreCase = true)) { "Use \"Erase this device\" to remove this phone." }
         val list = when (val result = api.getAuthorized(signedIn.origin, signedIn.token, "/v1/devices")) {
             is ApiResult.Success -> runCatching { json.decodeFromJsonElement(DevicesResponse.serializer(), result.value) }.getOrNull()
-            else -> null
-        } ?: error("Could not read the device list; try again.")
+                ?: error("Core returned an invalid device list.")
+            else -> error(refusal(result))
+        }
         val target = list.devices.singleOrNull { it.id.equals(id, ignoreCase = true) && it.status == "active" }
             ?: error("Core no longer lists this device as active.")
         revoke(

@@ -73,7 +73,9 @@ fun ContextScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRe
                     "No devices linked yet.",
                     rowActions = { item ->
                         val device = devices.firstOrNull { it.id == item.id }
-                        if (device != null && device.status == "active" && !device.id.equals(data.ownDevice, ignoreCase = true)) {
+                        // Nothing is offered until this phone's own id is known.
+                        val own = data.ownDevice
+                        if (device != null && own != null && device.status == "active" && !device.id.equals(own, ignoreCase = true)) {
                             GhostButton(
                                 if (data.revoking == device.id) "Revoking…" else "Revoke", { confirming = device },
                                 enabled = data.revoking == null, danger = true,

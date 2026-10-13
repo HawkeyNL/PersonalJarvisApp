@@ -19,6 +19,7 @@ import com.hawkeynl.jarvis.network.Registry
 import com.hawkeynl.jarvis.network.ServicesResponse
 import com.hawkeynl.jarvis.network.SystemAuditResponse
 import com.hawkeynl.jarvis.network.SystemUsage
+import com.hawkeynl.jarvis.security.PairingApproval
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -150,7 +151,7 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
             } catch (error: Exception) {
                 error
             }
-            _state.update { it.copy(revoking = null, revokeError = failure?.let { "Not revoked: ${it.message ?: "Core did not confirm."}" }) }
+            _state.update { it.copy(revoking = null, revokeError = failure?.let { "Not revoked: " + PairingApproval.displayName(it.message ?: "Core did not confirm.", 160) }) }
             refreshContext()
         }
     }

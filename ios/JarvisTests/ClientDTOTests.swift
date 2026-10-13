@@ -1223,9 +1223,10 @@ final class PairingApprovalTests: XCTestCase {
 
 private actor PairingPromptCounter {
     private(set) var count = 0
+    private(set) var reasons: [String] = []
     private var result = LocalUnlockResult.unlocked
     func set(_ value: LocalUnlockResult) { result = value }
-    func authenticate() -> LocalUnlockResult { count += 1; return result }
+    func authenticate(_ reason: String = "") -> LocalUnlockResult { count += 1; reasons.append(reason); return result }
 }
 
 private final class PairingDecisionProtocol: URLProtocol {
@@ -1337,14 +1338,14 @@ final class AccountApprovalTests: XCTestCase {
     func testRevokingAnotherDeviceUsesAFreshListAndRefusesUnknownIds() async throws {
         let other = UUID(uuidString: "05050505-0505-0505-0505-050505050505")!
         let gone = UUID(uuidString: "06060606-0606-0606-0606-060606060606")!
-        let devices = #"{"devices":[{"id":"\#(other)","name":"Old laptop","platform":"linux","status":"active","created_at":1},"#
+        let devices = #"{"devices":[{"id":"\#(other)","name":"Old\u202E laptop","platform":"linux","status":"active","created_at":1},"#
             + #"{"id":"\#(gone)","name":"Gone","platform":"ios","status":"revoked","created_at":1},"#
             + #"{"id":"\#(AccountDecisionProtocol.device)","name":"Me","platform":"ios","status":"active","created_at":1}]}"#
         let (auth, _, _, prompts) = try await fixture(revoke: AccountDecisionProtocol.json(approval(target: other)), devices: devices)
         try await auth.revokeDevice(other)
-        XCTAssertEqual(AccountDecisionProtocol.calls().map { $0.path }[2], "/v1/devices/\(other.uuidString)/revoke-request")
-        let promptCount = await prompts.count
-        XCTAssertEqual(promptCount, 1)
+        XCTAssertEqual(AccountDecisionProtocol.calls().map { $0.path }.dropFirst(2).first, "/v1/devices/\(other.uuidString)/revoke-request")
+        let reasons = await prompts.reasons
+        XCTAssertEqual(reasons, ["Revoke \"Old laptop\" (linux)"])
         for id in [UUID(), gone, AccountDecisionProtocol.device] {
             let (refused, _, _, refusedPrompts) = try await fixture(revoke: AccountDecisionProtocol.json(approval(target: id)), devices: devices)
             do { try await refused.revokeDevice(id); XCTFail("Must refuse \(id)") } catch { }
@@ -1378,9 +1379,9 @@ final class AccountApprovalTests: XCTestCase {
         configuration.protocolClasses = [AccountDecisionProtocol.self]
         let api = JarvisAPIClient(baseURL: URL(string: "https://jarvis.example.com")!, session: URLSession(configuration: configuration))
         let prompts = PairingPromptCounter()
-        let auth = AuthService(api: api, identity: identity, credentials: credentials, authenticateBiometric: { _ in
+        let auth = AuthService(api: api, identity: identity, credentials: credentials, authenticateBiometric: { reason in
             await prompt?()
-            return store.prompt(await prompts.authenticate())
+            return store.prompt(await prompts.authenticate(reason))
         })
         return (auth, credentials, publicKey, prompts)
     }
