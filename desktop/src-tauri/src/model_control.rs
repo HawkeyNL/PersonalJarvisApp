@@ -238,20 +238,6 @@ const BROKER_FRAME_BYTES: usize = 16 * 1024;
 
 const USE_PHONE: &str = "Change models from your phone or the Home Node";
 
-/// Signing prompts are biometric only, never the device password. Only macOS
-/// (Touch ID) can enforce that: Windows Hello always offers its PIN and Linux
-/// has no biometric prompt, so both refuse to sign. A Mac without Touch ID,
-/// or a cancelled prompt, gets the same hint.
-fn biometric_signing(
-    macos: bool,
-    authenticate: impl FnOnce() -> Result<(), String>,
-) -> Result<(), String> {
-    if !macos {
-        return Err(USE_PHONE.into());
-    }
-    authenticate().map_err(|_| format!("Touch ID did not confirm the change. {USE_PHONE}"))
-}
-
 /// Login binding captured before any network call; revalidated before signing
 /// and before posting.
 pub(super) struct Session {
@@ -325,7 +311,7 @@ impl Session {
         let body =
             tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
                 let _prompt = model_authorization::prompt();
-                biometric_signing(cfg!(target_os = "macos"), || {
+                model_authorization::touch_id(cfg!(target_os = "macos"), USE_PHONE, || {
                     authenticate_owner(&prompt, false)
                 })?;
                 let guard = auth_storage()?;
@@ -887,20 +873,6 @@ mod tests {
         snapshot.routing = None;
         snapshot.routing_unavailable_reason = Some("routing_invalid".into());
         assert!(current_routing(&snapshot).is_none());
-    }
-
-    #[test]
-    fn signing_is_biometric_only_and_refused_off_macos() {
-        assert!(biometric_signing(true, || Ok(())).is_ok());
-        assert_eq!(
-            biometric_signing(true, || Err("biometrics not supported".into())).unwrap_err(),
-            "Touch ID did not confirm the change. Change models from your phone or the Home Node"
-        );
-        // Off macOS the OS prompt is never shown.
-        assert_eq!(
-            biometric_signing(false, || panic!("prompted")).unwrap_err(),
-            "Change models from your phone or the Home Node"
-        );
     }
 
     #[test]

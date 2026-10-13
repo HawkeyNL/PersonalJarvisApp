@@ -1,7 +1,10 @@
-// Unlock requests. This device long-polls for pending unlock requests from
-// the user's other devices. Core accepts approvals only from a phone and no
-// phone approves unlocks yet, so this app shows them and can deny them.
+// Unlock approvals. This device long-polls for pending unlock requests from
+// the user's other devices. Approving (macOS only) passes only the request id:
+// the native layer re-fetches the request, asks for Touch ID (no password
+// fallback), signs the v1 unlock approval with the device key and posts it.
+// Other desktops can only deny.
 import { ref } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { currentAuthStatus } from "./auth";
 import { getJsonAuth, postJsonAuth } from "./api";
 
@@ -14,6 +17,7 @@ export interface UnlockReq {
 }
 
 export const pending = ref<UnlockReq[]>([]);
+export const approving = ref<string | null>(null);
 export const approvalError = ref<string | null>(null);
 
 let polling = false;
@@ -40,6 +44,22 @@ async function fetchPending(wait: number): Promise<boolean> {
 
 export function refreshPending(): Promise<boolean> {
   return fetchPending(0);
+}
+
+export async function approve(req: UnlockReq): Promise<void> {
+  if (approving.value) return;
+  approvalError.value = null;
+  approving.value = req.id;
+  try {
+    const status = await currentAuthStatus();
+    if (!status.authenticated) throw new Error("not signed in");
+    await invoke("auth_approve_unlock", { requestId: req.id });
+    pending.value = pending.value.filter((r) => r.id !== req.id);
+  } catch (e) {
+    approvalError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    approving.value = null;
+  }
 }
 
 export async function deny(req: UnlockReq): Promise<void> {

@@ -1,6 +1,11 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import NavIcon from "./NavIcon.vue";
-import { pending, deny, approvalError } from "../unlockApprovals";
+import { pending, approve, deny, approving, approvalError } from "../unlockApprovals";
+import { platformCapabilities } from "../platform";
+
+// Only a Mac approves here, behind Touch ID; other desktops can deny.
+const signer = computed(() => platformCapabilities.value.supportsBiometricSigning);
 </script>
 
 <template>
@@ -15,11 +20,14 @@ import { pending, deny, approvalError } from "../unlockApprovals";
             wants to unlock
           </div>
           <div class="actions">
-            <button class="deny" @click="deny(r)">Deny</button>
+            <button class="deny" :disabled="approving === r.id" @click="deny(r)">Deny</button>
+            <button v-if="signer" class="approve" :disabled="approving === r.id" @click="approve(r)">
+              {{ approving === r.id ? "Verifying…" : "Approve" }}
+            </button>
           </div>
         </div>
         <p v-if="approvalError" class="err">{{ approvalError }}</p>
-        <p class="hint">Approving unlocks is not available yet; you can deny here.</p>
+        <p class="hint">{{ signer ? "Confirm with Touch ID on this Mac." : "Approve on a Mac with Touch ID; you can deny here." }}</p>
       </div>
     </div>
   </Transition>
@@ -84,6 +92,7 @@ import { pending, deny, approvalError } from "../unlockApprovals";
   display: flex;
   gap: 8px;
 }
+.approve,
 .deny {
   border-radius: 11px;
   padding: 9px 16px;
@@ -91,6 +100,11 @@ import { pending, deny, approvalError } from "../unlockApprovals";
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
+}
+.approve {
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  color: #04140c;
+  border: none;
 }
 .deny {
   background: transparent;
@@ -101,6 +115,11 @@ import { pending, deny, approvalError } from "../unlockApprovals";
 .deny:hover:not(:disabled) {
   border-color: #f87171;
   color: #f87171;
+}
+.approve:disabled,
+.deny:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 .err {
   color: #f87171;

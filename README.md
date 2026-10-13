@@ -102,9 +102,10 @@ device reset and Home Node/session changes cancel a change still waiting for
 its prompt. No device password or private signing key is sent to the Home Node
 or exposed to the desktop frontend.
 
-The desktop Touch ID requirement is a prompt gate in the native layer: the
-macOS device key itself is stored in the keychain without biometric access
-control. Binding the key to biometry is a follow-up.
+The desktop Touch ID requirement (for model changes and approvals) is a
+prompt gate in the native layer: the macOS device key itself is stored in the
+keychain without biometric access control. Binding the key to biometry needs a
+data-protection keychain entitlement and is a follow-up.
 
 The desktop app lock is a privacy screen and signs nothing. It unlocks with
 the local OS prompt (Touch ID, Windows Hello or the computer password); where
@@ -150,15 +151,18 @@ with the one the new device shows before approving.
 |--------|-------|---------------------------------------|
 | iOS | Context › Devices › Pairing requests, or `jarvis://approvals/pairing` | Face ID / Touch ID only (`deviceOwnerAuthenticationWithBiometrics`, no passcode fallback) for approve and deny |
 | Android | Context › Devices › Pairing requests, or `jarvis://approvals/pairing` | `BiometricPrompt` with `BIOMETRIC_STRONG` only (no device credential) for approve and deny |
-| Desktop | Overlay on every page | Shows requests and can deny them; approve from your phone |
+| macOS | Overlay on every page | Touch ID only (no computer-password fallback) in the native layer before signing |
+| Linux, Windows | Overlay on every page | Shows requests and can deny them; approve on a phone or a Mac |
 
-Core accepts pairing, unlock, account and agent approvals only from iOS and
-Android devices, so the desktop app signs none of them. Today the phones
-approve pairing requests (and model changes); unlock, account-password and
-agent approvals are not available on any client yet. A device is revoked on
-the Home Node with `sudo jarvis devices revoke <id>`. Approving signs the v1
-`pairing_approval_message` of `jarvis-client-core` (iOS and Android
-re-implement it and test against its golden vector). Without usable
+Core accepts pairing, unlock, account and agent approvals only from iOS,
+Android and macOS devices. On macOS the desktop app approves pairing, unlock
+and agent requests and signs account changes (password, device revocation),
+each after its own Touch ID prompt. Linux and Windows cannot enforce a
+biometric-only prompt, so they sign none of them: they list requests and can
+deny, and a device is revoked there with `sudo jarvis devices revoke <id>` on
+the Home Node. Approving signs the v1 `pairing_approval_message` of
+`jarvis-client-core` (desktop in Rust; iOS and Android re-implement it and
+test against the same golden vector). Without usable
 biometrics the mobile apps say "Biometrics required" and offer no approve or
 deny buttons. The mobile list refreshes every
 30 seconds while open (Core allows five list reads per source IP per minute).

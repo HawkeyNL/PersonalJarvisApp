@@ -14,6 +14,7 @@ use tauri::{AppHandle, Manager};
 
 #[cfg(desktop)]
 mod app_updates;
+mod approvals;
 mod local_speech;
 mod local_speech_engine;
 mod local_voices;
@@ -297,6 +298,55 @@ fn sign_challenge(
     Ok(hex::encode(key.sign(&message).to_bytes()))
 }
 
+/// Account administration is always explicitly owner-approved, action-bound,
+/// expiring, and signed natively after Touch ID. A password/session alone is
+/// insufficient.
+#[tauri::command]
+fn auth_sign_account_approval(
+    app: AppHandle,
+    approval: jarvis_client_core::account::AccountApproval,
+) -> Result<String, String> {
+    use jarvis_client_core::account::{account_approval_message, AccountAction};
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    if approval.expires_at <= now || approval.expires_at > now + 300 {
+        return Err("account approval expired or invalid".into());
+    }
+    let (origin, epoch) = {
+        let guard = auth_storage()?;
+        let metadata = load_metadata(&app)?;
+        if metadata.device_id.as_deref() != Some(approval.device_id.to_string().as_str()) {
+            return Err("account approver does not match this device".into());
+        }
+        (
+            metadata
+                .home_node_origin
+                .ok_or("Home Node is not configured")?,
+            *guard,
+        )
+    };
+    let reason = match approval.action {
+        AccountAction::PasswordSet if approval.target == approval.user_id => {
+            "Change Jarvis account password".to_string()
+        }
+        AccountAction::PasswordSet => return Err("invalid password approval target".into()),
+        AccountAction::DeviceRevoke => format!("Revoke Jarvis device {}", approval.target),
+    };
+    let message = account_approval_message(&approval).map_err(str::to_string)?;
+    let _prompt = model_authorization::try_prompt()?;
+    model_authorization::touch_id(cfg!(target_os = "macos"), approvals::APPROVE_ON_MAC, || {
+        authenticate_owner(&reason, false)
+    })?;
+    let guard = auth_storage()?;
+    let current = load_metadata(&app)?;
+    validate_login_binding(*guard, epoch, current.home_node_origin.as_deref(), &origin)?;
+    if approval.expires_at <= time::OffsetDateTime::now_utc().unix_timestamp() {
+        return Err("account approval expired".into());
+    }
+    Ok(hex::encode(
+        signing_key_unlocked(&app, false)?.sign(&message).to_bytes(),
+    ))
+}
+
 /// Persist the device id and session token after a successful login.
 fn save_auth(
     app: &AppHandle,
@@ -361,7 +411,7 @@ fn authenticated_api_path(path: &str) -> bool {
     {
         return true;
     }
-    [
+    let shared: &[&str] = &[
         "/v1/assistant",
         "/v1/events/capability",
         "/v1/conversations",
@@ -374,9 +424,8 @@ fn authenticated_api_path(path: &str) -> bool {
         "/v1/broker",
         "/v1/agent/pending",
         "/v1/voice",
-    ]
-    .iter()
-    .any(|prefix| {
+    ];
+    shared.iter().chain(ACCOUNT_ADMIN_ROUTES).any(|prefix| {
         route == *prefix
             || route
                 .strip_prefix(prefix)
@@ -384,14 +433,25 @@ fn authenticated_api_path(path: &str) -> bool {
     })
 }
 
-/// Routes the webview proxy may only read. Device revocation is done on the
-/// Home Node, never from this app.
+/// Account administration signs its approval in this app behind Touch ID, so
+/// only macOS proxies its routes. Elsewhere the page only lists devices; a
+/// revocation runs on the Home Node.
+const ACCOUNT_ADMIN_ROUTES: &[&str] = if cfg!(target_os = "macos") {
+    &[
+        "/v1/devices",
+        "/v1/auth/account/password/requests",
+        "/v1/auth/account/requests",
+    ]
+} else {
+    &[]
+};
+
+/// Routes the webview proxy may only read.
 fn read_only_route(path: &str) -> bool {
     path.split('?').next() == Some("/v1/devices")
 }
 
-/// Approve routes the webview proxy may never call. This app signs no
-/// approvals: they are made on a phone.
+/// Approve routes that only native code may call, with a signature it made.
 fn native_only_route(path: &str) -> bool {
     let route = path.split('?').next().unwrap_or(path);
     route.ends_with("/approve")
@@ -698,8 +758,8 @@ fn auth_logout(app: AppHandle) -> Result<(), String> {
 
 /// Fully deregister this device locally: wipe the device key (keychain + file),
 /// the device id, and the session token. The next `login()` enrolls a fresh
-/// device. The device stays active on the Home Node until
-/// `jarvis devices revoke <id>` runs there.
+/// device. Pair with a server-side revocation: a signed account approval on
+/// macOS, or `jarvis devices revoke <id>` on the Home Node.
 #[tauri::command]
 fn auth_reset(app: AppHandle) -> Result<(), String> {
     realtime::stop(&app);
@@ -807,7 +867,7 @@ fn origin_from_legacy_update_endpoint(value: &str) -> Option<String> {
 ///
 /// `allow_password` controls the device-password fallback. The app lock only
 /// hides the screen and signs nothing, so the desktop passes `true`. Signing
-/// prompts never allow it (see `model_control`).
+/// prompts never allow it (see `model_authorization::touch_id`).
 /// Returns `Ok(())` only on a successful verification; any failure,
 /// cancellation, or lack of hardware is an `Err`.
 #[tauri::command]
@@ -815,8 +875,8 @@ fn biometric_unlock(allow_password: bool) -> Result<(), String> {
     authenticate_owner("Unlock Jarvis", allow_password)
 }
 
-/// Lock: advance the auth epoch so a model change still waiting for its OS
-/// prompt fails its login binding check instead of signing.
+/// Lock: advance the auth epoch so a model change or approval still waiting
+/// for its OS prompt fails its login binding check instead of signing.
 #[tauri::command]
 fn revoke_model_authorization() -> Result<(), String> {
     let mut guard = auth_storage()?;
@@ -901,6 +961,10 @@ pub fn run() {
             realtime::realtime_stop_speech,
             device_info,
             auth_public_key,
+            approvals::auth_approve_unlock,
+            approvals::auth_approve_pairing,
+            approvals::auth_approve_agent,
+            auth_sign_account_approval,
             model_control::set_model_enabled,
             model_control::set_model_routing,
             auth_remember_enrolled_device,
@@ -1072,13 +1136,18 @@ mod tests {
     fn native_authenticated_proxy_is_bounded_and_excludes_updater_routes() {
         assert!(authenticated_api_path("/v1/conversations"));
         assert!(authenticated_api_path("/v1/auth/unlock/pending?wait=20"));
-        // Account changes are approved on a phone; the page cannot start one.
-        assert!(!authenticated_api_path(
-            "/v1/auth/account/password/requests"
-        ));
-        assert!(!authenticated_api_path(
-            "/v1/auth/account/requests/fixture/approve"
-        ));
+        // Only macOS signs account approvals, so only it proxies their routes.
+        for path in [
+            "/v1/auth/account/password/requests",
+            "/v1/auth/account/requests/fixture/approve",
+            "/v1/devices/fixture/revoke-request",
+        ] {
+            assert_eq!(
+                authenticated_api_path(path),
+                cfg!(target_os = "macos"),
+                "{path}"
+            );
+        }
         assert!(!authenticated_api_path("/v1/auth/bootstrap"));
         assert!(!authenticated_api_path("/v1/auth/login"));
         assert!(!authenticated_api_path("/v1/app-updates/capability"));
@@ -1115,14 +1184,12 @@ mod tests {
     }
 
     #[test]
-    fn webview_proxy_only_lists_devices() {
+    fn webview_proxy_only_reads_the_device_list() {
         assert!(authenticated_api_path("/v1/devices"));
         assert!(read_only_route("/v1/devices"));
         assert!(read_only_route("/v1/devices?x=1"));
         assert!(!read_only_route("/v1/conversations"));
-        for path in ["/v1/devices/fixture", "/v1/devices/fixture/revoke-request"] {
-            assert!(!authenticated_api_path(path), "{path}");
-        }
+        assert!(!read_only_route("/v1/devices/fixture/revoke-request"));
     }
 
     #[test]
@@ -1140,6 +1207,8 @@ mod tests {
             "/v1/auth/unlock/fixture/deny",
             "/v1/agent/pending/fixture/deny",
             "/v1/agent/pending",
+            // Account approvals are signed natively and posted by the page.
+            "/v1/auth/account/requests/fixture/approve",
         ] {
             assert!(!native_only_route(path), "{path}");
         }

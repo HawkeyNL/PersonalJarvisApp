@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { pairingRequests, denyPairing } from "../pairingApprovals";
+import { computed } from "vue";
+import { pairingError, pairingRequests, approvePairing, denyPairing } from "../pairingApprovals";
 import { displayHint, groupFingerprint } from "../pairingFingerprint";
+import { platformCapabilities } from "../platform";
 
 const time = (seconds: number) => new Date(seconds * 1000).toLocaleString();
+// Only a Mac approves here, behind Touch ID; other desktops can deny.
+const signer = computed(() => platformCapabilities.value.supportsBiometricSigning);
 </script>
 <template>
   <aside v-if="pairingRequests.length" class="pairing-approvals">
@@ -20,11 +24,13 @@ const time = (seconds: number) => new Date(seconds * 1000).toLocaleString();
         <dd v-if="request.verified_fingerprint" class="fingerprint">{{ groupFingerprint(request.verified_fingerprint) }}</dd>
         <dd v-else class="error">Does not match the candidate key. Do not approve.</dd>
       </dl>
-      <small>Approve from your phone. Compare the fingerprint with the one the new device shows. Model, version, IP and user agent are unverified hints.</small>
+      <small>{{ signer ? "Approving asks for Touch ID." : "Approve from your phone or a Mac with Touch ID." }} Compare the fingerprint with the one the new device shows. Model, version, IP and user agent are unverified hints.</small>
       <div>
+        <button v-if="signer" :disabled="!request.verified_fingerprint" @click="approvePairing(request)">Approve</button>
         <button @click="denyPairing(request)">Deny</button>
       </div>
     </section>
+    <small v-if="pairingError" class="error">{{ pairingError }}</small>
   </aside>
 </template>
 <style scoped>

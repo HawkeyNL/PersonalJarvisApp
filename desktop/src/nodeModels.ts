@@ -54,6 +54,12 @@ export function countOf<T>(list: T[], flag: (item: T) => boolean): string {
   return `${list.filter(flag).length} of ${list.length}`;
 }
 
+/** Only the agent-approval-v1 message may be signed; a pending action from an
+ *  older Core (raw nonce, no action hash) cannot be approved from this app. */
+export function canSignApproval(item: { approval_message?: string; action_sha256?: string }): boolean {
+  return item.approval_message === "agent-approval-v1" && /^[0-9a-f]{64}$/.test(item.action_sha256 ?? "");
+}
+
 // --- Agents ----------------------------------------------------------------------
 
 export type AgentUsage = {

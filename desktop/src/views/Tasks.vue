@@ -7,9 +7,10 @@ import JvTile from "../components/jv/JvTile.vue";
 import JvActivityList, { type ActivityItem } from "../components/jv/JvActivityList.vue";
 import JvUnavailable from "../components/jv/JvUnavailable.vue";
 import { loadOptional } from "../coreStatus";
-import { denyAction, type PendingAction } from "../agentApprovals";
+import { approveAction, denyAction, type PendingAction } from "../agentApprovals";
 import { failureText, relativeTime, type Availability, type Tone } from "../hubModel";
-import { outcomeTone, sessionState, splitSessions, type CodingSessionRow } from "../nodeModels";
+import { canSignApproval, outcomeTone, sessionState, splitSessions, type CodingSessionRow } from "../nodeModels";
+import { platformCapabilities } from "../platform";
 
 // Tasks: coding sessions, agent actions waiting for the owner, and the agent
 // audit history. Scheduled and recurring tasks and goals need Core support
@@ -65,7 +66,7 @@ const SUB_TABS: SegmentItem[] = [{ id: "overview", label: "Sessions", icon: "cod
 
 const DETAILS: Record<string, string> = {
   active: "Coding sessions Jarvis is running or has paused on your Home Node.",
-  waiting: "Changes an agent proposed. Nothing runs until it is approved; approving agent actions is not available yet.",
+  waiting: "Changes an agent proposed. Nothing runs until you approve it on a Mac with Touch ID.",
   completed: "Coding sessions that ended, and every agent action Core recorded.",
   scheduled: "Core cannot run tasks at a set time yet.",
   recurring: "Core cannot repeat tasks on a schedule yet.",
@@ -87,23 +88,26 @@ const pendingRows = computed<ActivityItem[]>(() => waiting.value.map((p) => ({
   id: p.pending_id, icon: "alert", title: p.action, detail: p.preview, time: relativeTime(p.created_at, now.value),
   tone: "warn", toneLabel: "Waiting for approval",
 })));
+// Only a Mac approves, behind Touch ID; other desktops can deny.
+const signer = computed(() => platformCapabilities.value.supportsBiometricSigning);
+const signable = computed(() => new Set(waiting.value.filter(canSignApproval).map((p) => p.pending_id)));
 const lastUpdate = computed(() => {
   const first = sessions.value.state === "ok" ? sessions.value.value.sessions[0] : undefined;
   return first?.updated_at ? relativeTime(first.updated_at, now.value) || "—" : "—";
 });
 
-// --- Deny (no client can approve agent actions yet) ------------------------------
+// --- Approve / deny -----------------------------------------------------------
 const deciding = ref<string | null>(null);
 const decisionError = ref<string | null>(null);
-async function deny(id: string) {
+async function decide(id: string, approve: boolean) {
   const item = waiting.value.find((p) => p.pending_id === id);
   if (!item || deciding.value) return;
   deciding.value = id;
   decisionError.value = null;
   try {
-    await denyAction(item);
+    await (approve ? approveAction(item) : denyAction(item));
   } catch (error) {
-    decisionError.value = `Denial failed: ${error instanceof Error ? error.message : String(error)}`;
+    decisionError.value = `${approve ? "Approval" : "Denial"} failed: ${error instanceof Error ? error.message : String(error)}`;
   } finally {
     deciding.value = null;
     await load();
@@ -147,12 +151,22 @@ async function deny(id: string) {
           :kind="pending.state === 'unsupported' ? 'core-update' : 'error'" :detail="why(pending)" icon="alert" />
         <p v-else-if="pending.state === 'loading'" class="muted" role="status">Loading approvals…</p>
         <template v-else>
-          <p class="muted small">Approving agent actions is not available yet. Read the full preview; you can deny here.</p>
+          <p class="muted small">
+            Read the full preview first.
+            {{ signer ? "Approving asks for Touch ID, then signs this exact action with this Mac's device key." : "Approve on a Mac with Touch ID; you can deny here." }}
+          </p>
           <p v-if="decisionError" class="err" role="alert">{{ decisionError }}</p>
           <JvActivityList title="Waiting for approval" :items="pendingRows" empty="Nothing is waiting for you." full-detail>
             <template #actions="{ item }">
+              <template v-if="signer">
+                <button v-if="signable.has(item.id)" type="button" class="ghost-btn sm" :disabled="!!deciding"
+                  :aria-label="`Approve ${item.title}`" @click="decide(item.id, true)">
+                  {{ deciding === item.id ? "Confirming…" : "Approve" }}
+                </button>
+                <span v-else class="muted small">Requires newer Core</span>
+              </template>
               <button type="button" class="ghost-btn sm danger" :disabled="!!deciding" :aria-label="`Deny ${item.title}`"
-                @click="deny(item.id)">Deny</button>
+                @click="decide(item.id, false)">Deny</button>
             </template>
           </JvActivityList>
         </template>
