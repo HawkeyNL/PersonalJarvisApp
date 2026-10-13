@@ -1139,6 +1139,7 @@ final class PairingApprovalTests: XCTestCase {
         }
         XCTAssertEqual(PairingFingerprint.grouped("0123456789abcdef01"), "0123 4567 89ab cdef 01")
         XCTAssertEqual(PairingFingerprint.displayName(nil), "unknown")
+        XCTAssertEqual(PairingFingerprint.displayName("Pixel\u{202E} 9\u{7}"), "Pixel 9")
         XCTAssertEqual(pairingCountdown(100, now: Date(timeIntervalSince1970: 0)), "1:40")
         XCTAssertEqual(pairingCountdown(100, now: Date(timeIntervalSince1970: 100)), "Expired")
     }

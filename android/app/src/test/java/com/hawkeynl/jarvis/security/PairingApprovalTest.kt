@@ -75,6 +75,7 @@ class PairingApprovalTest {
         }
         assertEquals("0123 4567 89ab cdef 01", PairingApproval.grouped("0123456789abcdef01"))
         assertEquals("unknown", PairingApproval.displayName(null))
+        assertEquals("Pixel 9", PairingApproval.displayName("Pixel\u202E 9\u0007"))
         assertEquals("1:40", PairingApproval.countdown(100, 0))
         assertEquals("Expired", PairingApproval.countdown(100, 100))
     }
