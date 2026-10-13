@@ -72,14 +72,19 @@ const confirmUnlink = ref(false);
 // A Mac revokes itself with a Touch ID approval; other desktops only sign out.
 const signer = computed(() => platformCapabilities.value.supportsBiometricSigning);
 const unlinking = ref(false);
+const unlinkMessage = ref<string | null>(null);
 
 async function doUnlink() {
   unlinking.value = true;
+  unlinkMessage.value = null;
+  const deviceId = session.value?.device_id;
   try {
     await deregisterDevice();
     session.value = await currentAuthStatus();
+    // Off macOS the device stays active until revoked on the Home Node.
+    if (!signer.value && deviceId) unlinkMessage.value = `Unlinked. Revoke it on the Home Node: sudo jarvis devices revoke ${deviceId}`;
   } catch {
-    homeNodeMessage.value = "Unlinking did not finish. Try again.";
+    unlinkMessage.value = "Unlinking did not finish. Try again.";
   } finally {
     unlinking.value = false;
     confirmUnlink.value = false;
@@ -189,6 +194,7 @@ onMounted(async () => {
       >
         Unlink this device
       </button>
+      <p v-if="unlinkMessage" class="small muted unlink-message" role="status">{{ unlinkMessage }}</p>
     </div>
 
     <div v-if="section === 'Account & security'" class="panel glass">
@@ -471,6 +477,7 @@ onMounted(async () => {
 }
 .modal h2 { margin: 0 0 10px; font-size: 16px; }
 .modal p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.unlink-message { overflow-wrap: anywhere; user-select: text; }
 .modal pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 .modal-actions .ghost { margin-top: 0; }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -94,18 +94,28 @@ test("approvals are signed natively by id and every signature needs Touch ID", a
     assert.match(handlers, new RegExp(`approvals::${command},`));
   }
   assert.deepEqual(handlers.match(/auth_sign_\w+/g), ["auth_sign_account_approval"]);
+  assert.match(handlers, /approvals::auth_sign_account_approval,/);
+  // The device key is loaded only by the public-key export, the login
+  // challenge and the two Touch ID signing paths; a new signer fails here.
+  const keyUses = {};
+  for (const file of await readdir(new URL("../src-tauri/src/", import.meta.url))) {
+    if (!file.endsWith(".rs")) continue;
+    const source = await readFile(new URL(`../src-tauri/src/${file}`, import.meta.url), "utf8");
+    const uses = source.match(/signing_key_unlocked\(/g)?.length ?? 0;
+    if (uses) keyUses[file] = uses;
+  }
+  assert.deepEqual(keyUses, { "approvals.rs": 1, "lib.rs": 3, "model_control.rs": 1 });
   const commands = approvals.match(/async fn auth_approve_\w+\([^)]*\)/g);
   assert.equal(commands?.length, 3);
   for (const command of commands) assert.match(command, /^async fn auth_approve_\w+\(app: AppHandle, \w+_id: String\)$/);
   // Only the app lock may offer the computer password; it signs nothing.
   assert.match(native, /fn biometric_unlock\(allow_password: bool\)/);
   assert.deepEqual(native.match(/authenticate_owner\([^)]*\)/g), [
-    "authenticate_owner(&reason, false)",
     'authenticate_owner("Unlock Jarvis", allow_password)',
     "authenticate_owner(reason: &str, allow_password: bool)",
   ]);
   // Every signing path refuses off macOS and asks for Touch ID on it.
-  for (const [file, source] of [["lib.rs", native], ["approvals.rs", approvals], ["model_control.rs", models]]) {
+  for (const [file, source] of [["approvals.rs", approvals], ["model_control.rs", models]]) {
     assert.match(source, /model_authorization::touch_id\(cfg!\(target_os = "macos"\), [\w:]+, \|\| \{\s*authenticate_owner\(&\w+, false\)/, file);
   }
   assert.deepEqual(approvals.match(/authenticate_owner\([^)]*\)/g), ["authenticate_owner(&prompt, false)"]);

@@ -97,9 +97,10 @@ Home Node advertising `device-signed-model-toggle-v1`. On macOS, every model or
 routing change opens its own Touch ID prompt (no computer-password fallback)
 before the device key signs that one action-bound approval; there is no window.
 Windows Hello always offers its PIN and Linux has no biometric prompt, so both
-refuse to sign: change models from your phone or the Home Node. Lock, logout,
-device reset and Home Node/session changes cancel a change still waiting for
-its prompt. No device password or private signing key is sent to the Home Node
+refuse to sign: change models from your phone or the Home Node. After a lock,
+logout, device reset or Home Node/session change, a change or approval still
+waiting for its prompt is not signed (the prompt itself stays open until it
+ends or times out). No device password or private signing key is sent to the Home Node
 or exposed to the desktop frontend.
 
 The desktop Touch ID requirement (for model changes and approvals) is a
