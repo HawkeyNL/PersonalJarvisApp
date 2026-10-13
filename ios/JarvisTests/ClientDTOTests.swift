@@ -1454,3 +1454,98 @@ private final class AccountDecisionProtocol: URLProtocol {
     }
     override func stopLoading() { }
 }
+
+final class UnlockApprovalTests: XCTestCase {
+    private let nonce = (0..<32).map { String(format: "%02x", $0) }.joined()
+
+    func testFreshnessWindow() {
+        func item(_ createdAt: Int64) -> UnlockRequestItem {
+            UnlockRequestItem(id: UUID(), device_name: "Mac", platform: "macos", nonce: nonce, created_at: createdAt)
+        }
+        XCTAssertTrue(AuthService.fresh(item(1_000), now: 1_130))
+        XCTAssertFalse(AuthService.fresh(item(1_000), now: 1_131))
+        XCTAssertFalse(AuthService.fresh(item(1_031), now: 1_000))
+    }
+
+    func testApprovalRereadsTheRequestAndSignsTheUnlockMessage() async throws {
+        let (auth, publicKey, prompts) = try await fixture(createdAt: Int64(Date().timeIntervalSince1970) - 5)
+        try await auth.approveUnlock(UnlockDecisionProtocol.request)
+        let promptCount = await prompts.count
+        XCTAssertEqual(promptCount, 1)
+        let calls = UnlockDecisionProtocol.calls()
+        XCTAssertEqual(calls.map { $0.path }, ["/v1/auth/unlock/pending", "/v1/auth/unlock/\(UnlockDecisionProtocol.request.uuidString)/approve"])
+        let signature = try XCTUnwrap(calls.last?.body["signature"].flatMap { Data(hexEncoded: $0) })
+        let message = try DeviceIdentityStore.unlockApprovalMessage(requestId: UnlockDecisionProtocol.request,
+                                                                    approverDeviceId: UnlockDecisionProtocol.device, nonceHex: nonce)
+        let verifier = try Curve25519.Signing.PublicKey(rawRepresentation: XCTUnwrap(Data(hexEncoded: publicKey)))
+        XCTAssertTrue(verifier.isValidSignature(signature, for: message))
+    }
+
+    func testStaleOrUnlistedRequestsNeverPrompt() async throws {
+        let now = Int64(Date().timeIntervalSince1970)
+        for (createdAt, id) in [(now - 200, UnlockDecisionProtocol.request), (now, UUID())] {
+            let (auth, _, prompts) = try await fixture(createdAt: createdAt)
+            do { try await auth.approveUnlock(id); XCTFail("Must refuse") } catch { }
+            do { try await auth.denyUnlock(id); XCTFail("Must refuse") } catch { }
+            let promptCount = await prompts.count
+            XCTAssertEqual(promptCount, 0)
+            XCTAssertFalse(UnlockDecisionProtocol.calls().contains { $0.path.hasSuffix("/approve") || $0.path.hasSuffix("/deny") })
+        }
+    }
+
+    private func fixture(createdAt: Int64) async throws -> (AuthService, String, PairingPromptCounter) {
+        let store = FixtureSecureStorage()
+        let credentials = SecureCredentialStore(keychain: store)
+        let identity = DeviceIdentityStore(keychain: store)
+        let publicKey = try await identity.publicKeyHex()
+        try await credentials.save(deviceId: UnlockDecisionProtocol.device)
+        try await credentials.save(session: SecureSession(token: "fixture-session-not-a-secret", expiresAt: Int64(Date().timeIntervalSince1970) + 3600))
+        UnlockDecisionProtocol.reset(pending: #"{"requests":[{"id":"\#(UnlockDecisionProtocol.request)","device_name":"Work Mac","platform":"macos","nonce":"\#(nonce)","created_at":\#(createdAt)}]}"#)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [UnlockDecisionProtocol.self]
+        let api = JarvisAPIClient(baseURL: URL(string: "https://jarvis.example.com")!, session: URLSession(configuration: configuration))
+        let prompts = PairingPromptCounter()
+        let auth = AuthService(api: api, identity: identity, credentials: credentials,
+                               authenticateBiometric: { _ in store.prompt(await prompts.authenticate()) })
+        return (auth, publicKey, prompts)
+    }
+}
+
+private final class UnlockDecisionProtocol: URLProtocol {
+    static let device = UUID(uuidString: "04040404-0404-0404-0404-040404040404")!
+    static let request = UUID(uuidString: "00112233-4455-6677-8899-aabbccddeeff")!
+    private static let lock = NSLock()
+    private static var pending = ""
+    private static var captured: [(path: String, body: [String: String])] = []
+    static func reset(pending: String) { lock.withLock { self.pending = pending; captured = [] } }
+    static func calls() -> [(path: String, body: [String: String])] { lock.withLock { captured } }
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url?.path ?? ""
+        var data = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open(); defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while data.count < 16384 {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }
+                data.append(contentsOf: buffer.prefix(count))
+            }
+        }
+        let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: String] ?? [:]
+        Self.lock.withLock { Self.captured.append((path, body)) }
+        let answer: String
+        if path == "/v1/auth/unlock/pending" {
+            answer = Self.lock.withLock { Self.pending }
+        } else {
+            answer = path.hasSuffix("/approve") ? #"{"status":"approved"}"# : #"{"status":"denied"}"#
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                       headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(answer.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() { }
+}

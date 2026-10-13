@@ -1,0 +1,99 @@
+package com.hawkeynl.jarvis.security
+
+import com.hawkeynl.jarvis.network.ApiResult
+import com.hawkeynl.jarvis.network.HomeNodeEndpoint
+import com.hawkeynl.jarvis.network.JarvisApi
+import com.hawkeynl.jarvis.network.UnlockRequestItem
+import com.hawkeynl.jarvis.storage.SessionRepository
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+
+/** Approve or deny another device's unlock request. Every decision re-reads the request
+ *  by id, refuses a stale one and needs a strong-biometric prompt (approve signs with
+ *  the device key; deny uses [authenticate], the same kind of prompt without a key). */
+class UnlockApprovalService(
+    private val api: JarvisApi,
+    private val sessions: SessionRepository,
+    private val endpoint: suspend () -> HomeNodeEndpoint?,
+    private val identity: DeviceIdentity,
+    private val approvals: ApprovalLock,
+    private val authenticate: suspend (String) -> Boolean,
+    private val unlocked: () -> Boolean,
+    private val now: () -> Long = { System.currentTimeMillis() / 1000 },
+) {
+    /** Requests waiting for this device, holding the call up to [waitSeconds] until one
+     *  appears. Callers poll only while the app is in the foreground and unlocked. */
+    suspend fun pending(waitSeconds: Int): List<UnlockRequestItem> {
+        val origin = endpoint() ?: return emptyList()
+        val token = sessions.session().token ?: return emptyList()
+        return when (val result = api.unlockPending(origin, token, waitSeconds)) {
+            is ApiResult.Success -> result.value.requests.filter { fresh(it) }
+            else -> error(refusal(result))
+        }
+    }
+
+    suspend fun approve(id: String) = approvals.exclusive {
+        val (origin, token, item) = current(id)
+        val session = sessions.session()
+        val device = session.deviceId ?: error("Device not paired")
+        val message = UnlockApprovalMessage(item.id, device, item.nonce).also { it.message() }
+        val signature = identity.sign(message, "Unlock \"${PairingApproval.displayName(item.device_name, 40)}\" (${PairingApproval.displayName(item.platform, 16)})")
+        currentCoroutineContext().ensureActive()
+        check(unlocked() && endpoint() == origin && sessions.session() == session && fresh(item)) { "Request expired or session changed" }
+        decide(origin, token, "/v1/auth/unlock/${item.id}/approve", JsonObject(mapOf("signature" to JsonPrimitive(signature))), "approved")
+    }
+
+    suspend fun deny(id: String) = approvals.exclusive {
+        val (origin, token, item) = current(id)
+        val session = sessions.session()
+        if (!authenticate("Deny unlock of \"${PairingApproval.displayName(item.device_name, 40)}\"")) {
+            error("Cancelled; fingerprint or face unlock is required.")
+        }
+        currentCoroutineContext().ensureActive()
+        check(unlocked() && endpoint() == origin && sessions.session() == session) { "Session changed; try again" }
+        decide(origin, token, "/v1/auth/unlock/${item.id}/deny", JsonObject(emptyMap()), "denied")
+    }
+
+    /** The request as Core lists it right now, never a copy the UI held on to. */
+    private suspend fun current(id: String): Triple<HomeNodeEndpoint, String, UnlockRequestItem> {
+        check(unlocked()) { "App locked" }
+        require(PairingApproval.canonicalUuid.matches(id)) { "Invalid unlock request" }
+        val origin = endpoint() ?: error("Home Node missing")
+        val token = sessions.session().token ?: error("Sign in again")
+        val item = when (val result = api.unlockPending(origin, token, 0)) {
+            is ApiResult.Success -> result.value.requests.singleOrNull { it.id.equals(id, ignoreCase = true) }
+            else -> error(refusal(result))
+        } ?: error("This unlock request is no longer pending.")
+        check(fresh(item)) { "This unlock request is too old; ask again on the other device." }
+        return Triple(origin, token, item)
+    }
+
+    /** Core expires requests after two minutes; anything older is refused here too. */
+    private fun fresh(item: UnlockRequestItem): Boolean = now() - item.created_at in -30L..MAX_AGE_SECONDS
+
+    private suspend fun decide(origin: HomeNodeEndpoint, token: String, path: String, body: JsonObject, expected: String) {
+        when (val result = api.postAuthorizedJson(origin, token, path, body)) {
+            is ApiResult.Success -> check(
+                runCatching { result.value.jsonObject["status"]?.jsonPrimitive?.content }.getOrNull() == expected,
+            ) { "Core did not confirm the decision." }
+            else -> error(refusal(result))
+        }
+    }
+
+    // Core answers 401 for an unknown, handled or expired request too: report it, do not sign out here.
+    private fun refusal(result: ApiResult<*>): String = when (result) {
+        is ApiResult.Success -> "Core did not confirm the decision."
+        ApiResult.Unauthorized -> "Core refused this decision. The request may have expired or been handled already."
+        is ApiResult.HttpError -> result.message ?: "Core refused this decision (HTTP ${result.status})."
+        is ApiResult.Unreachable -> "Home Node unreachable; refresh to see whether the decision applied."
+        is ApiResult.InvalidResponse -> result.message
+    }
+
+    private companion object {
+        const val MAX_AGE_SECONDS = 130L
+    }
+}

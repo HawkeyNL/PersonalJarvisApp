@@ -12,6 +12,7 @@ import com.hawkeynl.jarvis.security.BiometricAvailability
 import com.hawkeynl.jarvis.security.BiometricResult
 import com.hawkeynl.jarvis.security.ModelControlService
 import com.hawkeynl.jarvis.security.PairingApprovalService
+import com.hawkeynl.jarvis.security.UnlockApprovalService
 import kotlinx.coroutines.flow.first
 import androidx.activity.compose.setContent
 import androidx.activity.SystemBarStyle
@@ -53,6 +54,14 @@ class MainActivity : FragmentActivity() {
             container.api, container.sessions, { container.settings.endpoint.first() }, container.identity, container.approvals,
             ::authenticatePairing,
             { container.biometricGate.availability(this) == BiometricAvailability.Available },
+            { !viewModel.state.value.locked && viewModel.state.value.authenticated },
+        )
+    }
+
+    private val unlockApprovals by lazy {
+        UnlockApprovalService(
+            container.api, container.sessions, { container.settings.endpoint.first() }, container.identity, container.approvals,
+            { reason -> strongBiometric("Unlock request", reason) is BiometricResult.Authenticated },
             { !viewModel.state.value.locked && viewModel.state.value.authenticated },
         )
     }
@@ -112,6 +121,7 @@ class MainActivity : FragmentActivity() {
                     onInstallUpdate = ::installVerifiedUpdate,
                     modelControls = modelControls,
                     pairingApprovals = pairingApprovals,
+                    unlockApprovals = unlockApprovals,
                 )
             }
         }

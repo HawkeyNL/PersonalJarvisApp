@@ -398,6 +398,74 @@ actor AuthService {
         guard result.status == "completed" else { throw JarvisAPIError.rejected(status: 503, message: "Core did not confirm the change.") }
     }
 
+    /// Unlock requests waiting for this device, held up to `wait` seconds until one appears.
+    /// Callers poll only while the app is in the foreground and unlocked.
+    func pendingUnlocks(wait: Int) async throws -> [UnlockRequestItem] {
+        let binding = await api.binding()
+        guard let token = try await credentials.session()?.token else { throw JarvisAPIError.unauthorized }
+        // Stay inside the 15 s request timeout; Core holds the call at most 25 s.
+        let list: UnlockRequestList = try await api.get("/v1/auth/unlock/pending?wait=\(min(max(wait, 0), 10))",
+                                                        token: token, expectedBinding: binding)
+        return list.requests.filter { Self.fresh($0) }
+    }
+
+    /// Approve another device's unlock: re-read the request by id, refuse a stale one,
+    /// then sign the exact v1 unlock message after one Face ID / Touch ID prompt.
+    func approveUnlock(_ id: UUID) async throws { try await exclusive {
+        let (binding, token, item) = try await currentUnlock(id)
+        guard let device = try await credentials.deviceId() else { throw JarvisAPIError.unauthorized }
+        // Built once before prompting, so a malformed request never prompts.
+        _ = try DeviceIdentityStore.unlockApprovalMessage(requestId: item.id, approverDeviceId: device, nonceHex: item.nonce)
+        let context = try await requireBiometric("Unlock \"\(PairingFingerprint.displayName(item.device_name, max: 40))\" "
+            + "(\(PairingFingerprint.displayName(item.platform, max: 16)))")
+        defer { context.invalidate() }
+        guard await api.binding() == binding, try await credentials.session()?.token == token,
+              try await credentials.deviceId() == device, Self.fresh(item) else {
+            throw JarvisAPIError.rejected(status: 409, message: "Request expired or session changed.")
+        }
+        try Task.checkCancellation()
+        let signature = try await identity.signUnlockApproval(requestId: item.id, approverDeviceId: device, nonceHex: item.nonce, context: context)
+        let result: StatusResponse = try await accountDecision {
+            try await api.post("/v1/auth/unlock/\(item.id.uuidString)/approve", body: ["signature": signature],
+                               token: token, expectedBinding: binding)
+        }
+        guard result.status == "approved" else { throw JarvisAPIError.rejected(status: 503, message: "Core did not confirm the decision.") }
+    } }
+
+    /// Deny another device's unlock. Also re-read by id and gated on Face ID / Touch ID.
+    func denyUnlock(_ id: UUID) async throws { try await exclusive {
+        let (binding, token, item) = try await currentUnlock(id)
+        try await requireBiometric("Deny unlock of \"\(PairingFingerprint.displayName(item.device_name, max: 40))\"").invalidate()
+        guard await api.binding() == binding, try await credentials.session()?.token == token else {
+            throw JarvisAPIError.rejected(status: 409, message: "Session changed; try again.")
+        }
+        let result: StatusResponse = try await accountDecision {
+            try await api.post("/v1/auth/unlock/\(item.id.uuidString)/deny", body: [String: String](), token: token, expectedBinding: binding)
+        }
+        guard result.status == "denied" else { throw JarvisAPIError.rejected(status: 503, message: "Core did not confirm the decision.") }
+    } }
+
+    /// The request as Core lists it right now, never a copy the UI held on to.
+    private func currentUnlock(_ id: UUID) async throws -> (UUID, String, UnlockRequestItem) {
+        let binding = await api.binding()
+        guard let token = try await credentials.session()?.token else { throw JarvisAPIError.unauthorized }
+        let list: UnlockRequestList = try await accountDecision {
+            try await api.get("/v1/auth/unlock/pending?wait=0", token: token, expectedBinding: binding)
+        }
+        guard let item = list.requests.first(where: { $0.id == id }) else {
+            throw JarvisAPIError.rejected(status: 404, message: "This unlock request is no longer pending.")
+        }
+        guard Self.fresh(item) else {
+            throw JarvisAPIError.rejected(status: 410, message: "This unlock request is too old; ask again on the other device.")
+        }
+        return (binding, token, item)
+    }
+
+    /// Core expires unlock requests after two minutes; anything older is refused here too.
+    static func fresh(_ item: UnlockRequestItem, now: Int64 = Int64(Date().timeIntervalSince1970)) -> Bool {
+        (-30...130).contains(now - item.created_at)
+    }
+
     /// Core answers 401 for a refused account action too; report it instead of ending
     /// the session here.
     private func accountDecision<T>(_ call: () async throws -> T) async throws -> T {
