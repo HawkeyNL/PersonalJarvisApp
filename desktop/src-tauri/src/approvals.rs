@@ -1,8 +1,10 @@
 //! Pending approvals by id. The webview only names a pending item; native code
 //! fetches it from the Home Node with the stored bearer, validates it, builds
 //! the OS prompt and the signed bytes from that server data, and posts the
-//! approval itself. No prompt text, nonce or signature crosses IPC.
+//! approval itself. No prompt text, nonce or signature crosses IPC. Only
+//! macOS signs, and only after Touch ID (see `model_authorization::touch_id`).
 use super::*;
+use jarvis_client_core::account::{account_approval_message, AccountAction, AccountApproval};
 use model_control::Session;
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
@@ -319,48 +321,55 @@ async fn fetch<T: DeserializeOwned>(session: &Session, path: &str) -> Result<T, 
     serde_json::from_slice(&bytes).map_err(|_| "Home Node response is invalid".into())
 }
 
-/// OS prompt, login binding revalidation and signing, then a native POST of
-/// the signature with the captured origin and bearer.
-async fn sign_and_post(session: Session, approval: Approval, path: String) -> Result<(), String> {
-    let Session {
-        app,
-        origin,
-        device,
-        token,
-        epoch,
-        client,
-    } = session;
-    let signing_app = app.clone();
-    let signing_origin = origin.clone();
+/// Shown when this computer cannot approve: approvals need Touch ID.
+pub(super) const APPROVE_ON_MAC: &str = "Approve on a Mac with Touch ID";
+
+/// Touch ID prompt off the main thread, then login binding revalidation and
+/// signing. A lock, logout or Home Node change during the prompt advances the
+/// epoch, so the approval is not signed.
+async fn sign_after_touch_id(session: &Session, approval: Approval) -> Result<String, String> {
+    let app = session.app.clone();
+    let origin = session.origin.clone();
+    let device = session.device.clone();
+    let epoch = session.epoch;
     let Approval {
         prompt,
         message,
         expires_at,
     } = approval;
-    let signature = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         let _prompt = model_authorization::try_prompt()?;
-        authenticate_owner(&prompt, true)?;
+        model_authorization::touch_id(cfg!(target_os = "macos"), APPROVE_ON_MAC, || {
+            authenticate_owner(&prompt, false)
+        })?;
         let guard = auth_storage()?;
-        let current = load_metadata(&signing_app)?;
-        validate_login_binding(
-            *guard,
-            epoch,
-            current.home_node_origin.as_deref(),
-            &signing_origin,
-        )?;
+        let current = load_metadata(&app)?;
+        validate_login_binding(*guard, epoch, current.home_node_origin.as_deref(), &origin)?;
         if current.device_id.as_deref() != Some(device.as_str())
             || expires_at.is_some_and(|at| at <= time::OffsetDateTime::now_utc().unix_timestamp())
         {
             return Err("Approval expired or device changed".into());
         }
         Ok(hex::encode(
-            signing_key_unlocked(&signing_app, false)?
-                .sign(&message)
-                .to_bytes(),
+            signing_key_unlocked(&app, false)?.sign(&message).to_bytes(),
         ))
     })
     .await
-    .map_err(|_| "OS authentication failed")??;
+    .map_err(|_| "OS authentication failed")?
+}
+
+/// Sign after Touch ID, then a native POST of the signature with the
+/// captured origin and bearer.
+async fn sign_and_post(session: Session, approval: Approval, path: String) -> Result<(), String> {
+    let signature = sign_after_touch_id(&session, approval).await?;
+    let Session {
+        app,
+        origin,
+        token,
+        epoch,
+        client,
+        ..
+    } = session;
     {
         let guard = auth_storage()?;
         let current = load_metadata(&app)?;
@@ -418,6 +427,70 @@ pub(super) async fn auth_approve_agent(app: AppHandle, pending_id: String) -> Re
     let approval = agent_approval(&list.pending, pending_id, device)?;
     let path = format!("/v1/agent/pending/{pending_id}/approve");
     sign_and_post(session, approval, path).await
+}
+
+#[derive(Deserialize)]
+struct DeviceList {
+    devices: Vec<DeviceItem>,
+}
+
+#[derive(Deserialize)]
+struct DeviceItem {
+    id: uuid::Uuid,
+    name: String,
+    platform: String,
+}
+
+/// Touch ID prompt for an account approval. A revocation names the target as
+/// the Home Node lists it, not as the page shows it.
+fn account_prompt(approval: &AccountApproval, devices: &[DeviceItem]) -> Result<String, String> {
+    match approval.action {
+        AccountAction::PasswordSet if approval.target == approval.user_id => {
+            Ok("Change Jarvis account password".into())
+        }
+        AccountAction::PasswordSet => Err("invalid password approval target".into()),
+        AccountAction::DeviceRevoke => {
+            let device = devices
+                .iter()
+                .find(|device| device.id == approval.target)
+                .ok_or("device to revoke is not listed")?;
+            Ok(format!(
+                "Revoke Jarvis device \"{}\" ({})",
+                display_name(&device.name, NAME_CHARS),
+                display_name(&device.platform, PLATFORM_CHARS)
+            ))
+        }
+    }
+}
+
+/// Account administration is always explicitly owner-approved, action-bound,
+/// expiring, and signed natively after Touch ID. A password/session alone is
+/// insufficient. The signed message binds the action and target id.
+#[tauri::command]
+pub(super) async fn auth_sign_account_approval(
+    app: AppHandle,
+    approval: AccountApproval,
+) -> Result<String, String> {
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    if approval.expires_at <= now || approval.expires_at > now + 300 {
+        return Err("account approval expired or invalid".into());
+    }
+    let session = Session::load(app)?;
+    if session_device(&session)? != approval.device_id {
+        return Err("account approver does not match this device".into());
+    }
+    let devices = match approval.action {
+        AccountAction::DeviceRevoke => fetch::<DeviceList>(&session, "/v1/devices").await?.devices,
+        AccountAction::PasswordSet => Vec::new(),
+    };
+    let prompt = account_prompt(&approval, &devices)?;
+    let message = account_approval_message(&approval).map_err(str::to_string)?;
+    let approval = Approval {
+        prompt,
+        message,
+        expires_at: Some(approval.expires_at),
+    };
+    sign_after_touch_id(&session, approval).await
 }
 
 #[cfg(test)]
@@ -570,6 +643,34 @@ mod tests {
         assert!(unlock_approval(&items.requests, id(USER), id(DEVICE))
             .unwrap_err()
             .contains("no longer pending"));
+    }
+
+    #[test]
+    fn account_prompt_names_the_listed_device_and_refuses_others() {
+        let approval = |action, target: &str| {
+            serde_json::from_value::<AccountApproval>(serde_json::json!({
+                "request_id": REQUEST, "user_id": USER, "device_id": DEVICE,
+                "action": action, "target": target, "nonce": NONCE, "expires_at": 1,
+            }))
+            .unwrap()
+        };
+        let devices = [DeviceItem {
+            id: id(REQUEST),
+            name: "Old\u{202E} iPad\nApprove".into(),
+            platform: "ios".into(),
+        }];
+        assert_eq!(
+            account_prompt(&approval("device-revoke", REQUEST), &devices).unwrap(),
+            "Revoke Jarvis device \"Old iPad Approve\" (ios)"
+        );
+        assert!(account_prompt(&approval("device-revoke", DEVICE), &devices)
+            .unwrap_err()
+            .contains("not listed"));
+        assert_eq!(
+            account_prompt(&approval("password-set", USER), &[]).unwrap(),
+            "Change Jarvis account password"
+        );
+        assert!(account_prompt(&approval("password-set", DEVICE), &[]).is_err());
     }
 
     fn agent(action: &str) -> serde_json::Value {

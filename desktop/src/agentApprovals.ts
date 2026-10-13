@@ -1,6 +1,6 @@
-// Agent actions waiting for the owner (ADR-029 4b). Approving runs natively
-// by id: the Rust command fetches the pending action from the Home Node, asks
-// the OS to confirm it is the owner (biometrics, passcode fallback), signs the
+// Agent actions waiting for the owner (ADR-029 4b). Approving (macOS only)
+// runs natively by id: the Rust command fetches the pending action from the
+// Home Node, asks for Touch ID (no password fallback), signs the
 // agent-approval-v1 message from that server data and posts it. Denying only
 // cancels and needs no signature.
 import { invoke } from "@tauri-apps/api/core";
