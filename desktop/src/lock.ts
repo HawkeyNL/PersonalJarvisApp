@@ -86,7 +86,7 @@ export async function biometricUnlock(): Promise<boolean> {
   unlocking.value = true;
   lockError.value = null;
   try {
-    await invoke("biometric_unlock", { reason: "Unlock Jarvis", allowPassword: true });
+    await invoke("biometric_unlock", { allowPassword: true });
     unlockApp();
     return true;
   } catch (e) {

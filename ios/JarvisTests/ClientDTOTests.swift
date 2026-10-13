@@ -3,6 +3,7 @@ import Network
 import SwiftUI
 import UIKit
 import CryptoKit
+import LocalAuthentication
 @testable import Jarvis
 
 final class ModelApprovalTests: XCTestCase {
@@ -28,7 +29,8 @@ final class ModelApprovalTests: XCTestCase {
         let identity = DeviceIdentityStore(keychain: storage)
         do { _ = try await identity.existingPublicKeyHex(); XCTFail("Must not create a replacement identity") }
         catch DeviceIdentityError.missingStoredKey { }
-        XCTAssertNil(try storage.read(account: "device-ed25519-seed-v1"))
+        XCTAssertFalse(try storage.containsProtected(account: "device-ed25519-seed-v2"))
+        XCTAssertNil(try storage.read(account: "device-ed25519-public-v2"))
     }
 }
 
@@ -162,6 +164,10 @@ final class RealtimeHeartbeatTests: XCTestCase {
 final class FixtureSecureStorage: SecureValueStorage, @unchecked Sendable {
     private let lock = NSLock()
     private var values: [String: Data] = [:]
+    private var protected: [String: Data] = [:]
+    private var evaluated: [LAContext] = []
+    /// Forces protected reads to fail with this Keychain status.
+    var protectedReadStatus: OSStatus?
     func read(account: String) throws -> Data? {
         lock.lock(); defer { lock.unlock() }; return values[account]
     }
@@ -169,7 +175,170 @@ final class FixtureSecureStorage: SecureValueStorage, @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }; values[account] = data
     }
     func delete(account: String) throws {
-        lock.lock(); defer { lock.unlock() }; values.removeValue(forKey: account)
+        lock.lock(); defer { lock.unlock() }; values.removeValue(forKey: account); protected.removeValue(forKey: account)
+    }
+    func saveProtected(_ data: Data, account: String) throws {
+        lock.lock(); defer { lock.unlock() }; protected[account] = data
+    }
+    /// Like the Keychain item: only a context Face ID / Touch ID evaluated reads it.
+    func readProtected(account: String, context: LAContext) throws -> Data? {
+        lock.lock(); defer { lock.unlock() }
+        guard let data = protected[account] else { return nil }
+        if let status = protectedReadStatus { throw KeychainError.status(status) }
+        // A context that does not satisfy the item fails rather than prompting again.
+        guard evaluated.contains(where: { $0 === context }) else { throw KeychainError.status(errSecInteractionNotAllowed) }
+        return data
+    }
+    func containsProtected(account: String) throws -> Bool {
+        lock.lock(); defer { lock.unlock() }; return protected[account] != nil
+    }
+    /// A fixture biometric prompt: an evaluated context on success, as BiometricLock returns.
+    func prompt(_ result: LocalUnlockResult) -> (result: LocalUnlockResult, context: LAContext?) {
+        guard result == .unlocked else { return (result, nil) }
+        let context = LAContext()
+        lock.lock(); defer { lock.unlock() }; evaluated.append(context)
+        return (result, context)
+    }
+}
+
+final class DeviceKeyProtectionTests: XCTestCase {
+    private let seedV1 = "device-ed25519-seed-v1", seedV2 = "device-ed25519-seed-v2", publicV2 = "device-ed25519-public-v2"
+    private let nonce = String(repeating: "00", count: 32)
+
+    func testMigrationMovesSeedBehindBiometryKeepsPublicKeyAndDeletesV1() async throws {
+        let store = FixtureSecureStorage()
+        let legacy = Curve25519.Signing.PrivateKey()
+        try store.save(legacy.rawRepresentation, account: seedV1)
+        let identity = DeviceIdentityStore(keychain: store)
+        try await identity.migrateIfNeeded()
+        XCTAssertNil(try store.read(account: seedV1))
+        XCTAssertNil(try store.read(account: seedV2), "The seed is never stored as a plain item")
+        let publicKey = try await identity.existingPublicKeyHex()
+        XCTAssertEqual(publicKey, legacy.publicKey.rawRepresentation.hexEncodedString())
+        try await identity.migrateIfNeeded()
+        let challenge = UUID(), device = UUID()
+        let context = try XCTUnwrap(store.prompt(.unlocked).context)
+        let signature = try await identity.signLogin(challengeId: challenge, deviceId: device, nonceHex: nonce, context: context)
+        let message = try DeviceIdentityStore.loginMessage(challengeId: challenge, deviceId: device, nonceHex: nonce)
+        XCTAssertTrue(legacy.publicKey.isValidSignature(try XCTUnwrap(Data(hexEncoded: signature)), for: message))
+    }
+
+    func testDifferingLegacyKeyWinsAfterDowngradeAndRepair() async throws {
+        let store = FixtureSecureStorage()
+        let identity = DeviceIdentityStore(keychain: store)
+        let older = try await identity.publicKeyHex()
+        let repaired = Curve25519.Signing.PrivateKey()
+        try store.save(repaired.rawRepresentation, account: seedV1)
+        try await identity.migrateIfNeeded()
+        XCTAssertNil(try store.read(account: seedV1))
+        let current = try await identity.existingPublicKeyHex()
+        XCTAssertNotEqual(current, older)
+        XCTAssertEqual(current, repaired.publicKey.rawRepresentation.hexEncodedString())
+        let context = try XCTUnwrap(store.prompt(.unlocked).context)
+        let seed = try XCTUnwrap(store.readProtected(account: seedV2, context: context))
+        XCTAssertEqual(seed, repaired.rawRepresentation)
+    }
+
+    func testMatchingLegacyKeyKeepsProtectedKey() async throws {
+        let store = FixtureSecureStorage()
+        let identity = DeviceIdentityStore(keychain: store)
+        let current = try await identity.publicKeyHex()
+        let context = try XCTUnwrap(store.prompt(.unlocked).context)
+        let seed = try XCTUnwrap(store.readProtected(account: seedV2, context: context))
+        try store.save(seed, account: seedV1)
+        try await identity.migrateIfNeeded()
+        XCTAssertNil(try store.read(account: seedV1))
+        let kept = try await identity.existingPublicKeyHex()
+        XCTAssertEqual(kept, current)
+        // A damaged legacy seed never replaces a complete protected key.
+        try store.save(Data([1, 2, 3]), account: seedV1)
+        try await identity.migrateIfNeeded()
+        XCTAssertNil(try store.read(account: seedV1))
+        let stillKept = try await identity.existingPublicKeyHex()
+        XCTAssertEqual(stillKept, current)
+    }
+
+    func testUnreadableKnownKeyIsReportedAsRetryable() async throws {
+        let store = FixtureSecureStorage()
+        let identity = DeviceIdentityStore(keychain: store)
+        _ = try await identity.publicKeyHex()
+        let context = try XCTUnwrap(store.prompt(.unlocked).context)
+        for status in [errSecAuthFailed, errSecUserCanceled, errSecInteractionNotAllowed] {
+            store.protectedReadStatus = status
+            do {
+                _ = try await identity.signLogin(challengeId: UUID(), deviceId: UUID(), nonceHex: nonce, context: context)
+                XCTFail("Status \(status) must not sign")
+            } catch DeviceIdentityError.keyLocked { }
+        }
+    }
+
+    func testEnrolmentReplacesAPublicKeyWithoutItsSeed() async throws {
+        let store = FixtureSecureStorage()
+        let stale = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation
+        try store.save(stale, account: publicV2)
+        let identity = DeviceIdentityStore(keychain: store)
+        let fresh = try await identity.publicKeyHex()
+        XCTAssertNotEqual(fresh, stale.hexEncodedString())
+        XCTAssertTrue(try store.containsProtected(account: seedV2))
+        let context = try XCTUnwrap(store.prompt(.unlocked).context)
+        let seed = try XCTUnwrap(store.readProtected(account: seedV2, context: context))
+        XCTAssertEqual(try Curve25519.Signing.PrivateKey(rawRepresentation: seed).publicKey.rawRepresentation.hexEncodedString(), fresh)
+    }
+
+    func testLegacySeedReplacesAnInterruptedProtectedWrite() async throws {
+        let store = FixtureSecureStorage()
+        let legacy = Curve25519.Signing.PrivateKey()
+        try store.saveProtected(Curve25519.Signing.PrivateKey().rawRepresentation, account: seedV2)
+        try store.save(legacy.rawRepresentation, account: seedV1)
+        let identity = DeviceIdentityStore(keychain: store)
+        try await identity.migrateIfNeeded()
+        XCTAssertNil(try store.read(account: seedV1))
+        let publicKey = try await identity.existingPublicKeyHex()
+        XCTAssertEqual(publicKey, legacy.publicKey.rawRepresentation.hexEncodedString())
+        let context = try XCTUnwrap(store.prompt(.unlocked).context)
+        _ = try await identity.signLogin(challengeId: UUID(), deviceId: UUID(), nonceHex: nonce, context: context)
+    }
+
+    func testDamagedLegacySeedIsKeptWhenNothingReplacesIt() async throws {
+        let store = FixtureSecureStorage()
+        try store.save(Data([1, 2, 3]), account: seedV1)
+        do { try await DeviceIdentityStore(keychain: store).migrateIfNeeded(); XCTFail("Damaged seed must not migrate") }
+        catch DeviceIdentityError.invalidStoredKey { }
+        XCTAssertNotNil(try store.read(account: seedV1))
+    }
+
+    func testSigningRequiresAnEvaluatedContext() async throws {
+        let store = FixtureSecureStorage()
+        let identity = DeviceIdentityStore(keychain: store)
+        _ = try await identity.publicKeyHex()
+        do {
+            _ = try await identity.signLogin(challengeId: UUID(), deviceId: UUID(), nonceHex: nonce, context: LAContext())
+            XCTFail("An unevaluated context must not unlock the device key")
+        } catch DeviceIdentityError.keyLocked { }
+        let context = try XCTUnwrap(store.prompt(.unlocked).context)
+        _ = try await identity.signLogin(challengeId: UUID(), deviceId: UUID(), nonceHex: nonce, context: context)
+    }
+
+    func testPlainPublicKeyMatchesProtectedSeed() async throws {
+        let store = FixtureSecureStorage()
+        let identity = DeviceIdentityStore(keychain: store)
+        let publicKey = try await identity.publicKeyHex()
+        let context = try XCTUnwrap(store.prompt(.unlocked).context)
+        let seed = try XCTUnwrap(store.readProtected(account: seedV2, context: context))
+        let derived = try Curve25519.Signing.PrivateKey(rawRepresentation: seed).publicKey.rawRepresentation
+        XCTAssertEqual(derived.hexEncodedString(), publicKey)
+        XCTAssertEqual(try store.read(account: publicV2), derived)
+    }
+
+    func testInvalidatedKeyAsksToRepair() async throws {
+        let store = FixtureSecureStorage()
+        try store.save(Curve25519.Signing.PrivateKey().publicKey.rawRepresentation, account: publicV2)
+        let context = try XCTUnwrap(store.prompt(.unlocked).context)
+        do {
+            _ = try await DeviceIdentityStore(keychain: store).signLogin(challengeId: UUID(), deviceId: UUID(), nonceHex: nonce, context: context)
+            XCTFail("An invalidated key must not sign")
+        } catch DeviceIdentityError.biometryChanged { }
+        XCTAssertFalse(try store.containsProtected(account: seedV2), "Signing never creates a replacement key")
     }
 }
 
@@ -188,16 +357,17 @@ final class DeviceLoginRecoveryTests: XCTestCase {
     func testMissingSigningKeyIsNotRegenerated() async throws {
         let store = FixtureSecureStorage()
         let identity = DeviceIdentityStore(keychain: store)
+        let context = try XCTUnwrap(store.prompt(.unlocked).context)
         do {
-            _ = try await identity.signLogin(challengeId: UUID(), deviceId: UUID(), nonceHex: String(repeating: "00", count: 32))
+            _ = try await identity.signLogin(challengeId: UUID(), deviceId: UUID(), nonceHex: String(repeating: "00", count: 32), context: context)
             XCTFail("Missing registered identity must fail closed")
         } catch DeviceIdentityError.missingStoredKey { }
-        XCTAssertNil(try store.read(account: "device-ed25519-seed-v1"))
+        XCTAssertFalse(try store.containsProtected(account: "device-ed25519-seed-v2"))
     }
 
     func testRecreatedStoresKeepIdentityAndSettings() async throws {
         let store = FixtureSecureStorage()
-        defer { try? store.delete(account: "device-ed25519-seed-v1") }
+        defer { try? store.delete(account: "device-ed25519-seed-v2") }
         let first = DeviceIdentityStore(keychain: store)
         let publicKey = try await first.publicKeyHex()
         let restored = try await DeviceIdentityStore(keychain: store).publicKeyHex()
@@ -216,7 +386,7 @@ final class DeviceLoginRecoveryTests: XCTestCase {
             let credentials = SecureCredentialStore(keychain: store)
             let identity = DeviceIdentityStore(keychain: store)
             defer {
-                for account in ["device-ed25519-seed-v1", "registered-device-id-v1", "authenticated-session-v1"] {
+                for account in ["device-ed25519-seed-v2", "device-ed25519-public-v2", "registered-device-id-v1", "authenticated-session-v1"] {
                     try? store.delete(account: account)
                 }
             }
@@ -228,7 +398,8 @@ final class DeviceLoginRecoveryTests: XCTestCase {
             let transport = URLSession(configuration: config)
             defer { transport.invalidateAndCancel() }
             let api = JarvisAPIClient(baseURL: URL(string: "https://\(host)")!, session: transport)
-            let auth = AuthService(api: api, identity: identity, credentials: credentials)
+            let auth = AuthService(api: api, identity: identity, credentials: credentials,
+                                   authenticateBiometric: { _ in store.prompt(.unlocked) })
             let initial = try await auth.restore()
             XCTAssertEqual(initial, .needsPassword)
             do {
@@ -990,7 +1161,7 @@ final class PairingApprovalTests: XCTestCase {
         let api = JarvisAPIClient(baseURL: URL(string: "https://jarvis.example.com")!, session: transport)
         let prompts = PairingPromptCounter()
         let auth = AuthService(api: api, identity: identity, credentials: credentials,
-                               authenticateBiometric: { _ in await prompts.authenticate() })
+                               authenticateBiometric: { _ in store.prompt(await prompts.authenticate()) })
         PairingDecisionProtocol.reset()
         let request = item(full: full)
 

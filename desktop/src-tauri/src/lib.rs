@@ -14,6 +14,7 @@ use tauri::{AppHandle, Manager};
 
 #[cfg(desktop)]
 mod app_updates;
+mod approvals;
 mod local_speech;
 mod local_speech_engine;
 mod local_voices;
@@ -147,6 +148,10 @@ fn validate_acceptance_identity(identifier: &str) -> Result<(), &'static str> {
 }
 const KEY_ACCOUNT: &str = "device-private-key";
 const TOKEN_ACCOUNT: &str = "session-token";
+/// Both the device key and the bearer belong to one Home Node. Reusing the key
+/// for another origin would let that host obtain login signatures it can
+/// replay to the original node, so an origin change drops both.
+const ORIGIN_BOUND_CREDENTIALS: [&str; 2] = [KEY_ACCOUNT, TOKEN_ACCOUNT];
 
 fn credential(account: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(KEY_SERVICE, account)
@@ -267,55 +272,17 @@ fn auth_public_key(app: AppHandle) -> Result<String, String> {
     Ok(hex::encode(key.verifying_key().to_bytes()))
 }
 
-/// Sign the v1 login message for one challenge as this enrolled device.
-#[tauri::command]
-fn auth_sign_login(
-    app: AppHandle,
-    challenge_id: String,
-    nonce_hex: String,
-) -> Result<String, String> {
-    sign_challenge(
-        &app,
-        &challenge_id,
-        &nonce_hex,
-        jarvis_client_core::login_message,
-    )
-}
-
-/// Sign the v1 approval of one pending unlock request as this device. The OS
-/// prompt runs here, not in the webview, so a compromised page cannot approve
-/// an unlock silently.
-#[tauri::command]
-fn auth_sign_unlock_approval(
-    app: AppHandle,
-    request_id: String,
-    nonce_hex: String,
-    device_name: String,
-) -> Result<String, String> {
-    let device_name: String = device_name
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(64)
-        .collect();
-    authenticate_owner(&format!("Unlock {device_name}"), true)?;
-    sign_challenge(
-        &app,
-        &request_id,
-        &nonce_hex,
-        jarvis_client_core::unlock_approval_message,
-    )
-}
-
 type ChallengeMessage =
     fn(uuid::Uuid, uuid::Uuid, &[u8]) -> Result<Vec<u8>, jarvis_client_core::ProtocolError>;
 
-/// The webview only supplies the server's id and nonce; the domain and this
-/// device's id are fixed here, so no command signs caller-chosen bytes.
+/// Callers pass the server's id and nonce; the domain and this device's id
+/// are fixed here, so no command signs caller-chosen bytes.
 fn sign_challenge(
     app: &AppHandle,
     id: &str,
     nonce_hex: &str,
     message: ChallengeMessage,
+    expected_device_id: Option<&str>,
 ) -> Result<String, String> {
     let _guard = auth_storage()?;
     let id = uuid::Uuid::parse_str(id).map_err(|_| "invalid challenge".to_string())?;
@@ -323,128 +290,12 @@ fn sign_challenge(
         .device_id
         .and_then(|device_id| uuid::Uuid::parse_str(&device_id).ok())
         .ok_or("this device is not enrolled")?;
+    if expected_device_id.is_some_and(|expected| expected != device_id.to_string()) {
+        return Err("device login session changed".into());
+    }
     let nonce = hex::decode(nonce_hex).map_err(|_| "invalid challenge".to_string())?;
     let message = message(id, device_id, &nonce).map_err(|_| "invalid challenge".to_string())?;
     let key = signing_key_unlocked(app, false)?;
-    Ok(hex::encode(key.sign(&message).to_bytes()))
-}
-
-/// Sign only the canonical device-pairing approval protocol. Keeping this
-/// separate from generic challenge signing prevents a UI bug from turning an
-/// arbitrary server string into a privileged enrollment approval.
-#[tauri::command]
-// Tauri exposes these as separately named IPC fields; wrapping them would
-// silently change the command contract used by the Vue approval flow.
-#[allow(clippy::too_many_arguments)]
-fn auth_sign_pairing_approval(
-    app: AppHandle,
-    candidate_name: String,
-    request_id: String,
-    nonce_hex: String,
-    candidate_public_key_hex: String,
-    user_id: String,
-    approver_device_id: String,
-    expires_at: i64,
-) -> Result<String, String> {
-    if candidate_name.trim().is_empty() || candidate_name.len() > 128 {
-        return Err("invalid device name".to_string());
-    }
-    let request_id = uuid::Uuid::parse_str(&request_id).map_err(|e| e.to_string())?;
-    let user_id = uuid::Uuid::parse_str(&user_id).map_err(|e| e.to_string())?;
-    let approver_device_id =
-        uuid::Uuid::parse_str(&approver_device_id).map_err(|e| e.to_string())?;
-    let nonce = hex::decode(nonce_hex).map_err(|e| e.to_string())?;
-    let public_key = hex::decode(candidate_public_key_hex).map_err(|e| e.to_string())?;
-    if nonce.len() != 32 || public_key.len() != 32 {
-        return Err("invalid pairing payload".to_string());
-    }
-    if expires_at <= time::OffsetDateTime::now_utc().unix_timestamp() {
-        return Err("pairing request expired".to_string());
-    }
-    let local_device_id = load_metadata(&app)?
-        .device_id
-        .ok_or_else(|| "device is not enrolled".to_string())?;
-    if local_device_id != approver_device_id.to_string() {
-        return Err("pairing approver does not match this device".to_string());
-    }
-    authenticate_owner(&format!("Pair {}", candidate_name.trim()), true)?;
-    let expires_at = time::OffsetDateTime::from_unix_timestamp(expires_at)
-        .map_err(|_| "invalid pairing expiry".to_string())?;
-    let message = jarvis_client_core::pairing_approval_message(
-        request_id,
-        &nonce,
-        &public_key,
-        user_id,
-        approver_device_id,
-        expires_at,
-    )
-    .map_err(|_| "invalid pairing payload".to_string())?;
-    let _guard = auth_storage()?;
-    if expires_at <= time::OffsetDateTime::now_utc()
-        || load_metadata(&app)?.device_id.as_deref()
-            != Some(approver_device_id.to_string().as_str())
-    {
-        return Err("pairing approval expired or device changed".into());
-    }
-    let key = signing_key_unlocked(&app, false)?;
-    Ok(hex::encode(key.sign(&message).to_bytes()))
-}
-
-/// Validate a pending agent action from `GET /v1/agent/pending` and return the
-/// OS prompt text plus the canonical agent-approval-v1 message for this device.
-/// The action type is shown in the OS prompt, so it must be a short identifier.
-fn agent_approval(
-    pending_id: &str,
-    action: &str,
-    nonce_hex: &str,
-    action_sha256_hex: &str,
-    device_id: &str,
-) -> Result<(String, Vec<u8>), String> {
-    if action.is_empty()
-        || action.len() > 64
-        || !action
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
-    {
-        return Err("invalid agent action".to_string());
-    }
-    let pending_id = uuid::Uuid::parse_str(pending_id).map_err(|e| e.to_string())?;
-    let device_id = uuid::Uuid::parse_str(device_id).map_err(|e| e.to_string())?;
-    let nonce = hex::decode(nonce_hex).map_err(|e| e.to_string())?;
-    let action_sha256 = hex::decode(action_sha256_hex).map_err(|e| e.to_string())?;
-    let message =
-        jarvis_client_core::agent_approval_message(pending_id, &nonce, &action_sha256, device_id)
-            .map_err(|_| "invalid agent approval payload".to_string())?;
-    Ok((format!("Approve agent action: {action}"), message))
-}
-
-/// Sign only the canonical agent-approval-v1 message, after OS authentication
-/// in Rust. Every signing command fixes its own domain, so no approval can be
-/// replayed as another kind.
-#[tauri::command]
-fn auth_sign_agent_approval(
-    app: AppHandle,
-    pending_id: String,
-    action: String,
-    nonce_hex: String,
-    action_sha256_hex: String,
-) -> Result<String, String> {
-    let device_id = load_metadata(&app)?
-        .device_id
-        .ok_or_else(|| "device is not enrolled".to_string())?;
-    let (reason, message) = agent_approval(
-        &pending_id,
-        &action,
-        &nonce_hex,
-        &action_sha256_hex,
-        &device_id,
-    )?;
-    authenticate_owner(&reason, true)?;
-    let _guard = auth_storage()?;
-    if load_metadata(&app)?.device_id.as_deref() != Some(device_id.as_str()) {
-        return Err("agent approval device changed".into());
-    }
-    let key = signing_key_unlocked(&app, false)?;
     Ok(hex::encode(key.sign(&message).to_bytes()))
 }
 
@@ -481,6 +332,7 @@ fn auth_sign_account_approval(
         AccountAction::DeviceRevoke => format!("Revoke Jarvis device {}", approval.target),
     };
     let message = account_approval_message(&approval).map_err(str::to_string)?;
+    let _prompt = model_authorization::try_prompt()?;
     authenticate_owner(&reason, true)?;
     let guard = auth_storage()?;
     let current = load_metadata(&app)?;
@@ -576,6 +428,19 @@ fn authenticated_api_path(path: &str) -> bool {
     })
 }
 
+/// Approve routes that only native code may call, with a signature it made.
+fn native_only_route(path: &str) -> bool {
+    let route = path.split('?').next().unwrap_or(path);
+    route.ends_with("/approve")
+        && [
+            "/v1/auth/pairing/requests/",
+            "/v1/auth/unlock/",
+            "/v1/agent/pending/",
+        ]
+        .iter()
+        .any(|prefix| route.starts_with(prefix))
+}
+
 fn api_url(origin: Option<&str>, path: &str) -> Result<String, String> {
     if !authenticated_api_path(path) {
         return Err("authenticated API path is invalid".to_string());
@@ -606,7 +471,39 @@ struct LoginResponse {
 
 #[cfg(test)]
 mod login_response_tests {
-    use super::LoginResponse;
+    use super::{parse_login_challenge, LoginResponse};
+
+    #[test]
+    fn accepts_canonical_login_challenge() {
+        let nonce = "ab".repeat(32);
+        let body = format!(
+            r#"{{"challenge_id":"10213243-5465-7687-98a9-bacbdcedfe0f","nonce":"{nonce}"}}"#
+        );
+        let challenge = parse_login_challenge(body.as_bytes()).expect("canonical challenge");
+        assert_eq!(
+            challenge.challenge_id.to_string(),
+            "10213243-5465-7687-98a9-bacbdcedfe0f"
+        );
+        assert_eq!(challenge.nonce, nonce);
+    }
+
+    #[test]
+    fn rejects_malformed_login_challenges() {
+        let id = "10213243-5465-7687-98a9-bacbdcedfe0f";
+        for body in [
+            format!(
+                r#"{{"challenge_id":"not-a-uuid","nonce":"{}"}}"#,
+                "ab".repeat(32)
+            ),
+            format!(r#"{{"challenge_id":"{id}","nonce":"{}"}}"#, "ab".repeat(31)),
+            format!(r#"{{"challenge_id":"{id}","nonce":"{}"}}"#, "ab".repeat(33)),
+            format!(r#"{{"challenge_id":"{id}","nonce":"{}"}}"#, "zz".repeat(32)),
+            format!(r#"{{"challenge_id":"{id}"}}"#),
+            "not json".to_string(),
+        ] {
+            assert!(parse_login_challenge(body.as_bytes()).is_err(), "{body}");
+        }
+    }
 
     #[test]
     fn accepts_canonical_core_login_response() {
@@ -652,12 +549,23 @@ fn auth_remember_enrolled_device(
     save_metadata(&app, &metadata)
 }
 
+/// Parse the Home Node's login challenge. Only the server's id and a 32-byte
+/// nonce are accepted, so the signed bytes stay the canonical login message.
+fn parse_login_challenge(bytes: &[u8]) -> Result<jarvis_client_core::ChallengeResponse, String> {
+    let challenge: jarvis_client_core::ChallengeResponse = serde_json::from_slice(bytes)
+        .map_err(|_| "Home Node login challenge is invalid".to_string())?;
+    if !jarvis_client_core::is_hex_of_len(&challenge.nonce, 64) {
+        return Err("Home Node login challenge is invalid".to_string());
+    }
+    Ok(challenge)
+}
+
+/// Run the whole device login natively: fetch a challenge from the stored
+/// Home Node, sign it, post the login and persist the bearer. The signature
+/// and the bearer never cross Tauri IPC.
 #[tauri::command]
-async fn auth_complete_login(
+async fn auth_login(
     app: AppHandle,
-    device_id: String,
-    challenge_id: String,
-    signature: String,
     password: Option<String>,
     expected_origin: String,
 ) -> Result<(), String> {
@@ -667,23 +575,44 @@ async fn auth_complete_login(
     {
         return Err("account password is invalid".to_string());
     }
-    uuid::Uuid::parse_str(&device_id).map_err(|_| "login device id is invalid".to_string())?;
-    uuid::Uuid::parse_str(&challenge_id)
-        .map_err(|_| "login challenge id is invalid".to_string())?;
-    if signature.len() != 128 || !signature.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err("login signature is invalid".to_string());
-    }
-    let (origin, epoch) = {
+    let (origin, device_id, epoch) = {
         let guard = auth_storage()?;
-        let origin = load_metadata(&app)?
+        let metadata = load_metadata(&app)?;
+        let origin = metadata
             .home_node_origin
             .ok_or_else(|| "Home Node is not configured".to_string())?;
         if origin != expected_origin {
             return Err("Home Node changed; sign in again".into());
         }
-        (origin, *guard)
+        let device_id = metadata
+            .device_id
+            .and_then(|device_id| uuid::Uuid::parse_str(&device_id).ok())
+            .ok_or("this device is not enrolled")?;
+        (origin, device_id.to_string(), *guard)
     };
-    let response = native_http_client()?
+    let client = native_http_client()?;
+    let response = client
+        .post(format!("{origin}/v1/auth/challenge"))
+        .json(&serde_json::json!({ "device_id": device_id }))
+        .send()
+        .await
+        .map_err(|_| "Home Node login is unavailable".to_string())?;
+    if !response.status().is_success() {
+        return Err("Home Node rejected the login challenge".to_string());
+    }
+    let bytes = native_response::bounded(response, 16 * 1024)
+        .await
+        .map_err(|_| "Home Node login challenge is invalid".to_string())?;
+    let challenge = parse_login_challenge(&bytes)?;
+    let challenge_id = challenge.challenge_id.to_string();
+    let signature = sign_challenge(
+        &app,
+        &challenge_id,
+        &challenge.nonce,
+        jarvis_client_core::login_message,
+        Some(&device_id),
+    )?;
+    let response = client
         .post(format!("{origin}/v1/auth/login"))
         .json(&serde_json::json!({
             "device_id": device_id,
@@ -739,6 +668,9 @@ async fn auth_request(
         "DELETE" => reqwest::Method::DELETE,
         _ => return Err("authenticated API method is invalid".to_string()),
     };
+    if native_only_route(&path) {
+        return Err("authenticated API path is invalid".to_string());
+    }
     if method != reqwest::Method::POST && body.is_some() {
         return Err("authenticated API body is invalid".to_string());
     }
@@ -843,12 +775,15 @@ fn home_node_configure(app: AppHandle, origin: String) -> Result<HomeNodeConfig,
     advance_auth_epoch(&mut guard)?;
     let mut metadata = load_metadata(&app)?;
     if origin_changed(metadata.home_node_origin.as_deref(), &origin) {
-        // A bearer is scoped to the Home Node that minted it. Clear both the
-        // token and server-side device id before persisting a different origin
-        // so the old credential can never be sent to a newly entered host.
+        // The bearer and the device key are scoped to the Home Node that
+        // enrolled them. Clear both, and the server-side device id, before
+        // persisting a different origin so neither can be used against a
+        // newly entered host. The next enrolment generates a fresh key.
         #[cfg(desktop)]
         app_updates::forget(&app);
-        delete_credential(TOKEN_ACCOUNT)?;
+        for account in ORIGIN_BOUND_CREDENTIALS {
+            delete_credential(account)?;
+        }
         metadata.device_id = None;
     }
     metadata.home_node_origin = Some(origin.clone());
@@ -902,7 +837,9 @@ fn origin_from_legacy_update_endpoint(value: &str) -> Option<String> {
     .ok()
 }
 
-/// Prompt the OS for local verification (Touch ID / Face ID).
+/// Prompt the OS for local verification (Touch ID / Face ID) to unlock the
+/// app. The prompt text is fixed here so the webview cannot show a lookalike
+/// approval prompt.
 ///
 /// `allow_password` controls the device-password fallback. The desktop passes
 /// `false` (biometrics-only): if biometrics fail, the app falls back to phone
@@ -911,8 +848,8 @@ fn origin_from_legacy_update_endpoint(value: &str) -> Option<String> {
 /// Returns `Ok(())` only on a successful verification; any failure,
 /// cancellation, or lack of hardware is an `Err`.
 #[tauri::command]
-fn biometric_unlock(reason: String, allow_password: bool) -> Result<(), String> {
-    authenticate_owner(&reason, allow_password)
+fn biometric_unlock(allow_password: bool) -> Result<(), String> {
+    authenticate_owner("Unlock Jarvis", allow_password)
 }
 
 /// Revocation only: the webview cannot mint or extend an authorization lease.
@@ -1000,15 +937,14 @@ pub fn run() {
             realtime::realtime_stop_speech,
             device_info,
             auth_public_key,
-            auth_sign_login,
-            auth_sign_unlock_approval,
-            auth_sign_pairing_approval,
-            auth_sign_agent_approval,
+            approvals::auth_approve_unlock,
+            approvals::auth_approve_pairing,
+            approvals::auth_approve_agent,
             auth_sign_account_approval,
             model_control::set_model_enabled,
             model_control::set_model_routing,
             auth_remember_enrolled_device,
-            auth_complete_login,
+            auth_login,
             auth_request,
             auth_status,
             auth_logout,
@@ -1079,37 +1015,6 @@ mod tests {
         assert!(super::api_url(None, "/v1/conversations").is_err());
     }
     use super::*;
-
-    #[test]
-    fn agent_approval_signs_the_golden_v1_message_only() {
-        let pending_id = "00112233-4455-6677-8899-aabbccddeeff";
-        let device_id = "ffeeddcc-bbaa-9988-7766-554433221100";
-        let nonce = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
-        let hash = "8d2dd02e0f1e485d0be7f748f2fdd0d2160dd245b000ca1bff1ca15cd043dbe5";
-        let (reason, message) =
-            agent_approval(pending_id, "write_file", nonce, hash, device_id).unwrap();
-        assert_eq!(reason, "Approve agent action: write_file");
-        assert_eq!(
-            hex::encode(&message),
-            concat!(
-                "6a61727669732f6167656e742d617070726f76616c2f763100",
-                "00112233445566778899aabbccddeeff",
-                "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
-                "8d2dd02e0f1e485d0be7f748f2fdd0d2160dd245b000ca1bff1ca15cd043dbe5",
-                "ffeeddccbbaa99887766554433221100"
-            )
-        );
-        for (pending_id, action, nonce, hash, device_id) in [
-            ("not-a-uuid", "write_file", nonce, hash, device_id),
-            (pending_id, "", nonce, hash, device_id),
-            (pending_id, "write file\nApprove", nonce, hash, device_id),
-            (pending_id, "write_file", &nonce[..62], hash, device_id),
-            (pending_id, "write_file", nonce, "", device_id),
-            (pending_id, "write_file", nonce, hash, "device"),
-        ] {
-            assert!(agent_approval(pending_id, action, nonce, hash, device_id).is_err());
-        }
-    }
 
     #[test]
     fn metadata_serialization_never_contains_legacy_secrets() {
@@ -1188,6 +1093,10 @@ mod tests {
             "https://new.example"
         ));
         assert!(origin_changed(None, "https://home.example"));
+        // Without the device key, signing for a re-entered device id fails
+        // ("Original device key unavailable") instead of serving the new host.
+        assert!(super::ORIGIN_BOUND_CREDENTIALS.contains(&super::KEY_ACCOUNT));
+        assert!(super::ORIGIN_BOUND_CREDENTIALS.contains(&super::TOKEN_ACCOUNT));
     }
 
     #[test]
@@ -1240,6 +1149,28 @@ mod tests {
         assert!(!authenticated_api_path("/v1/agent/action"));
         assert!(!authenticated_api_path("/v1/coding/sessions/fixture/start"));
         assert!(!authenticated_api_path("/v1/agents/fixture"));
+    }
+
+    #[test]
+    fn webview_proxy_cannot_post_native_only_approvals() {
+        for path in [
+            "/v1/auth/pairing/requests/fixture/approve",
+            "/v1/auth/unlock/fixture/approve",
+            "/v1/agent/pending/fixture/approve",
+            "/v1/agent/pending/fixture/approve?x=1",
+        ] {
+            assert!(native_only_route(path), "{path}");
+        }
+        for path in [
+            "/v1/auth/pairing/requests/fixture/deny",
+            "/v1/auth/unlock/fixture/deny",
+            "/v1/agent/pending/fixture/deny",
+            "/v1/agent/pending",
+            // Account approvals are still signed natively and posted by the page.
+            "/v1/auth/account/requests/fixture/approve",
+        ] {
+            assert!(!native_only_route(path), "{path}");
+        }
     }
 
     #[test]

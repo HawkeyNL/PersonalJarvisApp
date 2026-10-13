@@ -13,7 +13,8 @@ The current client provides:
   generic network failure states;
 - restart-safe pairing, challenge signing and session login boundaries;
 - one unique Ed25519 identity per install, with its seed encrypted by a
-  non-exportable Android Keystore AES-GCM wrapping key;
+  non-exportable Android Keystore AES-GCM key that needs a strong-biometric
+  prompt for every signature;
 - encrypted-at-rest pairing nonce, device id and bearer session token;
 - a strong-biometric `BiometricPrompt` lock on launch and after backgrounding;
 - conversation list/load/send calls using client-local DTOs that mirror the
@@ -96,14 +97,26 @@ timeouts and the HTTP client deliberately has no logging plugin.
 
 The Home Node protocol requires a raw 32-byte Ed25519 public key. Android
 Keystore does not provide portable Ed25519 key-pair generation across API 28+,
-so the client generates a 32-byte Ed25519 seed in native Kotlin and immediately
-wraps it with AES-GCM. Only ciphertext is persisted in app-private preferences;
-the AES key is non-exportable and stored in Android Keystore with
-`setUnlockedDeviceRequired(true)`. The seed is decrypted only for public-key
-derivation or signing and the temporary byte buffer is cleared afterward.
+so the client generates a 32-byte Ed25519 seed in native Kotlin and wraps it
+with AES-GCM. Only ciphertext and the public key are persisted in app-private
+preferences. The AES key `com.hawkeynl.jarvis.identity.v2` is non-exportable,
+in StrongBox when available (otherwise the TEE), requires `BIOMETRIC_STRONG`
+authentication for every use, is unusable while the device is locked and is
+invalidated when biometrics are enrolled or removed. The seed is decrypted only
+with the cipher a `BiometricPrompt` `CryptoObject` authorised, for one signature
+(login, pairing approval, model change), and the buffer is cleared afterward.
+Showing the public key or fingerprint never prompts.
 
-The same wrapping boundary protects bearer tokens, device ids and pending
-pairing nonces. Storage decryption failures fail clearly and never create a new
+A new seed is created behind the biometric key when pairing starts (one
+prompt). A seed from an older version, kept under the shared secrets key, moves
+behind the biometric key on its next signature in the same prompt. If biometrics
+change, Keystore invalidates the key and the seed is lost. The app then offers
+"Erase this device and pair again"; nothing is erased until the user taps it.
+Revoke the old device on the Home Node. The key material is excluded from
+backups and device-to-device transfer.
+
+A separate Keystore key without user authentication, also unusable while the
+device is locked, protects bearer tokens, device ids and pending pairing nonces. Storage decryption failures fail clearly and never create a new
 identity silently. Device reset best-effort calls `DELETE /v1/devices/{id}` before
 clearing the local session and identity.
 
