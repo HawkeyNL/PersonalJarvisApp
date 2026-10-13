@@ -15,6 +15,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.hawkeynl.jarvis.network.UnlockRequestItem
 import com.hawkeynl.jarvis.security.PairingApproval
 import com.hawkeynl.jarvis.security.UnlockApprovalService
@@ -30,18 +33,22 @@ fun UnlockRequests(service: UnlockApprovalService) {
     var busy by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    LaunchedEffect(service) {
-        while (true) {
-            val result = try {
-                Result.success(service.pending(waitSeconds = 20))
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: Exception) {
-                Result.failure(failure)
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(service, lifecycle) {
+        // Compose keeps this on screen while the app is stopped; poll only while resumed.
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                val result = try {
+                    Result.success(service.pending(waitSeconds = 20))
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    Result.failure(failure)
+                }
+                requests = result.getOrDefault(emptyList())
+                // An answer with requests, an error or a locked app returns at once: never spin.
+                delay(if (result.isFailure || requests.isNotEmpty()) 10_000 else 2_000)
             }
-            requests = result.getOrDefault(emptyList())
-            // An answer with requests returns at once; do not spin on it or on errors.
-            if (result.isFailure || requests.isNotEmpty()) delay(10_000)
         }
     }
     if (requests.isEmpty() && error == null) return

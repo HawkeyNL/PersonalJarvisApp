@@ -1493,6 +1493,16 @@ final class UnlockApprovalTests: XCTestCase {
         }
     }
 
+    func testDenyNeedsFaceIDToo() async throws {
+        let (auth, _, prompts) = try await fixture(createdAt: Int64(Date().timeIntervalSince1970))
+        await prompts.set(.cancelled)
+        do { try await auth.denyUnlock(UnlockDecisionProtocol.request); XCTFail("Cancelled biometrics must not deny") } catch { }
+        XCTAssertFalse(UnlockDecisionProtocol.calls().contains { $0.path.hasSuffix("/deny") })
+        await prompts.set(.unlocked)
+        try await auth.denyUnlock(UnlockDecisionProtocol.request)
+        XCTAssertEqual(UnlockDecisionProtocol.calls().last?.path, "/v1/auth/unlock/\(UnlockDecisionProtocol.request.uuidString)/deny")
+    }
+
     private func fixture(createdAt: Int64) async throws -> (AuthService, String, PairingPromptCounter) {
         let store = FixtureSecureStorage()
         let credentials = SecureCredentialStore(keychain: store)

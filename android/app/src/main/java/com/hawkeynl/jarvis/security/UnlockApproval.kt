@@ -26,12 +26,14 @@ class UnlockApprovalService(
     private val now: () -> Long = { System.currentTimeMillis() / 1000 },
 ) {
     /** Requests waiting for this device, holding the call up to [waitSeconds] until one
-     *  appears. Callers poll only while the app is in the foreground and unlocked. */
+     *  appears. Callers poll only while the app is in the foreground; a locked app reads
+     *  nothing. Staleness is checked when deciding, not here. */
     suspend fun pending(waitSeconds: Int): List<UnlockRequestItem> {
+        if (!unlocked()) return emptyList()
         val origin = endpoint() ?: return emptyList()
         val token = sessions.session().token ?: return emptyList()
         return when (val result = api.unlockPending(origin, token, waitSeconds)) {
-            is ApiResult.Success -> result.value.requests.filter { fresh(it) }
+            is ApiResult.Success -> result.value.requests
             else -> error(refusal(result))
         }
     }

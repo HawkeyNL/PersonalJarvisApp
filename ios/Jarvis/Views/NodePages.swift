@@ -968,8 +968,8 @@ struct UnlockRequestsBanner: View {
                 let result = await model.pendingUnlocks()
                 guard !Task.isCancelled else { break }
                 requests = result ?? []
-                // An answer with requests returns at once; do not spin on it or on errors.
-                if result == nil || !requests.isEmpty { try? await Task.sleep(for: .seconds(10)) }
+                // An answer with requests or an error returns at once: never spin.
+                try? await Task.sleep(for: .seconds(result == nil || !requests.isEmpty ? 10 : 2))
             }
         }
     }

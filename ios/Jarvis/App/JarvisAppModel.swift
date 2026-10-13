@@ -418,6 +418,7 @@ final class JarvisAppModel: ObservableObject {
     func pendingUnlocks() async -> [UnlockRequestItem]? {
         guard isAuthenticated, lockState == .unlocked else { return nil }
         let generation = presentation.id
+        // Errors only pause polling; any other owner read still handles a real 401.
         let requests = try? await auth.pendingUnlocks(wait: 10)
         guard presentation.accepts(generation), lockState == .unlocked else { return nil }
         return requests

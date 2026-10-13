@@ -52,7 +52,8 @@ class UnlockApprovalTest {
             assertEquals(0, fixture.prompts)
             assertTrue(fixture.paths.none { it.endsWith("/approve") || it.endsWith("/deny") })
         }
-        assertTrue(Fixture(createdAt = NOW - 131).service.pending(0).isEmpty())
+        // Listing shows what Core returns; only a decision refuses a stale request.
+        assertEquals(1, Fixture(createdAt = NOW - 131).service.pending(0).size)
     }
 
     @Test fun denyNeedsBiometricsToo() = runTest {

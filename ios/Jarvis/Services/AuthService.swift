@@ -399,14 +399,15 @@ actor AuthService {
     }
 
     /// Unlock requests waiting for this device, held up to `wait` seconds until one appears.
-    /// Callers poll only while the app is in the foreground and unlocked.
+    /// Callers poll only while the app is in the foreground and unlocked. Staleness is
+    /// checked when deciding, not here.
     func pendingUnlocks(wait: Int) async throws -> [UnlockRequestItem] {
         let binding = await api.binding()
         guard let token = try await credentials.session()?.token else { throw JarvisAPIError.unauthorized }
         // Stay inside the 15 s request timeout; Core holds the call at most 25 s.
         let list: UnlockRequestList = try await api.get("/v1/auth/unlock/pending?wait=\(min(max(wait, 0), 10))",
                                                         token: token, expectedBinding: binding)
-        return list.requests.filter { Self.fresh($0) }
+        return list.requests
     }
 
     /// Approve another device's unlock: re-read the request by id, refuse a stale one,
