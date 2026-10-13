@@ -352,6 +352,15 @@ final class DeviceLoginRecoveryTests: XCTestCase {
             "6a61727669732d6c6f67696e2d763100" + "00112233445566778899aabbccddeeff" +
             "ffeeddccbbaa99887766554433221100" + "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
         XCTAssertThrowsError(try DeviceIdentityStore.loginMessage(challengeId: UUID(), deviceId: UUID(), nonceHex: "00"))
+        XCTAssertEqual(try DeviceIdentityStore.unlockApprovalMessage(
+            requestId: UUID(uuidString: "00112233-4455-6677-8899-aabbccddeeff")!,
+            approverDeviceId: UUID(uuidString: "ffeeddcc-bbaa-9988-7766-554433221100")!,
+            nonceHex: (0..<32).map { String(format: "%02x", $0) }.joined()).hexEncodedString(),
+            "6a61727669732d756e6c6f636b2d617070726f76616c2d763100" + "00112233445566778899aabbccddeeff" +
+            "ffeeddccbbaa99887766554433221100" + "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+        // A sign prefix is not hex, even where Swift's integer parser accepts it.
+        XCTAssertThrowsError(try DeviceIdentityStore.unlockApprovalMessage(requestId: UUID(), approverDeviceId: UUID(),
+                                                                           nonceHex: "+0" + String(repeating: "00", count: 31)))
     }
 
     func testMissingSigningKeyIsNotRegenerated() async throws {
@@ -1129,11 +1138,33 @@ final class PairingApprovalTests: XCTestCase {
             XCTAssertThrowsError(try PairingFingerprint.verified(item(key: bad))) { XCTAssertEqual($0 as? PairingFingerprint.Failure, .invalidKey) }
         }
         XCTAssertEqual(PairingFingerprint.grouped("0123456789abcdef01"), "0123 4567 89ab cdef 01")
-        XCTAssertEqual(PairingFingerprint.hint(nil), "unknown")
-        XCTAssertEqual(PairingFingerprint.hint("Pixel\u{202E} 9\u{7}"), "Pixel 9")
-        XCTAssertEqual(PairingFingerprint.hint(String(repeating: "x", count: 70)), String(repeating: "x", count: 64) + "…")
+        XCTAssertEqual(PairingFingerprint.displayName(nil), "unknown")
         XCTAssertEqual(pairingCountdown(100, now: Date(timeIntervalSince1970: 0)), "1:40")
         XCTAssertEqual(pairingCountdown(100, now: Date(timeIntervalSince1970: 100)), "Expired")
+    }
+
+    /// The desktop `display_name` table, unchanged.
+    func testDisplayNamesDropControlAndFormatCharacters() {
+        func name(_ value: String) -> String { PairingFingerprint.displayName(value, max: 40) }
+        XCTAssertEqual(name("Owner's iPhone"), "Owner's iPhone")
+        XCTAssertEqual(name("Evil\u{202E}enohPi\u{200B}\u{2066}"), "EvilenohPi")
+        XCTAssertEqual(name("a\nApprove\u{2028}all\t"), "a Approve all")
+        XCTAssertEqual(name("\u{0}\u{7}\u{FEFF} "), "unknown")
+        XCTAssertEqual(name("A\u{34F}\u{3164}\u{2800}\u{FE0F}\u{E0100}\u{F0000}\u{E000}\"B"), "AB")
+        XCTAssertEqual(name("\u{201C}A\u{2019}\u{AB}B\u{BB}\u{FF02}\u{2039}C\u{203A}"), "ABC")
+        // At most two combining marks per base character.
+        XCTAssertEqual(name("e\u{301}\u{302}\u{303}\u{304} o\u{308}"), "e\u{301}\u{302} o\u{308}")
+        let long = name(String(repeating: "a", count: 60) + String(repeating: "z", count: 40))
+        XCTAssertEqual(long.unicodeScalars.count, 40)
+        XCTAssertEqual(long, String(repeating: "a", count: 20) + "…" + String(repeating: "z", count: 19))
+        XCTAssertEqual(name(String(repeating: "x", count: 40)), String(repeating: "x", count: 40))
+    }
+
+    func testApproverPlatformsCarryAWarning() {
+        for platform in ["ios", "android", "macos", " MacOS "] {
+            XCTAssertTrue(PairingFingerprint.approverWarning(platform: platform)?.contains("approve unlocks, account changes and agent actions") == true)
+        }
+        for platform in ["linux", "windows", ""] { XCTAssertNil(PairingFingerprint.approverWarning(platform: platform)) }
     }
 
     func testDecodesPairingListWithAndWithoutDetails() throws {
@@ -1231,6 +1262,167 @@ private final class PairingDecisionProtocol: URLProtocol {
                                        headerFields: ["Content-Type": "application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: try! JSONSerialization.data(withJSONObject: object))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() { }
+}
+
+final class AccountApprovalTests: XCTestCase {
+    private let nonce = (0..<32).map { String(format: "%02x", $0) }.joined()
+
+    private func approval(action: String = AccountApproval.deviceRevoke, user: UUID = AccountDecisionProtocol.user,
+                          device: UUID = AccountDecisionProtocol.device, target: UUID = AccountDecisionProtocol.device,
+                          expiresAt: Int64 = 4102444800) -> AccountApproval {
+        AccountApproval(request_id: AccountDecisionProtocol.request, user_id: user, device_id: device, action: action,
+                        target: target, nonce: nonce, expires_at: expiresAt)
+    }
+
+    /// client-core `account_approval_v1_matches_golden_bytes`.
+    func testMessageMatchesClientCoreGoldenVectors() throws {
+        let vector = AccountApproval(request_id: UUID(uuidString: "00112233-4455-6677-8899-aabbccddeeff")!,
+            user_id: UUID(uuidString: "10213243-5465-7687-98a9-bacbdcedfe0f")!,
+            device_id: UUID(uuidString: "ffeeddcc-bbaa-9988-7766-554433221100")!, action: AccountApproval.deviceRevoke,
+            target: UUID(uuidString: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0")!, nonce: nonce, expires_at: 1_800_000_000)
+        let tail = "00112233445566778899aabbccddeeff" + "102132435465768798a9bacbdcedfe0f" +
+            "ffeeddccbbaa99887766554433221100" + "0f1e2d3c4b5a69788796a5b4c3d2e1f0" + nonce + "000000006b49d200"
+        XCTAssertEqual(try vector.message().hexEncodedString(),
+                       "6a61727669732d6163636f756e742d617070726f76616c2d7631006465766963652d7265766f6b6500" + tail)
+        let password = AccountApproval(request_id: vector.request_id, user_id: vector.user_id, device_id: vector.device_id,
+                                       action: AccountApproval.passwordSet, target: vector.target, nonce: nonce, expires_at: 1_800_000_000)
+        XCTAssertEqual(try password.message().hexEncodedString(),
+                       "6a61727669732d6163636f756e742d617070726f76616c2d76310070617373776f72642d73657400" + tail)
+        for bad in [approval(action: "device-delete"), approval(expiresAt: 0),
+                    AccountApproval(request_id: UUID(), user_id: UUID(), device_id: UUID(), action: AccountApproval.deviceRevoke,
+                                    target: UUID(), nonce: String(repeating: "ab", count: 31), expires_at: 1)] {
+            XCTAssertThrowsError(try bad.message())
+        }
+    }
+
+    func testOnlyTheRequestedChallengeIsAccepted() throws {
+        let me = AccountDecisionProtocol.user, device = AccountDecisionProtocol.device
+        XCTAssertNoThrow(try approval().require(action: AccountApproval.deviceRevoke, user: me, device: device, target: device, now: 1))
+        for other in [approval(action: AccountApproval.passwordSet), approval(user: UUID()), approval(device: UUID()),
+                      approval(target: UUID()), approval(expiresAt: 1)] {
+            XCTAssertThrowsError(try other.require(action: AccountApproval.deviceRevoke, user: me, device: device, target: device, now: 1))
+        }
+    }
+
+    func testUnlinkSignsCoresRevokeChallengeAndErasesNothing() async throws {
+        let (auth, credentials, publicKey, prompts) = try await fixture(revoke: AccountDecisionProtocol.json(approval()))
+        try await auth.unlinkDevice()
+        let promptCount = await prompts.count
+        XCTAssertEqual(promptCount, 1)
+        let calls = AccountDecisionProtocol.calls()
+        XCTAssertEqual(calls.map { $0.path }, ["/v1/auth/me", "/v1/devices/\(AccountDecisionProtocol.device.uuidString)/revoke-request",
+                                            "/v1/auth/account/requests/\(AccountDecisionProtocol.request.uuidString)/approve"])
+        let signature = try XCTUnwrap(calls.last?.body["signature"].flatMap { Data(hexEncoded: $0) })
+        let verifier = try Curve25519.Signing.PublicKey(rawRepresentation: XCTUnwrap(Data(hexEncoded: publicKey)))
+        XCTAssertTrue(verifier.isValidSignature(signature, for: try approval().message()))
+        let device = try await credentials.deviceId()
+        XCTAssertEqual(device, AccountDecisionProtocol.device, "Erasing is the user's separate decision")
+    }
+
+    func testSwappedChallengeOrRefusalNeverSigns() async throws {
+        for revoke in [AccountDecisionProtocol.json(approval(target: UUID())), AccountDecisionProtocol.json(approval(user: UUID())),
+                       AccountDecisionProtocol.json(approval(action: AccountApproval.passwordSet)), "{}", nil] {
+            let (auth, _, _, prompts) = try await fixture(revoke: revoke)
+            do { try await auth.unlinkDevice(); XCTFail("Must not unlink") } catch { }
+            let promptCount = await prompts.count
+            XCTAssertEqual(promptCount, 0)
+            XCTAssertFalse(AccountDecisionProtocol.calls().contains { $0.path.hasSuffix("/approve") })
+        }
+    }
+
+    func testASecondApprovalIsRefusedWhileOneIsPrompting() async throws {
+        let gate = PromptGate()
+        let (auth, _, _, _) = try await fixture(revoke: AccountDecisionProtocol.json(approval()), prompt: { await gate.wait() })
+        let first = Task { try await auth.unlinkDevice() }
+        await gate.waitUntilPrompting()
+        do { try await auth.unlinkDevice(); XCTFail("A second approval must be refused") }
+        catch { XCTAssertEqual((error as? LocalizedError)?.errorDescription, "Another approval is in progress.") }
+        await gate.release()
+        try await first.value
+    }
+
+    private func fixture(revoke: String?, prompt: (@Sendable () async -> Void)? = nil) async throws
+        -> (AuthService, SecureCredentialStore, String, PairingPromptCounter) {
+        let store = FixtureSecureStorage()
+        let credentials = SecureCredentialStore(keychain: store)
+        let identity = DeviceIdentityStore(keychain: store)
+        let publicKey = try await identity.publicKeyHex()
+        try await credentials.save(deviceId: AccountDecisionProtocol.device)
+        try await credentials.save(session: SecureSession(token: "fixture-session-not-a-secret", expiresAt: Int64(Date().timeIntervalSince1970) + 3600))
+        AccountDecisionProtocol.reset(revoke: revoke)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AccountDecisionProtocol.self]
+        let api = JarvisAPIClient(baseURL: URL(string: "https://jarvis.example.com")!, session: URLSession(configuration: configuration))
+        let prompts = PairingPromptCounter()
+        let auth = AuthService(api: api, identity: identity, credentials: credentials, authenticateBiometric: { _ in
+            await prompt?()
+            return store.prompt(await prompts.authenticate())
+        })
+        return (auth, credentials, publicKey, prompts)
+    }
+}
+
+private actor PromptGate {
+    private var prompting: CheckedContinuation<Void, Never>?
+    private var released: CheckedContinuation<Void, Never>?
+    private var started = false
+    func wait() async {
+        started = true
+        prompting?.resume(); prompting = nil
+        await withCheckedContinuation { released = $0 }
+    }
+    func waitUntilPrompting() async {
+        if started { return }
+        await withCheckedContinuation { prompting = $0 }
+    }
+    func release() { released?.resume(); released = nil }
+}
+
+private final class AccountDecisionProtocol: URLProtocol {
+    static let device = UUID(uuidString: "04040404-0404-0404-0404-040404040404")!
+    static let user = UUID(uuidString: "03030303-0303-0303-0303-030303030303")!
+    static let request = UUID(uuidString: "00112233-4455-6677-8899-aabbccddeeff")!
+    private static let lock = NSLock()
+    private static var revoke: String?
+    private static var captured: [(path: String, body: [String: String])] = []
+    static func reset(revoke: String?) { lock.withLock { self.revoke = revoke; captured = [] } }
+    static func calls() -> [(path: String, body: [String: String])] { lock.withLock { captured } }
+    static func json(_ approval: AccountApproval) -> String {
+        #"{"request_id":"\#(approval.request_id)","user_id":"\#(approval.user_id)","device_id":"\#(approval.device_id)","action":"\#(approval.action)","target":"\#(approval.target)","nonce":"\#(approval.nonce)","expires_at":\#(approval.expires_at)}"#
+    }
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url?.path ?? ""
+        var data = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open(); defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while data.count < 16384 {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }
+                data.append(contentsOf: buffer.prefix(count))
+            }
+        }
+        let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: String] ?? [:]
+        Self.lock.withLock { Self.captured.append((path, body)) }
+        if path == "/v1/auth/me" {
+            respond(200, #"{"user_id":"\#(Self.user)","device_id":"\#(Self.device)"}"#)
+        } else if path.hasSuffix("/revoke-request") {
+            // No configured answer: Core refuses.
+            if let revoke = Self.lock.withLock({ Self.revoke }) { respond(200, revoke) } else { respond(401, #"{"error":"unauthorized"}"#) }
+        } else {
+            respond(200, #"{"status":"completed"}"#)
+        }
+    }
+    private func respond(_ status: Int, _ answer: String) {
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
+                                       headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(answer.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() { }

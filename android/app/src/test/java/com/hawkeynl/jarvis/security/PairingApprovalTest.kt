@@ -42,10 +42,10 @@ class PairingApprovalTest {
         PairingRequestItem(REQUEST_ID, "Fixture phone", "ios", fingerprint, "00".repeat(32), publicKey, 1, expiresAt, fingerprintFull)
 
     @Test fun messageMatchesClientCoreGoldenVector() {
-        val message = PairingApproval.message(
+        val message = PairingApprovalMessage(
             "00112233-4455-6677-8899-aabbccddeeff", Hex.encode(ByteArray(32) { it.toByte() }), Hex.encode(key),
             "10213243-5465-7687-98a9-bacbdcedfe0f", "ffeeddcc-bbaa-9988-7766-554433221100", 1_800_000_000,
-        )
+        ).message()
         assertEquals(
             "6a61727669732d6465766963652d70616972696e672d763100" + "00112233445566778899aabbccddeeff" +
                 "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" +
@@ -53,9 +53,13 @@ class PairingApprovalTest {
                 "102132435465768798a9bacbdcedfe0f" + "ffeeddccbbaa99887766554433221100" + "000000006b49d200",
             Hex.encode(message),
         )
-        assertThrows(IllegalArgumentException::class.java) { PairingApproval.message(REQUEST_ID, "00", Hex.encode(key), USER_ID, DEVICE_ID, 1) }
-        assertThrows(IllegalArgumentException::class.java) { PairingApproval.message("1-1-1-1-1", "00".repeat(32), Hex.encode(key), USER_ID, DEVICE_ID, 1) }
-        assertThrows(IllegalArgumentException::class.java) { PairingApproval.message(REQUEST_ID, "00".repeat(32), "+f" + "00".repeat(31), USER_ID, DEVICE_ID, 1) }
+        for (bad in listOf(
+            PairingApprovalMessage(REQUEST_ID, "00", Hex.encode(key), USER_ID, DEVICE_ID, 1),
+            PairingApprovalMessage("1-1-1-1-1", "00".repeat(32), Hex.encode(key), USER_ID, DEVICE_ID, 1),
+            PairingApprovalMessage(REQUEST_ID, "00".repeat(32), "+f" + "00".repeat(31), USER_ID, DEVICE_ID, 1),
+        )) {
+            assertThrows(IllegalArgumentException::class.java) { bad.message() }
+        }
     }
 
     @Test fun fingerprintIsComputedLocallyAndAnyMismatchIsRefused() {
@@ -70,11 +74,34 @@ class PairingApprovalTest {
             assertThrows(IllegalArgumentException::class.java) { PairingApproval.verifiedFingerprint(item(publicKey = bad)) }
         }
         assertEquals("0123 4567 89ab cdef 01", PairingApproval.grouped("0123456789abcdef01"))
-        assertEquals("unknown", PairingApproval.hint(null))
-        assertEquals("Pixel 9", PairingApproval.hint("Pixel‮ 9\u0007"))
-        assertEquals("x".repeat(64) + "…", PairingApproval.hint("x".repeat(70)))
+        assertEquals("unknown", PairingApproval.displayName(null))
         assertEquals("1:40", PairingApproval.countdown(100, 0))
         assertEquals("Expired", PairingApproval.countdown(100, 100))
+    }
+
+    /** The desktop `display_name` table, unchanged. */
+    @Test fun displayNamesDropControlAndFormatCharacters() {
+        fun name(value: String) = PairingApproval.displayName(value, 40)
+        assertEquals("Owner's iPhone", name("Owner's iPhone"))
+        assertEquals("EvilenohPi", name("Evil\u202EenohPi\u200B\u2066"))
+        assertEquals("a Approve all", name("a\nApprove\u2028all\t"))
+        assertEquals("unknown", name("\u0000\u0007\uFEFF "))
+        // U+E0100 and U+F0000 as surrogate pairs.
+        assertEquals("AB", name("A\u034F\u3164\u2800\uFE0F\uDB40\uDD00\uDB80\uDC00\uE000\"B"))
+        assertEquals("ABC", name("\u201CA\u2019\u00ABB\u00BB\uFF02\u2039C\u203A"))
+        // At most two combining marks per base character.
+        assertEquals("e\u0301\u0302 o\u0308", name("e\u0301\u0302\u0303\u0304 o\u0308"))
+        val long = name("a".repeat(60) + "z".repeat(40))
+        assertEquals(40, long.codePointCount(0, long.length))
+        assertEquals("a".repeat(20) + "…" + "z".repeat(19), long)
+        assertEquals("x".repeat(40), name("x".repeat(40)))
+    }
+
+    @Test fun approverPlatformsCarryAWarning() {
+        for (platform in listOf("ios", "android", "macos", " MacOS ")) {
+            assertTrue(PairingApproval.approverWarning(platform)!!.contains("approve unlocks, account changes and agent actions"))
+        }
+        for (platform in listOf("linux", "windows", "")) assertNull(PairingApproval.approverWarning(platform))
     }
 
     @Test fun decodesPairingListWithAndWithoutDetails() {
@@ -121,7 +148,7 @@ class PairingApprovalTest {
         accept = false
         val sessions = SessionRepository(store).apply { saveLogin(DEVICE_ID, "fixture-session-not-a-secret", Long.MAX_VALUE) }
         val service = PairingApprovalService(
-            api, sessions, { endpoint }, identity,
+            api, sessions, { endpoint }, identity, ApprovalLock(),
             authenticate = { prompts++; accept }, biometricsAvailable = { true }, unlocked = { true }, now = { 1_000 },
         )
         val request = item(fingerprintFull = full)
@@ -139,7 +166,7 @@ class PairingApprovalTest {
         service.approve(request)
         assertEquals(listOf("/v1/auth/pairing/requests/$REQUEST_ID/approve"), decisions.map { it.first })
         val signature = Json.parseToJsonElement(decisions.single().second).jsonObject["signature"]!!.jsonPrimitive.content
-        val message = PairingApproval.message(REQUEST_ID, request.nonce, request.candidate_public_key, USER_ID, DEVICE_ID, request.expires_at)
+        val message = PairingApprovalMessage(REQUEST_ID, request.nonce, request.candidate_public_key, USER_ID, DEVICE_ID, request.expires_at).message()
         val verifier = Ed25519Signer().apply {
             init(false, Ed25519PublicKeyParameters(Hex.decode(publicKey), 0))
             update(message, 0, message.size)

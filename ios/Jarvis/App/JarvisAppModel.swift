@@ -18,6 +18,8 @@ final class JarvisAppModel: ObservableObject {
     @Published private(set) var isSending = false
     @Published var endpointText: String
     @Published var notice: String?
+    /// Why Core did not revoke this device; set while the user decides on erasing locally only.
+    @Published var localEraseOffer: String?
     @Published private(set) var availableVoices: [LocalSpeechVoice] = []
     @Published var selectedVoice = UserDefaults.standard.string(forKey: "jarvis.voice.identifier") ?? "" {
         didSet {
@@ -394,7 +396,20 @@ final class JarvisAppModel: ObservableObject {
         } catch { if presentation.accepts(generation) { handle(error) } }
     }
 
+    /// Revokes this device on Core with a signed approval, then erases it here. If Core
+    /// does not confirm, nothing is erased: `localEraseOffer` asks the user instead.
     func resetDevice() async {
+        do { try await auth.unlinkDevice() }
+        catch {
+            localEraseOffer = safeMessage(error)
+            return
+        }
+        await eraseLocally()
+    }
+
+    /// Erases this device here only; after a failed revoke this is the user's explicit choice.
+    func eraseLocally() async {
+        localEraseOffer = nil
         invalidatePresentation(clearIdentity: true)
         let generation = presentation.id
         enrollmentState = .notStarted
@@ -402,7 +417,7 @@ final class JarvisAppModel: ObservableObject {
         pendingRequests.clear()
         realtime.stop(); speech.stop()
         do {
-            try await auth.resetDevice()
+            try await auth.eraseLocally()
             guard presentation.accepts(generation) else { return }
             enrollmentState = .notStarted
             lockState = .unlocked

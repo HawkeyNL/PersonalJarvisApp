@@ -91,8 +91,8 @@ class KeystoreBackedEd25519Identity(
         }
     }
 
-    override suspend fun signHex(messageHex: String, reason: String): String = signing.withLock {
-        val message = Hex.decode(messageHex)
+    override suspend fun sign(message: DeviceMessage, reason: String): String = signing.withLock {
+        val bytes = message.message()
         val sealed = io { synchronized(lock) { vault.load(SEED) } }
         val seed = if (sealed != null) unseal(sealed, reason) else migrate(reason)
         try {
@@ -100,7 +100,7 @@ class KeystoreBackedEd25519Identity(
             // parameters, which cannot be cleared; it is garbage once signing returns.
             val signer = Ed25519Signer()
             signer.init(true, Ed25519PrivateKeyParameters(seed, 0))
-            signer.update(message, 0, message.size)
+            signer.update(bytes, 0, bytes.size)
             Hex.encode(signer.generateSignature())
         } finally {
             seed.fill(0)

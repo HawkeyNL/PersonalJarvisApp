@@ -26,7 +26,7 @@ enum AuthServiceOutcome: Equatable {
 }
 
 actor AuthService {
-    private var modelChangeRunning = false
+    private var approvalRunning = false
     private let api: JarvisAPIClient
     private let identity: DeviceIdentityStore
     private let credentials: SecureCredentialStore
@@ -143,7 +143,7 @@ actor AuthService {
 
     /// Approve one pairing request: verify the fingerprint locally, build the exact
     /// v1 message, then sign with the context of that one Face ID / Touch ID prompt.
-    func approvePairing(_ item: PairingApprovalItem) async throws {
+    func approvePairing(_ item: PairingApprovalItem) async throws { try await exclusive {
         let fingerprint = try PairingFingerprint.verified(item)
         let binding = await api.binding()
         guard let token = try await credentials.session()?.token,
@@ -151,30 +151,43 @@ actor AuthService {
         // Core owns the user binding; learn it from the authenticated session.
         let me: AuthenticatedIdentity = try await api.get("/v1/auth/me", token: token, expectedBinding: binding)
         guard me.deviceId == device else { throw JarvisAPIError.unauthorized }
-        let message = try DeviceIdentityStore.pairingApprovalMessage(
+        // Built once before prompting, so a malformed request never prompts.
+        _ = try DeviceIdentityStore.pairingApprovalMessage(
             requestId: item.id, nonceHex: item.nonce, candidatePublicKeyHex: item.candidate_public_key,
             userId: me.userId, approverDeviceId: device, expiresAt: item.expires_at)
         try requireUnexpired(item)
-        let name = PairingFingerprint.hint(item.device_name, max: 40)
-        let context = try await requireBiometric("Approve \(name) with key \(PairingFingerprint.grouped(String(fingerprint.prefix(16))))")
+        // The verified key comes first, so a candidate-chosen name cannot pose as it.
+        let context = try await requireBiometric("Pair key \(PairingFingerprint.grouped(String(fingerprint.prefix(16)))): "
+            + "\"\(PairingFingerprint.displayName(item.device_name, max: 40))\" (\(PairingFingerprint.displayName(item.platform, max: 16)))")
         defer { context.invalidate() }
         guard await api.binding() == binding, try await credentials.session()?.token == token,
               try await credentials.deviceId() == device else { throw JarvisAPIError.unauthorized }
         try requireUnexpired(item)
         try Task.checkCancellation()
-        let signature = try await identity.signPairingApproval(message, context: context)
+        let signature = try await identity.signPairingApproval(
+            requestId: item.id, nonceHex: item.nonce, candidatePublicKeyHex: item.candidate_public_key,
+            userId: me.userId, approverDeviceId: device, expiresAt: item.expires_at, context: context)
         try await pairingDecision("/v1/auth/pairing/requests/\(item.id.uuidString)/approve",
                                   body: ["signature": signature], token: token, binding: binding)
-    }
+    } }
 
     /// Deny one pairing request. Also gated on Face ID / Touch ID.
-    func denyPairing(_ item: PairingApprovalItem) async throws {
+    func denyPairing(_ item: PairingApprovalItem) async throws { try await exclusive {
         let binding = await api.binding()
         guard let token = try await credentials.session()?.token else { throw JarvisAPIError.unauthorized }
-        try await requireBiometric("Deny pairing of \(PairingFingerprint.hint(item.device_name, max: 40))").invalidate()
+        try await requireBiometric("Deny pairing of \"\(PairingFingerprint.displayName(item.device_name, max: 40))\"").invalidate()
         guard await api.binding() == binding, try await credentials.session()?.token == token else { throw JarvisAPIError.unauthorized }
         try await pairingDecision("/v1/auth/pairing/requests/\(item.id.uuidString)/deny",
                                   body: [String: String](), token: token, binding: binding)
+    } }
+
+    /// One approval (fetch, prompt, sign, send) at a time across the app. A second one
+    /// is refused rather than queued, so prompts never stack up behind each other.
+    private func exclusive<T>(_ body: () async throws -> T) async throws -> T {
+        guard !approvalRunning else { throw JarvisAPIError.rejected(status: 409, message: "Another approval is in progress.") }
+        approvalRunning = true
+        defer { approvalRunning = false }
+        return try await body()
     }
 
     private func requireUnexpired(_ item: PairingApprovalItem) throws {
@@ -203,10 +216,7 @@ actor AuthService {
         }
     }
 
-    func setModelEnabled(_ entry: ModelAccessEntry, policyHash: String) async throws {
-        guard !modelChangeRunning else { throw JarvisAPIError.rejected(status: 409, message: "Another model change is running.") }
-        modelChangeRunning = true
-        defer { modelChangeRunning = false }
+    func setModelEnabled(_ entry: ModelAccessEntry, policyHash: String) async throws { try await exclusive {
         let binding = await api.binding()
         guard let token = try await credentials.session()?.token,
               let device = try await credentials.deviceId() else { throw JarvisAPIError.unauthorized }
@@ -233,15 +243,12 @@ actor AuthService {
         let signature = try await identity.signModelToggle(approval, context: context)
         let result: StatusResponse = try await api.post("/v1/system/config/privileged", body: approval.signed(signature), token: token, expectedBinding: binding)
         guard result.status == "active" else { throw JarvisAPIError.rejected(status: 503, message: "Model activation was not confirmed. Refresh its status.") }
-    }
+    } }
     /// Replace the owner routing document. Mirrors desktop `set_model_routing`: validate
     /// against a fresh snapshot, then sign bytes built here from the typed document. Any
     /// change gets its own Face ID / Touch ID prompt naming any cost relaxation or
     /// web-search opt-in.
-    func setModelRouting(_ routing: RoutingDocument, routingHash: String) async throws {
-        guard !modelChangeRunning else { throw JarvisAPIError.rejected(status: 409, message: "Another model change is running.") }
-        modelChangeRunning = true
-        defer { modelChangeRunning = false }
+    func setModelRouting(_ routing: RoutingDocument, routingHash: String) async throws { try await exclusive {
         let binding = await api.binding()
         guard let token = try await credentials.session()?.token,
               let device = try await credentials.deviceId() else { throw JarvisAPIError.unauthorized }
@@ -282,7 +289,7 @@ actor AuthService {
             throw JarvisAPIError.rejected(status: 503, message: "Outcome unknown; refresh the model status")
         }
         guard result.status == "active" else { throw JarvisAPIError.rejected(status: 503, message: "Activation not confirmed. Refresh the routing status.") }
-    }
+    } }
 
     // Origin changes must clear server-specific state before the new host is
     // configured. No revocation request is sent to the replacement host.
@@ -309,13 +316,52 @@ actor AuthService {
         return .signedOut
     }
 
-    func resetDevice() async throws {
-        let session = try await credentials.session()
-        let deviceId = try await credentials.deviceId()
-        if let token = session?.token, let deviceId {
-            try? await api.delete("/v1/devices/\(deviceId.uuidString)", token: token)
+    /// Revokes this device on Core with a signed device-revoke approval. Throws unless
+    /// Core confirmed; erases nothing (the user decides, see `eraseLocally`).
+    func unlinkDevice() async throws { try await exclusive {
+        let binding = await api.binding()
+        guard let token = try await credentials.session()?.token else {
+            throw JarvisAPIError.rejected(status: 401, message: "Not signed in, so Core cannot be asked to revoke this device.")
         }
-        // Local erasure is authoritative even if the Home Node is offline.
+        guard let device = try await credentials.deviceId() else {
+            throw JarvisAPIError.rejected(status: 409, message: "This device is not paired, so there is nothing to revoke on Core.")
+        }
+        let me: AuthenticatedIdentity = try await accountDecision {
+            try await api.get("/v1/auth/me", token: token, expectedBinding: binding)
+        }
+        guard me.deviceId == device else { throw JarvisAPIError.rejected(status: 401, message: "Session does not belong to this device.") }
+        let approval: AccountApproval = try await accountDecision {
+            try await api.post("/v1/devices/\(device.uuidString)/revoke-request", body: [String: String](), token: token, expectedBinding: binding)
+        }
+        try approval.require(action: AccountApproval.deviceRevoke, user: me.userId, device: device, target: device,
+                             now: Int64(Date().timeIntervalSince1970))
+        let context = try await requireBiometric("Unlink this device from Jarvis")
+        defer { context.invalidate() }
+        guard await api.binding() == binding, try await credentials.session()?.token == token,
+              try await credentials.deviceId() == device, approval.expires_at > Int64(Date().timeIntervalSince1970) else {
+            throw JarvisAPIError.rejected(status: 409, message: "Approval expired or session changed.")
+        }
+        try Task.checkCancellation()
+        let signature = try await identity.signAccountApproval(approval, context: context)
+        let result: StatusResponse = try await accountDecision {
+            try await api.post("/v1/auth/account/requests/\(approval.request_id.uuidString)/approve",
+                               body: ["signature": signature], token: token, expectedBinding: binding)
+        }
+        guard result.status == "completed" else { throw JarvisAPIError.rejected(status: 503, message: "Core did not confirm the change.") }
+    } }
+
+    /// Core answers 401 for a refused account action too; report it instead of ending
+    /// the session here.
+    private func accountDecision<T>(_ call: () async throws -> T) async throws -> T {
+        do { return try await call() }
+        catch JarvisAPIError.unauthorized { throw JarvisAPIError.rejected(status: 401, message: "Core refused this change.") }
+        catch JarvisAPIError.unreachable, JarvisAPIError.timedOut {
+            throw JarvisAPIError.rejected(status: 503, message: "Home Node unreachable; the change was not confirmed.")
+        }
+    }
+
+    /// Erases this device's session, binding and key here only.
+    func eraseLocally() async throws {
         var resetError: Error?
         do { try await credentials.reset() }
         catch { resetError = error }
