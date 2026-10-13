@@ -414,6 +414,12 @@ final class JarvisAppModel: ObservableObject {
         await eraseLocally()
     }
 
+    /// Revokes another device of this account (one Face ID / Touch ID prompt).
+    func revokeDevice(_ id: UUID) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        try await auth.revokeDevice(id)
+    }
+
     /// Erases this device here only; after a failed revoke this is the user's explicit choice.
     func eraseLocally() async {
         localEraseOffer = nil

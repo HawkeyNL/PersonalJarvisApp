@@ -1,17 +1,23 @@
 package com.hawkeynl.jarvis.ui
 
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import com.hawkeynl.jarvis.network.LinkedDevice
+import com.hawkeynl.jarvis.security.PairingApproval
 import java.time.Instant
 
 /** Context: only the linked devices are real today. Modes, sources and the
  *  schedule need Core support that does not exist yet. */
 @Composable
-fun ContextScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRefresh: () -> Unit) {
+fun ContextScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRefresh: () -> Unit, onRevoke: (String) -> Unit) {
     LaunchedEffect(Unit) { onRefresh() }
     val (deviceTone, deviceStatus) = statusOf(data.devices) {
         (if (it.devices.isEmpty()) Tone.IDLE else Tone.OK) to "${it.devices.size} linked"
@@ -25,6 +31,7 @@ fun ContextScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRe
         NodeItem("devices", "Devices", "Devices", JvIcon.MONITOR, deviceTone, deviceStatus, "Desktop and mobile app"),
     )
     var selected by rememberSaveable { mutableStateOf("devices") }
+    var confirming by remember { mutableStateOf<LinkedDevice?>(null) }
     val current = items.first { it.id == selected }
 
     NodePage("CONTEXT", "WHAT JARVIS PAYS ATTENTION TO", items, selected, { selected = it }, onNavigate, mood) {
@@ -37,6 +44,7 @@ fun ContextScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRe
                 return@Panel
             }
             ActionButton("Pairing requests", { onNavigate(Screen.PAIRING_APPROVALS) }, arrow = true)
+            data.revokeError?.let { ErrorText(it) }
             Loaded(data.devices, "Devices", JvIcon.MONITOR, "Loading devices…") { response ->
                 val devices = response.devices
                 TileGrid(
@@ -63,8 +71,33 @@ fun ContextScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRe
                         )
                     },
                     "No devices linked yet.",
+                    rowActions = { item ->
+                        val device = devices.firstOrNull { it.id == item.id }
+                        if (device != null && device.status == "active" && !device.id.equals(data.ownDevice, ignoreCase = true)) {
+                            GhostButton(
+                                if (data.revoking == device.id) "Revoking…" else "Revoke", { confirming = device },
+                                enabled = data.revoking == null, danger = true,
+                            )
+                        }
+                    },
                 )
             }
         }
+    }
+    confirming?.let { device ->
+        AlertDialog(
+            onDismissRequest = { confirming = null },
+            title = { Text("Revoke this device?") },
+            text = {
+                Text(
+                    "\"${PairingApproval.displayName(device.name, 40)}\" (${PairingApproval.displayName(device.platform, 16)}) is signed out " +
+                        "at once and must be paired again to use Jarvis.",
+                )
+            },
+            dismissButton = { TextButton(onClick = { confirming = null }) { Text("Cancel") } },
+            confirmButton = {
+                TextButton(onClick = { confirming = null; onRevoke(device.id) }) { Text("Revoke", color = Jv.Danger) }
+            },
+        )
     }
 }

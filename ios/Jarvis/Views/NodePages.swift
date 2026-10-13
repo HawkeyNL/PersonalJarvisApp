@@ -681,6 +681,9 @@ struct ContextPage: View {
     @State private var devices: Availability<[LinkedDevice]> = .loading
     @State private var thisDevice: String?
     @State private var selected = "devices"
+    @State private var confirming: LinkedDevice?
+    @State private var revoking: String?
+    @State private var revokeError: String?
 
     private var items: [NodeItem] {
         let summary = summarize(devices) { list in CardSummary(line1: "\(list.count) linked", line2: "", tone: list.isEmpty ? .idle : .ok) }
@@ -722,6 +725,21 @@ struct ContextPage: View {
                                                time: device.created_at.map { "linked \(relativeTime(Date(timeIntervalSince1970: $0), now: Date()))" },
                                                tone: device.status == "active" ? .ok : .idle, toneLabel: device.status)
                         }, emptyText: "No devices linked.")
+                        let others = list.filter { $0.status == "active" && $0.id.lowercased() != thisDevice }
+                        if !others.isEmpty {
+                            Eyebrow(text: "Revoke a device")
+                            ForEach(others) { device in
+                                Button(role: .destructive) { confirming = device } label: {
+                                    Label(revoking == device.id ? "Revoking…" : "Revoke \(PairingFingerprint.displayName(device.name, max: 40))",
+                                          systemImage: "xmark.circle")
+                                        .font(JarvisFont.body(14, 500))
+                                }
+                                .disabled(revoking != nil)
+                            }
+                        }
+                        if let revokeError {
+                            Text(verbatim: revokeError).font(JarvisFont.body(12)).foregroundStyle(JarvisTheme.danger)
+                        }
                     }
                 } else {
                     UnavailableState(title: current.title, detail: current.detail, symbol: current.icon)
@@ -730,6 +748,23 @@ struct ContextPage: View {
         }
         .refreshable { await load() }
         .task { await load() }
+        .confirmationDialog("Revoke this device?", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
+                            titleVisibility: .visible, presenting: confirming) { device in
+            Button("Revoke", role: .destructive) { Task { await revoke(device) } }
+            Button("Cancel", role: .cancel) { }
+        } message: { device in
+            Text(verbatim: "\"\(PairingFingerprint.displayName(device.name, max: 40))\" (\(PairingFingerprint.displayName(device.platform, max: 16))) is signed out at once and must be paired again to use Jarvis.")
+        }
+    }
+
+    private func revoke(_ device: LinkedDevice) async {
+        guard revoking == nil, let id = UUID(uuidString: device.id) else { return }
+        revoking = device.id
+        revokeError = nil
+        do { try await model.revokeDevice(id) }
+        catch { revokeError = "Not revoked: " + ((error as? LocalizedError)?.errorDescription ?? "Core did not confirm.") }
+        revoking = nil
+        await load()
     }
 
     private func load() async {

@@ -2,8 +2,10 @@ package com.hawkeynl.jarvis.security
 
 import com.hawkeynl.jarvis.network.ApiResult
 import com.hawkeynl.jarvis.network.AuthMe
+import com.hawkeynl.jarvis.network.DevicesResponse
 import com.hawkeynl.jarvis.network.HomeNodeEndpoint
 import com.hawkeynl.jarvis.network.JarvisApi
+import com.hawkeynl.jarvis.storage.ProtectedSession
 import com.hawkeynl.jarvis.storage.SessionRepository
 import java.nio.ByteBuffer
 import java.util.UUID
@@ -74,28 +76,61 @@ class AccountApprovalService(
     private val json = Json { ignoreUnknownKeys = true }
 
     /** Revokes this device on Core. Throws unless Core confirmed; erases nothing itself. */
-    suspend fun unlinkThisDevice() {
-        val device = sessions.session().deviceId ?: error("This device is not paired, so there is nothing to revoke on Core.")
-        revoke(device, "Unlink this device from Jarvis")
+    suspend fun unlinkThisDevice() = approvals.exclusive {
+        val signedIn = signedIn()
+        revoke(signedIn, signedIn.device, "Unlink this device from Jarvis")
     }
 
-    private suspend fun revoke(target: String, reason: String) = approvals.exclusive {
-        require(PairingApproval.canonicalUuid.matches(target)) { "Invalid device id" }
+    /** Revokes another device of this account. The prompt names it from a fresh device
+     *  list; an id Core does not list as active is refused before anything is signed. */
+    suspend fun revokeDevice(id: String) = approvals.exclusive {
+        val signedIn = signedIn()
+        check(!id.equals(signedIn.device, ignoreCase = true)) { "Use \"Erase this device\" to remove this phone." }
+        val list = when (val result = api.getAuthorized(signedIn.origin, signedIn.token, "/v1/devices")) {
+            is ApiResult.Success -> runCatching { json.decodeFromJsonElement(DevicesResponse.serializer(), result.value) }.getOrNull()
+            else -> null
+        } ?: error("Could not read the device list; try again.")
+        val target = list.devices.singleOrNull { it.id.equals(id, ignoreCase = true) && it.status == "active" }
+            ?: error("Core no longer lists this device as active.")
+        revoke(
+            signedIn, target.id,
+            "Revoke \"${PairingApproval.displayName(target.name, 40)}\" (${PairingApproval.displayName(target.platform, 16)})",
+        )
+    }
+
+    private class SignedIn(
+        val origin: HomeNodeEndpoint, val session: ProtectedSession, val token: String, val device: String, val user: String,
+    )
+
+    /** The signed-in session, confirmed by Core to belong to this device. */
+    private suspend fun signedIn(): SignedIn {
         val origin = endpoint() ?: error("Home Node missing")
         val session = sessions.session()
-        val token = session.token ?: error("Not signed in, so Core cannot be asked to revoke this device.")
-        val device = session.deviceId ?: error("Device not paired")
+        val device = session.deviceId ?: error("This device is not paired, so there is nothing to revoke on Core.")
+        val token = session.token ?: error("Not signed in, so Core cannot be asked for this change.")
         val me = when (val result = api.getAuthorized(origin, token, "/v1/auth/me")) {
             is ApiResult.Success -> runCatching { json.decodeFromJsonElement(AuthMe.serializer(), result.value) }.getOrNull()
             else -> null
         } ?: error("Could not confirm this device's session; try again.")
         check(me.device_id.equals(device, ignoreCase = true)) { "Session does not belong to this device" }
-        val approval = request(origin, token, "/v1/devices/$target/revoke-request", JsonObject(emptyMap()))
-        approval.requireFor(AccountApproval.DEVICE_REVOKE, me.user_id, device, target, now())
+        return SignedIn(origin, session, token, device, me.user_id)
+    }
+
+    private suspend fun revoke(signedIn: SignedIn, target: String, reason: String) {
+        require(PairingApproval.canonicalUuid.matches(target)) { "Invalid device id" }
+        val approval = request(signedIn.origin, signedIn.token, "/v1/devices/$target/revoke-request", JsonObject(emptyMap()))
+        approval.requireFor(AccountApproval.DEVICE_REVOKE, signedIn.user, signedIn.device, target, now())
+        signAndApprove(signedIn, approval, reason)
+    }
+
+    /** One strong-biometric prompt, then the approval, only while nothing changed. */
+    private suspend fun signAndApprove(signedIn: SignedIn, approval: AccountApproval, reason: String) {
         val signature = identity.sign(approval, reason)
         currentCoroutineContext().ensureActive()
-        check(endpoint() == origin && sessions.session() == session && approval.expires_at > now()) { "Approval expired or session changed" }
-        approve(origin, token, approval, signature)
+        check(endpoint() == signedIn.origin && sessions.session() == signedIn.session && approval.expires_at > now()) {
+            "Approval expired or session changed"
+        }
+        approve(signedIn.origin, signedIn.token, approval, signature)
     }
 
     private suspend fun request(origin: HomeNodeEndpoint, token: String, path: String, body: JsonObject): AccountApproval =

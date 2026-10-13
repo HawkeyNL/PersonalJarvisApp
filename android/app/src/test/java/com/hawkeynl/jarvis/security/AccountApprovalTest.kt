@@ -99,6 +99,24 @@ class AccountApprovalTest {
         assertTrue(runCatching { unconfirmed.service.unlinkThisDevice() }.isFailure)
     }
 
+    @Test fun revokingAnotherDeviceNamesItFromAFreshList() = runTest {
+        val devices = """{"devices":[{"id":"$OTHER_ID","name":"Old\u202E laptop","platform":"linux","status":"active"},""" +
+            """{"id":"$THIRD_ID","name":"Gone","platform":"ios","status":"revoked"},{"id":"$DEVICE_ID","name":"Me","platform":"android","status":"active"}]}"""
+        val fixture = Fixture(approvalJson(target = OTHER_ID), devicesBody = devices)
+        fixture.service.revokeDevice(OTHER_ID)
+        assertEquals("Revoke \"Old laptop\" (linux)", fixture.reason)
+        assertEquals("/v1/devices/$OTHER_ID/revoke-request", fixture.paths[2])
+        assertTrue(fixture.paths.last().endsWith("/approve"))
+
+        // Unknown, revoked and own ids are refused before Core is asked for a challenge.
+        for (id in listOf(UNKNOWN_ID, THIRD_ID, DEVICE_ID)) {
+            val refused = Fixture(approvalJson(target = id), devicesBody = devices)
+            assertTrue(runCatching { refused.service.revokeDevice(id) }.isFailure)
+            assertEquals(0, refused.prompts)
+            assertTrue(refused.paths.none { it.endsWith("/revoke-request") })
+        }
+    }
+
     @Test fun aSecondApprovalIsRefusedWhileOneIsRunning() = runTest {
         val lock = ApprovalLock()
         val inside = CompletableDeferred<Unit>()
@@ -118,14 +136,16 @@ class AccountApprovalTest {
         revokeBody: String,
         revokeStatus: HttpStatusCode = HttpStatusCode.OK,
         approveBody: String = """{"status":"completed"}""",
+        devicesBody: String = """{"devices":[]}""",
     ) {
         val paths = mutableListOf<String>()
         val bodies = mutableListOf<String>()
         var prompts = 0
+        var reason: String? = null
         private val store = InMemorySecureValueStore()
         private val vault = FakeDeviceKeyVault()
         private val identity = KeystoreBackedEd25519Identity(store, vault).apply {
-            prompt = { _, cipher -> prompts++; cipher.also(vault::authorise) }
+            prompt = { text, cipher -> prompts++; reason = text; cipher.also(vault::authorise) }
         }
         val publicKey: String = kotlinx.coroutines.runBlocking { identity.enrollmentKeyHex("fixture") }.also { prompts = 0 }
         val sessions = SessionRepository(store).apply { saveLogin(DEVICE_ID, "fixture-session-not-a-secret", Long.MAX_VALUE) }
@@ -137,6 +157,7 @@ class AccountApprovalTest {
                 when {
                     path == "/v1/auth/me" -> respond("""{"user_id":"$USER_ID","device_id":"$DEVICE_ID"}""", HttpStatusCode.OK, JSON)
                     path.endsWith("/revoke-request") -> respond(revokeBody, revokeStatus, JSON)
+                    path == "/v1/devices" -> respond(devicesBody, HttpStatusCode.OK, JSON)
                     else -> respond(approveBody, HttpStatusCode.OK, JSON)
                 }
             }) {
@@ -152,6 +173,8 @@ class AccountApprovalTest {
         const val USER_ID = "03030303-0303-0303-0303-030303030303"
         const val DEVICE_ID = "04040404-0404-0404-0404-040404040404"
         const val OTHER_ID = "05050505-0505-0505-0505-050505050505"
+        const val THIRD_ID = "06060606-0606-0606-0606-060606060606"
+        const val UNKNOWN_ID = "07070707-0707-0707-0707-070707070707"
         const val NONCE = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
         val JSON = headersOf(HttpHeaders.ContentType, "application/json")
     }

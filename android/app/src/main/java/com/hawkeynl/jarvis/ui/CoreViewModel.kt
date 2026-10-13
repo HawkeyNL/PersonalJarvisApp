@@ -19,6 +19,7 @@ import com.hawkeynl.jarvis.network.Registry
 import com.hawkeynl.jarvis.network.ServicesResponse
 import com.hawkeynl.jarvis.network.SystemAuditResponse
 import com.hawkeynl.jarvis.network.SystemUsage
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -49,6 +50,10 @@ data class CoreData(
     val loadedAt: Long = System.currentTimeMillis(),
     val denying: String? = null,
     val denyError: String? = null,
+    /** This phone's device id, so the device list never offers to revoke it. */
+    val ownDevice: String? = null,
+    val revoking: String? = null,
+    val revokeError: String? = null,
 )
 
 /**
@@ -71,7 +76,11 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
         }
 
     private val agents = source("/v1/agents", AgentsResponse.serializer()) { copy(agents = it) }
-    private val devices = source("/v1/devices", DevicesResponse.serializer()) { copy(devices = it) }
+    private val devices: suspend (HomeNodeEndpoint) -> Unit = { endpoint ->
+        val result = container.core.read(endpoint, "/v1/devices", DevicesResponse.serializer())
+        val own = container.sessions.session().deviceId
+        _state.update { it.copy(devices = result, ownDevice = own) }
+    }
     private val pending = source("/v1/agent/pending", PendingResponse.serializer()) { copy(pending = it) }
     private val sessions = source("/v1/coding/sessions", CodingSessionsResponse.serializer()) { copy(sessions = it) }
     private val agentAudit = source("/v1/agent/audit", AgentAuditResponse.serializer()) { copy(agentAudit = it) }
@@ -125,6 +134,24 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
             else container.core.denyPending(endpoint, pendingId)
             _state.update { it.copy(denying = null, denyError = if (result is ApiResult.Success) null else "Denial failed: ${describe(result)}") }
             refreshTasks()
+        }
+    }
+
+    /** Revoke another device with a signed approval (one strong-biometric prompt). */
+    fun revokeDevice(id: String) {
+        if (_state.value.revoking != null) return
+        _state.update { it.copy(revoking = id, revokeError = null) }
+        scope.launch {
+            val failure = try {
+                container.accountApprovals.revokeDevice(id)
+                null
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                error
+            }
+            _state.update { it.copy(revoking = null, revokeError = failure?.let { "Not revoked: ${it.message ?: "Core did not confirm."}" }) }
+            refreshContext()
         }
     }
 
