@@ -127,7 +127,9 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             val parsed = HomeNodeEndpoint.parse(_state.value.endpointDraft)
             if (parsed is EndpointValidation.Valid && parsed.endpoint != _state.value.endpoint) {
                 container.realtime.stop(); speech.stop(); pending.clear(); container.sessions.reset()
-                _state.update { it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), conversationId = null) }
+                _state.update {
+                    it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), conversationId = null, passwordResetRequest = null)
+                }
             }
             when (val result = container.settings.save(_state.value.endpointDraft)) {
                 is EndpointValidation.Valid -> checkConnection(result.endpoint)
@@ -302,7 +304,9 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         val endpoint = _state.value.endpoint ?: return
         viewModelScope.launch {
             container.enrollment.logout(endpoint)
-            _state.update { it.copy(authenticated = false, messages = emptyList(), conversations = emptyList()) }
+            _state.update {
+                it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), passwordResetRequest = null)
+            }
         }
     }
 
