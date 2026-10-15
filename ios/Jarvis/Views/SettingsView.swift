@@ -15,6 +15,9 @@ struct SettingsView: View {
             Section("This device") {
                 NavigationLink { VoiceSettingsView(model: model) } label: { Label("Voice", systemImage: "waveform") }
                 NavigationLink { SecuritySettingsView(model: model) } label: { Label("Security", systemImage: "lock.shield") }
+                if model.isAuthenticated {
+                    NavigationLink { ApprovalNotificationsView(push: model.approvalPush) } label: { Label("Approval notifications", systemImage: "bell.badge") }
+                }
             }
             if let notice = model.notice { Section("Status") { Text(notice) } }
         }

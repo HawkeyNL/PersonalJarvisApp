@@ -776,6 +776,9 @@ struct PairingApprovalsPage: View {
         // List reads share Core's five-per-minute pairing budget per IP with
         // candidates creating requests, so pull-to-refresh is throttled.
         .refreshable { if Date().timeIntervalSince(lastLoad) >= 20 { await load() } }
+        .onReceive(NotificationCenter.default.publisher(for: .jarvisApprovalPushed)) { _ in
+            if Date().timeIntervalSince(lastLoad) >= 20 { Task { await load() } }
+        }
         .task {
             while !Task.isCancelled {
                 await load()

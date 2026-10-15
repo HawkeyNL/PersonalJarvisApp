@@ -69,6 +69,8 @@ final class JarvisAppModel: ObservableObject {
     private let auth: AuthService
     private let chat: ChatService
     private let biometricLock: BiometricLock
+    /// The "Approval notifications" setting and APNs token registration.
+    let approvalPush = ApprovalPush()
 
     init() {
         let endpointStore = EndpointStore()
@@ -82,6 +84,7 @@ final class JarvisAppModel: ObservableObject {
         self.endpointText = endpointStore.endpoint?.absoluteString ?? ""
         speech.setRate(voiceRate)
         speech.setVoice(selectedVoice)
+        approvalPush.owner = self
     }
 
     var isAuthenticated: Bool { enrollmentState == .authenticated }
@@ -179,6 +182,12 @@ final class JarvisAppModel: ObservableObject {
     /// This device's own key fingerprint, grouped, for the pairing wait screen.
     func ownKeyFingerprint() async -> String? {
         (try? await auth.ownKeyFingerprint()).map(PairingFingerprint.grouped)
+    }
+
+    /// Register (token, environment) or remove (nil) this device's approval push target.
+    func setPushTarget(_ target: (token: String, environment: String)?) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        try await auth.setPushTarget(target)
     }
 
     func registeredDeviceID() async -> UUID? {
@@ -319,6 +328,7 @@ final class JarvisAppModel: ObservableObject {
             guard presentation.accepts(generation) else { return }
             apply(awaitResult: result)
             if result == .authenticated {
+                approvalPush.signedIn()
                 await loadConversations()
                 guard presentation.accepts(generation) else { return }
                 let available = await chat.realtimeAvailable()
@@ -379,6 +389,7 @@ final class JarvisAppModel: ObservableObject {
     }
 
     func logout() async {
+        await approvalPush.signingOut(reset: false)
         invalidatePresentation(clearIdentity: true)
         let generation = presentation.id
         enrollmentState = .signedOut
@@ -395,6 +406,7 @@ final class JarvisAppModel: ObservableObject {
     }
 
     func resetDevice() async {
+        await approvalPush.signingOut(reset: true)
         invalidatePresentation(clearIdentity: true)
         let generation = presentation.id
         enrollmentState = .notStarted

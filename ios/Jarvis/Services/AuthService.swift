@@ -136,6 +136,19 @@ actor AuthService {
 
     func registeredDeviceID() async -> UUID? { try? await credentials.deviceId() }
 
+    /// PUT or DELETE this device's own APNs push target. Core binds it to the
+    /// session's device; no other device can be named.
+    func setPushTarget(_ target: (token: String, environment: String)?) async throws {
+        let binding = await api.binding()
+        guard let token = try await credentials.session()?.token else { throw JarvisAPIError.unauthorized }
+        if let target {
+            try await api.put("/v1/devices/self/push", body: ["apns_token": target.token, "apns_env": target.environment],
+                              token: token, expectedBinding: binding)
+        } else {
+            try await api.delete("/v1/devices/self/push", token: token, expectedBinding: binding)
+        }
+    }
+
     /// This installation's key fingerprint, shown while it waits for pairing approval.
     func ownKeyFingerprint() async throws -> String {
         try PairingFingerprint.of(publicKeyHex: try await identity.existingPublicKeyHex())
