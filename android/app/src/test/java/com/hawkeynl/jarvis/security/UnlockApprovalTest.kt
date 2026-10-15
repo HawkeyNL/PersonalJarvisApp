@@ -94,7 +94,7 @@ class UnlockApprovalTest {
     @Test fun wrongPickDeniesWithoutPromptOrSignature() = runTest {
         for (choice in listOf(0, 88, 90, 99)) {
             val fixture = Fixture(createdAt = NOW)
-            assertTrue(runCatching { fixture.service.approve(REQUEST_ID, choice) }.isFailure)
+            assertTrue(runCatching { fixture.service.approve(REQUEST_ID, choice) }.exceptionOrNull() is WrongUnlockNumber)
             assertEquals(0, fixture.prompts)
             assertEquals(listOf("/v1/auth/unlock/pending", "/v1/auth/unlock/$REQUEST_ID/deny"), fixture.paths)
             assertTrue(fixture.bodies.none { "signature" in it })

@@ -16,6 +16,12 @@ const PREVIEW_CHARS: usize = 80;
 /// Mirrors client-core `UNLOCK_CODE_DOMAIN` (newer than the pinned revision).
 const UNLOCK_CODE_DOMAIN: &[u8] = b"jarvis-unlock-code-v1\0";
 const WRONG_CODE: &str = "Wrong number. The unlock request was denied.";
+const DENY_UNCONFIRMED: &str = "Wrong number, but Core did not confirm the deny. Deny it again.";
+
+#[derive(Deserialize)]
+struct StatusReply {
+    status: String,
+}
 
 #[derive(Deserialize)]
 struct Me {
@@ -493,14 +499,17 @@ pub(super) async fn auth_approve_unlock(
                 .json(&serde_json::json!({}))
                 .send()
                 .await
-                .map_err(|_| "Wrong number; the deny was not confirmed. Deny it again.")?;
+                .map_err(|_| DENY_UNCONFIRMED)?;
             if !response.status().is_success() {
-                return Err(format!(
-                    "Wrong number; Core did not confirm the deny (HTTP {}). Deny it again.",
-                    response.status().as_u16()
-                ));
+                return Err(DENY_UNCONFIRMED.into());
             }
-            Err(WRONG_CODE.into())
+            let body = native_response::bounded(response, 4096)
+                .await
+                .map_err(|_| DENY_UNCONFIRMED)?;
+            match serde_json::from_slice::<StatusReply>(&body) {
+                Ok(reply) if reply.status == "denied" => Err(WRONG_CODE.into()),
+                _ => Err(DENY_UNCONFIRMED.into()),
+            }
         }
     }
 }

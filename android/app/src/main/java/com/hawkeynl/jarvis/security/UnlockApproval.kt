@@ -12,6 +12,9 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+/** The owner picked the wrong number; the unlock request has been denied. */
+class WrongUnlockNumber : IllegalStateException("Wrong number. The unlock request was denied.")
+
 /** Approve or deny another device's unlock request. Every decision re-reads the request
  *  by id and refuses a stale one. Approve needs the owner's pick of the number the other
  *  device shows: a wrong pick denies without any prompt or signature. Otherwise each
@@ -51,7 +54,7 @@ class UnlockApprovalService(
         val (origin, token, item) = current(id)
         if (choice != UnlockCode.code(item.id, item.nonce)) {
             decide(origin, token, "/v1/auth/unlock/${item.id}/deny", JsonObject(emptyMap()), "denied")
-            error("Wrong number. The unlock request was denied.")
+            throw WrongUnlockNumber()
         }
         val session = sessions.session()
         val device = session.deviceId ?: error("Device not paired")

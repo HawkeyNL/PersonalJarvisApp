@@ -49,7 +49,10 @@ const SESSION_UNLOCKED = "jarvis.unlocked";
 // Auto re-lock after this much time without pointer or keyboard input (ms).
 const INACTIVITY_MS = 15 * 60 * 1000;
 let idleTimer: number | undefined;
-let pollActive = false;
+// Id of the phone-approval attempt in progress; 0 = none. A newer attempt or a
+// cancel changes it, so an older loop can never stop or unlock for the current one.
+let phoneAttempt = 0;
+let attempts = 0;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -102,29 +105,29 @@ export async function biometricUnlock(): Promise<boolean> {
 
 /** Ask a trusted phone to approve the unlock; long-poll until it resolves. */
 export async function requestPhoneApproval(): Promise<void> {
+  if (phoneAttempt) return; // one request at a time: one code on screen
+  const attempt = (phoneAttempt = ++attempts);
+  const active = () => phoneAttempt === attempt;
+  phoneWaiting.value = true;
   phoneError.value = null;
-  const status = await currentAuthStatus();
-  if (!status.authenticated) {
-    phoneError.value = "not signed in";
-    return;
-  }
   try {
+    if (!(await currentAuthStatus()).authenticated) throw new Error("not signed in");
     const { request_id, nonce } = await postJsonAuth<{ request_id: string; nonce: string }>(
       "/v1/auth/unlock/request",
       {},
     );
-    phoneCode.value = await unlockCode(request_id, nonce);
-    phoneWaiting.value = true;
-    pollActive = true;
+    const code = await unlockCode(request_id, nonce);
+    if (!active()) return; // cancelled while the request was created
+    phoneCode.value = code;
     const deadline = Date.now() + 2 * 60 * 1000;
     // Long-poll: the server holds each request ~20s and returns the instant the
     // phone acts, so approval feels immediate without a tight polling loop.
-    while (pollActive && Date.now() < deadline) {
+    while (active() && Date.now() < deadline) {
       try {
         const { status } = await getJsonAuth<{ status: string }>(
           `/v1/auth/unlock/${request_id}?wait=20`,
         );
-        if (!pollActive) return; // cancelled while the request was open
+        if (!active()) return; // cancelled while the request was open
         if (status === "approved") {
           unlockApp();
           return;
@@ -141,15 +144,16 @@ export async function requestPhoneApproval(): Promise<void> {
         }
         // still pending → loop immediately (the server already waited)
       } catch {
-        if (!pollActive) return;
+        if (!active()) return;
         await sleep(1500); // transient network error — back off, then retry
       }
     }
-    if (pollActive) {
+    if (active()) {
       stopPhonePoll();
       phoneError.value = "request expired — try again";
     }
   } catch (e) {
+    if (!active()) return;
     stopPhonePoll();
     phoneError.value = e instanceof Error ? e.message : String(e);
   }
@@ -161,7 +165,7 @@ export function cancelPhoneApproval(): void {
 }
 
 function stopPhonePoll(): void {
-  pollActive = false;
+  phoneAttempt = 0;
   phoneWaiting.value = false;
   phoneCode.value = null;
 }

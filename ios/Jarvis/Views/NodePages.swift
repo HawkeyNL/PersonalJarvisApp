@@ -1042,6 +1042,7 @@ struct UnlockRequestsBanner: View {
             try await model.approveUnlock(item.id, choice: choice)
             requests.removeAll { $0.id == item.id }
         } catch {
+            if error is UnlockWrongNumber { requests.removeAll { $0.id == item.id } }
             decisionError = (error as? LocalizedError)?.errorDescription ?? "The decision could not be completed."
         }
         busy = nil

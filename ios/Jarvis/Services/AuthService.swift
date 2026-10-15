@@ -468,7 +468,7 @@ actor AuthService {
         let code = try UnlockCode.code(requestId: item.id, nonceHex: item.nonce)
         guard choice == code else {
             try await postUnlockDeny(item.id, token: token, binding: binding)
-            throw JarvisAPIError.rejected(status: 409, message: "Wrong number. The unlock request was denied.")
+            throw UnlockWrongNumber()
         }
         guard let device = try await credentials.deviceId() else { throw JarvisAPIError.unauthorized }
         // Built once before prompting, so a malformed request never prompts.
@@ -601,6 +601,11 @@ actor AuthService {
 }
 
 private struct StatusResponse: Decodable { let status: String }
+
+/// The owner picked the wrong number; the unlock request has been denied.
+struct UnlockWrongNumber: LocalizedError {
+    var errorDescription: String? { "Wrong number. The unlock request was denied." }
+}
 
 /// Unlock number matching, mirroring client-core `unlock_code`: the first two bytes
 /// (big-endian) of SHA-256("jarvis-unlock-code-v1\0" || request id || 32-byte nonce),

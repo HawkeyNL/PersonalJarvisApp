@@ -10,32 +10,34 @@ const two = (n: number) => String(n).padStart(2, "0");
     <div v-if="pending.length" class="wrap">
       <div class="sheet">
         <div class="lead"><NavIcon name="link" /> Unlock request</div>
-        <div v-for="r in pending" :key="r.id" class="req">
-          <div class="who">
-            <strong>{{ r.device_name }}</strong>
-            <span class="plat">{{ r.platform }}</span>
-            wants to unlock
+        <template v-for="r in pending" :key="r.id">
+          <div class="req">
+            <div class="who">
+              <strong>{{ r.device_name }}</strong>
+              <span class="plat">{{ r.platform }}</span>
+              wants to unlock
+            </div>
+            <div class="actions">
+              <button class="deny" :disabled="approving === r.id" @click="deny(r)">Deny</button>
+              <button
+                v-if="picking?.id !== r.id"
+                class="approve"
+                :disabled="approving === r.id"
+                @click="approve(r)"
+              >
+                {{ approving === r.id ? "Verifying…" : "Approve" }}
+              </button>
+            </div>
           </div>
-          <div class="actions">
-            <button class="deny" :disabled="approving === r.id" @click="deny(r)">Deny</button>
-            <button
-              v-if="picking?.id !== r.id"
-              class="approve"
-              :disabled="approving === r.id"
-              @click="approve(r)"
-            >
-              {{ approving === r.id ? "Verifying…" : "Approve" }}
-            </button>
+          <div v-if="picking?.id === r.id" class="pick">
+            <p>Pick the number shown on {{ r.device_name }}. A wrong number denies the request.</p>
+            <div class="choices">
+              <button v-for="c in picking.choices" :key="c" class="choice" @click="pick(r.id, c)">
+                {{ two(c) }}
+              </button>
+            </div>
           </div>
-        </div>
-        <div v-if="picking && pending.some((p) => p.id === picking?.id)" class="pick">
-          <p>Pick the number shown on the locked device. A wrong number denies the request.</p>
-          <div class="choices">
-            <button v-for="c in picking.choices" :key="c" class="choice" @click="pick(picking.id, c)">
-              {{ two(c) }}
-            </button>
-          </div>
-        </div>
+        </template>
         <p v-if="approvalError" class="err">{{ approvalError }}</p>
         <p class="hint">Confirm with Face ID / Touch ID on this device.</p>
       </div>

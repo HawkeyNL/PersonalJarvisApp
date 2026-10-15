@@ -22,6 +22,7 @@ import com.hawkeynl.jarvis.network.UnlockRequestItem
 import com.hawkeynl.jarvis.security.PairingApproval
 import com.hawkeynl.jarvis.security.UnlockApprovalService
 import com.hawkeynl.jarvis.security.UnlockCode
+import com.hawkeynl.jarvis.security.WrongUnlockNumber
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -74,6 +75,8 @@ fun UnlockRequests(service: UnlockApprovalService) {
                                 failure
                             }
                             error = failure?.let { it.message ?: "The decision could not be completed." }
+                            // A wrong number already denied it.
+                            if (failure is WrongUnlockNumber) requests = requests.filter { it.id != item.id }
                             busy = null
                         }
                     }

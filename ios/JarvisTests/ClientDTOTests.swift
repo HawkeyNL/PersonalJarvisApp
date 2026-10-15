@@ -1562,7 +1562,8 @@ final class UnlockApprovalTests: XCTestCase {
     func testWrongPickDeniesWithoutPromptOrSignature() async throws {
         for choice in [0, 88, 90, 99] {
             let (auth, _, prompts) = try await fixture(createdAt: Int64(Date().timeIntervalSince1970))
-            do { try await auth.approveUnlock(UnlockDecisionProtocol.request, choice: choice); XCTFail("A wrong pick must not approve") } catch { }
+            do { try await auth.approveUnlock(UnlockDecisionProtocol.request, choice: choice); XCTFail("A wrong pick must not approve") }
+            catch { XCTAssertTrue(error is UnlockWrongNumber, "\(error)") }
             let promptCount = await prompts.count
             XCTAssertEqual(promptCount, 0)
             let calls = UnlockDecisionProtocol.calls()
