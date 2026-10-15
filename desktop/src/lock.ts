@@ -11,6 +11,7 @@ import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { currentAuthStatus } from "./auth";
 import { getJsonAuth, postJsonAuth } from "./api";
+import { unlockCode } from "./unlockCode";
 import {
   initPlatformCapabilities,
   isDesktop,
@@ -34,6 +35,8 @@ export const supportsBiometrics = computed(
 // Phone-approval state, for the lock screen to reflect.
 export const phoneWaiting = ref(false);
 export const phoneError = ref<string | null>(null);
+// Number-matching code the owner must pick on the approving device.
+export const phoneCode = ref<string | null>(null);
 
 const LKEY = "jarvis.lock.enabled";
 export const lockEnabled = ref(localStorage.getItem(LKEY) !== "false");
@@ -106,10 +109,11 @@ export async function requestPhoneApproval(): Promise<void> {
     return;
   }
   try {
-    const { request_id } = await postJsonAuth<{ request_id: string; nonce: string }>(
+    const { request_id, nonce } = await postJsonAuth<{ request_id: string; nonce: string }>(
       "/v1/auth/unlock/request",
       {},
     );
+    phoneCode.value = await unlockCode(request_id, nonce);
     phoneWaiting.value = true;
     pollActive = true;
     const deadline = Date.now() + 2 * 60 * 1000;
@@ -159,6 +163,7 @@ export function cancelPhoneApproval(): void {
 function stopPhonePoll(): void {
   pollActive = false;
   phoneWaiting.value = false;
+  phoneCode.value = null;
 }
 
 function armIdle(): void {

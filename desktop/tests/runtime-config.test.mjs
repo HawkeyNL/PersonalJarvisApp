@@ -93,9 +93,15 @@ test("approvals are signed natively by id, never from webview-supplied data", as
   }
   assert.deepEqual(handlers.match(/auth_sign_\w+/g), ["auth_sign_account_approval"]);
   const approvals = await readFile(new URL("../src-tauri/src/approvals.rs", import.meta.url), "utf8");
-  const commands = approvals.match(/async fn auth_approve_\w+\([^)]*\)/g);
-  assert.equal(commands?.length, 3);
-  for (const command of commands) assert.match(command, /^async fn auth_approve_\w+\(app: AppHandle, \w+_id: String\)$/);
+  const commands = approvals.match(/async fn auth_approve_\w+\([^)]*\)/g)
+    ?.map((command) => command.replace(/\s+/g, " ").replace("( ", "(").replace(/,? \)$/, ")"));
+  // Only ids cross IPC; unlock also takes the owner's number pick, never signed bytes.
+  assert.deepEqual(commands, [
+    "async fn auth_approve_pairing(app: AppHandle, request_id: String)",
+    "async fn auth_approve_unlock(app: AppHandle, request_id: String, choice: u8)",
+    "async fn auth_approve_agent(app: AppHandle, pending_id: String)",
+  ]);
+  assert.match(approvals, /async fn auth_unlock_choices\(\s*app: AppHandle,\s*request_id: String,?\s*\)/);
   assert.match(native, /fn biometric_unlock\(allow_password: bool\)/);
   for (const file of ["pairingApprovals.ts", "unlockApprovals.ts", "agentApprovals.ts"]) {
     const web = await readFile(new URL(`../src/${file}`, import.meta.url), "utf8");

@@ -13,8 +13,10 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /** Approve or deny another device's unlock request. Every decision re-reads the request
- *  by id, refuses a stale one and needs a strong-biometric prompt (approve signs with
- *  the device key; deny uses [authenticate], the same kind of prompt without a key). */
+ *  by id and refuses a stale one. Approve needs the owner's pick of the number the other
+ *  device shows: a wrong pick denies without any prompt or signature. Otherwise each
+ *  decision needs a strong-biometric prompt (approve signs with the device key; deny
+ *  uses [authenticate], the same kind of prompt without a key). */
 class UnlockApprovalService(
     private val api: JarvisApi,
     private val sessions: SessionRepository,
@@ -38,8 +40,19 @@ class UnlockApprovalService(
         }
     }
 
-    suspend fun approve(id: String) = approvals.exclusive {
+    /** Three numbers for the owner to pick from, built here from the request Core lists
+     *  for this id; one of them is the code the other device shows. */
+    suspend fun choices(id: String): List<Int> {
+        val (_, _, item) = current(id)
+        return UnlockCode.choices(UnlockCode.code(item.id, item.nonce))
+    }
+
+    suspend fun approve(id: String, choice: Int) = approvals.exclusive {
         val (origin, token, item) = current(id)
+        if (choice != UnlockCode.code(item.id, item.nonce)) {
+            decide(origin, token, "/v1/auth/unlock/${item.id}/deny", JsonObject(emptyMap()), "denied")
+            error("Wrong number. The unlock request was denied.")
+        }
         val session = sessions.session()
         val device = session.deviceId ?: error("Device not paired")
         val message = UnlockApprovalMessage(item.id, device, item.nonce).also { it.message() }

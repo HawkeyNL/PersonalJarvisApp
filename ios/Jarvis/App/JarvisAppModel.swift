@@ -424,9 +424,14 @@ final class JarvisAppModel: ObservableObject {
         return requests
     }
 
-    func approveUnlock(_ id: UUID) async throws {
+    func unlockChoices(_ id: UUID) async throws -> [Int] {
         guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
-        try await auth.approveUnlock(id)
+        return try await auth.unlockChoices(id)
+    }
+
+    func approveUnlock(_ id: UUID, choice: Int) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        try await auth.approveUnlock(id, choice: choice)
     }
 
     func denyUnlock(_ id: UUID) async throws {

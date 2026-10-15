@@ -1500,7 +1500,7 @@ final class UnlockApprovalTests: XCTestCase {
 
     func testApprovalRereadsTheRequestAndSignsTheUnlockMessage() async throws {
         let (auth, publicKey, prompts) = try await fixture(createdAt: Int64(Date().timeIntervalSince1970) - 5)
-        try await auth.approveUnlock(UnlockDecisionProtocol.request)
+        try await auth.approveUnlock(UnlockDecisionProtocol.request, choice: 89)
         let promptCount = await prompts.count
         XCTAssertEqual(promptCount, 1)
         let calls = UnlockDecisionProtocol.calls()
@@ -1516,11 +1516,58 @@ final class UnlockApprovalTests: XCTestCase {
         let now = Int64(Date().timeIntervalSince1970)
         for (createdAt, id) in [(now - 200, UnlockDecisionProtocol.request), (now, UUID())] {
             let (auth, _, prompts) = try await fixture(createdAt: createdAt)
-            do { try await auth.approveUnlock(id); XCTFail("Must refuse") } catch { }
+            do { try await auth.approveUnlock(id, choice: 89); XCTFail("Must refuse") } catch { }
+            do { _ = try await auth.unlockChoices(id); XCTFail("Must refuse") } catch { }
             do { try await auth.denyUnlock(id); XCTFail("Must refuse") } catch { }
             let promptCount = await prompts.count
             XCTAssertEqual(promptCount, 0)
             XCTAssertFalse(UnlockDecisionProtocol.calls().contains { $0.path.hasSuffix("/approve") || $0.path.hasSuffix("/deny") })
+        }
+    }
+
+    /// Same vectors as client-core `unlock_code` and the desktop and Android clients.
+    func testUnlockCodeMatchesClientCoreVectors() throws {
+        XCTAssertEqual(try UnlockCode.code(requestId: UnlockDecisionProtocol.request, nonceHex: nonce), 89)
+        XCTAssertEqual(try UnlockCode.code(requestId: UUID(uuidString: "ffeeddcc-bbaa-9988-7766-554433221100")!,
+                                           nonceHex: String(repeating: "0b", count: 32)), 0)
+        XCTAssertEqual(UnlockCode.display(0), "00")
+        XCTAssertEqual(UnlockCode.display(89), "89")
+        XCTAssertThrowsError(try UnlockCode.code(requestId: UnlockDecisionProtocol.request, nonceHex: String(nonce.dropLast(2))))
+    }
+
+    func testChoicesHoldTheCodeAndTwoDistinctDecoys() throws {
+        var random = SystemRandomNumberGenerator()
+        var positions = [0, 0, 0]
+        for code in (0..<3000).map({ $0 % 100 }) {
+            let choices = UnlockCode.choices(for: code, using: &random)
+            XCTAssertEqual(choices.count, 3)
+            XCTAssertEqual(Set(choices).count, 3)
+            XCTAssertTrue(choices.allSatisfy { (0..<100).contains($0) })
+            positions[try XCTUnwrap(choices.firstIndex(of: code))] += 1
+        }
+        // Shuffled: the code is not stuck in one place (each slot ~1000 of 3000).
+        XCTAssertTrue(positions.allSatisfy { $0 > 800 }, "\(positions)")
+    }
+
+    func testChoicesComeFromTheRequestListedForThatId() async throws {
+        let (auth, _, prompts) = try await fixture(createdAt: Int64(Date().timeIntervalSince1970))
+        let choices = try await auth.unlockChoices(UnlockDecisionProtocol.request)
+        XCTAssertTrue(choices.contains(89))
+        XCTAssertEqual(Set(choices).count, 3)
+        let promptCount = await prompts.count
+        XCTAssertEqual(promptCount, 0)
+        XCTAssertEqual(UnlockDecisionProtocol.calls().map { $0.path }, ["/v1/auth/unlock/pending"])
+    }
+
+    func testWrongPickDeniesWithoutPromptOrSignature() async throws {
+        for choice in [0, 88, 90, 99] {
+            let (auth, _, prompts) = try await fixture(createdAt: Int64(Date().timeIntervalSince1970))
+            do { try await auth.approveUnlock(UnlockDecisionProtocol.request, choice: choice); XCTFail("A wrong pick must not approve") } catch { }
+            let promptCount = await prompts.count
+            XCTAssertEqual(promptCount, 0)
+            let calls = UnlockDecisionProtocol.calls()
+            XCTAssertEqual(calls.map { $0.path }, ["/v1/auth/unlock/pending", "/v1/auth/unlock/\(UnlockDecisionProtocol.request.uuidString)/deny"])
+            XCTAssertTrue(calls.allSatisfy { $0.body["signature"] == nil })
         }
     }
 

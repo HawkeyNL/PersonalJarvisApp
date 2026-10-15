@@ -21,6 +21,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.hawkeynl.jarvis.network.UnlockRequestItem
 import com.hawkeynl.jarvis.security.PairingApproval
 import com.hawkeynl.jarvis.security.UnlockApprovalService
+import com.hawkeynl.jarvis.security.UnlockCode
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -31,6 +32,7 @@ import kotlinx.coroutines.launch
 fun UnlockRequests(service: UnlockApprovalService) {
     var requests by remember { mutableStateOf(emptyList<UnlockRequestItem>()) }
     var busy by remember { mutableStateOf<String?>(null) }
+    var picking by remember { mutableStateOf<Pair<String, List<Int>>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -57,28 +59,48 @@ fun UnlockRequests(service: UnlockApprovalService) {
         requests.forEach { item ->
             Panel(JvIcon.SHIELD, "Unlock request", Tone.WARN, PairingApproval.displayName(item.platform, 16)) {
                 MutedText("\"${PairingApproval.displayName(item.device_name, 40)}\" asks to unlock Jarvis. Approve only if you just asked on that device.")
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    val decide: (Boolean) -> Unit = { approve ->
-                        if (busy == null) {
-                            busy = item.id
-                            error = null
-                            scope.launch {
-                                val failure = try {
-                                    if (approve) service.approve(item.id) else service.deny(item.id)
-                                    null
-                                } catch (cancelled: CancellationException) {
-                                    throw cancelled
-                                } catch (failure: Exception) {
-                                    failure
-                                }
-                                error = failure?.let { it.message ?: "The decision could not be completed." }
-                                if (failure == null) requests = requests.filter { it.id != item.id }
-                                busy = null
+                // Approve first shows the numbers; a pick then approves (or, if wrong, denies).
+                val launchStep: (suspend () -> Boolean) -> Unit = { step ->
+                    if (busy == null) {
+                        busy = item.id
+                        error = null
+                        scope.launch {
+                            val failure = try {
+                                if (step()) requests = requests.filter { it.id != item.id }
+                                null
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (failure: Exception) {
+                                failure
                             }
+                            error = failure?.let { it.message ?: "The decision could not be completed." }
+                            busy = null
                         }
                     }
-                    GhostButton("Deny", { decide(false) }, enabled = busy == null, danger = true)
-                    ActionButton(if (busy == item.id) "Verifying…" else "Approve", { decide(true) }, Modifier.weight(1f), enabled = busy == null)
+                }
+                val choices = picking?.takeIf { it.first == item.id }?.second
+                if (choices != null) {
+                    MutedText("Pick the number shown on that device. A wrong number denies the request.")
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        choices.forEach { choice ->
+                            ActionButton(UnlockCode.display(choice), {
+                                picking = null
+                                launchStep { service.approve(item.id, choice); true }
+                            }, Modifier.weight(1f), enabled = busy == null)
+                        }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    GhostButton("Deny", {
+                        picking = null
+                        launchStep { service.deny(item.id); true }
+                    }, enabled = busy == null, danger = true)
+                    if (choices == null) {
+                        ActionButton(if (busy == item.id) "Verifying…" else "Approve", {
+                            picking = null
+                            launchStep { picking = item.id to service.choices(item.id); false }
+                        }, Modifier.weight(1f), enabled = busy == null)
+                    }
                 }
             }
         }

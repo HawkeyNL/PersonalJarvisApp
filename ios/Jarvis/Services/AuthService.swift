@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import LocalAuthentication
 import Security
@@ -450,10 +451,25 @@ actor AuthService {
         return list.requests
     }
 
-    /// Approve another device's unlock: re-read the request by id, refuse a stale one,
-    /// then sign the exact v1 unlock message after one Face ID / Touch ID prompt.
-    func approveUnlock(_ id: UUID) async throws { try await exclusive {
+    /// Three numbers for the owner to pick from, built here from the request Core lists for
+    /// this id; one of them is the code the other device shows.
+    func unlockChoices(_ id: UUID) async throws -> [Int] {
+        let (_, _, item) = try await currentUnlock(id)
+        let code = try UnlockCode.code(requestId: item.id, nonceHex: item.nonce)
+        var random = SystemRandomNumberGenerator()
+        return UnlockCode.choices(for: code, using: &random)
+    }
+
+    /// Approve another device's unlock with the owner's number pick: re-read the request by
+    /// id and refuse a stale one. A wrong pick denies it without any prompt or signature;
+    /// the right one signs the exact v1 unlock message after one Face ID / Touch ID prompt.
+    func approveUnlock(_ id: UUID, choice: Int) async throws { try await exclusive {
         let (binding, token, item) = try await currentUnlock(id)
+        let code = try UnlockCode.code(requestId: item.id, nonceHex: item.nonce)
+        guard choice == code else {
+            try await postUnlockDeny(item.id, token: token, binding: binding)
+            throw JarvisAPIError.rejected(status: 409, message: "Wrong number. The unlock request was denied.")
+        }
         guard let device = try await credentials.deviceId() else { throw JarvisAPIError.unauthorized }
         // Built once before prompting, so a malformed request never prompts.
         _ = try DeviceIdentityStore.unlockApprovalMessage(requestId: item.id, approverDeviceId: device, nonceHex: item.nonce)
@@ -480,11 +496,15 @@ actor AuthService {
         guard await api.binding() == binding, try await credentials.session()?.token == token else {
             throw JarvisAPIError.rejected(status: 409, message: "Session changed; try again.")
         }
+        try await postUnlockDeny(item.id, token: token, binding: binding)
+    } }
+
+    private func postUnlockDeny(_ id: UUID, token: String, binding: UUID) async throws {
         let result: StatusResponse = try await accountDecision {
-            try await api.post("/v1/auth/unlock/\(item.id.uuidString)/deny", body: [String: String](), token: token, expectedBinding: binding)
+            try await api.post("/v1/auth/unlock/\(id.uuidString)/deny", body: [String: String](), token: token, expectedBinding: binding)
         }
         guard result.status == "denied" else { throw JarvisAPIError.rejected(status: 503, message: "Core did not confirm the decision.") }
-    } }
+    }
 
     /// The request as Core lists it right now, never a copy the UI held on to.
     private func currentUnlock(_ id: UUID) async throws -> (UUID, String, UnlockRequestItem) {
@@ -581,3 +601,28 @@ actor AuthService {
 }
 
 private struct StatusResponse: Decodable { let status: String }
+
+/// Unlock number matching, mirroring client-core `unlock_code`: the first two bytes
+/// (big-endian) of SHA-256("jarvis-unlock-code-v1\0" || request id || 32-byte nonce),
+/// modulo 100. The requesting device shows it; the owner must pick it here.
+enum UnlockCode {
+    static func code(requestId: UUID, nonceHex: String) throws -> Int {
+        guard let nonce = Data(strictHex: nonceHex), nonce.count == 32 else { throw DeviceIdentityError.invalidChallenge }
+        var input = Data("jarvis-unlock-code-v1\0".utf8)
+        input.append(requestId.rawBytes); input.append(nonce)
+        let digest = Array(SHA256.hash(data: input))
+        return (Int(digest[0]) << 8 | Int(digest[1])) % 100
+    }
+
+    /// The code and two distinct random decoys, shuffled.
+    static func choices<R: RandomNumberGenerator>(for code: Int, using random: inout R) -> [Int] {
+        var choices = [code]
+        while choices.count < 3 {
+            let decoy = Int.random(in: 0..<100, using: &random)
+            if !choices.contains(decoy) { choices.append(decoy) }
+        }
+        return choices.shuffled(using: &random)
+    }
+
+    static func display(_ code: Int) -> String { String(format: "%02d", code) }
+}

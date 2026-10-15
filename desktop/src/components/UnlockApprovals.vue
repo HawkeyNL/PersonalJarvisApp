@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import NavIcon from "./NavIcon.vue";
-import { pending, approve, deny, approving, approvalError } from "../unlockApprovals";
+import { pending, approve, deny, pick, picking, approving, approvalError } from "../unlockApprovals";
+
+const two = (n: number) => String(n).padStart(2, "0");
 </script>
 
 <template>
@@ -16,8 +18,21 @@ import { pending, approve, deny, approving, approvalError } from "../unlockAppro
           </div>
           <div class="actions">
             <button class="deny" :disabled="approving === r.id" @click="deny(r)">Deny</button>
-            <button class="approve" :disabled="approving === r.id" @click="approve(r)">
+            <button
+              v-if="picking?.id !== r.id"
+              class="approve"
+              :disabled="approving === r.id"
+              @click="approve(r)"
+            >
               {{ approving === r.id ? "Verifying…" : "Approve" }}
+            </button>
+          </div>
+        </div>
+        <div v-if="picking && pending.some((p) => p.id === picking?.id)" class="pick">
+          <p>Pick the number shown on the locked device. A wrong number denies the request.</p>
+          <div class="choices">
+            <button v-for="c in picking.choices" :key="c" class="choice" @click="pick(picking.id, c)">
+              {{ two(c) }}
             </button>
           </div>
         </div>
@@ -115,6 +130,27 @@ import { pending, approve, deny, approving, approvalError } from "../unlockAppro
 .deny:disabled {
   opacity: 0.6;
   cursor: default;
+}
+.pick p {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 6px 0 8px;
+}
+.choices {
+  display: flex;
+  gap: 10px;
+}
+.choice {
+  flex: 1;
+  border-radius: 11px;
+  padding: 10px 0;
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 700;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--text);
+  cursor: pointer;
 }
 .err {
   color: #f87171;

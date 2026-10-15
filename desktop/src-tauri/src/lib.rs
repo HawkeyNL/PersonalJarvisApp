@@ -937,6 +937,7 @@ pub fn run() {
             realtime::realtime_stop_speech,
             device_info,
             auth_public_key,
+            approvals::auth_unlock_choices,
             approvals::auth_approve_unlock,
             approvals::auth_approve_pairing,
             approvals::auth_approve_agent,

@@ -4,6 +4,7 @@
 //! approval itself. No prompt text, nonce or signature crosses IPC.
 use super::*;
 use model_control::Session;
+use rand::{seq::SliceRandom, Rng};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
@@ -12,6 +13,9 @@ const LIST_BYTES: usize = 1024 * 1024;
 const NAME_CHARS: usize = 40;
 const PLATFORM_CHARS: usize = 16;
 const PREVIEW_CHARS: usize = 80;
+/// Mirrors client-core `UNLOCK_CODE_DOMAIN` (newer than the pinned revision).
+const UNLOCK_CODE_DOMAIN: &[u8] = b"jarvis-unlock-code-v1\0";
+const WRONG_CODE: &str = "Wrong number. The unlock request was denied.";
 
 #[derive(Deserialize)]
 struct Me {
@@ -225,19 +229,65 @@ fn pairing_approval(
     })
 }
 
-fn unlock_approval(
+/// Mirrors client-core `unlock_code`: the two-digit number the requesting
+/// device shows and the owner must pick here before approving.
+fn unlock_code(request_id: uuid::Uuid, nonce: &[u8; 32]) -> u8 {
+    let digest = Sha256::new()
+        .chain_update(UNLOCK_CODE_DOMAIN)
+        .chain_update(request_id.as_bytes())
+        .chain_update(nonce)
+        .finalize();
+    (u16::from_be_bytes([digest[0], digest[1]]) % 100) as u8
+}
+
+/// The code and two distinct random decoys, shuffled.
+fn unlock_choices<R: Rng + ?Sized>(code: u8, rng: &mut R) -> [u8; 3] {
+    let mut choices = [code; 3];
+    let mut filled = 1;
+    while filled < 3 {
+        let decoy = rng.gen_range(0..100);
+        if !choices[..filled].contains(&decoy) {
+            choices[filled] = decoy;
+            filled += 1;
+        }
+    }
+    choices.shuffle(rng);
+    choices
+}
+
+fn unlock_item(
     items: &[UnlockItem],
     request_id: uuid::Uuid,
-    approver: uuid::Uuid,
-) -> Result<Approval, String> {
+) -> Result<(&UnlockItem, [u8; 32]), String> {
     let item = items
         .iter()
         .find(|item| item.id == request_id)
         .ok_or("unlock request is no longer pending")?;
     let nonce = hex32(&item.nonce).ok_or("invalid unlock request")?;
+    Ok((item, nonce))
+}
+
+/// What the owner's pick on an unlock request leads to.
+#[derive(Debug)]
+enum UnlockDecision {
+    Approve(Approval),
+    /// A wrong pick: deny without prompting or signing.
+    Deny,
+}
+
+fn unlock_decision(
+    items: &[UnlockItem],
+    request_id: uuid::Uuid,
+    approver: uuid::Uuid,
+    choice: u8,
+) -> Result<UnlockDecision, String> {
+    let (item, nonce) = unlock_item(items, request_id)?;
+    if choice != unlock_code(item.id, &nonce) {
+        return Ok(UnlockDecision::Deny);
+    }
     let message = jarvis_client_core::unlock_approval_message(item.id, approver, &nonce)
         .map_err(|_| "invalid unlock request")?;
-    Ok(Approval {
+    Ok(UnlockDecision::Approve(Approval {
         prompt: format!(
             "Unlock \"{}\" ({})",
             display_name(&item.device_name, NAME_CHARS),
@@ -245,7 +295,7 @@ fn unlock_approval(
         ),
         message,
         expires_at: None,
-    })
+    }))
 }
 
 /// The action type is shown in the OS prompt, so it must be a short identifier.
@@ -398,15 +448,61 @@ pub(super) async fn auth_approve_pairing(app: AppHandle, request_id: String) -> 
     sign_and_post(session, approval, path).await
 }
 
+/// Three numbers for the owner to pick from, built here from the request
+/// Core lists for this id; one of them is the code the other device shows.
 #[tauri::command]
-pub(super) async fn auth_approve_unlock(app: AppHandle, request_id: String) -> Result<(), String> {
+pub(super) async fn auth_unlock_choices(
+    app: AppHandle,
+    request_id: String,
+) -> Result<[u8; 3], String> {
+    let request_id = parse_id(&request_id)?;
+    let session = Session::load(app)?;
+    let list: UnlockList = fetch(&session, "/v1/auth/unlock/pending?wait=0").await?;
+    let (item, nonce) = unlock_item(&list.requests, request_id)?;
+    Ok(unlock_choices(
+        unlock_code(item.id, &nonce),
+        &mut rand::rngs::OsRng,
+    ))
+}
+
+/// Approve with the owner's pick. A wrong pick denies the request and never
+/// reaches the OS prompt or the signing key.
+#[tauri::command]
+pub(super) async fn auth_approve_unlock(
+    app: AppHandle,
+    request_id: String,
+    choice: u8,
+) -> Result<(), String> {
     let request_id = parse_id(&request_id)?;
     let session = Session::load(app)?;
     let device = session_device(&session)?;
     let list: UnlockList = fetch(&session, "/v1/auth/unlock/pending?wait=0").await?;
-    let approval = unlock_approval(&list.requests, request_id, device)?;
-    let path = format!("/v1/auth/unlock/{request_id}/approve");
-    sign_and_post(session, approval, path).await
+    match unlock_decision(&list.requests, request_id, device, choice)? {
+        UnlockDecision::Approve(approval) => {
+            let path = format!("/v1/auth/unlock/{request_id}/approve");
+            sign_and_post(session, approval, path).await
+        }
+        UnlockDecision::Deny => {
+            let response = session
+                .client
+                .post(api_url(
+                    Some(&session.origin),
+                    &format!("/v1/auth/unlock/{request_id}/deny"),
+                )?)
+                .bearer_auth(&session.token)
+                .json(&serde_json::json!({}))
+                .send()
+                .await
+                .map_err(|_| "Wrong number; the deny was not confirmed. Deny it again.")?;
+            if !response.status().is_success() {
+                return Err(format!(
+                    "Wrong number; Core did not confirm the deny (HTTP {}). Deny it again.",
+                    response.status().as_u16()
+                ));
+            }
+            Err(WRONG_CODE.into())
+        }
+    }
 }
 
 #[tauri::command]
@@ -549,14 +645,62 @@ mod tests {
         assert!(approve(item, 0).is_err());
     }
 
-    #[test]
-    fn unlock_prompt_uses_the_sanitised_server_name() {
-        let items: UnlockList = serde_json::from_value(serde_json::json!({ "requests": [{
-            "id": REQUEST, "device_name": "Mac\u{202E}koob\nApprove", "platform": "macos",
+    fn unlock_list(name: &str) -> UnlockList {
+        serde_json::from_value(serde_json::json!({ "requests": [{
+            "id": REQUEST, "device_name": name, "platform": "macos",
             "nonce": NONCE, "created_at": 1,
         }]}))
-        .unwrap();
-        let approval = unlock_approval(&items.requests, id(REQUEST), id(DEVICE)).unwrap();
+        .unwrap()
+    }
+
+    /// Same vectors as client-core and the TypeScript, Swift and Kotlin clients.
+    #[test]
+    fn unlock_code_matches_the_client_core_vectors() {
+        assert_eq!(unlock_code(id(REQUEST), &hex32(NONCE).unwrap()), 89);
+        assert_eq!(unlock_code(id(DEVICE), &[0x0b; 32]), 0);
+    }
+
+    #[test]
+    fn unlock_choices_hold_the_code_and_two_distinct_decoys() {
+        let mut rng = rand::rngs::OsRng;
+        let mut positions = [0; 3];
+        for code in (0..100).cycle().take(3000) {
+            let choices = unlock_choices(code, &mut rng);
+            assert!(choices.iter().all(|c| *c < 100));
+            assert!(
+                choices[0] != choices[1] && choices[1] != choices[2] && choices[0] != choices[2]
+            );
+            positions[choices.iter().position(|c| *c == code).unwrap()] += 1;
+        }
+        // Shuffled: the code is not stuck in one place (each slot ~1000 of 3000).
+        assert!(positions.iter().all(|n| *n > 800), "{positions:?}");
+    }
+
+    #[test]
+    fn a_wrong_pick_denies_without_building_an_approval() {
+        let items = unlock_list("Mac");
+        for choice in (0..=u8::MAX).filter(|c| *c != 89) {
+            assert!(matches!(
+                unlock_decision(&items.requests, id(REQUEST), id(DEVICE), choice),
+                Ok(UnlockDecision::Deny)
+            ));
+        }
+        assert!(matches!(
+            unlock_decision(&items.requests, id(REQUEST), id(DEVICE), 89),
+            Ok(UnlockDecision::Approve(_))
+        ));
+        // An unlisted request is refused before any pick is judged.
+        assert!(unlock_decision(&items.requests, id(USER), id(DEVICE), 89).is_err());
+    }
+
+    #[test]
+    fn unlock_prompt_uses_the_sanitised_server_name() {
+        let items = unlock_list("Mac\u{202E}koob\nApprove");
+        let Ok(UnlockDecision::Approve(approval)) =
+            unlock_decision(&items.requests, id(REQUEST), id(DEVICE), 89)
+        else {
+            panic!("the right pick must approve");
+        };
         assert_eq!(approval.prompt, "Unlock \"Mackoob Approve\" (macos)");
         assert_eq!(
             approval.message,
@@ -567,7 +711,7 @@ mod tests {
             )
             .unwrap()
         );
-        assert!(unlock_approval(&items.requests, id(USER), id(DEVICE))
+        assert!(unlock_decision(&items.requests, id(USER), id(DEVICE), 89)
             .unwrap_err()
             .contains("no longer pending"));
     }

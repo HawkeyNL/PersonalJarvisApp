@@ -5,6 +5,7 @@ import {
   lockError,
   phoneWaiting,
   phoneError,
+  phoneCode,
   requestPhoneApproval,
   cancelPhoneApproval,
   supportsBiometrics,
@@ -39,11 +40,17 @@ import {
       <template v-if="!phoneWaiting">
         <button class="ghost" @click="requestPhoneApproval">Unlock with your phone</button>
       </template>
-      <div v-else class="waiting">
-        <span class="spinner" aria-hidden="true"></span>
-        Waiting for approval on your phone…
-        <button class="link" @click="cancelPhoneApproval">cancel</button>
-      </div>
+      <template v-else>
+        <div v-if="phoneCode" class="code" role="status">
+          <span class="digits">{{ phoneCode }}</span>
+          <span class="code-hint">Pick this number on your phone to approve.</span>
+        </div>
+        <div class="waiting">
+          <span class="spinner" aria-hidden="true"></span>
+          Waiting for approval on your phone…
+          <button class="link" @click="cancelPhoneApproval">cancel</button>
+        </div>
+      </template>
 
       <p v-if="phoneError || lockError" class="err">{{ phoneError || lockError }}</p>
     </div>
@@ -133,6 +140,23 @@ h1 {
   border-color: var(--accent);
 }
 
+.code {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.code .digits {
+  font-family: var(--mono);
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+}
+.code-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
 .waiting {
   display: flex;
   align-items: center;
