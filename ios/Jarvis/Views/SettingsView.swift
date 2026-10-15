@@ -172,11 +172,10 @@ private struct PasswordResetView: View {
     @State private var repeated = ""
     @State private var busy = false
     @State private var error: String?
-    @State private var requestId: UUID?
 
     var body: some View {
         Form {
-            if let requestId {
+            if let requestId = model.pendingPasswordReset {
                 Section {
                     Text("Run this on the Home Node within 15 minutes:")
                     Text(verbatim: "sudo jarvis account recovery confirm \(requestId.uuidString.lowercased())")
@@ -187,6 +186,7 @@ private struct PasswordResetView: View {
                 } footer: {
                     Text("Check that the request id matches. After confirming, every device is signed out; sign in with the new password.")
                 }
+                Section { Button("Done") { model.pendingPasswordReset = nil } }
             } else {
                 Section {
                     SecureField("New password (at least 15 characters)", text: $new).textContentType(.newPassword)
@@ -212,7 +212,7 @@ private struct PasswordResetView: View {
         busy = true
         error = nil
         do {
-            requestId = try await model.resetPassword(new: new)
+            _ = try await model.resetPassword(new: new)
             new = ""; repeated = ""
         } catch {
             self.error = PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "The reset was not started.", max: 160)

@@ -93,7 +93,7 @@ internal fun SettingsScreen(
                 MutedText("Model access moved to System Health → Models.")
                 ActionButton("Sign out", actions::logout)
                 PasswordChange(actions)
-                PasswordReset(actions)
+                PasswordReset(state, actions)
                 GhostButton("Erase this device and pair again", actions::resetDevice, Modifier.fillMaxWidth(), danger = true)
             }
         }
@@ -147,21 +147,20 @@ private fun PasswordChange(actions: JarvisViewModel) {
 
 /** Forgotten-password reset: signed here, then confirmed as root on the Home Node. */
 @Composable
-private fun PasswordReset(actions: JarvisViewModel) {
+private fun PasswordReset(state: JarvisUiState, actions: JarvisViewModel) {
     var open by remember { mutableStateOf(false) }
     var next by remember { mutableStateOf("") }
     var repeat by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var requestId by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    requestId?.let { id ->
-        MutedText("Confirm on the Home Node within 15 minutes:")
+    state.passwordResetRequest?.let { id ->
+        MutedText("Run this on the Home Node within 15 minutes:")
         SelectionContainer {
             Text("sudo jarvis account recovery confirm ${id.lowercase()}", fontFamily = FontFamily.Monospace)
         }
         MutedText("Check that the request id matches. After confirming, every device is signed out; sign in with the new password.")
-        GhostButton("Done", { requestId = null; open = false }, Modifier.fillMaxWidth())
+        GhostButton("Done", { actions.dismissPasswordReset(); open = false }, Modifier.fillMaxWidth())
         return
     }
     if (!open) {
@@ -187,10 +186,9 @@ private fun PasswordReset(actions: JarvisViewModel) {
                 busy = true
                 error = null
                 scope.launch {
-                    actions.resetPassword(next)
-                        .onSuccess { requestId = it; next = ""; repeat = "" }
-                        .onFailure { error = it.message }
+                    error = actions.resetPassword(next)
                     busy = false
+                    if (error == null) { next = ""; repeat = "" }
                 }
             }
         },

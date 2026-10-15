@@ -1426,9 +1426,26 @@ final class AccountApprovalTests: XCTestCase {
         // "completed" or another request id is not a pending reset.
         let challenge = approval(action: AccountApproval.passwordReset, target: AccountDecisionProtocol.user)
         for answer in [#"{"status":"completed"}"#, #"{"status":"pending_confirmation","request_id":"\#(UUID())"}"#] {
-            let (auth, _, _, _) = try await fixture(revoke: AccountDecisionProtocol.json(challenge), approve: answer)
-            do { _ = try await auth.resetPassword(new: "fixture new password only"); XCTFail("Must refuse") } catch { }
+            let (auth, _, _, prompts) = try await fixture(revoke: AccountDecisionProtocol.json(challenge), approve: answer)
+            do { _ = try await auth.resetPassword(new: "fixture new password only"); XCTFail("Must refuse") }
+            catch { XCTAssertEqual((error as? LocalizedError)?.errorDescription, "Core did not confirm the change.") }
+            let count = await prompts.count
+            XCTAssertEqual(count, 1)
+            XCTAssertTrue(AccountDecisionProtocol.calls().last?.path.hasSuffix("/approve") ?? false)
         }
+    }
+
+    func testAPendingConfirmationIsNotACompletedChangeOrUnlink() async throws {
+        let pending = #"{"status":"pending_confirmation","request_id":"\#(AccountDecisionProtocol.request)"}"#
+        let change = approval(action: AccountApproval.passwordSet, target: AccountDecisionProtocol.user)
+        let (auth, credentials, _, _) = try await fixture(revoke: AccountDecisionProtocol.json(change), approve: pending)
+        do { try await auth.changePassword(current: "fixture old password only", new: "fixture new password only"); XCTFail("Must refuse") }
+        catch { XCTAssertEqual((error as? LocalizedError)?.errorDescription, "Core did not confirm the change.") }
+        let session = try await credentials.session()
+        XCTAssertNotNil(session)
+        let (unlink, _, _, _) = try await fixture(revoke: AccountDecisionProtocol.json(approval()), approve: pending)
+        do { try await unlink.unlinkDevice(); XCTFail("Must refuse") }
+        catch { XCTAssertEqual((error as? LocalizedError)?.errorDescription, "Core did not confirm the change.") }
     }
 
     func testASecondApprovalIsRefusedWhileOneIsPrompting() async throws {

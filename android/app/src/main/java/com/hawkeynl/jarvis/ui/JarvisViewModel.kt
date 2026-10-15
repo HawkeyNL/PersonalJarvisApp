@@ -81,6 +81,8 @@ data class JarvisUiState(
     val busy: Boolean = false,
     val appUpdate: AndroidUpdateUiState = AndroidUpdateUiState.Idle,
     val error: String? = null,
+    /** A signed password reset waiting for root confirmation on the Home Node. */
+    val passwordResetRequest: String? = null,
 )
 
 class JarvisViewModel(private val container: AppContainer) : ViewModel() {
@@ -329,15 +331,20 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 
     /** Starts a forgotten-password reset (one strong-biometric prompt). Nothing changes until
      *  the owner confirms the returned request id as root on the Home Node. */
-    suspend fun resetPassword(new: String): Result<String> = viewModelScope.async {
+    // Kept in the UI state: the id must survive leaving Settings or rotation while it runs.
+    suspend fun resetPassword(new: String): String? = viewModelScope.async {
         try {
-            Result.success(container.accountApprovals.resetPassword(new))
+            val id = container.accountApprovals.resetPassword(new)
+            _state.update { it.copy(passwordResetRequest = id) }
+            null
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            Result.failure(IllegalStateException(PairingApproval.displayName(error.message ?: "The reset was not started.", 160)))
+            PairingApproval.displayName(error.message ?: "The reset was not started.", 160)
         }
     }.await()
+
+    fun dismissPasswordReset() = _state.update { it.copy(passwordResetRequest = null) }
 
     fun lockForBackground() {
         container.sessions.modelAuthorization.invalidate()

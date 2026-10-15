@@ -194,8 +194,19 @@ class AccountApprovalTest {
         // "completed" or another request id is not a pending reset.
         for (answer in listOf("""{"status":"completed"}""", """{"status":"pending_confirmation","request_id":"$OTHER_ID"}""")) {
             val fixture = Fixture(approvalJson(target = USER_ID, action = AccountApproval.PASSWORD_RESET), approveBody = answer)
-            assertTrue(runCatching { fixture.service.resetPassword(NEW_PASSWORD) }.isFailure)
+            assertEquals("Core did not confirm the change.", runCatching { fixture.service.resetPassword(NEW_PASSWORD) }.exceptionOrNull()?.message)
+            assertEquals(1, fixture.prompts)
+            assertTrue(fixture.paths.last().endsWith("/approve"))
         }
+    }
+
+    @Test fun aPendingConfirmationIsNotACompletedChangeOrUnlink() = runTest {
+        val pending = """{"status":"pending_confirmation","request_id":"$REQUEST_ID"}"""
+        val change = Fixture(approvalJson(target = USER_ID, action = AccountApproval.PASSWORD_SET), approveBody = pending)
+        assertEquals("Core did not confirm the change.", runCatching { change.service.changePassword(OLD_PASSWORD, NEW_PASSWORD) }.exceptionOrNull()?.message)
+        assertEquals("fixture-session-not-a-secret", change.sessions.session().token)
+        val unlink = Fixture(approvalJson(), approveBody = pending)
+        assertEquals("Core did not confirm the change.", runCatching { unlink.service.unlinkThisDevice() }.exceptionOrNull()?.message)
     }
 
     @Test fun aSecondApprovalIsRefusedWhileOneIsRunning() = runTest {
