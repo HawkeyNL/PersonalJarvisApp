@@ -327,6 +327,18 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         null
     }.await()
 
+    /** Starts a forgotten-password reset (one strong-biometric prompt). Nothing changes until
+     *  the owner confirms the returned request id as root on the Home Node. */
+    suspend fun resetPassword(new: String): Result<String> = viewModelScope.async {
+        try {
+            Result.success(container.accountApprovals.resetPassword(new))
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Result.failure(IllegalStateException(PairingApproval.displayName(error.message ?: "The reset was not started.", 160)))
+        }
+    }.await()
+
     fun lockForBackground() {
         container.sessions.modelAuthorization.invalidate()
         container.realtime.stop(); speech.stop()

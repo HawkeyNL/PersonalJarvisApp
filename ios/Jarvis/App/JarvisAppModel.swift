@@ -445,6 +445,13 @@ final class JarvisAppModel: ObservableObject {
         notice = "Password changed. Sign in with the new password."
     }
 
+    /// Starts a forgotten-password reset (one Face ID / Touch ID prompt). Nothing changes until
+    /// the owner confirms the returned request id as root on the Home Node.
+    func resetPassword(new: String) async throws -> UUID {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.rejected(status: 423, message: "Unlock Jarvis first.") }
+        return try await auth.resetPassword(new: new)
+    }
+
     /// Revokes another device of this account (one Face ID / Touch ID prompt).
     func revokeDevice(_ id: UUID) async throws {
         guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.rejected(status: 423, message: "Unlock Jarvis first.") }

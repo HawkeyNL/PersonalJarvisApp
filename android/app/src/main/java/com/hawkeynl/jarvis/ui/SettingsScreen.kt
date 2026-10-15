@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -26,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -91,6 +93,7 @@ internal fun SettingsScreen(
                 MutedText("Model access moved to System Health → Models.")
                 ActionButton("Sign out", actions::logout)
                 PasswordChange(actions)
+                PasswordReset(actions)
                 GhostButton("Erase this device and pair again", actions::resetDevice, Modifier.fillMaxWidth(), danger = true)
             }
         }
@@ -140,6 +143,60 @@ private fun PasswordChange(actions: JarvisViewModel) {
         enabled = !busy && current.isNotEmpty() && next.isNotEmpty(),
     )
     GhostButton("Cancel", { open = false; current = ""; next = ""; repeat = ""; error = null }, Modifier.fillMaxWidth(), enabled = !busy)
+}
+
+/** Forgotten-password reset: signed here, then confirmed as root on the Home Node. */
+@Composable
+private fun PasswordReset(actions: JarvisViewModel) {
+    var open by remember { mutableStateOf(false) }
+    var next by remember { mutableStateOf("") }
+    var repeat by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var requestId by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    requestId?.let { id ->
+        MutedText("Confirm on the Home Node within 15 minutes:")
+        SelectionContainer {
+            Text("sudo jarvis account recovery confirm ${id.lowercase()}", fontFamily = FontFamily.Monospace)
+        }
+        MutedText("Check that the request id matches. After confirming, every device is signed out; sign in with the new password.")
+        GhostButton("Done", { requestId = null; open = false }, Modifier.fillMaxWidth())
+        return
+    }
+    if (!open) {
+        GhostButton("Forgot password?", { open = true }, Modifier.fillMaxWidth())
+        return
+    }
+    @Composable
+    fun field(label: String, value: String, onChange: (String) -> Unit) = OutlinedTextField(
+        value = value, onValueChange = onChange, modifier = Modifier.fillMaxWidth(),
+        label = { Text(label) }, singleLine = true, visualTransformation = PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
+    )
+    field("New password (at least 15 characters)", next) { next = it }
+    field("Repeat new password", repeat) { repeat = it }
+    MutedText("Confirmed with your fingerprint or face, then by the owner as root on the Home Node. Nothing changes until then.")
+    error?.let { ErrorText(it) }
+    ActionButton(
+        if (busy) "Verifying…" else "Reset password",
+        {
+            if (next != repeat) {
+                error = "The new passwords do not match."
+            } else {
+                busy = true
+                error = null
+                scope.launch {
+                    actions.resetPassword(next)
+                        .onSuccess { requestId = it; next = ""; repeat = "" }
+                        .onFailure { error = it.message }
+                    busy = false
+                }
+            }
+        },
+        enabled = !busy && next.isNotEmpty(),
+    )
+    GhostButton("Cancel", { open = false; next = ""; repeat = ""; error = null }, Modifier.fillMaxWidth(), enabled = !busy)
 }
 
 @Composable
