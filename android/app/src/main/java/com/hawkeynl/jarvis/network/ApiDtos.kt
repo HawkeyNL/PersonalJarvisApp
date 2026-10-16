@@ -61,6 +61,13 @@ data class PairingRequestItem(
 @Serializable
 data class AuthMe(val user_id: String, val device_id: String)
 
+/** `GET /v1/auth/unlock/pending`: other devices of this account waiting to be unlocked. */
+@Serializable
+data class UnlockRequestItem(val id: String, val device_name: String = "", val platform: String = "", val nonce: String, val created_at: Long)
+
+@Serializable
+data class UnlockRequestList(val requests: List<UnlockRequestItem> = emptyList())
+
 @Serializable
 data class AccountStatus(val protocol: Int, val password_required: Boolean, val bootstrap_required: Boolean)
 

@@ -90,6 +90,8 @@ private struct SecuritySettingsView: View {
             Section("Device security") {
                 Text("The device key, pairing nonce, device ID, and session token are stored in the device-only Keychain and are never synchronized through iCloud.").font(.footnote)
                 if model.isAuthenticated {
+                    NavigationLink { PasswordChangeView(model: model) } label: { Text("Change account password") }
+                    NavigationLink { PasswordResetView(model: model) } label: { Text("Forgot password?") }
                     Button("Lock now") { model.lockWhenBackgrounded() }
                     Button("Log out") { showLogoutConfirmation = true }
                 }
@@ -105,11 +107,120 @@ private struct SecuritySettingsView: View {
             Text("This ends your session. Your Home Node address and device identity are kept so you can sign in again without resetting this device.")
         }
         .confirmationDialog("Remove this device identity?", isPresented: $showResetConfirmation, titleVisibility: .visible) {
-            Button("Reset and require re-enrollment", role: .destructive) { Task { await model.resetDevice() } }
+            Button("Revoke and require re-enrollment", role: .destructive) { Task { await model.resetDevice() } }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("Jarvis will attempt to revoke this device, then remove its local key and session even if the Home Node is offline.")
+            Text("Jarvis asks your Home Node to revoke this device, confirmed with Face ID or Touch ID, then removes its local key and session. If the Home Node does not confirm, nothing is erased until you choose.")
         }
+        .alert("Erase locally only?", isPresented: Binding(get: { model.localEraseOffer != nil },
+                                                          set: { if !$0 { model.localEraseOffer = nil } })) {
+            Button("Erase locally only", role: .destructive) { Task { await model.eraseLocally() } }
+            Button("Keep this device", role: .cancel) { model.localEraseOffer = nil }
+        } message: {
+            Text(verbatim: "\(model.localEraseOffer ?? "")\n\nThis device may stay active on your Home Node until you revoke it from another device. Erase locally only if you will do that.")
+        }
+    }
+}
+
+/// Change the account password with the current one; the change is signed with the device key.
+private struct PasswordChangeView: View {
+    @ObservedObject var model: JarvisAppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var current = ""
+    @State private var new = ""
+    @State private var repeated = ""
+    @State private var busy = false
+    @State private var error: String?
+
+    var body: some View {
+        Form {
+            Section {
+                SecureField("Current password", text: $current).textContentType(.password)
+                SecureField("New password (at least 15 characters)", text: $new).textContentType(.newPassword)
+                SecureField("Repeat new password", text: $repeated).textContentType(.newPassword)
+            } footer: {
+                Text("Confirmed with Face ID or Touch ID. Every device is signed out after the change; sign in again with the new password.")
+            }
+            if let error { Section { Text(verbatim: error).foregroundStyle(JarvisTheme.danger) } }
+            Section {
+                Button(busy ? "Verifying…" : "Change password") { Task { await change() } }
+                    .disabled(busy || current.isEmpty || new.isEmpty)
+            }
+        }
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+        .navigationTitle("Account password")
+        .settingsBackground()
+    }
+
+    private func change() async {
+        guard new == repeated else { error = "The new passwords do not match."; return }
+        busy = true
+        error = nil
+        do {
+            try await model.changePassword(current: current, new: new)
+            current = ""; new = ""; repeated = ""
+            dismiss()
+        } catch {
+            self.error = PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "The password was not changed.", max: 160)
+        }
+        busy = false
+    }
+}
+
+/// Forgotten-password reset: signed here, then confirmed as root on the Home Node.
+private struct PasswordResetView: View {
+    @ObservedObject var model: JarvisAppModel
+    @State private var new = ""
+    @State private var repeated = ""
+    @State private var busy = false
+    @State private var error: String?
+
+    var body: some View {
+        Form {
+            if let requestId = model.pendingPasswordReset {
+                Section {
+                    Text("Run this on the Home Node within 15 minutes:")
+                    Text(verbatim: "sudo jarvis account recovery confirm \(requestId.uuidString.lowercased())")
+                        .font(.system(.footnote, design: .monospaced))
+                        .textSelection(.enabled)
+                } header: {
+                    Text("Confirm on the Home Node")
+                } footer: {
+                    Text("Check that the request id matches. After confirming, every device is signed out; sign in with the new password.")
+                }
+                Section { Button("Done") { model.pendingPasswordReset = nil } }
+            } else {
+                Section {
+                    SecureField("New password (at least 15 characters)", text: $new).textContentType(.newPassword)
+                    SecureField("Repeat new password", text: $repeated).textContentType(.newPassword)
+                } footer: {
+                    Text("Confirmed with Face ID or Touch ID, then by the owner as root on the Home Node. Nothing changes until then.")
+                }
+                if let error { Section { Text(verbatim: error).foregroundStyle(JarvisTheme.danger) } }
+                Section {
+                    Button(busy ? "Verifying…" : "Reset password") { Task { await reset() } }
+                        .disabled(busy || new.isEmpty)
+                }
+            }
+        }
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+        .navigationTitle("Reset password")
+        .settingsBackground()
+    }
+
+    private func reset() async {
+        guard new == repeated else { error = "The new passwords do not match."; return }
+        busy = true
+        error = nil
+        do {
+            _ = try await model.resetPassword(new: new)
+            new = ""; repeated = ""
+        } catch {
+            self.error = PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "The reset was not started.", max: 160)
+        }
+        busy = false
     }
 }
 

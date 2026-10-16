@@ -27,7 +27,7 @@ class KeystoreBackedEd25519IdentityTest {
 
     @Test(expected = IllegalStateException::class)
     fun `signing never creates a missing device key`() = runTest {
-        identity.signHex("00".repeat(32), "fixture")
+        identity.sign(MESSAGE, "fixture")
     }
 
     @Test(expected = IllegalStateException::class)
@@ -46,7 +46,7 @@ class KeystoreBackedEd25519IdentityTest {
         assertEquals(64, publicKey.length)
         assertEquals("Reading the public key never prompts", 1, prompts)
 
-        repeat(2) { assertValid(publicKey, identity.signHex(Hex.encode(MESSAGE), "fixture")) }
+        repeat(2) { assertValid(publicKey, identity.sign(MESSAGE, "fixture")) }
         assertEquals(3, prompts)
         assertEquals("Every cipher handed out went through a prompt", prompts, vault.handedOut)
 
@@ -74,17 +74,17 @@ class KeystoreBackedEd25519IdentityTest {
         assertEquals(0, prompts)
 
         accept = false
-        val cancelled = runCatching { identity.signHex(Hex.encode(MESSAGE), "fixture") }.exceptionOrNull()
+        val cancelled = runCatching { identity.sign(MESSAGE, "fixture") }.exceptionOrNull()
         assertTrue("$cancelled", cancelled is DeviceSigningException)
         assertTrue("A cancelled move keeps the legacy seed", legacy.exists(LEGACY_SEED))
         assertNull(vault.load(SEED))
 
         accept = true
-        assertValid(publicKey, identity.signHex(Hex.encode(MESSAGE), "fixture"))
+        assertValid(publicKey, identity.sign(MESSAGE, "fixture"))
         assertFalse(legacy.exists(LEGACY_SEED))
         assertTrue(vault.load(SEED) != null)
         assertEquals(publicKey, identity.publicKeyHex())
-        assertValid(publicKey, identity.signHex(Hex.encode(MESSAGE), "fixture"))
+        assertValid(publicKey, identity.sign(MESSAGE, "fixture"))
         assertEquals(3, prompts)
         assertEquals(prompts, vault.handedOut)
     }
@@ -95,7 +95,7 @@ class KeystoreBackedEd25519IdentityTest {
         vault.invalidated = true
         val sealed = vault.load(SEED)
 
-        val error = runCatching { identity.signHex(Hex.encode(MESSAGE), "fixture") }.exceptionOrNull()
+        val error = runCatching { identity.sign(MESSAGE, "fixture") }.exceptionOrNull()
         assertTrue("$error", error is DeviceKeyInvalidatedException)
         assertEquals(publicKey, identity.publicKeyHex())
         assertTrue(sealed.contentEquals(vault.load(SEED)))
@@ -105,7 +105,7 @@ class KeystoreBackedEd25519IdentityTest {
     fun `signing without a visible Activity fails closed`() = runTest {
         legacy.write(LEGACY_SEED, ByteArray(32) { 1 })
         identity.prompt = null
-        val error = runCatching { identity.signHex(Hex.encode(MESSAGE), "fixture") }.exceptionOrNull()
+        val error = runCatching { identity.sign(MESSAGE, "fixture") }.exceptionOrNull()
         assertTrue("$error", error is DeviceSigningException)
         assertTrue(legacy.exists(LEGACY_SEED))
     }
@@ -114,7 +114,7 @@ class KeystoreBackedEd25519IdentityTest {
     fun `a cipher other than the Keystore one is refused`() = runTest {
         legacy.write(LEGACY_SEED, ByteArray(32) { 1 })
         identity.prompt = { _, _ -> Cipher.getInstance("AES/GCM/NoPadding") }
-        val error = runCatching { identity.signHex(Hex.encode(MESSAGE), "fixture") }.exceptionOrNull()
+        val error = runCatching { identity.sign(MESSAGE, "fixture") }.exceptionOrNull()
         assertTrue("$error", error is DeviceSigningException)
         assertNull(vault.load(SEED))
         assertTrue(legacy.exists(LEGACY_SEED))
@@ -124,7 +124,7 @@ class KeystoreBackedEd25519IdentityTest {
     fun `a prompt that never answers releases the signing lock`() = runTest {
         identity.enrollmentKeyHex("fixture")
         identity.prompt = { _, _ -> awaitCancellation() }
-        val error = runCatching { identity.signHex(Hex.encode(MESSAGE), "fixture") }.exceptionOrNull()
+        val error = runCatching { identity.sign(MESSAGE, "fixture") }.exceptionOrNull()
         assertTrue("$error", error is DeviceSigningException)
         identity.reset()
         assertTrue(vault.values.isEmpty())
@@ -135,13 +135,14 @@ class KeystoreBackedEd25519IdentityTest {
         assertEquals(64, signature.size)
         val verifier = Ed25519Signer().apply {
             init(false, Ed25519PublicKeyParameters(Hex.decode(publicKey), 0))
-            update(MESSAGE, 0, MESSAGE.size)
+            val bytes = MESSAGE.message()
+            update(bytes, 0, bytes.size)
         }
         assertTrue(verifier.verifySignature(signature))
     }
 
     private companion object {
-        val MESSAGE = ByteArray(32) { it.toByte() }
+        val MESSAGE = LoginMessage("00112233-4455-6677-8899-aabbccddeeff", "ffeeddcc-bbaa-9988-7766-554433221100", "00".repeat(32))
         const val LEGACY_SEED = "device-ed25519-seed.v1"
         const val SEED = "device-ed25519-seed.v2"
     }

@@ -13,13 +13,17 @@ import com.hawkeynl.jarvis.network.ConversationSummary
 import com.hawkeynl.jarvis.network.EndpointValidation
 import com.hawkeynl.jarvis.network.HomeNodeEndpoint
 import com.hawkeynl.jarvis.network.UnreachableReason
+import com.hawkeynl.jarvis.security.ApprovalBusyException
 import com.hawkeynl.jarvis.security.BiometricAvailability
 import com.hawkeynl.jarvis.security.BiometricResult
 import com.hawkeynl.jarvis.security.PairingApproval
+import com.hawkeynl.jarvis.security.SigningCancelledException
 import com.hawkeynl.jarvis.update.AndroidUpdateCheck
 import com.hawkeynl.jarvis.update.AndroidUpdateDownload
 import com.hawkeynl.jarvis.update.InstallerHandoff
 import java.time.Instant
+import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -68,6 +72,8 @@ data class JarvisUiState(
     val deviceKeyLost: Boolean = false,
     /** This device's key fingerprint, shown while waiting for approval. */
     val ownFingerprint: String? = null,
+    /** Why Core did not revoke this device; set while the user decides on erasing locally only. */
+    val localEraseOffer: String? = null,
     val conversations: List<ConversationSummary> = emptyList(),
     val conversationId: String? = null,
     val conversationTitle: String = "New conversation",
@@ -75,12 +81,15 @@ data class JarvisUiState(
     val busy: Boolean = false,
     val appUpdate: AndroidUpdateUiState = AndroidUpdateUiState.Idle,
     val error: String? = null,
+    /** A signed password reset waiting for root confirmation on the Home Node. */
+    val passwordResetRequest: String? = null,
 )
 
 class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     private val speech = RealtimeSpeech(container.localSpeech)
     private var realtimeAvailable = false
     private val pending = com.hawkeynl.jarvis.chat.PendingRuns()
+    private var unlinking = false
     private val _state = MutableStateFlow(
         JarvisUiState(locked = container.sessions.hasSessionRecord(), voiceEnabled = container.voicePreferences.getBoolean("enabled", false),
             voiceRate = SpeechRate.normalize(container.voicePreferences.getFloat("rate", 1f)),
@@ -118,7 +127,9 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             val parsed = HomeNodeEndpoint.parse(_state.value.endpointDraft)
             if (parsed is EndpointValidation.Valid && parsed.endpoint != _state.value.endpoint) {
                 container.realtime.stop(); speech.stop(); pending.clear(); container.sessions.reset()
-                _state.update { it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), conversationId = null) }
+                _state.update {
+                    it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), conversationId = null, passwordResetRequest = null)
+                }
             }
             when (val result = container.settings.save(_state.value.endpointDraft)) {
                 is EndpointValidation.Valid -> checkConnection(result.endpoint)
@@ -293,9 +304,51 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         val endpoint = _state.value.endpoint ?: return
         viewModelScope.launch {
             container.enrollment.logout(endpoint)
-            _state.update { it.copy(authenticated = false, messages = emptyList(), conversations = emptyList()) }
+            _state.update {
+                it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), passwordResetRequest = null)
+            }
         }
     }
+
+    /** Changes the account password (one strong-biometric prompt). Core then ends every
+     *  session, so this phone signs in again with the new password. Returns why it failed. */
+    // Runs in viewModelScope: leaving Settings must not cut the flow off after Core changed it.
+    suspend fun changePassword(current: String, new: String): String? = viewModelScope.async {
+        val failure = try {
+            container.accountApprovals.changePassword(current, new)
+            null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            error
+        }
+        if (failure != null) return@async PairingApproval.displayName(failure.message ?: "The password was not changed.", 160)
+        container.sessions.modelAuthorization.invalidate()
+        pending.clear()
+        container.realtime.stop(); speech.stop()
+        _state.update {
+            it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(),
+                error = "Password changed. Sign in with the new password.")
+        }
+        null
+    }.await()
+
+    /** Starts a forgotten-password reset (one strong-biometric prompt). Nothing changes until
+     *  the owner confirms the returned request id as root on the Home Node. */
+    // Kept in the UI state: the id must survive leaving Settings or rotation while it runs.
+    suspend fun resetPassword(new: String): String? = viewModelScope.async {
+        try {
+            val id = container.accountApprovals.resetPassword(new)
+            _state.update { it.copy(passwordResetRequest = id) }
+            null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            PairingApproval.displayName(error.message ?: "The reset was not started.", 160)
+        }
+    }.await()
+
+    fun dismissPasswordReset() = _state.update { it.copy(passwordResetRequest = null) }
 
     fun lockForBackground() {
         container.sessions.modelAuthorization.invalidate()
@@ -303,17 +356,49 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         if (container.sessions.hasSessionRecord()) _state.update { it.copy(locked = true) }
     }
 
+    /** Revokes this device on Core with a signed approval, then erases it here. If Core
+     *  does not confirm, nothing is erased: the user is asked about erasing locally only. */
     fun resetDevice() {
+        if (unlinking) return
+        unlinking = true
+        viewModelScope.launch {
+            val failure = try {
+                container.accountApprovals.unlinkThisDevice()
+                null
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                error
+            } finally {
+                unlinking = false
+            }
+            when (failure) {
+                null -> eraseLocally()
+                // The user stopped, or another prompt is open: nothing to offer.
+                is ApprovalBusyException, is SigningCancelledException -> _state.update { it.copy(error = failure.message) }
+                // Server text is shown sanitised and bounded.
+                else -> _state.update {
+                    it.copy(localEraseOffer = PairingApproval.displayName(failure.message ?: "Core did not confirm the revocation.", 160))
+                }
+            }
+        }
+    }
+
+    /** The user chose to erase this device here although Core still lists it as active. */
+    fun eraseLocally() {
+        _state.update { it.copy(localEraseOffer = null) }
         container.sessions.modelAuthorization.invalidate()
         pending.clear()
         container.realtime.stop(); speech.stop()
         viewModelScope.launch {
-            container.enrollment.resetDevice(_state.value.endpoint)
+            container.enrollment.eraseLocally()
             _state.update {
                 JarvisUiState(endpoint = it.endpoint, endpointDraft = it.endpointDraft, connection = it.connection)
             }
         }
     }
+
+    fun keepDevice() = _state.update { it.copy(localEraseOffer = null) }
 
     private suspend fun refreshAfterUnlock(endpoint: HomeNodeEndpoint) {
         checkConnection(endpoint)

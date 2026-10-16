@@ -79,6 +79,17 @@ struct PairingApprovalItem: Decodable, Identifiable, Equatable {
     var model: String? = nil
 }
 
+/// `GET /v1/auth/unlock/pending`: other devices of this account waiting to be unlocked.
+struct UnlockRequestList: Decodable { let requests: [UnlockRequestItem] }
+
+struct UnlockRequestItem: Decodable, Identifiable, Equatable {
+    let id: UUID
+    let device_name: String
+    let platform: String
+    let nonce: String
+    let created_at: Int64
+}
+
 struct ChallengeRequest: Encodable, Equatable {
     let deviceId: UUID
 
