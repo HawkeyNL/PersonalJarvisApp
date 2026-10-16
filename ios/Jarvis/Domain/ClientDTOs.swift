@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 struct AccountStatus: Decodable, Equatable {
@@ -289,14 +290,138 @@ struct LinkedDevice: Decodable, Identifiable {
 
 struct PendingActionList: Decodable { let pending: [PendingAction] }
 
-/// An agent action waiting for the owner. iOS can only deny; approving needs
-/// the desktop's native agent-approval-v1 signature.
-struct PendingAction: Decodable, Identifiable {
+/// An agent action waiting for the owner. `action_json` is the exact JSON whose
+/// SHA-256 (`action_sha256`) the agent-approval-v1 signature binds; Core leaves it
+/// out (null) when it is too large to review here, and older Cores omit it.
+struct PendingAction: Decodable, Identifiable, Equatable {
     let pending_id: String
     let action: String
     let preview: String?
     let created_at: String
+    var nonce: String? = nil
+    var action_sha256: String? = nil
+    var action_json: String? = nil
+    var approval_message: String? = nil
     var id: String { pending_id }
+}
+
+/// An agent action this app can show in full. Only these kinds and exactly these
+/// fields are accepted (client-core `MOBILE_APPROVABLE_AGENT_ACTIONS`); Core refuses
+/// other kinds from a phone too.
+enum ReviewedAgentAction: Equatable {
+    case writeFile(path: String, content: String)
+    case gitCommit(message: String)
+
+    var kind: String {
+        switch self {
+        case .writeFile: "write_file"
+        case .gitCommit: "git_commit"
+        }
+    }
+
+    /// The compact serde_json bytes Core stores for this action and hashes.
+    var canonicalJSON: String {
+        switch self {
+        case let .writeFile(path, content):
+            "{\"type\":\(Self.quote(kind)),\"path\":\(Self.quote(path)),\"content\":\(Self.quote(content))}"
+        case let .gitCommit(message):
+            "{\"type\":\(Self.quote(kind)),\"message\":\(Self.quote(message))}"
+        }
+    }
+
+    /// serde_json string escaping: quote, backslash, \b \f \n \r \t, other C0 controls as
+    /// lowercase \u00xx; everything else stays raw UTF-8.
+    private static func quote(_ value: String) -> String {
+        var out = "\""
+        for scalar in value.unicodeScalars {
+            switch scalar.value {
+            case 0x22: out += "\\\""
+            case 0x5C: out += "\\\\"
+            case 0x08: out += "\\b"
+            case 0x0C: out += "\\f"
+            case 0x0A: out += "\\n"
+            case 0x0D: out += "\\r"
+            case 0x09: out += "\\t"
+            case 0x00...0x1F: out += String(format: "\\u%04x", scalar.value)
+            default: out.unicodeScalars.append(scalar)
+            }
+        }
+        return out + "\""
+    }
+}
+
+/// What this app shows for one pending agent action, and whether it may approve it.
+enum AgentReview: Equatable {
+    /// `sha256` is computed here from the shown action: the hash the approval signs.
+    case approvable(ReviewedAgentAction, sha256: String)
+    /// Shown with `raw` (escaped) when present; only deny is offered.
+    case refused(reason: String, raw: String?)
+
+    /// client-core `MAX_REVIEWABLE_ACTION_JSON_LEN`.
+    static let maxActionJSONBytes = 16 * 1024
+    private static let fields: [String: Set<String>] = ["write_file": ["type", "path", "content"], "git_commit": ["type", "message"]]
+
+    /// Approvable only if the listed JSON is one known kind with exactly its string
+    /// fields, re-encodes to the same bytes, and those bytes hash to Core's `action_sha256`.
+    static func of(_ item: PendingAction) -> AgentReview {
+        guard let raw = item.action_json else {
+            return .refused(reason: "Too large to review on this iPhone. Approve it on the desktop app, or deny it.", raw: nil)
+        }
+        guard item.approval_message == "agent-approval-v1" else {
+            return .refused(reason: "This Home Node uses an approval format this app does not know.", raw: raw)
+        }
+        let bytes = Data(raw.utf8)
+        guard bytes.count <= maxActionJSONBytes else { return .refused(reason: "Too large to review on this iPhone.", raw: raw) }
+        guard let action = parse(bytes) else {
+            return .refused(reason: "This app cannot show this kind of action, so it cannot approve it.", raw: raw)
+        }
+        // Bytes, not String ==: Swift compares strings by canonical equivalence.
+        guard action.kind == item.action, Data(action.canonicalJSON.utf8) == bytes else {
+            return .refused(reason: "Core listed this action inconsistently. Do not approve it.", raw: raw)
+        }
+        let sha256 = Data(SHA256.hash(data: bytes)).hexEncodedString()
+        guard sha256 == item.action_sha256?.lowercased() else {
+            return .refused(reason: "The action does not match its hash. Do not approve it.", raw: raw)
+        }
+        return .approvable(action, sha256: sha256)
+    }
+
+    private static func parse(_ bytes: Data) -> ReviewedAgentAction? {
+        guard let object = (try? JSONSerialization.jsonObject(with: bytes)) as? [String: Any] else { return nil }
+        var values: [String: String] = [:]
+        for (key, value) in object {
+            guard let text = value as? String else { return nil }
+            values[key] = text
+        }
+        guard let type = values["type"], fields[type] == Set(values.keys) else { return nil }
+        switch type {
+        case "write_file":
+            guard let path = values["path"], let content = values["content"] else { return nil }
+            return .writeFile(path: path, content: content)
+        case "git_commit":
+            guard let message = values["message"] else { return nil }
+            return .gitCommit(message: message)
+        default:
+            return nil
+        }
+    }
+
+    /// Server text shown in full, with every invisible, control, bidi or private-use
+    /// character (and stacked combining marks past two) as a visible \u{XXXX}.
+    /// Newlines stay only where `keepNewlines`.
+    static func visible(_ text: String, keepNewlines: Bool = true) -> String {
+        let invisible: [Unicode.GeneralCategory] = [.control, .format, .privateUse, .surrogate, .unassigned,
+                                                       .lineSeparator, .paragraphSeparator, .spaceSeparator]
+        var marks = 0
+        var out = ""
+        for scalar in text.unicodeScalars {
+            marks = PairingFingerprint.isCombining(scalar.value) ? marks + 1 : 0
+            let plain = (scalar.value == 0x0A && keepNewlines) || scalar.value == 0x09 || scalar.value == 0x20
+                || (!invisible.contains(scalar.properties.generalCategory) && !PairingFingerprint.isHidden(scalar.value) && marks <= 2)
+            if plain { out.unicodeScalars.append(scalar) } else { out += String(format: "\\u{%04X}", scalar.value) }
+        }
+        return out
+    }
 }
 
 struct CodingSessionList: Decodable { let sessions: [CodingSession] }

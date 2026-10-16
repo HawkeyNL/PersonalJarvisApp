@@ -168,11 +168,18 @@ final class JarvisAppModel: ObservableObject {
         try? await api.get(path, response: HealthProbe.self)
     }
 
-    /// Deny (cancel) an agent action. Approval needs the desktop's signature.
+    /// Approve an agent action exactly as shown (its hash), after Face ID / Touch ID.
+    func approveAgentAction(_ id: String, shownSha256: String) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        guard let id = UUID(uuidString: id) else { throw JarvisAPIError.invalidResponse }
+        try await auth.approveAgentAction(id, shownSha256: shownSha256, unlocked: stillUnlocked)
+    }
+
+    /// Deny (cancel) an agent action after Face ID / Touch ID.
     func denyAgentAction(_ id: String) async throws {
         guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
-        guard isSafePathSegment(id) else { throw JarvisAPIError.invalidResponse }
-        try await auth.ownerPost("/v1/agent/pending/\(id)/deny")
+        guard let id = UUID(uuidString: id) else { throw JarvisAPIError.invalidResponse }
+        try await auth.denyAgentAction(id, unlocked: stillUnlocked)
     }
 
     /// Pairing decisions sign or deny only after Face ID / Touch ID on this device.

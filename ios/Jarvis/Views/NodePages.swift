@@ -202,9 +202,6 @@ struct TasksPage: View {
     @State private var selected = "active"
     @State private var sub = "overview"
     @State private var now = Date()
-    @State private var denying: PendingAction?
-    @State private var busy = false
-    @State private var decisionError: String?
 
     private var split: (open: [CodingSession], finished: [CodingSession]) { splitSessions(sessions.value ?? []) }
     private var waiting: [PendingAction] { pending.value ?? [] }
@@ -222,7 +219,7 @@ struct TasksPage: View {
                      detail: "Coding sessions Jarvis is running or has paused on your Home Node.", tone: active.0, status: active.1),
             .planned("scheduled", "Scheduled", "Scheduled", icon: "calendar", detail: "Core cannot run tasks at a set time yet."),
             NodeItem(id: "waiting", label: "Waiting", title: "Waiting on you", icon: "exclamationmark.triangle",
-                     detail: "Changes an agent proposed. Nothing runs until you approve it on a trusted device.", tone: wait.0, status: wait.1),
+                     detail: "Changes an agent proposed. Nothing runs until you approve it with this iPhone's key or on a trusted desktop.", tone: wait.0, status: wait.1),
             NodeItem(id: "completed", label: "Completed", title: "Completed", icon: "checkmark.circle",
                      detail: "Coding sessions that ended, and every agent action Core recorded.", tone: done.0, status: done.1),
             .planned("recurring", "Recurring", "Recurring", icon: "repeat", detail: "Core cannot repeat tasks on a schedule yet."),
@@ -248,17 +245,16 @@ struct TasksPage: View {
                 case "waiting":
                     if let state = UnavailableState.forSource(pending, title: "Approvals", symbol: "exclamationmark.triangle",
                                                               forbidden: "Agent actions are turned off in Core.") { state }
-                    Text("Approving needs this device's signature for the agent-approval message, which only the desktop app provides. Approve on desktop; you can deny here.")
+                    Text("Read the whole action first. Approving signs exactly what is shown with this iPhone's device key; anything this app cannot show in full can only be denied here.")
                         .font(JarvisFont.body(12))
                         .foregroundStyle(JarvisTheme.text5)
                         .fixedSize(horizontal: false, vertical: true)
-                    if let decisionError {
-                        Text(decisionError).font(JarvisFont.body(12)).foregroundStyle(JarvisTheme.warn)
-                    }
                     if waiting.isEmpty {
                         ActivityList(rows: [], emptyText: "Nothing is waiting for you.")
                     }
-                    ForEach(waiting) { action in pendingCard(action) }
+                    ForEach(waiting) { action in
+                        AgentActionCard(model: model, item: action, time: relativeTime(action.created_at, now: now)) { await load() }
+                    }
                 case "completed":
                     ChipRow(chips: [ChipRow.Chip(id: "overview", label: "Sessions", symbol: "chevron.left.forwardslash.chevron.right"),
                                     ChipRow.Chip(id: "history", label: "History", symbol: "clock")],
@@ -279,36 +275,6 @@ struct TasksPage: View {
         .onChange(of: selected) { _, _ in sub = "overview" }
         .refreshable { await load() }
         .task { await load() }
-        .confirmationDialog("Deny this agent action?", isPresented: Binding(
-            get: { denying != nil }, set: { if !$0 { denying = nil } }),
-                            titleVisibility: .visible, presenting: denying) { action in
-            Button("Deny", role: .destructive) { Task { await deny(action) } }
-            Button("Cancel", role: .cancel) {}
-        } message: { action in
-            Text("\(action.action) will be cancelled and will not run.")
-        }
-    }
-
-    private func pendingCard(_ action: PendingAction) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ActivityRowView(row: ActivityRow(id: action.pending_id, symbol: "exclamationmark.triangle", title: action.action,
-                                             detail: action.preview, time: relativeTime(action.created_at, now: now),
-                                             tone: .warn, toneLabel: "Waiting for approval"))
-            HStack(spacing: 10) {
-                Label("Approve on desktop", systemImage: "desktopcomputer")
-                    .font(JarvisFont.body(12))
-                    .foregroundStyle(JarvisTheme.text5)
-                Spacer()
-                Button("Deny", role: .destructive) { denying = action }
-                    .font(JarvisFont.body(13, 500))
-                    .buttonStyle(.bordered)
-                    .disabled(busy)
-            }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 10)
-        }
-        .background(JarvisTheme.tile, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(JarvisTheme.warn.opacity(0.4), lineWidth: 1))
     }
 
     private var lastUpdate: String {
@@ -346,16 +312,98 @@ struct TasksPage: View {
         self.audit = results.2.map(\.entries)
         now = Date()
     }
+}
 
-    private func deny(_ action: PendingAction) async {
+/// One pending agent action, shown in full from the JSON whose hash the approval signs.
+/// Anything this app cannot parse exactly is shown raw (escaped) and can only be denied.
+/// Approve and Deny each need Face ID / Touch ID and re-read the action by id.
+struct AgentActionCard: View {
+    @ObservedObject var model: JarvisAppModel
+    let item: PendingAction
+    let time: String
+    let decided: () async -> Void
+    @State private var busy = false
+    @State private var decisionError: String?
+
+    private var review: AgentReview { AgentReview.of(item) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(verbatim: title).font(JarvisFont.body(14, 600)).foregroundStyle(JarvisTheme.text1)
+                Spacer()
+                Text(verbatim: time).font(JarvisFont.body(11)).foregroundStyle(JarvisTheme.text5)
+            }
+            switch review {
+            case let .approvable(.writeFile(path, content), _):
+                field("Path", AgentReview.visible(path, keepNewlines: false))
+                field("Content \u{00B7} \(content.utf8.count) bytes", AgentReview.visible(content))
+            case let .approvable(.gitCommit(message), _):
+                field("Commit message", AgentReview.visible(message))
+            case let .refused(reason, raw):
+                Text(verbatim: reason).font(JarvisFont.body(12)).foregroundStyle(JarvisTheme.warn)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let raw { field("Raw action", AgentReview.visible(raw)) }
+            }
+            if let decisionError {
+                Text(verbatim: decisionError).font(JarvisFont.body(12)).foregroundStyle(JarvisTheme.danger)
+            }
+            HStack(spacing: 10) {
+                Button(busy ? "Verifying\u{2026}" : "Deny", role: .destructive) { Task { await decide(approve: false) } }
+                    .buttonStyle(.bordered)
+                Spacer()
+                if case .approvable = review {
+                    Button("Approve") { Task { await decide(approve: true) } }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            .font(JarvisFont.body(13, 500))
+            .disabled(busy)
+        }
+        .padding(12)
+        .background(JarvisTheme.tile, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(JarvisTheme.warn.opacity(0.4), lineWidth: 1))
+    }
+
+    private var title: String {
+        switch review {
+        case .approvable(.writeFile, _): "Write a file"
+        case .approvable(.gitCommit, _): "Commit all changes"
+        case .refused: PairingFingerprint.displayName(item.action, max: 40)
+        }
+    }
+
+    private func field(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Eyebrow(text: label)
+            Text(verbatim: value)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(JarvisTheme.text1)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(JarvisTheme.tile, in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
+    private func decide(approve: Bool) async {
         guard !busy else { return }
         busy = true
         decisionError = nil
-        denying = nil
-        do { try await model.denyAgentAction(action.pending_id) }
-        catch { decisionError = "Denial failed: \((error as? LocalizedError)?.errorDescription ?? "Core did not confirm.")" }
-        busy = false
-        await load()
+        do {
+            if approve {
+                guard case let .approvable(_, sha256) = review else { busy = false; return }
+                try await model.approveAgentAction(item.pending_id, shownSha256: sha256)
+            } else {
+                try await model.denyAgentAction(item.pending_id)
+            }
+            busy = false
+            await decided()
+        } catch {
+            // Server text is shown sanitised and bounded.
+            decisionError = PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "The decision could not be completed.", max: 160)
+            busy = false
+        }
     }
 }
 

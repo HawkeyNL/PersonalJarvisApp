@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import com.hawkeynl.jarvis.AppContainer
 import com.hawkeynl.jarvis.network.AgentAuditResponse
 import com.hawkeynl.jarvis.network.AgentsResponse
-import com.hawkeynl.jarvis.network.ApiResult
 import com.hawkeynl.jarvis.network.Availability
 import com.hawkeynl.jarvis.network.CodingSessionsResponse
 import com.hawkeynl.jarvis.network.DevicesResponse
@@ -49,8 +48,6 @@ data class CoreData(
     val systemAudit: Availability<SystemAuditResponse> = Availability.Loading,
     val pairing: Availability<PairingRequestList> = Availability.Loading,
     val loadedAt: Long = System.currentTimeMillis(),
-    val denying: String? = null,
-    val denyError: String? = null,
     /** This phone's device id, so the device list never offers to revoke it. */
     val ownDevice: String? = null,
     val revoking: String? = null,
@@ -124,20 +121,6 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /** Deny (cancel) a pending agent action. Approving needs a signature and
-     *  is only possible on the desktop app. */
-    fun deny(pendingId: String) {
-        if (_state.value.denying != null) return
-        _state.update { it.copy(denying = pendingId, denyError = null) }
-        scope.launch {
-            val endpoint = container.settings.endpoint.first()
-            val result = if (endpoint == null) ApiResult.InvalidResponse("No Home Node configured.")
-            else container.core.denyPending(endpoint, pendingId)
-            _state.update { it.copy(denying = null, denyError = if (result is ApiResult.Success) null else "Denial failed: ${describe(result)}") }
-            refreshTasks()
-        }
-    }
-
     /** Revoke another device with a signed approval (one strong-biometric prompt), only
      *  while [unlocked] holds before and after the prompt. */
     fun revokeDevice(id: String, unlocked: () -> Boolean) {
@@ -162,14 +145,6 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
         scope = childScope()
         inFlight = mutableSetOf()
         _state.value = CoreData()
-    }
-
-    private fun describe(result: ApiResult<*>): String = when (result) {
-        is ApiResult.Success -> "ok"
-        ApiResult.Unauthorized -> "sign in again."
-        is ApiResult.HttpError -> result.message ?: "HTTP ${result.status}"
-        is ApiResult.Unreachable -> "Home Node unreachable."
-        is ApiResult.InvalidResponse -> result.message
     }
 
     companion object {

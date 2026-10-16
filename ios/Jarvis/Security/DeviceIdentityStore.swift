@@ -83,6 +83,18 @@ actor DeviceIdentityStore {
         try challengeMessage("jarvis-unlock-approval-v1", id: requestId, deviceId: approverDeviceId, nonceHex: nonceHex)
     }
 
+    /// Exact v1 client-core `agent_approval_message`: domain, pending id, 32-byte
+    /// nonce, 32-byte SHA-256 of the action JSON, approver device id.
+    static func agentApprovalMessage(pendingId: UUID, nonceHex: String, actionSha256Hex: String, deviceId: UUID) throws -> Data {
+        guard let nonce = Data(strictHex: nonceHex), nonce.count == 32,
+              let hash = Data(strictHex: actionSha256Hex), hash.count == 32 else {
+            throw DeviceIdentityError.invalidChallenge
+        }
+        var result = Data("jarvis/agent-approval/v1\0".utf8)
+        result.append(pendingId.rawBytes); result.append(nonce); result.append(hash); result.append(deviceId.rawBytes)
+        return result
+    }
+
     private static func challengeMessage(_ domain: String, id: UUID, deviceId: UUID, nonceHex: String) throws -> Data {
         guard let nonce = Data(strictHex: nonceHex), nonce.count == 32 else {
             throw DeviceIdentityError.invalidChallenge
@@ -123,6 +135,11 @@ actor DeviceIdentityStore {
 
     func signUnlockApproval(requestId: UUID, approverDeviceId: UUID, nonceHex: String, context: LAContext) throws -> String {
         try sign(Self.unlockApprovalMessage(requestId: requestId, approverDeviceId: approverDeviceId, nonceHex: nonceHex), context: context)
+    }
+
+    func signAgentApproval(pendingId: UUID, nonceHex: String, actionSha256Hex: String, deviceId: UUID, context: LAContext) throws -> String {
+        try sign(Self.agentApprovalMessage(pendingId: pendingId, nonceHex: nonceHex, actionSha256Hex: actionSha256Hex, deviceId: deviceId),
+                 context: context)
     }
 
     func signAccountApproval(_ approval: AccountApproval, context: LAContext) throws -> String {
@@ -237,7 +254,7 @@ enum PairingFingerprint {
 
     /// Unicode category Cf (bidi controls, zero-width, tags) plus other invisible or
     /// blank-looking default-ignorable and private-use characters, and quotation marks.
-    private static func isHidden(_ c: UInt32) -> Bool {
+    static func isHidden(_ c: UInt32) -> Bool {
         switch c {
         case 0xAD, 0x34F, 0x600...0x605, 0x61C, 0x6DD, 0x70F, 0x890...0x891, 0x8E2, 0x115F...0x1160,
              0x17B4...0x17B5, 0x180B...0x180F, 0x200B...0x200F, 0x202A...0x202E, 0x2060...0x2064, 0x2066...0x206F,
@@ -253,7 +270,7 @@ enum PairingFingerprint {
     }
 
     /// Common combining-mark blocks, as on desktop.
-    private static func isCombining(_ c: UInt32) -> Bool {
+    static func isCombining(_ c: UInt32) -> Bool {
         switch c {
         case 0x300...0x36F, 0x1AB0...0x1AFF, 0x1DC0...0x1DFF, 0x20D0...0x20FF, 0xFE20...0xFE2F: return true
         default: return false

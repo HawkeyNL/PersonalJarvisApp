@@ -63,6 +63,11 @@ data class PendingAction(
     val action: String = "",
     val preview: String = "",
     val created_at: String = "",
+    val nonce: String = "",
+    val action_sha256: String = "",
+    /** The exact JSON `action_sha256` hashes; null when too large to review here or from an older Core. */
+    val action_json: String? = null,
+    val approval_message: String? = null,
 )
 
 @Serializable

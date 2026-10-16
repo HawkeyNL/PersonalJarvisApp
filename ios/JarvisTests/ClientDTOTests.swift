@@ -1802,3 +1802,189 @@ final class UnlinkOutcomeTests: XCTestCase {
         XCTAssertEqual(JarvisAppModel.afterUnlink(CancellationError()), .nothing)
     }
 }
+
+final class AgentApprovalTests: XCTestCase {
+    private let nonce = (0..<32).map { String(format: "%02x", $0) }.joined()
+    private let write = #"{"type":"write_file","path":"note.txt","content":"ok"}"#
+    private let writeSha = "8d2dd02e0f1e485d0be7f748f2fdd0d2160dd245b000ca1bff1ca15cd043dbe5"
+
+    private func sha(_ text: String) -> String { Data(SHA256.hash(data: Data(text.utf8))).hexEncodedString() }
+
+    private func item(_ json: String?, kind: String = "write_file", sha256: String? = nil,
+                      approvalMessage: String? = "agent-approval-v1") -> PendingAction {
+        PendingAction(pending_id: AgentDecisionProtocol.pending.uuidString.lowercased(), action: kind, preview: nil,
+                      created_at: "2026-10-17T00:00:00Z", nonce: nonce, action_sha256: sha256 ?? json.map(sha) ?? "",
+                      action_json: json, approval_message: approvalMessage)
+    }
+
+    /// Same bytes as client-core `agent_approval_v1_matches_golden_bytes`.
+    func testMessageMatchesTheClientCoreVector() throws {
+        let message = try DeviceIdentityStore.agentApprovalMessage(
+            pendingId: AgentDecisionProtocol.pending, nonceHex: nonce, actionSha256Hex: writeSha,
+            deviceId: UUID(uuidString: "ffeeddcc-bbaa-9988-7766-554433221100")!)
+        XCTAssertEqual(message.hexEncodedString(), "6a61727669732f6167656e742d617070726f76616c2f763100"
+            + "00112233445566778899aabbccddeeff" + nonce + writeSha + "ffeeddccbbaa99887766554433221100")
+        XCTAssertThrowsError(try DeviceIdentityStore.agentApprovalMessage(pendingId: AgentDecisionProtocol.pending, nonceHex: String(nonce.dropLast(2)),
+                                                                          actionSha256Hex: writeSha, deviceId: AgentDecisionProtocol.device))
+        XCTAssertThrowsError(try DeviceIdentityStore.agentApprovalMessage(pendingId: AgentDecisionProtocol.pending, nonceHex: nonce,
+                                                                          actionSha256Hex: String(writeSha.dropLast(2)), deviceId: AgentDecisionProtocol.device))
+    }
+
+    /// Same JSON and hash as Core `stored_action_json_escaping_matches_the_mobile_vector`.
+    func testCanonicalJSONMatchesSerdeEscaping() {
+        let action = ReviewedAgentAction.writeFile(path: "a/\"b\".txt", content: "\\\u{08}\u{0C}\n\r\t\u{01}\u{1F}\u{7F}\u{E9}\u{2028}\u{1F600}")
+        let expected = #"{"type":"write_file","path":"a/\"b\".txt","content":"\\\b\f\n\r\t\u0001\u001f"# + "\u{7F}\u{E9}\u{2028}\u{1F600}" + #""}"#
+        XCTAssertEqual(Data(action.canonicalJSON.utf8), Data(expected.utf8))
+        XCTAssertEqual(sha(action.canonicalJSON), "e151c338cf311d5531b50c2451032bb04fe5bb8e6bfb5e6ab6535a1080f51aa5")
+        XCTAssertEqual(ReviewedAgentAction.writeFile(path: "note.txt", content: "ok").canonicalJSON, write)
+        XCTAssertEqual(AgentReview.of(item(expected)), .approvable(action, sha256: sha(expected)))
+    }
+
+    func testOnlyExactKnownActionsWithTheirHashAreApprovable() {
+        XCTAssertEqual(AgentReview.of(item(write)), .approvable(.writeFile(path: "note.txt", content: "ok"), sha256: writeSha))
+        let commit = #"{"type":"git_commit","message":"Fix"}"#
+        XCTAssertEqual(AgentReview.of(item(commit, kind: "git_commit")), .approvable(.gitCommit(message: "Fix"), sha256: sha(commit)))
+        let refused = [
+            item(nil),
+            item(write, approvalMessage: "agent-approval-v2"),
+            item(write, approvalMessage: nil),
+            item(write, sha256: String(repeating: "00", count: 32)),
+            item(write, kind: "git_commit"),
+            item(#"{"type":"claude_code","prompt":"x"}"#, kind: "claude_code"),
+            item(#"{"type":"write_file","path":"note.txt","content":"ok","mode":"x"}"#),
+            item(#"{"type":"write_file","path":"note.txt"}"#),
+            item(#"{"type":"write_file","content":"ok","path":"note.txt"}"#),
+            item(#"{"type":"write_file","path":"note.txt","content":1}"#),
+            item(#"{"type":"write_file","path":"note.txt","path":"other.txt","content":"ok"}"#),
+            item(#"{ "type":"write_file","path":"note.txt","content":"ok"}"#),
+            // JSON escapes where serde_json writes the raw character.
+            item(#"{"type":"write_file","path":"note.txt","content":"\u006fk"}"#),
+            item(#"{"type":"write_file","path":"note.txt","content":"e\u0301"}"#),
+            item(#"["write_file"]"#),
+            item("not json"),
+            item(#"{"type":"write_file","path":"n","content":""# + String(repeating: "x", count: AgentReview.maxActionJSONBytes) + #""}"#),
+        ]
+        for pending in refused {
+            guard case .refused = AgentReview.of(pending) else { return XCTFail("Must refuse \(pending.action_json ?? "nil")") }
+        }
+    }
+
+    func testHiddenCharactersAreShownEscaped() {
+        XCTAssertEqual(AgentReview.visible("a\u{202E}b\u{200B}c\nd\te"), #"a\u{202E}b\u{200B}c"# + "\nd\te")
+        XCTAssertEqual(AgentReview.visible("a\nb\r", keepNewlines: false), #"a\u{000A}b\u{000D}"#)
+        XCTAssertEqual(AgentReview.visible("e\u{301}\u{301}\u{301}"), "e\u{301}\u{301}" + #"\u{0301}"#)
+        XCTAssertEqual(AgentReview.visible("x\u{A0}y\u{2028}\u{E9}"), #"x\u{00A0}y\u{2028}"# + "\u{E9}")
+    }
+
+    func testApprovalRereadsTheActionAndSignsItsHash() async throws {
+        let (auth, publicKey, prompts) = try await fixture()
+        try await auth.approveAgentAction(AgentDecisionProtocol.pending, shownSha256: writeSha.uppercased())
+        let reasons = await prompts.reasons
+        XCTAssertEqual(reasons, ["Write note.txt (2 bytes)"])
+        let calls = AgentDecisionProtocol.calls()
+        XCTAssertEqual(calls.map { $0.path }, ["/v1/agent/pending", "/v1/agent/pending/\(AgentDecisionProtocol.pending.uuidString)/approve"])
+        let signature = try XCTUnwrap(calls.last?.body["signature"].flatMap { Data(hexEncoded: $0) })
+        let message = try DeviceIdentityStore.agentApprovalMessage(pendingId: AgentDecisionProtocol.pending, nonceHex: nonce,
+                                                                   actionSha256Hex: writeSha, deviceId: AgentDecisionProtocol.device)
+        let verifier = try Curve25519.Signing.PublicKey(rawRepresentation: XCTUnwrap(Data(hexEncoded: publicKey)))
+        XCTAssertTrue(verifier.isValidSignature(signature, for: message))
+    }
+
+    func testAChangedUnlistedDuplicatedOrUnknownActionNeverPrompts() async throws {
+        let changed = item(#"{"type":"write_file","path":"note.txt","content":"no"}"#)
+        let unknown = item(#"{"type":"run","cmd":"x"}"#, kind: "run")
+        for (listed, id) in [([item(write)], UUID()), ([item(write), item(write)], AgentDecisionProtocol.pending),
+                             ([changed], AgentDecisionProtocol.pending), ([unknown], AgentDecisionProtocol.pending)] {
+            let (auth, _, prompts) = try await fixture(listed)
+            do { try await auth.approveAgentAction(id, shownSha256: writeSha); XCTFail("Must refuse") } catch { }
+            let promptCount = await prompts.count
+            XCTAssertEqual(promptCount, 0)
+            XCTAssertFalse(AgentDecisionProtocol.calls().contains { $0.path.hasSuffix("/approve") })
+        }
+    }
+
+    func testLockingDuringFaceIDSendsNothing() async throws {
+        let (auth, _, prompts) = try await fixture()
+        do { try await auth.approveAgentAction(AgentDecisionProtocol.pending, shownSha256: writeSha, unlocked: { false }); XCTFail("Must refuse") } catch { }
+        do { try await auth.denyAgentAction(AgentDecisionProtocol.pending, unlocked: { false }); XCTFail("Must refuse") } catch { }
+        let promptCount = await prompts.count
+        XCTAssertEqual(promptCount, 2)
+        XCTAssertFalse(AgentDecisionProtocol.calls().contains { $0.path.hasSuffix("/approve") || $0.path.hasSuffix("/deny") })
+    }
+
+    func testDenyNeedsFaceIDAndWorksForActionsThisAppCannotShow() async throws {
+        let (auth, _, prompts) = try await fixture([item(nil)])
+        await prompts.set(.cancelled)
+        do { try await auth.denyAgentAction(AgentDecisionProtocol.pending); XCTFail("Cancelled biometrics must not deny") } catch { }
+        XCTAssertFalse(AgentDecisionProtocol.calls().contains { $0.path.hasSuffix("/deny") })
+        await prompts.set(.unlocked)
+        try await auth.denyAgentAction(AgentDecisionProtocol.pending)
+        XCTAssertEqual(AgentDecisionProtocol.calls().last?.path, "/v1/agent/pending/\(AgentDecisionProtocol.pending.uuidString)/deny")
+        let reasons = await prompts.reasons
+        XCTAssertEqual(reasons.last, "Deny agent action write_file")
+    }
+
+    private func fixture(_ listed: [PendingAction]? = nil) async throws -> (AuthService, String, PairingPromptCounter) {
+        let store = FixtureSecureStorage()
+        let credentials = SecureCredentialStore(keychain: store)
+        let identity = DeviceIdentityStore(keychain: store)
+        let publicKey = try await identity.publicKeyHex()
+        try await credentials.save(deviceId: AgentDecisionProtocol.device)
+        try await credentials.save(session: SecureSession(token: "fixture-session-not-a-secret", expiresAt: Int64(Date().timeIntervalSince1970) + 3600))
+        let entries: [[String: Any]] = (listed ?? [item(write)]).map { entry in
+            var fields: [String: Any] = ["pending_id": entry.pending_id, "action": entry.action, "preview": "p",
+                                         "nonce": entry.nonce ?? "", "action_sha256": entry.action_sha256 ?? "",
+                                         "created_at": entry.created_at, "action_json": entry.action_json ?? NSNull()]
+            fields["approval_message"] = entry.approval_message
+            return fields
+        }
+        let body = try JSONSerialization.data(withJSONObject: ["pending": entries])
+        AgentDecisionProtocol.reset(pending: String(decoding: body, as: UTF8.self))
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AgentDecisionProtocol.self]
+        let api = JarvisAPIClient(baseURL: URL(string: "https://jarvis.example.com")!, session: URLSession(configuration: configuration))
+        let prompts = PairingPromptCounter()
+        let auth = AuthService(api: api, identity: identity, credentials: credentials,
+                               authenticateBiometric: { reason in store.prompt(await prompts.authenticate(reason)) })
+        return (auth, publicKey, prompts)
+    }
+}
+
+private final class AgentDecisionProtocol: URLProtocol {
+    static let device = UUID(uuidString: "04040404-0404-0404-0404-040404040404")!
+    static let pending = UUID(uuidString: "00112233-4455-6677-8899-aabbccddeeff")!
+    private static let lock = NSLock()
+    private static var list = ""
+    private static var captured: [(path: String, body: [String: String])] = []
+    static func reset(pending: String) { lock.withLock { list = pending; captured = [] } }
+    static func calls() -> [(path: String, body: [String: String])] { lock.withLock { captured } }
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url?.path ?? ""
+        var data = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open(); defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while data.count < 16384 {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }
+                data.append(contentsOf: buffer.prefix(count))
+            }
+        }
+        let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: String] ?? [:]
+        Self.lock.withLock { Self.captured.append((path, body)) }
+        let answer: String
+        if path == "/v1/agent/pending" {
+            answer = Self.lock.withLock { Self.list }
+        } else {
+            answer = path.hasSuffix("/approve") ? #"{"action":"write_file","output":"written","truncated":false}"# : #"{"status":"denied"}"#
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                       headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(answer.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() { }
+}
