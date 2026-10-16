@@ -96,6 +96,8 @@ final class ApprovalPush: ObservableObject {
     private var token: String?
     /// Token Core last accepted in this session; avoids a PUT on every unlock.
     private var registered: String?
+    /// A removal the lock blocked; retried after the next unlock.
+    private var removalPending = false
     private var observer: NSObjectProtocol?
 
     init() {
@@ -129,6 +131,10 @@ final class ApprovalPush: ObservableObject {
 
     /// After sign-in: ask APNs for the current token; it goes to Core when it arrives.
     func signedIn() {
+        if removalPending, !enabled {
+            Task { await removeTarget() }
+            return
+        }
         guard enabled, environment != nil else { return }
         UIApplication.shared.registerForRemoteNotifications()
     }
@@ -149,7 +155,14 @@ final class ApprovalPush: ObservableObject {
     private func removeTarget() async {
         token = nil
         registered = nil
+        removalPending = false
         guard let owner, owner.isAuthenticated else { return }
+        guard owner.lockState == .unlocked else {
+            removalPending = true
+            status = "Your Home Node still has this iPhone for notifications. Unlock Jarvis to remove it."
+            return
+        }
+        status = nil
         let delete = Task { try? await owner.setPushTarget(nil) }
         let deadline = Task {
             try? await Task.sleep(for: .seconds(3))
