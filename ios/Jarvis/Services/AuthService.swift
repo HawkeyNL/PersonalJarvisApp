@@ -337,8 +337,8 @@ actor AuthService {
 
     /// Revokes another device of this account. The prompt names it from a fresh device
     /// list, with its short id; an id Core does not list as active is refused before
-    /// anything is signed.
-    func revokeDevice(_ id: UUID) async throws { try await exclusive {
+    /// anything is signed. `unlocked` is checked again after Face ID, before signing.
+    func revokeDevice(_ id: UUID, unlocked: @Sendable () async -> Bool = { true }) async throws { try await exclusive {
         let signedIn = try await signedIn()
         guard id != signedIn.device else {
             throw JarvisAPIError.rejected(status: 409, message: "Use Reset this device to remove this iPhone.")
@@ -351,7 +351,7 @@ actor AuthService {
             throw JarvisAPIError.rejected(status: 404, message: "Core no longer lists this device as active.")
         }
         try await revoke(signedIn, target: id, reason: "Revoke \"\(PairingFingerprint.displayName(target.name, max: 40))\" "
-            + "(\(PairingFingerprint.displayName(target.platform, max: 16)), \(Self.shortId(id)))")
+            + "(\(PairingFingerprint.displayName(target.platform, max: 16)), \(Self.shortId(id)))", unlocked: unlocked)
     } }
 
     /// Changes the account password with the current one. Core binds the new verifier to
@@ -440,22 +440,25 @@ actor AuthService {
         return SignedIn(binding: binding, token: token, device: device, user: me.userId)
     }
 
-    private func revoke(_ signedIn: SignedIn, target: UUID, reason: String) async throws {
+    private func revoke(_ signedIn: SignedIn, target: UUID, reason: String,
+                        unlocked: @Sendable () async -> Bool = { true }) async throws {
         let approval: AccountApproval = try await accountDecision {
             try await api.post("/v1/devices/\(target.uuidString)/revoke-request", body: [String: String](),
                                token: signedIn.token, expectedBinding: signedIn.binding)
         }
         try approval.require(action: AccountApproval.deviceRevoke, user: signedIn.user, device: signedIn.device, target: target,
                              now: Int64(Date().timeIntervalSince1970))
-        try await signAndApprove(approval, signedIn: signedIn, reason: reason)
+        try await signAndApprove(approval, signedIn: signedIn, reason: reason, unlocked: unlocked)
     }
 
-    /// One Face ID / Touch ID prompt, then the approval, only while nothing changed.
+    /// One Face ID / Touch ID prompt, then the approval, only while nothing changed
+    /// (including `unlocked`, where the caller needs the app unlocked).
     private func signAndApprove(_ approval: AccountApproval, signedIn: SignedIn, reason: String,
-                                expectedStatus: String = "completed") async throws {
+                                expectedStatus: String = "completed",
+                                unlocked: @Sendable () async -> Bool = { true }) async throws {
         let context = try await requireBiometric(reason)
         defer { context.invalidate() }
-        guard await api.binding() == signedIn.binding, try await credentials.session()?.token == signedIn.token,
+        guard await unlocked(), await api.binding() == signedIn.binding, try await credentials.session()?.token == signedIn.token,
               try await credentials.deviceId() == signedIn.device, approval.expires_at > Int64(Date().timeIntervalSince1970) else {
             throw JarvisAPIError.rejected(status: 409, message: "Approval expired or session changed.")
         }

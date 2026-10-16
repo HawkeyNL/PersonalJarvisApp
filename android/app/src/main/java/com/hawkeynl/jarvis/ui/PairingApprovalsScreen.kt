@@ -56,7 +56,8 @@ fun PairingApprovalsScreen(
             error = null
             scope.launch {
                 val failure = runCatching { if (approve) service.approve(item) else service.deny(item) }.exceptionOrNull()
-                error = failure?.let { it.message ?: "The decision could not be completed." }
+                // Server text is shown sanitised and bounded.
+                error = failure?.let { PairingApproval.displayName(it.message ?: "The decision could not be completed.", 160) }
                 busy = null
                 // No extra list read: the 30-second poll picks up any other change.
                 if (failure == null) onDecided(item.id)
