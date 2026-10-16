@@ -6,6 +6,8 @@ export type Platform = "linux" | "macos" | "windows" | "unknown";
 export interface PlatformCapabilities {
   platform: Platform;
   supportsBiometrics: boolean;
+  /** Touch ID without a password fallback: the only desktop that may sign. */
+  supportsBiometricSigning: boolean;
   supportsWakeWord: boolean;
   supportsBackgroundAudio: boolean;
   supportsNotifications: boolean;
@@ -18,6 +20,7 @@ export function capabilitiesFor(platform: Platform): PlatformCapabilities {
   return {
     platform,
     supportsBiometrics: platform === "macos" || platform === "windows",
+    supportsBiometricSigning: platform === "macos",
     supportsWakeWord: desktop,
     supportsBackgroundAudio: false,
     supportsNotifications: false,

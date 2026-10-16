@@ -1,16 +1,15 @@
-// App-lock: the desktop app sits behind a biometric gate (Touch ID / Face ID).
+// App-lock: a privacy screen in front of the desktop app. It signs nothing.
 //
-// Primary unlock is local biometrics, with the OS account password as the
-// fallback the OS offers. Otherwise a trusted phone can approve: the desktop
-// posts an unlock request and polls until the phone signs it (see
-// `requestPhoneApproval`). The phone app locks itself whenever it leaves the
-// foreground and is the approver.
+// Unlock is the local OS prompt: biometrics, or the computer password the OS
+// offers as fallback. Linux has no such prompt, so the lock is off there. If
+// the prompt is unavailable (for example Windows Hello not set up), signing
+// out ends the session; signing in again needs the account password.
 //
-// The lock is on by default and can be switched off in Settings.
+// The lock is on by default where the OS prompt exists and can be switched
+// off in Settings.
 import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { currentAuthStatus } from "./auth";
-import { getJsonAuth, postJsonAuth } from "./api";
+import { logout } from "./auth";
 import {
   initPlatformCapabilities,
   isDesktop,
@@ -26,14 +25,10 @@ watch(locked, (value) => {
 }, { flush: "sync" });
 export const unlocking = ref(false);
 export const lockError = ref<string | null>(null);
-export { isDesktop };
-export const supportsBiometrics = computed(
-  () => platformCapabilities.value.supportsBiometrics,
+/** Only where the OS offers a local unlock prompt. */
+export const lockAvailable = computed(
+  () => isDesktop.value && platformCapabilities.value.supportsBiometrics,
 );
-
-// Phone-approval state, for the lock screen to reflect.
-export const phoneWaiting = ref(false);
-export const phoneError = ref<string | null>(null);
 
 const LKEY = "jarvis.lock.enabled";
 export const lockEnabled = ref(localStorage.getItem(LKEY) !== "false");
@@ -46,35 +41,30 @@ const SESSION_UNLOCKED = "jarvis.unlocked";
 // Auto re-lock after this much time without pointer or keyboard input (ms).
 const INACTIVITY_MS = 15 * 60 * 1000;
 let idleTimer: number | undefined;
-let pollActive = false;
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** Decide whether this platform locks in-app (desktop yes, phone no). */
+/** Decide whether this platform locks in-app (only with a local OS prompt). */
 export async function initLock(): Promise<void> {
   await initPlatformCapabilities();
   const alreadyUnlocked = sessionStorage.getItem(SESSION_UNLOCKED) === "1";
-  locked.value = isDesktop.value && lockEnabled.value && !alreadyUnlocked;
+  locked.value = lockAvailable.value && lockEnabled.value && !alreadyUnlocked;
 }
 
 export function setLockEnabled(v: boolean): void {
   lockEnabled.value = v;
   localStorage.setItem(LKEY, String(v));
   if (!v) unlockApp();
-  else if (isDesktop.value) locked.value = true;
+  else if (lockAvailable.value) locked.value = true;
 }
 
 export function unlockApp(): void {
-  stopPhonePoll();
   locked.value = false;
   lockError.value = null;
-  phoneError.value = null;
   sessionStorage.setItem(SESSION_UNLOCKED, "1"); // survive reloads this session
   armIdle();
 }
 
 export function lockApp(): void {
-  if (isDesktop.value && lockEnabled.value) {
+  if (lockAvailable.value && lockEnabled.value) {
     sessionStorage.removeItem(SESSION_UNLOCKED);
     locked.value = true;
   }
@@ -97,72 +87,23 @@ export async function biometricUnlock(): Promise<boolean> {
   }
 }
 
-/** Ask a trusted phone to approve the unlock; long-poll until it resolves. */
-export async function requestPhoneApproval(): Promise<void> {
-  phoneError.value = null;
-  const status = await currentAuthStatus();
-  if (!status.authenticated) {
-    phoneError.value = "not signed in";
+/** Way out when the OS prompt is unavailable: end the session, then reload
+ *  to the sign-in screen with no app state left in memory. Stays locked if
+ *  the local session could not be cleared. */
+export async function signOutFromLock(): Promise<void> {
+  lockError.value = null;
+  try {
+    await logout();
+  } catch (e) {
+    lockError.value = e instanceof Error ? e.message : String(e);
     return;
   }
-  try {
-    const { request_id } = await postJsonAuth<{ request_id: string; nonce: string }>(
-      "/v1/auth/unlock/request",
-      {},
-    );
-    phoneWaiting.value = true;
-    pollActive = true;
-    const deadline = Date.now() + 2 * 60 * 1000;
-    // Long-poll: the server holds each request ~20s and returns the instant the
-    // phone acts, so approval feels immediate without a tight polling loop.
-    while (pollActive && Date.now() < deadline) {
-      try {
-        const { status } = await getJsonAuth<{ status: string }>(
-          `/v1/auth/unlock/${request_id}?wait=20`,
-        );
-        if (!pollActive) return; // cancelled while the request was open
-        if (status === "approved") {
-          unlockApp();
-          return;
-        }
-        if (status === "denied") {
-          stopPhonePoll();
-          phoneError.value = "denied on your phone";
-          return;
-        }
-        if (status === "expired") {
-          stopPhonePoll();
-          phoneError.value = "request expired — try again";
-          return;
-        }
-        // still pending → loop immediately (the server already waited)
-      } catch {
-        if (!pollActive) return;
-        await sleep(1500); // transient network error — back off, then retry
-      }
-    }
-    if (pollActive) {
-      stopPhonePoll();
-      phoneError.value = "request expired — try again";
-    }
-  } catch (e) {
-    stopPhonePoll();
-    phoneError.value = e instanceof Error ? e.message : String(e);
-  }
-}
-
-export function cancelPhoneApproval(): void {
-  stopPhonePoll();
-  phoneError.value = null;
-}
-
-function stopPhonePoll(): void {
-  pollActive = false;
-  phoneWaiting.value = false;
+  unlockApp();
+  window.location.reload();
 }
 
 function armIdle(): void {
-  if (!INACTIVITY_MS || !isDesktop.value || !lockEnabled.value) return;
+  if (!INACTIVITY_MS || !lockAvailable.value || !lockEnabled.value) return;
   clearTimeout(idleTimer);
   idleTimer = window.setTimeout(() => lockApp(), INACTIVITY_MS);
 }

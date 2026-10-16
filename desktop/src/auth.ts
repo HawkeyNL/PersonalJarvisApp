@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { chatSession } from "./chatSession";
 import { homeNodeOrigin } from "./homeNode";
 import { getJson, getJsonAuth, getJsonWithHeaders, postAuth, postJson, postJsonAuth, postJsonWithHeaders } from "./api";
+import { initPlatformCapabilities } from "./platform";
 import { scheduleAutomaticUpdateCheck } from "./updates";
 import { groupFingerprint, keyFingerprint } from "./pairingFingerprint";
 
@@ -30,7 +31,7 @@ export function currentAuthStatus(): Promise<AuthStatus> {
 const PAIRING_WAIT_KEY = "jarvis.pairing.wait";
 type PairingWait = { request_id: string; nonce: string; expires_at: number };
 export class PairingPending extends Error {
-  constructor() { super("Waiting for approval from a trusted Jarvis device."); }
+  constructor() { super("Waiting for approval from your phone, a Mac or the Home Node."); }
 }
 
 export type AccountStatus = { protocol: number; password_required: boolean; bootstrap_required: boolean };
@@ -136,6 +137,8 @@ export async function logout(): Promise<void> {
   await invoke("auth_logout");
 }
 
+// Account administration (macOS only): Core creates the request, native code
+// signs it after Touch ID, and this page posts the signature.
 type AccountApproval = {
   request_id: string; user_id: string; device_id: string;
   action: "password-set" | "device-revoke"; target: string; nonce: string; expires_at: number;
@@ -161,15 +164,18 @@ export async function setAccountPassword(password: string, currentPassword?: str
   await clearSession();
 }
 
-/** Confirm remote revocation before deleting the local signing identity. */
+/** On a Mac, revoke this device with a Touch ID approval before erasing the
+ *  local signing identity. Elsewhere sign out and erase it; the device stays
+ *  active on the Home Node until `jarvis devices revoke <id>` runs there. */
 export async function deregisterDevice(): Promise<void> {
-  chatSession.invalidate();
-  await invoke("realtime_stop").catch(()=>{});
-  const status = await currentAuthStatus();
-  if (status.authenticated && status.device_id) {
+  if ((await initPlatformCapabilities()).supportsBiometricSigning) {
+    chatSession.invalidate();
+    await invoke("realtime_stop").catch(()=>{});
+    const status = await currentAuthStatus();
+    if (!status.authenticated || !status.device_id) throw new Error("Sign in to revoke this device safely.");
     await revokeDevice(status.device_id);
   } else {
-    throw new Error("Sign in to revoke this device safely.");
+    await logout();
   }
   await invoke("auth_reset");
 }

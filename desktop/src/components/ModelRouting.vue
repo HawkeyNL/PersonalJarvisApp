@@ -3,13 +3,14 @@ import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getJsonAuth } from "../api";
 import JvUnavailable from "./jv/JvUnavailable.vue";
+import { platformCapabilities } from "../platform";
 import {
   MAX_CHAIN, TIERS, canonicalRouting, candidates, isMetered, isSubscription, meteredAfterSubscription, moveEntry,
   routingIssue, routingMode, routingReason, sameRouting, type RouteEntry, type Routing, type RoutingPolicy, type Tier,
 } from "../modelRouting";
 
 // Owner routing per tier. The native command re-validates the document,
-// requires OS authentication and signs Core's canonical payload; this view
+// requires Touch ID and signs Core's canonical payload; this view
 // only edits the typed document.
 const TIER_COPY: Record<Tier, [string, string]> = {
   cheap: ["Cheap", "Quick, light requests"],
@@ -30,7 +31,8 @@ const dirty = computed(() => !sameRouting(draft.value, canonicalRouting(policy.v
 const canApply = computed(() => dirty.value || !!policy.value?.routing_unavailable_reason);
 const issue = computed(() => (policy.value ? routingIssue(draft.value, policy.value.models) : null));
 const reason = computed(() => routingReason(policy.value?.routing_unavailable_reason));
-const editable = computed(() => mode.value === "editable" && !busy.value);
+const signer = computed(() => platformCapabilities.value.supportsBiometricSigning);
+const editable = computed(() => mode.value === "editable" && signer.value && !busy.value);
 const enabled = computed(() => new Set(policy.value?.models.filter((m) => m.enabled).map((m) => `${m.provider}/${m.model}`)));
 
 function kind(provider: string) {
@@ -95,8 +97,9 @@ onMounted(reload);
     <template v-else>
       <p class="muted small">
         Routing only orders models per tier. A model still has to be allowed, within budget and healthy;
-        a tier on the built-in order keeps Core's own choice. Changes apply to all devices and need OS authentication.
+        a tier on the built-in order keeps Core's own choice. Changes apply to all devices and need Touch ID on a Mac.
       </p>
+      <p v-if="!signer" class="warn">Change models from your phone or the Home Node.</p>
       <p v-if="reason" class="warn" role="alert">{{ reason }}</p>
       <p v-if="mode === 'readonly'" class="warn">
         Routing changes are unavailable on this Core right now (privileged broker unavailable or routing file unreadable).

@@ -1,18 +1,8 @@
 <script setup lang="ts">
-import {
-  biometricUnlock,
-  unlocking,
-  lockError,
-  phoneWaiting,
-  phoneError,
-  requestPhoneApproval,
-  cancelPhoneApproval,
-  supportsBiometrics,
-} from "../lock";
+import { biometricUnlock, unlocking, lockError, signOutFromLock } from "../lock";
 
-// Locking only shows this screen. The OS prompt or a phone request starts when
-// the owner presses a button, so an idle lock never pops a dialog over other
-// apps.
+// Locking only shows this screen. The OS prompt starts when the owner presses
+// a button, so an idle lock never pops a dialog over other apps.
 </script>
 
 <template>
@@ -24,28 +14,17 @@ import {
       </div>
       <h1>Jarvis is locked</h1>
       <p class="sub">
-        {{ supportsBiometrics ? "Unlock with Touch ID, Face ID or your computer password." : "Approve the unlock from your phone." }}
+        Unlock with Touch ID, Windows Hello or your computer password.
       </p>
 
-      <button
-        v-if="supportsBiometrics"
-        class="primary"
-        :disabled="unlocking || phoneWaiting"
-        @click="biometricUnlock"
-      >
+      <button class="primary" :disabled="unlocking" @click="biometricUnlock">
         {{ unlocking ? "Verifying…" : "Unlock" }}
       </button>
 
-      <template v-if="!phoneWaiting">
-        <button class="ghost" @click="requestPhoneApproval">Unlock with your phone</button>
-      </template>
-      <div v-else class="waiting">
-        <span class="spinner" aria-hidden="true"></span>
-        Waiting for approval on your phone…
-        <button class="link" @click="cancelPhoneApproval">cancel</button>
-      </div>
+      <button class="ghost" :disabled="unlocking" @click="signOutFromLock">Sign out instead</button>
+      <p class="hint">Signing in again needs your account password.</p>
 
-      <p v-if="phoneError || lockError" class="err">{{ phoneError || lockError }}</p>
+      <p v-if="lockError" class="err">{{ lockError }}</p>
     </div>
   </div>
 </template>
@@ -133,30 +112,13 @@ h1 {
   border-color: var(--accent);
 }
 
-.waiting {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  flex-wrap: wrap;
-  color: var(--accent);
-  font-size: 13px;
+.ghost:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
-.spinner {
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  border: 2px solid rgba(52, 245, 160, 0.3);
-  border-top-color: var(--accent);
-  animation: spin 0.9s linear infinite;
-}
-.link {
-  background: none;
-  border: none;
+.hint {
+  margin: 0;
   color: var(--muted);
-  text-decoration: underline;
-  cursor: pointer;
-  font: inherit;
   font-size: 12px;
 }
 .err {
@@ -165,16 +127,12 @@ h1 {
   margin: 4px 0 0;
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
 @keyframes pulse {
   0%, 100% { box-shadow: 0 0 18px rgba(52, 245, 160, 0.28), inset 0 0 14px rgba(52, 245, 160, 0.2); }
   50% { box-shadow: 0 0 34px rgba(52, 245, 160, 0.55), inset 0 0 22px rgba(52, 245, 160, 0.32); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .mark .ring,
-  .spinner {
+  .mark .ring {
     animation: none;
   }
 }

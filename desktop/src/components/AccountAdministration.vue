@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from "vue";
+import { computed, ref, onMounted, onBeforeUnmount } from "vue";
 import { accountStatus, listDevices, revokeDevice, setAccountPassword, type DeviceItem } from "../auth";
+import { platformCapabilities } from "../platform";
+// Only a Mac signs account changes, behind Touch ID; other desktops list devices.
+const signer = computed(() => platformCapabilities.value.supportsBiometricSigning);
 const devices = ref<DeviceItem[]>([]);
 const passwordRequired = ref(true);
 const currentPassword = ref("");
@@ -13,7 +16,7 @@ async function refresh() {
     const [account, knownDevices] = await Promise.all([accountStatus(), listDevices()]);
     passwordRequired.value = account.password_required;
     devices.value = knownDevices;
-  } catch { message.value = "Sign in to manage your devices."; }
+  } catch { message.value = "Sign in to see your devices."; }
 }
 async function changePassword() {
   busy.value = true;
@@ -26,7 +29,7 @@ async function changePassword() {
     await setAccountPassword(next, previous || undefined);
     devices.value = [];
     message.value = "Password changed. Sign in again on your devices.";
-  } catch { message.value = "Change not completed. Check your password and confirm on your device."; }
+  } catch { message.value = "Change not completed. Check your password and confirm with Touch ID."; }
   finally { busy.value = false; }
 }
 async function confirmRevoke() {
@@ -39,7 +42,7 @@ async function confirmRevoke() {
     devices.value = devices.value.filter(item => item.id !== device.id);
     message.value = "Device revoked. Its sessions have ended.";
     confirmation.value = null;
-  } catch { message.value = "Revocation not completed. A valid device approval is required."; }
+  } catch { message.value = "Revocation not completed. Confirm with Touch ID and try again."; }
   finally { busy.value = false; }
 }
 onMounted(refresh);
@@ -49,28 +52,31 @@ onBeforeUnmount(() => { currentPassword.value = ""; newPassword.value = ""; });
 <template>
   <section class="panel glass account-administration">
     <h2>Account and devices</h2>
-    <p>A password never replaces the signed approval of a trusted device.</p>
-    <form @submit.prevent="changePassword">
-      <label v-if="passwordRequired">Current password
-        <input v-model="currentPassword" type="password" autocomplete="current-password" maxlength="1024" required />
-      </label>
-      <label>New account password
-        <input v-model="newPassword" type="password" autocomplete="new-password" minlength="15" maxlength="1024" required />
-      </label>
-      <button :disabled="busy">Set and sign password</button>
-    </form>
+    <template v-if="signer">
+      <p>A password never replaces the signed approval of a trusted device. Every change asks for Touch ID.</p>
+      <form @submit.prevent="changePassword">
+        <label v-if="passwordRequired">Current password
+          <input v-model="currentPassword" type="password" autocomplete="current-password" maxlength="1024" required />
+        </label>
+        <label>New account password
+          <input v-model="newPassword" type="password" autocomplete="new-password" minlength="15" maxlength="1024" required />
+        </label>
+        <button :disabled="busy">Set and sign password</button>
+      </form>
+    </template>
+    <p v-else>Change the account password or revoke a device on a Mac with Touch ID. On the Home Node, <code>sudo jarvis devices revoke &lt;id&gt;</code> also revokes a device.</p>
     <h3>Trusted devices</h3>
     <button :disabled="busy" @click="refresh">Refresh</button>
     <ul>
       <li v-for="device in devices" :key="device.id">
-        <span>{{ device.name }} · {{ device.platform }} · {{ device.status }}</span>
-        <button v-if="device.status === 'active'" :disabled="busy" @click="confirmation = device">Revoke…</button>
+        <span>{{ device.name }} · {{ device.platform }} · {{ device.status }} · <code>{{ device.id }}</code></span>
+        <button v-if="signer && device.status === 'active'" :disabled="busy" @click="confirmation = device">Revoke…</button>
       </li>
     </ul>
-    <div v-if="confirmation" role="alertdialog" aria-label="Revoke device">
+    <div v-if="signer && confirmation" role="alertdialog" aria-label="Revoke device">
       <p>Revoke {{ confirmation.name }}? This ends that device's sessions.</p>
       <button :disabled="busy" @click="confirmation = null">Cancel</button>
-      <button :disabled="busy" @click="confirmRevoke">Confirm and sign</button>
+      <button :disabled="busy" @click="confirmRevoke">Confirm with Touch ID</button>
     </div>
     <p v-if="message" role="status">{{ message }}</p>
   </section>
