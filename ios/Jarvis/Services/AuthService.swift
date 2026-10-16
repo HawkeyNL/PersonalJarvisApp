@@ -638,6 +638,8 @@ actor AuthService {
         } catch JarvisAPIError.rejected(let status, let message) where status == 400 && message == "agent action failed" {
             // Core claims the action before it runs: a failed run is not pending any more.
             throw JarvisAPIError.rejected(status: 400, message: "Approved, but the action failed on the Home Node.")
+        } catch JarvisAPIError.unauthorized, JarvisAPIError.rejected(401, _) {
+            throw JarvisAPIError.rejected(status: 401, message: "Core refused this approval. The action may have expired or been handled already.")
         } catch {
             // A refusal is final; anything else may have reached Core before the answer failed.
             if let refusal = error as? JarvisAPIError, case let .rejected(status, _) = refusal, status != 503 { throw error }
@@ -648,6 +650,8 @@ actor AuthService {
 
     /// Deny a pending agent action, re-read by id and gated on Face ID / Touch ID; `unlocked`
     /// is checked again after the prompt. Also offered for actions this app cannot show.
+    /// The prompt guards the phone UI; Core deny is unsigned by design: any owner session
+    /// can cancel a pending action.
     func denyAgentAction(_ id: UUID, unlocked: @Sendable () async -> Bool = { true }) async throws { try await exclusive {
         let (binding, token, item) = try await currentAgentAction(id)
         try await requireBiometric("Deny agent action \(PairingFingerprint.displayName(item.action, max: 32))").invalidate()
@@ -677,7 +681,7 @@ actor AuthService {
     static func agentPrompt(_ action: ReviewedAgentAction) -> String {
         switch action {
         case let .writeFile(path, content):
-            "Write \(PairingFingerprint.displayName(path, max: 60)) (\(content.utf8.count) bytes)"
+            "Write \(PairingFingerprint.displayName(AgentReview.asciiPath(path), max: 60)) (\(content.utf8.count) bytes)"
         }
     }
 

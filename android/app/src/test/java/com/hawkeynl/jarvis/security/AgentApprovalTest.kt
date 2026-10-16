@@ -98,6 +98,15 @@ class AgentApprovalTest {
         assertEquals("x\\u{00A0}y\\u{2028}\u00E9", AgentReview.visible("x\u00A0y\u2028\u00E9"))
     }
 
+    @Test fun pathsShowOnlyPrintableAscii() {
+        assertEquals("a/b c.txt", AgentReview.asciiPath("a/b c.txt"))
+        assertEquals("\\u{00E9}/\\u{05D0}/\\u{202E}x\\u{000A}\\u{1F600}", AgentReview.asciiPath("\u00E9/\u05D0/\u202Ex\n\uD83D\uDE00"))
+    }
+
+    @Test fun contentLinesAreIsolatedLeftToRightForDisplayOnly() {
+        assertEquals("\u2066a\u2069\n\u2066\u05D0b\u2069", AgentReview.ltrLines("a\n\u05D0b"))
+    }
+
     @Test fun approvalRereadsTheActionAndSignsItsHash() = runTest {
         val fixture = Fixture()
         fixture.service.approve(PENDING_ID.uppercase(), ACTION_SHA)
@@ -125,6 +134,12 @@ class AgentApprovalTest {
             assertEquals(0, fixture.prompts)
             assertTrue(fixture.paths.none { it.endsWith("/approve") })
         }
+    }
+
+    @Test fun aRefusedApprovalIsReportedAsRefusedNotUnknown() = runTest {
+        val fixture = Fixture(approveStatus = HttpStatusCode.Unauthorized)
+        val message = runCatching { fixture.service.approve(PENDING_ID, ACTION_SHA) }.exceptionOrNull()?.message.orEmpty()
+        assertTrue(message, message.startsWith("Core refused"))
     }
 
     @Test fun lockingDuringThePromptSendsNothing() = runTest {
@@ -165,6 +180,7 @@ class AgentApprovalTest {
         private val accept: Boolean = true,
         onPrompt: () -> Unit = {},
         unlocked: () -> Boolean = { true },
+        approveStatus: HttpStatusCode = HttpStatusCode.OK,
     ) {
         val paths = mutableListOf<String>()
         val bodies = mutableListOf<String>()
@@ -187,7 +203,7 @@ class AgentApprovalTest {
                     path.endsWith("/approve") -> """{"action":"write_file","output":"written","truncated":false}"""
                     else -> """{"status":"denied"}"""
                 }
-                respond(body, HttpStatusCode.OK, JSON)
+                respond(body, if (path.endsWith("/approve")) approveStatus else HttpStatusCode.OK, JSON)
             }) {
                 expectSuccess = false
                 install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true; explicitNulls = false }) }

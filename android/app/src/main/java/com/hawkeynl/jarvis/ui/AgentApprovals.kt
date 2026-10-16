@@ -20,6 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hawkeynl.jarvis.network.PendingAction
@@ -66,7 +67,7 @@ fun AgentActionCard(item: PendingAction, time: String, service: AgentApprovalSer
         when (review) {
             is AgentReview.Approvable -> when (val action = review.action) {
                 is ReviewedAgentAction.WriteFile -> {
-                    Field("Path", AgentReview.visible(action.path, keepNewlines = false))
+                    Field("Path", AgentReview.asciiPath(action.path))
                     // Whether the file existed is Home Node state, not part of what is signed.
                     item.preview.lineSequence().first().takeIf { it.isNotBlank() }?.let {
                         MutedText("When proposed (not signed): " + AgentReview.visible(it, keepNewlines = false))
@@ -98,10 +99,14 @@ private fun title(review: AgentReview, item: PendingAction): String = when ((rev
 private fun Field(label: String, value: String) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Eyebrow(label)
+        // Strictly left-to-right: each line isolated at display time only.
         Text(
-            value,
+            AgentReview.ltrLines(value),
             Modifier.fillMaxWidth().clip(Jv.R10).background(Jv.Tile).padding(8.dp),
-            style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 16.sp, color = Jv.Text1),
+            style = TextStyle(
+                fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 16.sp, color = Jv.Text1,
+                textDirection = TextDirection.Ltr,
+            ),
         )
     }
 }

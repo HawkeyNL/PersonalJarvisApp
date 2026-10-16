@@ -1878,6 +1878,22 @@ final class AgentApprovalTests: XCTestCase {
         XCTAssertEqual(AgentReview.visible("x\u{A0}y\u{2028}\u{E9}"), #"x\u{00A0}y\u{2028}"# + "\u{E9}")
     }
 
+    func testPathsShowOnlyPrintableASCII() {
+        XCTAssertEqual(AgentReview.asciiPath("a/b c.txt"), "a/b c.txt")
+        XCTAssertEqual(AgentReview.asciiPath("\u{E9}/\u{5D0}/\u{202E}x\n\u{1F600}"),
+                       #"\u{00E9}/\u{05D0}/\u{202E}x\u{000A}\u{1F600}"#)
+    }
+
+    func testContentLinesAreIsolatedLeftToRightForDisplayOnly() {
+        XCTAssertEqual(AgentReview.ltrLines("a\n\u{5D0}b"), "\u{2066}a\u{2069}\n\u{2066}\u{5D0}b\u{2069}")
+    }
+
+    func testARefusedApprovalIsReportedAsRefusedNotUnknown() async throws {
+        let (auth, _, _) = try await fixture(approveStatus: 401)
+        do { try await auth.approveAgentAction(AgentDecisionProtocol.pending, shownSha256: writeSha); XCTFail("Must refuse") }
+        catch { XCTAssertTrue((error as? LocalizedError)?.errorDescription?.hasPrefix("Core refused") == true, "\(error)") }
+    }
+
     func testApprovalRereadsTheActionAndSignsItsHash() async throws {
         let (auth, publicKey, prompts) = try await fixture()
         try await auth.approveAgentAction(AgentDecisionProtocol.pending, shownSha256: writeSha.uppercased())
@@ -1926,7 +1942,7 @@ final class AgentApprovalTests: XCTestCase {
         XCTAssertEqual(reasons.last, "Deny agent action write_file")
     }
 
-    private func fixture(_ listed: [PendingAction]? = nil) async throws -> (AuthService, String, PairingPromptCounter) {
+    private func fixture(_ listed: [PendingAction]? = nil, approveStatus: Int = 200) async throws -> (AuthService, String, PairingPromptCounter) {
         let store = FixtureSecureStorage()
         let credentials = SecureCredentialStore(keychain: store)
         let identity = DeviceIdentityStore(keychain: store)
@@ -1941,7 +1957,7 @@ final class AgentApprovalTests: XCTestCase {
             return fields
         }
         let body = try JSONSerialization.data(withJSONObject: ["pending": entries])
-        AgentDecisionProtocol.reset(pending: String(decoding: body, as: UTF8.self))
+        AgentDecisionProtocol.reset(pending: String(decoding: body, as: UTF8.self), approveStatus: approveStatus)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [AgentDecisionProtocol.self]
         let api = JarvisAPIClient(baseURL: URL(string: "https://jarvis.example.com")!, session: URLSession(configuration: configuration))
@@ -1957,8 +1973,11 @@ private final class AgentDecisionProtocol: URLProtocol {
     static let pending = UUID(uuidString: "00112233-4455-6677-8899-aabbccddeeff")!
     private static let lock = NSLock()
     private static var list = ""
+    private static var approveStatus = 200
     private static var captured: [(path: String, body: [String: String])] = []
-    static func reset(pending: String) { lock.withLock { list = pending; captured = [] } }
+    static func reset(pending: String, approveStatus: Int) {
+        lock.withLock { list = pending; self.approveStatus = approveStatus; captured = [] }
+    }
     static func calls() -> [(path: String, body: [String: String])] { lock.withLock { captured } }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -1982,7 +2001,8 @@ private final class AgentDecisionProtocol: URLProtocol {
         } else {
             answer = path.hasSuffix("/approve") ? #"{"action":"write_file","output":"written","truncated":false}"# : #"{"status":"denied"}"#
         }
-        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+        let status = path.hasSuffix("/approve") ? Self.lock.withLock({ Self.approveStatus }) : 200
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
                                        headerFields: ["Content-Type": "application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(answer.utf8))

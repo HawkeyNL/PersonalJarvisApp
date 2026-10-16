@@ -402,6 +402,24 @@ enum AgentReview: Equatable {
     /// Server text shown in full, with every invisible, control, bidi or private-use
     /// character (and stacked combining marks past two) as a visible \u{XXXX}.
     /// Newlines stay only where `keepNewlines`.
+    /// A path as printable ASCII: every other scalar as a visible \u{XXXX}, so look-alike,
+    /// right-to-left or invisible characters cannot disguise it.
+    static func asciiPath(_ path: String) -> String {
+        var out = ""
+        for scalar in path.unicodeScalars {
+            if (0x20...0x7E).contains(scalar.value) { out.unicodeScalars.append(scalar) } else { out += String(format: "\\u{%04X}", scalar.value) }
+        }
+        return out
+    }
+
+    /// Each line in a left-to-right isolate (LRI ... PDI) for display only, so right-to-left
+    /// text cannot reorder or move text across lines. The hashed bytes are not touched.
+    static func ltrLines(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { "\u{2066}\($0)\u{2069}" }
+            .joined(separator: "\n")
+    }
+
     static func visible(_ text: String, keepNewlines: Bool = true) -> String {
         let invisible: [Unicode.GeneralCategory] = [.control, .format, .privateUse, .surrogate, .unassigned,
                                                        .lineSeparator, .paragraphSeparator, .spaceSeparator]

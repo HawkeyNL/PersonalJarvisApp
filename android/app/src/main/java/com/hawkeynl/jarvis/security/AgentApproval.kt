@@ -128,6 +128,16 @@ sealed interface AgentReview {
             }
         }
 
+        /** A path as printable ASCII: every other code point as a visible `\u{XXXX}`, so
+         *  look-alike, right-to-left or invisible characters cannot disguise it. */
+        fun asciiPath(path: String): String = buildString {
+            path.codePoints().forEach { c -> if (c in 0x20..0x7E) appendCodePoint(c) else append("\\u{%04X}".format(c)) }
+        }
+
+        /** Each line in a left-to-right isolate (LRI ... PDI) for display only, so right-to-left
+         *  text cannot reorder or move text across lines. The hashed bytes are not touched. */
+        fun ltrLines(text: String): String = text.split('\n').joinToString("\n") { "\u2066$it\u2069" }
+
         private val INVISIBLE_TYPES = setOf(
             Character.CONTROL, Character.FORMAT, Character.PRIVATE_USE, Character.SURROGATE, Character.UNASSIGNED,
             Character.LINE_SEPARATOR, Character.PARAGRAPH_SEPARATOR, Character.SPACE_SEPARATOR,
@@ -174,6 +184,8 @@ class AgentApprovalService(
         }
     }
 
+    /** The prompt guards the phone UI; Core deny is unsigned by design: any owner session
+     *  can cancel a pending action. */
     suspend fun deny(id: String) = approvals.exclusive {
         val (origin, token, item) = current(id)
         val session = sessions.session()
@@ -206,7 +218,7 @@ class AgentApprovalService(
 
     private fun prompt(action: ReviewedAgentAction): String = when (action) {
         is ReviewedAgentAction.WriteFile ->
-            "Write ${PairingApproval.displayName(action.path, 60)} (${action.content.toByteArray(Charsets.UTF_8).size} bytes)"
+            "Write ${PairingApproval.displayName(AgentReview.asciiPath(action.path), 60)} (${action.content.toByteArray(Charsets.UTF_8).size} bytes)"
     }
 
     private companion object {

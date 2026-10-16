@@ -336,7 +336,7 @@ struct AgentActionCard: View {
             }
             switch review {
             case let .approvable(.writeFile(path, content), _):
-                field("Path", AgentReview.visible(path, keepNewlines: false))
+                field("Path", AgentReview.asciiPath(path))
                 // Whether the file existed is Home Node state, not part of what is signed.
                 if let state = item.preview?.split(separator: "\n", omittingEmptySubsequences: false).first, !state.isEmpty {
                     Text(verbatim: "When proposed (not signed): " + AgentReview.visible(String(state), keepNewlines: false))
@@ -379,7 +379,10 @@ struct AgentActionCard: View {
     private func field(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Eyebrow(text: label)
-            Text(verbatim: value)
+            // Strictly left-to-right: each line isolated at display time only.
+            Text(verbatim: AgentReview.ltrLines(value))
+                .environment(\.layoutDirection, .leftToRight)
+                .multilineTextAlignment(.leading)
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(JarvisTheme.text1)
                 .fixedSize(horizontal: false, vertical: true)
