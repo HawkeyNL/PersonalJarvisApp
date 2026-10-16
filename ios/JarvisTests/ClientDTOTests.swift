@@ -1672,6 +1672,8 @@ final class UnlockApprovalTests: XCTestCase {
             let again = try await auth.unlockChoices(id)
             XCTAssertEqual(again, set)
         }
+    }
+
     func testApprovalStopsWhenJarvisLockedDuringFaceID() async throws {
         let (auth, _, prompts) = try await fixture(createdAt: Int64(Date().timeIntervalSince1970))
         do { try await auth.approveUnlock(UnlockDecisionProtocol.request, choice: 89, unlocked: { false }); XCTFail("Must refuse") } catch { }
