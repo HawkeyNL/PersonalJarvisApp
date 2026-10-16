@@ -71,7 +71,8 @@ fun UnlockRequests(service: UnlockApprovalService) {
                                 } catch (failure: Exception) {
                                     failure
                                 }
-                                error = failure?.let { it.message ?: "The decision could not be completed." }
+                                // Server text is shown sanitised and bounded.
+                                error = failure?.let { PairingApproval.displayName(it.message ?: "The decision could not be completed.", 160) }
                                 if (failure == null) requests = requests.filter { it.id != item.id }
                                 busy = null
                             }

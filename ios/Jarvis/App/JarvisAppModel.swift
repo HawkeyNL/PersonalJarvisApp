@@ -404,19 +404,29 @@ final class JarvisAppModel: ObservableObject {
     /// Revokes this device on Core with a signed approval, then erases it here. If Core
     /// does not confirm, nothing is erased: `localEraseOffer` asks the user instead.
     func resetDevice() async {
-        do { try await auth.unlinkDevice() }
-        catch let interrupted as ApprovalInterrupted {
-            // The user stopped, or another prompt is open: nothing to offer.
-            notice = safeMessage(interrupted)
-            return
-        } catch is CancellationError {
-            return
-        } catch {
-            // Server text is shown sanitised and bounded.
-            localEraseOffer = PairingFingerprint.displayName(safeMessage(error), max: 160)
-            return
+        var failure: Error?
+        do { try await auth.unlinkDevice() } catch { failure = error }
+        switch Self.afterUnlink(failure) {
+        case .erase: await eraseLocally()
+        case .nothing: break
+        case let .notice(message): notice = message
+        case let .offerLocalErase(reason): localEraseOffer = reason
         }
-        await eraseLocally()
+    }
+
+    enum UnlinkOutcome: Equatable { case erase, nothing, notice(String), offerLocalErase(String) }
+
+    /// Only a confirmed revoke erases. A refusal or unconfirmed revoke offers erasing locally;
+    /// a cancelled or busy prompt offers nothing.
+    static func afterUnlink(_ failure: Error?) -> UnlinkOutcome {
+        guard let failure else { return .erase }
+        switch failure {
+        // The user stopped, or another prompt is open: nothing to offer.
+        case let interrupted as ApprovalInterrupted: return .notice(safeMessage(interrupted))
+        case is CancellationError: return .nothing
+        // Server text is shown sanitised and bounded.
+        default: return .offerLocalErase(PairingFingerprint.displayName(safeMessage(failure), max: 160))
+        }
     }
 
     /// Unlock requests for this device; nil when signed out, locked or on any error.
@@ -431,7 +441,11 @@ final class JarvisAppModel: ObservableObject {
 
     func approveUnlock(_ id: UUID) async throws {
         guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
-        try await auth.approveUnlock(id)
+        // Checked again after Face ID: the app may have locked while the prompt was open.
+        try await auth.approveUnlock(id) { @MainActor [weak self] in
+            guard let self else { return false }
+            return self.isAuthenticated && self.lockState == .unlocked
+        }
     }
 
     func denyUnlock(_ id: UUID) async throws {
@@ -695,7 +709,9 @@ final class JarvisAppModel: ObservableObject {
         if !inserted { messages.append(row) }
     }
 
-    private func safeMessage(_ error: Error) -> String {
+    private func safeMessage(_ error: Error) -> String { Self.safeMessage(error) }
+
+    private static func safeMessage(_ error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? "Jarvis could not complete the request."
     }
 }

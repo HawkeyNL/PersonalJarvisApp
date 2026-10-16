@@ -138,13 +138,14 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /** Revoke another device with a signed approval (one strong-biometric prompt). */
-    fun revokeDevice(id: String) {
+    /** Revoke another device with a signed approval (one strong-biometric prompt), only
+     *  while [unlocked] holds before and after the prompt. */
+    fun revokeDevice(id: String, unlocked: () -> Boolean) {
         if (_state.value.revoking != null) return
         _state.update { it.copy(revoking = id, revokeError = null) }
         scope.launch {
             val failure = try {
-                container.accountApprovals.revokeDevice(id)
+                container.accountApprovals.revokeDevice(id, unlocked)
                 null
             } catch (cancelled: CancellationException) {
                 throw cancelled

@@ -110,17 +110,45 @@ class AccountApprovalTest {
         val devices = """{"devices":[{"id":"$OTHER_ID","name":"Old\u202E laptop","platform":"linux","status":"active"},""" +
             """{"id":"$THIRD_ID","name":"Gone","platform":"ios","status":"revoked"},{"id":"$DEVICE_ID","name":"Me","platform":"android","status":"active"}]}"""
         val fixture = Fixture(approvalJson(target = OTHER_ID), devicesBody = devices)
-        fixture.service.revokeDevice(OTHER_ID)
-        assertEquals("Revoke \"Old laptop\" (linux)", fixture.reason)
+        fixture.service.revokeDevice(OTHER_ID) { true }
+        assertEquals("Revoke \"Old laptop\" (linux, 05050505)", fixture.reason)
         assertEquals("/v1/devices/$OTHER_ID/revoke-request", fixture.paths[2])
         assertTrue(fixture.paths.last().endsWith("/approve"))
 
         // Unknown, revoked and own ids are refused before Core is asked for a challenge.
         for (id in listOf(UNKNOWN_ID, THIRD_ID, DEVICE_ID)) {
             val refused = Fixture(approvalJson(target = id), devicesBody = devices)
-            assertTrue(runCatching { refused.service.revokeDevice(id) }.isFailure)
+            assertTrue(runCatching { refused.service.revokeDevice(id) { true } }.isFailure)
             assertEquals(0, refused.prompts)
             assertTrue(refused.paths.none { it.endsWith("/revoke-request") })
+        }
+    }
+
+    @Test fun revokingAnotherDeviceNeedsTheAppUnlockedBeforeAndAfterThePrompt() = runTest {
+        val devices = """{"devices":[{"id":"$OTHER_ID","name":"Old laptop","platform":"linux","status":"active"}]}"""
+        val locked = Fixture(approvalJson(target = OTHER_ID), devicesBody = devices)
+        assertTrue(runCatching { locked.service.revokeDevice(OTHER_ID) { false } }.isFailure)
+        assertEquals(0, locked.prompts)
+        assertTrue(locked.paths.isEmpty())
+        // Locked while the prompt was open: signed, but never sent.
+        val lockedDuring = Fixture(approvalJson(target = OTHER_ID), devicesBody = devices)
+        assertTrue(runCatching { lockedDuring.service.revokeDevice(OTHER_ID) { lockedDuring.prompts == 0 } }.isFailure)
+        assertEquals(1, lockedDuring.prompts)
+        assertTrue(lockedDuring.paths.none { it.endsWith("/approve") })
+    }
+
+    @Test fun theCurrentPasswordIsOnlyCheckedByCore() = runTest {
+        // Short or old-style current passwords still reach Core.
+        val short = Fixture(approvalJson(target = USER_ID, action = AccountApproval.PASSWORD_SET))
+        short.service.changePassword("old", NEW_PASSWORD)
+        assertEquals("/v1/auth/account/password/requests", short.paths[1])
+        for (current in listOf("", "old\u0007pw", "x".repeat(1025))) {
+            val refused = Fixture(approvalJson(target = USER_ID, action = AccountApproval.PASSWORD_SET))
+            assertEquals(
+                "Enter the current account password.",
+                runCatching { refused.service.changePassword(current, NEW_PASSWORD) }.exceptionOrNull()?.message,
+            )
+            assertTrue(refused.paths.isEmpty())
         }
     }
 
