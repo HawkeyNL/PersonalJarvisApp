@@ -476,7 +476,11 @@ final class JarvisAppModel: ObservableObject {
     /// Revokes another device of this account (one Face ID / Touch ID prompt).
     func revokeDevice(_ id: UUID) async throws {
         guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.rejected(status: 423, message: "Unlock Jarvis first.") }
-        try await auth.revokeDevice(id)
+        // Checked again after Face ID: the app may have locked while the prompt was open.
+        try await auth.revokeDevice(id) { @MainActor [weak self] in
+            guard let self else { return false }
+            return self.isAuthenticated && self.lockState == .unlocked
+        }
     }
 
     /// Erases this device here only; after a failed revoke this is the user's explicit choice.
