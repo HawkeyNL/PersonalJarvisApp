@@ -18,6 +18,8 @@ final class JarvisAppModel: ObservableObject {
     @Published private(set) var isSending = false
     @Published var endpointText: String
     @Published var notice: String?
+    /// A signed password reset waiting for root confirmation on the Home Node.
+    @Published var pendingPasswordReset: UUID?
     /// Why Core did not revoke this device; set while the user decides on erasing locally only.
     @Published var localEraseOffer: String?
     @Published private(set) var availableVoices: [LocalSpeechVoice] = []
@@ -51,7 +53,10 @@ final class JarvisAppModel: ObservableObject {
     private func invalidatePresentation(clearIdentity: Bool) {
         presentation.invalidate()
         messages = []; conversations = []; isSending = false; realtimeAvailable = false
-        if clearIdentity { pendingRequests.clear(); currentConversationId = nil; currentConversationTitle = "New conversation" }
+        if clearIdentity {
+            pendingRequests.clear(); currentConversationId = nil; currentConversationTitle = "New conversation"
+            pendingPasswordReset = nil
+        }
     }
 
     func stopSpeaking() {
@@ -443,6 +448,15 @@ final class JarvisAppModel: ObservableObject {
         realtime.stop(); speech.stop(); voiceReleaseTask?.cancel()
         enrollmentState = .signedOut
         notice = "Password changed. Sign in with the new password."
+    }
+
+    /// Starts a forgotten-password reset (one Face ID / Touch ID prompt). Nothing changes until
+    /// the owner confirms the returned request id as root on the Home Node.
+    func resetPassword(new: String) async throws -> UUID {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.rejected(status: 423, message: "Unlock Jarvis first.") }
+        let id = try await auth.resetPassword(new: new)
+        pendingPasswordReset = id
+        return id
     }
 
     /// Revokes another device of this account (one Face ID / Touch ID prompt).

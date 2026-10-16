@@ -81,6 +81,8 @@ data class JarvisUiState(
     val busy: Boolean = false,
     val appUpdate: AndroidUpdateUiState = AndroidUpdateUiState.Idle,
     val error: String? = null,
+    /** A signed password reset waiting for root confirmation on the Home Node. */
+    val passwordResetRequest: String? = null,
 )
 
 class JarvisViewModel(private val container: AppContainer) : ViewModel() {
@@ -125,7 +127,9 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             val parsed = HomeNodeEndpoint.parse(_state.value.endpointDraft)
             if (parsed is EndpointValidation.Valid && parsed.endpoint != _state.value.endpoint) {
                 container.realtime.stop(); speech.stop(); pending.clear(); container.sessions.reset()
-                _state.update { it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), conversationId = null) }
+                _state.update {
+                    it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), conversationId = null, passwordResetRequest = null)
+                }
             }
             when (val result = container.settings.save(_state.value.endpointDraft)) {
                 is EndpointValidation.Valid -> checkConnection(result.endpoint)
@@ -300,7 +304,9 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         val endpoint = _state.value.endpoint ?: return
         viewModelScope.launch {
             container.enrollment.logout(endpoint)
-            _state.update { it.copy(authenticated = false, messages = emptyList(), conversations = emptyList()) }
+            _state.update {
+                it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), passwordResetRequest = null)
+            }
         }
     }
 
@@ -326,6 +332,23 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         }
         null
     }.await()
+
+    /** Starts a forgotten-password reset (one strong-biometric prompt). Nothing changes until
+     *  the owner confirms the returned request id as root on the Home Node. */
+    // Kept in the UI state: the id must survive leaving Settings or rotation while it runs.
+    suspend fun resetPassword(new: String): String? = viewModelScope.async {
+        try {
+            val id = container.accountApprovals.resetPassword(new)
+            _state.update { it.copy(passwordResetRequest = id) }
+            null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            PairingApproval.displayName(error.message ?: "The reset was not started.", 160)
+        }
+    }.await()
+
+    fun dismissPasswordReset() = _state.update { it.copy(passwordResetRequest = null) }
 
     fun lockForBackground() {
         container.sessions.modelAuthorization.invalidate()

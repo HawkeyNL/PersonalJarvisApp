@@ -56,7 +56,8 @@ data class AccountApproval(
     companion object {
         const val DEVICE_REVOKE = "device-revoke"
         const val PASSWORD_SET = "password-set"
-        private val ACTIONS = setOf(DEVICE_REVOKE, PASSWORD_SET)
+        const val PASSWORD_RESET = "password-reset"
+        private val ACTIONS = setOf(DEVICE_REVOKE, PASSWORD_SET, PASSWORD_RESET)
         private val HEX64 = Regex("[0-9a-fA-F]{64}")
     }
 }
@@ -119,6 +120,23 @@ class AccountApprovalService(
         sessions.clearToken()
     }
 
+    /** Forgotten-password recovery from this signed-in device: no current password. The
+     *  signed request only waits on Core until the owner confirms it as root on the Home
+     *  Node; Core then ends every session. Returns the request id to confirm there. */
+    suspend fun resetPassword(new: String): String = approvals.exclusive {
+        require(acceptable(new)) { "Choose a new password of at least 15 characters and at most 1024 bytes, without control characters." }
+        val signedIn = signedIn()
+        val approval = request(
+            signedIn.origin, signedIn.token, "/v1/auth/account/password/reset-requests",
+            JsonObject(mapOf("password" to JsonPrimitive(new))),
+            unauthorized = "Not accepted on this device, or the session expired.",
+        )
+        // Sign only the reset Core just issued for this account's own password.
+        approval.requireFor(AccountApproval.PASSWORD_RESET, signedIn.user, signedIn.device, signedIn.user, now())
+        signAndApprove(signedIn, approval, "Reset Jarvis account password", expected = PENDING_CONFIRMATION)
+        approval.request_id
+    }
+
     /** Core's account password rules: at least 15 characters, at most 1024 UTF-8 bytes, no controls. */
     private fun acceptable(password: String) =
         password.codePointCount(0, password.length) >= 15 && password.toByteArray(Charsets.UTF_8).size <= 1024 &&
@@ -150,13 +168,13 @@ class AccountApprovalService(
     }
 
     /** One strong-biometric prompt, then the approval, only while nothing changed. */
-    private suspend fun signAndApprove(signedIn: SignedIn, approval: AccountApproval, reason: String) {
+    private suspend fun signAndApprove(signedIn: SignedIn, approval: AccountApproval, reason: String, expected: String = COMPLETED) {
         val signature = identity.sign(approval, reason)
         currentCoroutineContext().ensureActive()
         check(endpoint() == signedIn.origin && sessions.session() == signedIn.session && approval.expires_at > now()) {
             "Approval expired or session changed"
         }
-        approve(signedIn.origin, signedIn.token, approval, signature)
+        approve(signedIn.origin, signedIn.token, approval, signature, expected)
     }
 
     private suspend fun request(
@@ -169,12 +187,18 @@ class AccountApprovalService(
             else -> error(refusal(result))
         }
 
-    private suspend fun approve(origin: HomeNodeEndpoint, token: String, approval: AccountApproval, signature: String) {
+    private suspend fun approve(origin: HomeNodeEndpoint, token: String, approval: AccountApproval, signature: String, expected: String) {
         val body = JsonObject(mapOf("signature" to JsonPrimitive(signature)))
         when (val result = api.postAuthorizedJson(origin, token, "/v1/auth/account/requests/${approval.request_id}/approve", body)) {
-            is ApiResult.Success -> check(
-                runCatching { result.value.jsonObject["status"]?.jsonPrimitive?.content }.getOrNull() == "completed",
-            ) { "Core did not confirm the change." }
+            is ApiResult.Success -> {
+                val answer = runCatching { result.value.jsonObject }.getOrNull()
+                val status = runCatching { answer?.get("status")?.jsonPrimitive?.content }.getOrNull()
+                val request = runCatching { answer?.get("request_id")?.jsonPrimitive?.content }.getOrNull()
+                // A pending reset must name the request this device signed.
+                check(status == expected && (expected == COMPLETED || request.equals(approval.request_id, ignoreCase = true))) {
+                    "Core did not confirm the change."
+                }
+            }
             // The signed approval may have reached Core before the connection failed.
             is ApiResult.Unreachable -> error("Home Node unreachable; the outcome is unknown. Refresh, or sign in again if asked.")
             else -> error(refusal(result))
@@ -192,5 +216,7 @@ class AccountApprovalService(
 
     private companion object {
         const val REFUSED = "Core refused this change."
+        const val COMPLETED = "completed"
+        const val PENDING_CONFIRMATION = "pending_confirmation"
     }
 }

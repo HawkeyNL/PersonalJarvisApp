@@ -53,6 +53,13 @@ class AccountApprovalTest {
             "6a61727669732d6163636f756e742d617070726f76616c2d76310070617373776f72642d73657400$tail",
             Hex.encode(vector.copy(action = AccountApproval.PASSWORD_SET).message()),
         )
+        // client-core `password_reset_approval_matches_golden_bytes`: target is the user.
+        assertEquals(
+            "6a61727669732d6163636f756e742d617070726f76616c2d763100" + "70617373776f72642d726573657400" +
+                "00112233445566778899aabbccddeeff" + "102132435465768798a9bacbdcedfe0f" +
+                "ffeeddccbbaa99887766554433221100" + "102132435465768798a9bacbdcedfe0f" + NONCE + "000000006b49d200",
+            Hex.encode(vector.copy(action = AccountApproval.PASSWORD_RESET, target = vector.user_id).message()),
+        )
         for (bad in listOf(approval(action = "device-delete"), approval(nonce = "ab".repeat(31)), approval(expiresAt = 0), approval(target = "1-1-1-1-1"))) {
             assertThrows(IllegalArgumentException::class.java) { bad.message() }
         }
@@ -153,6 +160,55 @@ class AccountApprovalTest {
         }
     }
 
+    @Test fun passwordResetSignsCoresResetChallengeAndKeepsTheSession() = runTest {
+        val pending = """{"status":"pending_confirmation","request_id":"$REQUEST_ID","expires_in_seconds":900}"""
+        val fixture = Fixture(approvalJson(target = USER_ID, action = AccountApproval.PASSWORD_RESET), approveBody = pending)
+        assertEquals(REQUEST_ID, fixture.service.resetPassword(NEW_PASSWORD))
+        assertEquals("Reset Jarvis account password", fixture.reason)
+        assertEquals(1, fixture.prompts)
+        assertEquals("/v1/auth/account/password/reset-requests", fixture.paths[1])
+        val request = Json.parseToJsonElement(fixture.bodies[1]).jsonObject
+        assertEquals(setOf("password"), request.keys)
+        assertEquals(NEW_PASSWORD, request["password"]!!.jsonPrimitive.content)
+        val signature = Json.parseToJsonElement(fixture.bodies.last()).jsonObject["signature"]!!.jsonPrimitive.content
+        val message = approval(target = USER_ID, action = AccountApproval.PASSWORD_RESET).message()
+        val verifier = Ed25519Signer().apply {
+            init(false, Ed25519PublicKeyParameters(Hex.decode(fixture.publicKey), 0))
+            update(message, 0, message.size)
+        }
+        assertTrue(verifier.verifySignature(Hex.decode(signature)))
+        // Core ends the session only after the Home Node confirms.
+        assertEquals("fixture-session-not-a-secret", fixture.sessions.session().token)
+    }
+
+    @Test fun passwordResetRefusesBeforeSigningOrWithoutPendingConfirmation() = runTest {
+        val short = Fixture(approvalJson(target = USER_ID, action = AccountApproval.PASSWORD_RESET))
+        assertTrue(runCatching { short.service.resetPassword("too short") }.isFailure)
+        assertTrue(short.paths.isEmpty())
+        // A password-set challenge, or a reset for another target, is never signed.
+        for (json in listOf(approvalJson(target = USER_ID, action = AccountApproval.PASSWORD_SET), approvalJson(action = AccountApproval.PASSWORD_RESET))) {
+            val swapped = Fixture(json)
+            assertTrue(runCatching { swapped.service.resetPassword(NEW_PASSWORD) }.isFailure)
+            assertEquals(0, swapped.prompts)
+        }
+        // "completed" or another request id is not a pending reset.
+        for (answer in listOf("""{"status":"completed"}""", """{"status":"pending_confirmation","request_id":"$OTHER_ID"}""")) {
+            val fixture = Fixture(approvalJson(target = USER_ID, action = AccountApproval.PASSWORD_RESET), approveBody = answer)
+            assertEquals("Core did not confirm the change.", runCatching { fixture.service.resetPassword(NEW_PASSWORD) }.exceptionOrNull()?.message)
+            assertEquals(1, fixture.prompts)
+            assertTrue(fixture.paths.last().endsWith("/approve"))
+        }
+    }
+
+    @Test fun aPendingConfirmationIsNotACompletedChangeOrUnlink() = runTest {
+        val pending = """{"status":"pending_confirmation","request_id":"$REQUEST_ID"}"""
+        val change = Fixture(approvalJson(target = USER_ID, action = AccountApproval.PASSWORD_SET), approveBody = pending)
+        assertEquals("Core did not confirm the change.", runCatching { change.service.changePassword(OLD_PASSWORD, NEW_PASSWORD) }.exceptionOrNull()?.message)
+        assertEquals("fixture-session-not-a-secret", change.sessions.session().token)
+        val unlink = Fixture(approvalJson(), approveBody = pending)
+        assertEquals("Core did not confirm the change.", runCatching { unlink.service.unlinkThisDevice() }.exceptionOrNull()?.message)
+    }
+
     @Test fun aSecondApprovalIsRefusedWhileOneIsRunning() = runTest {
         val lock = ApprovalLock()
         val inside = CompletableDeferred<Unit>()
@@ -192,7 +248,7 @@ class AccountApprovalTest {
                 bodies += request.body.toByteArray().decodeToString()
                 when {
                     path == "/v1/auth/me" -> respond("""{"user_id":"$USER_ID","device_id":"$DEVICE_ID"}""", HttpStatusCode.OK, JSON)
-                    path.endsWith("/revoke-request") || path == "/v1/auth/account/password/requests" -> respond(revokeBody, revokeStatus, JSON)
+                    path.endsWith("/revoke-request") || path.startsWith("/v1/auth/account/password/") -> respond(revokeBody, revokeStatus, JSON)
                     path == "/v1/devices" -> respond(devicesBody, HttpStatusCode.OK, JSON)
                     else -> respond(approveBody, HttpStatusCode.OK, JSON)
                 }

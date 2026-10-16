@@ -88,6 +88,7 @@ private struct SecuritySettingsView: View {
                 Text("The device key, pairing nonce, device ID, and session token are stored in the device-only Keychain and are never synchronized through iCloud.").font(.footnote)
                 if model.isAuthenticated {
                     NavigationLink { PasswordChangeView(model: model) } label: { Text("Change account password") }
+                    NavigationLink { PasswordResetView(model: model) } label: { Text("Forgot password?") }
                     Button("Lock now") { model.lockWhenBackgrounded() }
                     Button("Log out") { showLogoutConfirmation = true }
                 }
@@ -159,6 +160,62 @@ private struct PasswordChangeView: View {
             dismiss()
         } catch {
             self.error = PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "The password was not changed.", max: 160)
+        }
+        busy = false
+    }
+}
+
+/// Forgotten-password reset: signed here, then confirmed as root on the Home Node.
+private struct PasswordResetView: View {
+    @ObservedObject var model: JarvisAppModel
+    @State private var new = ""
+    @State private var repeated = ""
+    @State private var busy = false
+    @State private var error: String?
+
+    var body: some View {
+        Form {
+            if let requestId = model.pendingPasswordReset {
+                Section {
+                    Text("Run this on the Home Node within 15 minutes:")
+                    Text(verbatim: "sudo jarvis account recovery confirm \(requestId.uuidString.lowercased())")
+                        .font(.system(.footnote, design: .monospaced))
+                        .textSelection(.enabled)
+                } header: {
+                    Text("Confirm on the Home Node")
+                } footer: {
+                    Text("Check that the request id matches. After confirming, every device is signed out; sign in with the new password.")
+                }
+                Section { Button("Done") { model.pendingPasswordReset = nil } }
+            } else {
+                Section {
+                    SecureField("New password (at least 15 characters)", text: $new).textContentType(.newPassword)
+                    SecureField("Repeat new password", text: $repeated).textContentType(.newPassword)
+                } footer: {
+                    Text("Confirmed with Face ID or Touch ID, then by the owner as root on the Home Node. Nothing changes until then.")
+                }
+                if let error { Section { Text(verbatim: error).foregroundStyle(JarvisTheme.danger) } }
+                Section {
+                    Button(busy ? "Verifying…" : "Reset password") { Task { await reset() } }
+                        .disabled(busy || new.isEmpty)
+                }
+            }
+        }
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+        .navigationTitle("Reset password")
+        .settingsBackground()
+    }
+
+    private func reset() async {
+        guard new == repeated else { error = "The new passwords do not match."; return }
+        busy = true
+        error = nil
+        do {
+            _ = try await model.resetPassword(new: new)
+            new = ""; repeated = ""
+        } catch {
+            self.error = PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "The reset was not started.", max: 160)
         }
         busy = false
     }
