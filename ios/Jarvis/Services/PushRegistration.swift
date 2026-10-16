@@ -96,8 +96,11 @@ final class ApprovalPush: ObservableObject {
     private var token: String?
     /// Token Core last accepted in this session; avoids a PUT on every unlock.
     private var registered: String?
-    /// A removal the lock blocked; retried after the next unlock.
-    private var removalPending = false
+    private static let removalKey = "jarvis.push.removalPending"
+    /// A removal that was blocked or failed; retried after the next unlock, also after a restart.
+    private var removalPending = UserDefaults.standard.bool(forKey: ApprovalPush.removalKey) {
+        didSet { UserDefaults.standard.set(removalPending, forKey: Self.removalKey) }
+    }
     private var observer: NSObjectProtocol?
 
     init() {
@@ -155,21 +158,28 @@ final class ApprovalPush: ObservableObject {
     private func removeTarget() async {
         token = nil
         registered = nil
-        removalPending = false
+        // Signed out: nothing can be removed now; any pending removal stays pending.
         guard let owner, owner.isAuthenticated else { return }
         guard owner.lockState == .unlocked else {
             removalPending = true
             status = "Your Home Node still has this iPhone for notifications. Unlock Jarvis to remove it."
             return
         }
+        removalPending = false
         status = nil
-        let delete = Task { try? await owner.setPushTarget(nil) }
+        let delete = Task { () -> Bool in
+            do { try await owner.setPushTarget(nil); return true } catch { return false }
+        }
         let deadline = Task {
             try? await Task.sleep(for: .seconds(3))
             delete.cancel()
         }
-        _ = await delete.value
+        let removed = await delete.value
         deadline.cancel()
+        if !removed {
+            removalPending = true
+            status = "Your Home Node may still have this iPhone for notifications. Jarvis tries again after the next unlock."
+        }
     }
 
     private func received(_ token: String?) {
@@ -186,9 +196,14 @@ final class ApprovalPush: ObservableObject {
         guard enabled, let token, token != registered, let environment, let owner, owner.isAuthenticated else { return }
         do {
             try await owner.setPushTarget((token, environment))
-            // Turned off while the PUT was in flight: take it back.
-            guard enabled else { await removeTarget(); return }
+            // Turned off, signed out or reset while the PUT was in flight: take it back.
+            // A newer token is left to its own upload, which replaces this one.
+            guard enabled, self.token == token else {
+                if !enabled || self.token == nil { await removeTarget() }
+                return
+            }
             registered = token
+            removalPending = false
             status = nil
         } catch {
             status = (error as? LocalizedError)?.errorDescription ?? "Your Home Node did not accept this device for notifications."
