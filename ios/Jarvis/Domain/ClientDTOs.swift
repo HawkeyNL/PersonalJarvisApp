@@ -305,17 +305,15 @@ struct PendingAction: Decodable, Identifiable, Equatable {
     var id: String { pending_id }
 }
 
-/// An agent action this app can show in full. Only these kinds and exactly these
+/// An agent action this app can show in full. Only this kind and exactly these
 /// fields are accepted (client-core `MOBILE_APPROVABLE_AGENT_ACTIONS`); Core refuses
 /// other kinds from a phone too.
 enum ReviewedAgentAction: Equatable {
     case writeFile(path: String, content: String)
-    case gitCommit(message: String)
 
     var kind: String {
         switch self {
         case .writeFile: "write_file"
-        case .gitCommit: "git_commit"
         }
     }
 
@@ -324,8 +322,6 @@ enum ReviewedAgentAction: Equatable {
         switch self {
         case let .writeFile(path, content):
             "{\"type\":\(Self.quote(kind)),\"path\":\(Self.quote(path)),\"content\":\(Self.quote(content))}"
-        case let .gitCommit(message):
-            "{\"type\":\(Self.quote(kind)),\"message\":\(Self.quote(message))}"
         }
     }
 
@@ -359,13 +355,13 @@ enum AgentReview: Equatable {
 
     /// client-core `MAX_REVIEWABLE_ACTION_JSON_LEN`.
     static let maxActionJSONBytes = 16 * 1024
-    private static let fields: [String: Set<String>] = ["write_file": ["type", "path", "content"], "git_commit": ["type", "message"]]
+    private static let fields: [String: Set<String>] = ["write_file": ["type", "path", "content"]]
 
     /// Approvable only if the listed JSON is one known kind with exactly its string
     /// fields, re-encodes to the same bytes, and those bytes hash to Core's `action_sha256`.
     static func of(_ item: PendingAction) -> AgentReview {
         guard let raw = item.action_json else {
-            return .refused(reason: "Too large to review on this iPhone. Approve it on the desktop app, or deny it.", raw: nil)
+            return .refused(reason: "This iPhone cannot review this action. Approve it in the macOS app, or deny it.", raw: nil)
         }
         guard item.approval_message == "agent-approval-v1" else {
             return .refused(reason: "This Home Node uses an approval format this app does not know.", raw: raw)
@@ -373,7 +369,7 @@ enum AgentReview: Equatable {
         let bytes = Data(raw.utf8)
         guard bytes.count <= maxActionJSONBytes else { return .refused(reason: "Too large to review on this iPhone.", raw: raw) }
         guard let action = parse(bytes) else {
-            return .refused(reason: "This app cannot show this kind of action, so it cannot approve it.", raw: raw)
+            return .refused(reason: "Phones approve only file writes they can show in full. Approve it in the macOS app, or deny it.", raw: raw)
         }
         // Bytes, not String ==: Swift compares strings by canonical equivalence.
         guard action.kind == item.action, Data(action.canonicalJSON.utf8) == bytes else {
@@ -398,9 +394,6 @@ enum AgentReview: Equatable {
         case "write_file":
             guard let path = values["path"], let content = values["content"] else { return nil }
             return .writeFile(path: path, content: content)
-        case "git_commit":
-            guard let message = values["message"] else { return nil }
-            return .gitCommit(message: message)
         default:
             return nil
         }
@@ -415,9 +408,10 @@ enum AgentReview: Equatable {
         var marks = 0
         var out = ""
         for scalar in text.unicodeScalars {
-            marks = PairingFingerprint.isCombining(scalar.value) ? marks + 1 : 0
+            let category = scalar.properties.generalCategory
+            marks = category == .nonspacingMark || category == .enclosingMark ? marks + 1 : 0
             let plain = (scalar.value == 0x0A && keepNewlines) || scalar.value == 0x09 || scalar.value == 0x20
-                || (!invisible.contains(scalar.properties.generalCategory) && !PairingFingerprint.isHidden(scalar.value) && marks <= 2)
+                || (!invisible.contains(category) && !PairingFingerprint.isHidden(scalar.value) && marks <= 2)
             if plain { out.unicodeScalars.append(scalar) } else { out += String(format: "\\u{%04X}", scalar.value) }
         }
         return out

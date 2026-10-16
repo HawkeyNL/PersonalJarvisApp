@@ -253,7 +253,8 @@ struct TasksPage: View {
                         ActivityList(rows: [], emptyText: "Nothing is waiting for you.")
                     }
                     ForEach(waiting) { action in
-                        AgentActionCard(model: model, item: action, time: relativeTime(action.created_at, now: now)) { await load() }
+                        AgentActionCard(model: model, item: action, review: AgentReview.of(action),
+                                        time: relativeTime(action.created_at, now: now)) { await load() }
                     }
                 case "completed":
                     ChipRow(chips: [ChipRow.Chip(id: "overview", label: "Sessions", symbol: "chevron.left.forwardslash.chevron.right"),
@@ -320,12 +321,11 @@ struct TasksPage: View {
 struct AgentActionCard: View {
     @ObservedObject var model: JarvisAppModel
     let item: PendingAction
+    let review: AgentReview
     let time: String
     let decided: () async -> Void
     @State private var busy = false
     @State private var decisionError: String?
-
-    private var review: AgentReview { AgentReview.of(item) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -337,9 +337,13 @@ struct AgentActionCard: View {
             switch review {
             case let .approvable(.writeFile(path, content), _):
                 field("Path", AgentReview.visible(path, keepNewlines: false))
+                // Whether the file existed is Home Node state, not part of what is signed.
+                if let state = item.preview?.split(separator: "\n", omittingEmptySubsequences: false).first, !state.isEmpty {
+                    Text(verbatim: "When proposed (not signed): " + AgentReview.visible(String(state), keepNewlines: false))
+                        .font(JarvisFont.body(12)).foregroundStyle(JarvisTheme.text5)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 field("Content \u{00B7} \(content.utf8.count) bytes", AgentReview.visible(content))
-            case let .approvable(.gitCommit(message), _):
-                field("Commit message", AgentReview.visible(message))
             case let .refused(reason, raw):
                 Text(verbatim: reason).font(JarvisFont.body(12)).foregroundStyle(JarvisTheme.warn)
                     .fixedSize(horizontal: false, vertical: true)
@@ -368,7 +372,6 @@ struct AgentActionCard: View {
     private var title: String {
         switch review {
         case .approvable(.writeFile, _): "Write a file"
-        case .approvable(.gitCommit, _): "Commit all changes"
         case .refused: PairingFingerprint.displayName(item.action, max: 40)
         }
     }

@@ -89,7 +89,7 @@ object PairingApproval {
     internal fun isHidden(c: Int) = hidden.any { c in it }
 
     /** Common combining-mark blocks, as on desktop. */
-    internal fun isCombining(c: Int) =
+    private fun isCombining(c: Int) =
         c in 0x300..0x36F || c in 0x1AB0..0x1AFF || c in 0x1DC0..0x1DFF || c in 0x20D0..0x20FF || c in 0xFE20..0xFE2F
 
     /** A device on these platforms can approve unlocks, account changes and agent actions

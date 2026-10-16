@@ -3,6 +3,7 @@ package com.hawkeynl.jarvis.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -91,7 +92,7 @@ fun TasksScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRefr
                     MutedText("Read the whole action first. Approving signs exactly what is shown with this phone's device key; anything this app cannot show in full can only be denied here.")
                     if (waiting.isEmpty()) ActivityList("Waiting for approval", emptyList(), "Nothing is waiting for you.")
                     waiting.forEach { p ->
-                        AgentActionCard(p, relativeTime(p.created_at, now), agentApprovals, onRefresh)
+                        key(p.pending_id) { AgentActionCard(p, relativeTime(p.created_at, now), agentApprovals, onRefresh) }
                     }
                 }
                 "completed" -> {

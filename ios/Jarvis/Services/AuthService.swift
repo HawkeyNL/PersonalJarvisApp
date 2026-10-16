@@ -635,12 +635,13 @@ actor AuthService {
                 try await api.post("/v1/agent/pending/\(id.uuidString)/approve", body: ["signature": signature],
                                    token: token, expectedBinding: binding)
             }
-        } catch JarvisAPIError.rejected(let status, _) where status == 503 {
-            // The signed approval may have reached Core before the connection failed.
-            throw JarvisAPIError.rejected(status: 503, message: "Home Node unreachable; the outcome is unknown. Refresh to see whether it ran.")
         } catch JarvisAPIError.rejected(let status, let message) where status == 400 && message == "agent action failed" {
             // Core claims the action before it runs: a failed run is not pending any more.
             throw JarvisAPIError.rejected(status: 400, message: "Approved, but the action failed on the Home Node.")
+        } catch {
+            // A refusal is final; anything else may have reached Core before the answer failed.
+            if let refusal = error as? JarvisAPIError, case let .rejected(status, _) = refusal, status != 503 { throw error }
+            throw JarvisAPIError.rejected(status: 503, message: "The outcome is unknown. Refresh to see whether it ran.")
         }
         guard result.action == item.action else { throw JarvisAPIError.rejected(status: 503, message: "Core did not confirm the approval.") }
     } }
@@ -677,8 +678,6 @@ actor AuthService {
         switch action {
         case let .writeFile(path, content):
             "Write \(PairingFingerprint.displayName(path, max: 60)) (\(content.utf8.count) bytes)"
-        case let .gitCommit(message):
-            "Commit: \(PairingFingerprint.displayName(message, max: 60))"
         }
     }
 

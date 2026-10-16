@@ -1842,9 +1842,9 @@ final class AgentApprovalTests: XCTestCase {
 
     func testOnlyExactKnownActionsWithTheirHashAreApprovable() {
         XCTAssertEqual(AgentReview.of(item(write)), .approvable(.writeFile(path: "note.txt", content: "ok"), sha256: writeSha))
-        let commit = #"{"type":"git_commit","message":"Fix"}"#
-        XCTAssertEqual(AgentReview.of(item(commit, kind: "git_commit")), .approvable(.gitCommit(message: "Fix"), sha256: sha(commit)))
         let refused = [
+            // A commit's effect is not in the JSON: never approvable on a phone.
+            item(#"{"type":"git_commit","message":"Fix"}"#, kind: "git_commit"),
             item(nil),
             item(write, approvalMessage: "agent-approval-v2"),
             item(write, approvalMessage: nil),
@@ -1873,6 +1873,8 @@ final class AgentApprovalTests: XCTestCase {
         XCTAssertEqual(AgentReview.visible("a\u{202E}b\u{200B}c\nd\te"), #"a\u{202E}b\u{200B}c"# + "\nd\te")
         XCTAssertEqual(AgentReview.visible("a\nb\r", keepNewlines: false), #"a\u{000A}b\u{000D}"#)
         XCTAssertEqual(AgentReview.visible("e\u{301}\u{301}\u{301}"), "e\u{301}\u{301}" + #"\u{0301}"#)
+        // Stacked marks outside the common blocks (Thai) are counted too.
+        XCTAssertEqual(AgentReview.visible("\u{E01}\u{E34}\u{E48}\u{E49}"), "\u{E01}\u{E34}\u{E48}" + #"\u{0E49}"#)
         XCTAssertEqual(AgentReview.visible("x\u{A0}y\u{2028}\u{E9}"), #"x\u{00A0}y\u{2028}"# + "\u{E9}")
     }
 

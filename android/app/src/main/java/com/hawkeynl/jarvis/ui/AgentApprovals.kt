@@ -67,9 +67,12 @@ fun AgentActionCard(item: PendingAction, time: String, service: AgentApprovalSer
             is AgentReview.Approvable -> when (val action = review.action) {
                 is ReviewedAgentAction.WriteFile -> {
                     Field("Path", AgentReview.visible(action.path, keepNewlines = false))
+                    // Whether the file existed is Home Node state, not part of what is signed.
+                    item.preview.lineSequence().first().takeIf { it.isNotBlank() }?.let {
+                        MutedText("When proposed (not signed): " + AgentReview.visible(it, keepNewlines = false))
+                    }
                     Field("Content · ${action.content.toByteArray(Charsets.UTF_8).size} bytes", AgentReview.visible(action.content))
                 }
-                is ReviewedAgentAction.GitCommit -> Field("Commit message", AgentReview.visible(action.message))
             }
             is AgentReview.Refused -> {
                 ErrorText(review.reason)
@@ -88,7 +91,6 @@ fun AgentActionCard(item: PendingAction, time: String, service: AgentApprovalSer
 
 private fun title(review: AgentReview, item: PendingAction): String = when ((review as? AgentReview.Approvable)?.action) {
     is ReviewedAgentAction.WriteFile -> "Write a file"
-    is ReviewedAgentAction.GitCommit -> "Commit all changes"
     null -> PairingApproval.displayName(item.action, 40)
 }
 

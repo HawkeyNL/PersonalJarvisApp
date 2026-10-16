@@ -60,9 +60,11 @@ class AgentApprovalTest {
 
     @Test fun onlyExactKnownActionsWithTheirHashAreApprovable() {
         assertEquals(AgentReview.Approvable(ReviewedAgentAction.WriteFile("note.txt", "ok"), ACTION_SHA), AgentReview.of(item(WRITE)))
-        val commit = """{"type":"git_commit","message":"Fix"}"""
-        assertEquals(AgentReview.Approvable(ReviewedAgentAction.GitCommit("Fix"), sha(commit)), AgentReview.of(item(commit, "git_commit", sha(commit))))
         val refused = listOf(
+            // A commit's effect is not in the JSON: never approvable on a phone.
+            item("""{"type":"git_commit","message":"Fix"}""", "git_commit"),
+            // A lone surrogate (listed as an escape) would show here but hash as '?'.
+            item(WRITE.replace("ok", "x\uD800")),
             item(null),
             item(WRITE, approvalMessage = "agent-approval-v2"),
             item(WRITE, approvalMessage = null),
@@ -91,6 +93,8 @@ class AgentApprovalTest {
         assertEquals("a\\u{202E}b\\u{200B}c\nd\te", AgentReview.visible("a\u202Eb\u200Bc\nd\te"))
         assertEquals("a\\u{000A}b\\u{000D}", AgentReview.visible("a\nb\r", keepNewlines = false))
         assertEquals("e\u0301\u0301\\u{0301}", AgentReview.visible("e\u0301\u0301\u0301"))
+        // Stacked marks outside the common blocks (Thai) are counted too.
+        assertEquals("\u0E01\u0E34\u0E48\\u{0E49}", AgentReview.visible("\u0E01\u0E34\u0E48\u0E49"))
         assertEquals("x\\u{00A0}y\\u{2028}\u00E9", AgentReview.visible("x\u00A0y\u2028\u00E9"))
     }
 

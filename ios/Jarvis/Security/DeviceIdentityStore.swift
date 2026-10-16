@@ -270,7 +270,7 @@ enum PairingFingerprint {
     }
 
     /// Common combining-mark blocks, as on desktop.
-    static func isCombining(_ c: UInt32) -> Bool {
+    private static func isCombining(_ c: UInt32) -> Bool {
         switch c {
         case 0x300...0x36F, 0x1AB0...0x1AFF, 0x1DC0...0x1DFF, 0x20D0...0x20FF, 0xFE20...0xFE2F: return true
         default: return false

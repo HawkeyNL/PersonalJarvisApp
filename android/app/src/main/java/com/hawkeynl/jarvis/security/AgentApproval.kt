@@ -42,8 +42,8 @@ data class AgentApprovalMessage(
     }
 }
 
-/** An agent action this app can show in full. Only these kinds and exactly these fields
- *  are accepted (client-core `MOBILE_APPROVABLE_AGENT_ACTIONS`); Core refuses others too. */
+/** An agent action this app can show in full. Only this kind and exactly these fields are
+ *  accepted (client-core `MOBILE_APPROVABLE_AGENT_ACTIONS`); Core refuses others too. */
 sealed interface ReviewedAgentAction {
     val kind: String
 
@@ -51,14 +51,9 @@ sealed interface ReviewedAgentAction {
         override val kind = "write_file"
     }
 
-    data class GitCommit(val message: String) : ReviewedAgentAction {
-        override val kind = "git_commit"
-    }
-
     /** The compact serde_json bytes Core stores for this action and hashes. */
     fun canonicalJson(): String = when (this) {
         is WriteFile -> """{"type":${quote(kind)},"path":${quote(path)},"content":${quote(content)}}"""
-        is GitCommit -> """{"type":${quote(kind)},"message":${quote(message)}}"""
     }
 
     private fun quote(value: String): String = buildString {
@@ -91,16 +86,18 @@ sealed interface AgentReview {
     companion object {
         /** client-core `MAX_REVIEWABLE_ACTION_JSON_LEN`. */
         const val MAX_ACTION_JSON_BYTES = 16 * 1024
-        private val FIELDS = mapOf("write_file" to listOf("type", "path", "content"), "git_commit" to listOf("type", "message"))
+        private val FIELDS = mapOf("write_file" to listOf("type", "path", "content"))
 
         /** Approvable only if the listed JSON is one known kind with exactly its string
          *  fields, re-encodes to the same bytes, and those bytes hash to Core's `action_sha256`. */
         fun of(item: PendingAction): AgentReview {
             val raw = item.action_json
-                ?: return Refused("Too large to review on this phone. Approve it on the desktop app, or deny it.", null)
+                ?: return Refused("This phone cannot review this action. Approve it in the macOS app, or deny it.", null)
             if (item.approval_message != "agent-approval-v1") return Refused("This Home Node uses an approval format this app does not know.", raw)
             if (raw.toByteArray(Charsets.UTF_8).size > MAX_ACTION_JSON_BYTES) return Refused("Too large to review on this phone.", raw)
-            val action = parse(raw) ?: return Refused("This app cannot show this kind of action, so it cannot approve it.", raw)
+            // A lone surrogate would show here but hash as '?'.
+            if (String(raw.toByteArray(Charsets.UTF_8), Charsets.UTF_8) != raw) return Refused("The action contains invalid text. Do not approve it.", raw)
+            val action = parse(raw) ?: return Refused("Phones approve only file writes they can show in full. Approve it in the macOS app, or deny it.", raw)
             if (action.kind != item.action || action.canonicalJson() != raw) return Refused("Core listed this action inconsistently. Do not approve it.", raw)
             val sha256 = Hex.encode(MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8)))
             if (!sha256.equals(item.action_sha256, ignoreCase = true)) return Refused("The action does not match its hash. Do not approve it.", raw)
@@ -113,7 +110,6 @@ sealed interface AgentReview {
             if (values.keys.toList() != FIELDS[values["type"]]) return null
             return when (values["type"]) {
                 "write_file" -> ReviewedAgentAction.WriteFile(values.getValue("path"), values.getValue("content"))
-                "git_commit" -> ReviewedAgentAction.GitCommit(values.getValue("message"))
                 else -> null
             }
         }
@@ -124,8 +120,8 @@ sealed interface AgentReview {
         fun visible(text: String, keepNewlines: Boolean = true): String = buildString {
             var marks = 0
             text.codePoints().forEach { c ->
-                marks = if (PairingApproval.isCombining(c)) marks + 1 else 0
                 val type = Character.getType(c)
+                marks = if (type == Character.NON_SPACING_MARK.toInt() || type == Character.ENCLOSING_MARK.toInt()) marks + 1 else 0
                 val plain = (c == '\n'.code && keepNewlines) || c == '\t'.code || c == ' '.code ||
                     (type !in INVISIBLE_TYPES && !PairingApproval.isHidden(c) && marks <= 2)
                 if (plain) appendCodePoint(c) else append("\\u{%04X}".format(c))
@@ -172,9 +168,9 @@ class AgentApprovalService(
             ) { "Core did not confirm the approval." }
             // Core claims the action before it runs: a failed run is not pending any more.
             is ApiResult.HttpError -> error(if (result.status == 400 && result.message == RUN_FAILED) "Approved, but the action failed on the Home Node." else refusal(result))
-            // The signed approval may have reached Core before the connection failed.
-            is ApiResult.Unreachable -> error("Home Node unreachable; the outcome is unknown. Refresh to see whether it ran.")
-            else -> error(refusal(result))
+            // The signed approval may have reached Core before the answer failed.
+            is ApiResult.Unreachable, is ApiResult.InvalidResponse -> error("The outcome is unknown. Refresh to see whether it ran.")
+            ApiResult.Unauthorized -> error(refusal(result))
         }
     }
 
@@ -211,7 +207,6 @@ class AgentApprovalService(
     private fun prompt(action: ReviewedAgentAction): String = when (action) {
         is ReviewedAgentAction.WriteFile ->
             "Write ${PairingApproval.displayName(action.path, 60)} (${action.content.toByteArray(Charsets.UTF_8).size} bytes)"
-        is ReviewedAgentAction.GitCommit -> "Commit: ${PairingApproval.displayName(action.message, 60)}"
     }
 
     private companion object {
