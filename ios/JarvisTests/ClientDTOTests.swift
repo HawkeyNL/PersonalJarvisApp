@@ -1362,6 +1362,16 @@ final class AccountApprovalTests: XCTestCase {
         }
     }
 
+    func testRevokeStopsWhenJarvisLockedDuringFaceID() async throws {
+        let other = UUID(uuidString: "05050505-0505-0505-0505-050505050505")!
+        let devices = #"{"devices":[{"id":"\#(other)","name":"Old laptop","platform":"linux","status":"active","created_at":1}]}"#
+        let (auth, _, _, prompts) = try await fixture(revoke: AccountDecisionProtocol.json(approval(target: other)), devices: devices)
+        do { try await auth.revokeDevice(other, unlocked: { false }); XCTFail("Must refuse") } catch { }
+        let count = await prompts.count
+        XCTAssertEqual(count, 1)
+        XCTAssertFalse(AccountDecisionProtocol.calls().contains { $0.path.hasSuffix("/approve") })
+    }
+
     func testPasswordChangeSignsCoresPasswordChallengeAndClearsTheSession() async throws {
         let challenge = approval(action: AccountApproval.passwordSet, target: AccountDecisionProtocol.user)
         let (auth, credentials, publicKey, _) = try await fixture(revoke: AccountDecisionProtocol.json(challenge))
