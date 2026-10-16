@@ -85,8 +85,10 @@ class AccountApprovalService(
     }
 
     /** Revokes another device of this account. The prompt names it from a fresh device
-     *  list; an id Core does not list as active is refused before anything is signed. */
-    suspend fun revokeDevice(id: String) = approvals.exclusive {
+     *  list, with its short id; an id Core does not list as active is refused before
+     *  anything is signed. [unlocked] is checked before and again after the prompt. */
+    suspend fun revokeDevice(id: String, unlocked: () -> Boolean) = approvals.exclusive {
+        check(unlocked()) { "Unlock Jarvis first." }
         val signedIn = signedIn()
         check(!id.equals(signedIn.device, ignoreCase = true)) { "Use \"Erase this device\" to remove this phone." }
         val list = when (val result = api.getAuthorized(signedIn.origin, signedIn.token, "/v1/devices")) {
@@ -98,7 +100,8 @@ class AccountApprovalService(
             ?: error("Core no longer lists this device as active.")
         revoke(
             signedIn, target.id,
-            "Revoke \"${PairingApproval.displayName(target.name, 40)}\" (${PairingApproval.displayName(target.platform, 16)})",
+            "Revoke \"${PairingApproval.displayName(target.name, 40)}\" (${PairingApproval.displayName(target.platform, 16)}, ${target.id.take(8).lowercase()})",
+            unlocked,
         )
     }
 
@@ -106,7 +109,7 @@ class AccountApprovalService(
      *  this device's signed approval and then ends every session, so this session is
      *  cleared here and the user signs in again with the new password. */
     suspend fun changePassword(current: String, new: String) = approvals.exclusive {
-        require(acceptable(current)) { "Enter the current account password." }
+        require(acceptableCurrent(current)) { "Enter the current account password." }
         require(acceptable(new)) { "Choose a new password of at least 15 characters and at most 1024 bytes, without control characters." }
         val signedIn = signedIn()
         val body = JsonObject(mapOf("password" to JsonPrimitive(new), "current_password" to JsonPrimitive(current)))
@@ -142,6 +145,11 @@ class AccountApprovalService(
         password.codePointCount(0, password.length) >= 15 && password.toByteArray(Charsets.UTF_8).size <= 1024 &&
             password.codePoints().noneMatch { Character.getType(it) == Character.CONTROL.toInt() }
 
+    /** The current password is only checked by Core; here just non-empty, bounded, no controls. */
+    private fun acceptableCurrent(password: String) =
+        password.isNotEmpty() && password.toByteArray(Charsets.UTF_8).size <= 1024 &&
+            password.codePoints().noneMatch { Character.getType(it) == Character.CONTROL.toInt() }
+
     private class SignedIn(
         val origin: HomeNodeEndpoint, val session: ProtectedSession, val token: String, val device: String, val user: String,
     )
@@ -160,18 +168,20 @@ class AccountApprovalService(
         return SignedIn(origin, session, token, device, me.user_id)
     }
 
-    private suspend fun revoke(signedIn: SignedIn, target: String, reason: String) {
+    private suspend fun revoke(signedIn: SignedIn, target: String, reason: String, unlocked: () -> Boolean = { true }) {
         require(PairingApproval.canonicalUuid.matches(target)) { "Invalid device id" }
         val approval = request(signedIn.origin, signedIn.token, "/v1/devices/$target/revoke-request", JsonObject(emptyMap()))
         approval.requireFor(AccountApproval.DEVICE_REVOKE, signedIn.user, signedIn.device, target, now())
-        signAndApprove(signedIn, approval, reason)
+        signAndApprove(signedIn, approval, reason, unlocked = unlocked)
     }
 
     /** One strong-biometric prompt, then the approval, only while nothing changed. */
-    private suspend fun signAndApprove(signedIn: SignedIn, approval: AccountApproval, reason: String, expected: String = COMPLETED) {
+    private suspend fun signAndApprove(
+        signedIn: SignedIn, approval: AccountApproval, reason: String, expected: String = COMPLETED, unlocked: () -> Boolean = { true },
+    ) {
         val signature = identity.sign(approval, reason)
         currentCoroutineContext().ensureActive()
-        check(endpoint() == signedIn.origin && sessions.session() == signedIn.session && approval.expires_at > now()) {
+        check(unlocked() && endpoint() == signedIn.origin && sessions.session() == signedIn.session && approval.expires_at > now()) {
             "Approval expired or session changed"
         }
         approve(signedIn.origin, signedIn.token, approval, signature, expected)

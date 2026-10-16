@@ -336,7 +336,8 @@ actor AuthService {
     } }
 
     /// Revokes another device of this account. The prompt names it from a fresh device
-    /// list; an id Core does not list as active is refused before anything is signed.
+    /// list, with its short id; an id Core does not list as active is refused before
+    /// anything is signed.
     func revokeDevice(_ id: UUID) async throws { try await exclusive {
         let signedIn = try await signedIn()
         guard id != signedIn.device else {
@@ -350,14 +351,14 @@ actor AuthService {
             throw JarvisAPIError.rejected(status: 404, message: "Core no longer lists this device as active.")
         }
         try await revoke(signedIn, target: id, reason: "Revoke \"\(PairingFingerprint.displayName(target.name, max: 40))\" "
-            + "(\(PairingFingerprint.displayName(target.platform, max: 16)))")
+            + "(\(PairingFingerprint.displayName(target.platform, max: 16)), \(Self.shortId(id)))")
     } }
 
     /// Changes the account password with the current one. Core binds the new verifier to
     /// this device's signed approval and then ends every session, so this session is
     /// cleared here and the user signs in again with the new password.
     func changePassword(current: String, new: String) async throws { try await exclusive {
-        guard Self.acceptablePassword(current) else {
+        guard Self.acceptableCurrentPassword(current) else {
             throw JarvisAPIError.rejected(status: 400, message: "Enter the current account password.")
         }
         guard Self.acceptablePassword(new) else {
@@ -405,6 +406,15 @@ actor AuthService {
                                  expectedStatus: "pending_confirmation")
         return approval.request_id
     } }
+
+    /// The current password is only checked by Core; here just non-empty, bounded, no controls.
+    static func acceptableCurrentPassword(_ password: String) -> Bool {
+        !password.isEmpty && password.utf8.count <= 1024
+            && !password.unicodeScalars.contains { $0.properties.generalCategory == .control }
+    }
+
+    /// First 8 hex digits of a device id, shown next to its (server-chosen) name.
+    static func shortId(_ id: UUID) -> String { String(id.uuidString.lowercased().prefix(8)) }
 
     /// Core's account password rules: at least 15 characters, at most 1024 UTF-8 bytes, no controls.
     static func acceptablePassword(_ password: String) -> Bool {
@@ -480,8 +490,9 @@ actor AuthService {
     }
 
     /// Approve another device's unlock: re-read the request by id, refuse a stale one,
-    /// then sign the exact v1 unlock message after one Face ID / Touch ID prompt.
-    func approveUnlock(_ id: UUID) async throws { try await exclusive {
+    /// then sign the exact v1 unlock message after one Face ID / Touch ID prompt, only if
+    /// `unlocked` still holds once the prompt is done.
+    func approveUnlock(_ id: UUID, unlocked: @Sendable () async -> Bool = { true }) async throws { try await exclusive {
         let (binding, token, item) = try await currentUnlock(id)
         guard let device = try await credentials.deviceId() else { throw JarvisAPIError.unauthorized }
         // Built once before prompting, so a malformed request never prompts.
@@ -489,9 +500,9 @@ actor AuthService {
         let context = try await requireBiometric("Unlock \"\(PairingFingerprint.displayName(item.device_name, max: 40))\" "
             + "(\(PairingFingerprint.displayName(item.platform, max: 16)))")
         defer { context.invalidate() }
-        guard await api.binding() == binding, try await credentials.session()?.token == token,
+        guard await unlocked(), await api.binding() == binding, try await credentials.session()?.token == token,
               try await credentials.deviceId() == device, Self.fresh(item) else {
-            throw JarvisAPIError.rejected(status: 409, message: "Request expired or session changed.")
+            throw JarvisAPIError.rejected(status: 409, message: "Request expired, session changed or Jarvis locked.")
         }
         try Task.checkCancellation()
         let signature = try await identity.signUnlockApproval(requestId: item.id, approverDeviceId: device, nonceHex: item.nonce, context: context)
@@ -522,7 +533,8 @@ actor AuthService {
         let list: UnlockRequestList = try await accountDecision {
             try await api.get("/v1/auth/unlock/pending?wait=0", token: token, expectedBinding: binding)
         }
-        guard let item = list.requests.first(where: { $0.id == id }) else {
+        let matches = list.requests.filter { $0.id == id }
+        guard matches.count == 1, let item = matches.first else {
             throw JarvisAPIError.rejected(status: 404, message: "This unlock request is no longer pending.")
         }
         guard Self.fresh(item) else {

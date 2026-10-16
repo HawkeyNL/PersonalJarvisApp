@@ -13,6 +13,7 @@ import androidx.compose.runtime.setValue
 import com.hawkeynl.jarvis.network.LinkedDevice
 import com.hawkeynl.jarvis.security.PairingApproval
 import java.time.Instant
+import java.time.ZoneId
 
 /** Context: only the linked devices are real today. Modes, sources and the
  *  schedule need Core support that does not exist yet. */
@@ -92,8 +93,10 @@ fun ContextScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRe
             title = { Text("Revoke this device?") },
             text = {
                 Text(
-                    "\"${PairingApproval.displayName(device.name, 40)}\" (${PairingApproval.displayName(device.platform, 16)}) is signed out " +
-                        "at once and must be paired again to use Jarvis.",
+                    "\"${PairingApproval.displayName(device.name, 40)}\" (${PairingApproval.displayName(device.platform, 16)}), " +
+                        "device ${PairingApproval.displayName(device.id.take(8).lowercase(), 8)}" +
+                        (device.created_at?.let { ", linked ${Instant.ofEpochSecond(it).atZone(ZoneId.systemDefault()).toLocalDate()}" } ?: "") +
+                        ", is signed out at once and must be paired again to use Jarvis.",
                 )
             },
             dismissButton = { TextButton(onClick = { confirming = null }) { Text("Cancel") } },
