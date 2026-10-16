@@ -372,15 +372,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             } finally {
                 unlinking = false
             }
-            when (failure) {
-                null -> eraseLocally()
-                // The user stopped, or another prompt is open: nothing to offer.
-                is ApprovalBusyException, is SigningCancelledException -> _state.update { it.copy(error = failure.message) }
-                // Server text is shown sanitised and bounded.
-                else -> _state.update {
-                    it.copy(localEraseOffer = PairingApproval.displayName(failure.message ?: "Core did not confirm the revocation.", 160))
-                }
-            }
+            if (failure == null) eraseLocally() else _state.update { afterFailedUnlink(it, failure) }
         }
     }
 
@@ -701,4 +693,13 @@ private fun BiometricAvailability.message(): String = when (this) {
     BiometricAvailability.TemporarilyUnavailable -> "Biometrics are temporarily unavailable."
     BiometricAvailability.SecurityUpdateRequired -> "Install the Android security update for biometrics."
     BiometricAvailability.Unsupported -> "Strong biometrics are not supported on this device."
+}
+
+/** What a failed or unconfirmed unlink leaves on screen. Nothing is erased: a refusal only
+ *  offers erasing locally, and a cancelled or busy prompt offers nothing at all. */
+internal fun afterFailedUnlink(state: JarvisUiState, failure: Exception): JarvisUiState = when (failure) {
+    // The user stopped, or another prompt is open: nothing to offer.
+    is ApprovalBusyException, is SigningCancelledException -> state.copy(error = failure.message)
+    // Server text is shown sanitised and bounded.
+    else -> state.copy(localEraseOffer = PairingApproval.displayName(failure.message ?: "Core did not confirm the revocation.", 160))
 }

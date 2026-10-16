@@ -274,25 +274,27 @@ fn unlock_choices<R: Rng + ?Sized>(code: u8, rng: &mut R) -> [u8; 3] {
 }
 
 /// The request's choice set: the cached one while it lives, else a new one.
+/// Refused when `CHOICE_SETS` live sets exist: evicting a live set would hand
+/// out new decoys for it.
 fn cached_unlock_choices<R: Rng + ?Sized>(
     sets: &mut Vec<ChoiceSet>,
     request_id: uuid::Uuid,
     code: u8,
     now: Instant,
     rng: &mut R,
-) -> [u8; 3] {
+) -> Result<[u8; 3], &'static str> {
     sets.retain(|(id, at, choices)| {
         now.duration_since(*at) < UNLOCK_TTL && (*id != request_id || choices.contains(&code))
     });
     if let Some((_, _, choices)) = sets.iter().find(|(id, _, _)| *id == request_id) {
-        return *choices;
+        return Ok(*choices);
     }
     if sets.len() >= CHOICE_SETS {
-        sets.remove(0);
+        return Err("too many unlock requests; deny some first");
     }
     let choices = unlock_choices(code, rng);
     sets.push((request_id, now, choices));
-    choices
+    Ok(choices)
 }
 
 fn forget_unlock_choices(request_id: uuid::Uuid) {
@@ -522,7 +524,7 @@ pub(super) async fn auth_unlock_choices(
         unlock_code(item.id, &nonce),
         Instant::now(),
         &mut rand::rngs::OsRng,
-    ))
+    )?)
 }
 
 /// Approve with the owner's pick. A wrong pick denies the request and never
@@ -811,23 +813,42 @@ mod tests {
     #[test]
     fn a_request_keeps_its_choice_set_until_it_expires() {
         let (mut sets, mut rng, start) = (Vec::new(), rand::rngs::OsRng, Instant::now());
-        let first = cached_unlock_choices(&mut sets, id(REQUEST), 89, start, &mut rng);
+        let first = cached_unlock_choices(&mut sets, id(REQUEST), 89, start, &mut rng).unwrap();
         for _ in 0..20 {
             assert_eq!(
                 cached_unlock_choices(&mut sets, id(REQUEST), 89, start, &mut rng),
-                first
+                Ok(first)
             );
         }
         // Expired: dropped from the cache (a new set is built on the next look).
-        cached_unlock_choices(&mut sets, id(USER), 1, start + UNLOCK_TTL, &mut rng);
+        cached_unlock_choices(&mut sets, id(USER), 1, start + UNLOCK_TTL, &mut rng).unwrap();
         assert!(sets.iter().all(|(set, _, _)| *set != id(REQUEST)));
-        // Bounded: the oldest set goes first.
-        for n in 0..CHOICE_SETS as u128 + 4 {
-            let other = uuid::Uuid::from_u128(n + 1);
-            cached_unlock_choices(&mut sets, other, 7, start + UNLOCK_TTL, &mut rng);
+    }
+
+    #[test]
+    fn a_full_choice_cache_refuses_instead_of_re_rolling() {
+        let (mut sets, mut rng, start) = (Vec::new(), rand::rngs::OsRng, Instant::now());
+        let ids: Vec<_> = (1..=CHOICE_SETS as u128)
+            .map(uuid::Uuid::from_u128)
+            .collect();
+        let first: Vec<_> = ids
+            .iter()
+            .map(|id| cached_unlock_choices(&mut sets, *id, 7, start, &mut rng).unwrap())
+            .collect();
+        assert_eq!(
+            cached_unlock_choices(&mut sets, id(REQUEST), 89, start, &mut rng),
+            Err("too many unlock requests; deny some first")
+        );
+        for (id, set) in ids.iter().zip(&first) {
+            assert_eq!(
+                cached_unlock_choices(&mut sets, *id, 7, start, &mut rng),
+                Ok(*set)
+            );
         }
-        assert_eq!(sets.len(), CHOICE_SETS);
-        assert!(sets.iter().all(|(set, _, _)| *set != id(USER)));
+        // Expired sets free room.
+        assert!(
+            cached_unlock_choices(&mut sets, id(REQUEST), 89, start + UNLOCK_TTL, &mut rng).is_ok()
+        );
     }
 
     #[test]

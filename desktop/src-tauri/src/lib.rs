@@ -415,6 +415,19 @@ fn native_only_route(path: &str) -> bool {
         .any(|prefix| route.starts_with(prefix))
 }
 
+/// The webview lists unlock requests but never needs their nonces: native code
+/// re-fetches a request by id to build the number choices and the signed bytes.
+fn strip_unlock_nonces(path: &str, body: &mut serde_json::Value) {
+    if path.split('?').next() != Some("/v1/auth/unlock/pending") {
+        return;
+    }
+    if let Some(requests) = body.get_mut("requests").and_then(|r| r.as_array_mut()) {
+        for request in requests.iter_mut().filter_map(|r| r.as_object_mut()) {
+            request.remove("nonce");
+        }
+    }
+}
+
 fn api_url(origin: Option<&str>, path: &str) -> Result<String, String> {
     if !authenticated_api_path(path) {
         return Err("authenticated API path is invalid".to_string());
@@ -672,11 +685,12 @@ async fn auth_request(
     let body = if bytes.is_empty() {
         None
     } else {
-        let value = serde_json::from_slice(&bytes)
+        let mut value = serde_json::from_slice(&bytes)
             .map_err(|_| "Home Node response is not valid JSON".to_string())?;
         if contains_secret_response_field(&value) {
             return Err("Home Node response contains a forbidden secret field".to_string());
         }
+        strip_unlock_nonces(&path, &mut value);
         Some(value)
     };
     Ok(NativeApiResponse { status, body })
@@ -1142,6 +1156,28 @@ mod tests {
         assert!(read_only_route("/v1/devices?x=1"));
         assert!(!read_only_route("/v1/conversations"));
         assert!(!read_only_route("/v1/devices/fixture/revoke-request"));
+    }
+
+    #[test]
+    fn webview_proxy_strips_unlock_nonces() {
+        let list = || {
+            serde_json::json!({ "requests": [
+                { "id": "a", "device_name": "Mac", "nonce": "00", "created_at": 1 },
+                { "id": "b", "nonce": "11" },
+            ]})
+        };
+        let mut pending = list();
+        strip_unlock_nonces("/v1/auth/unlock/pending?wait=20", &mut pending);
+        assert_eq!(
+            pending,
+            serde_json::json!({ "requests": [
+                { "id": "a", "device_name": "Mac", "created_at": 1 },
+                { "id": "b" },
+            ]})
+        );
+        let mut other = list();
+        strip_unlock_nonces("/v1/auth/pairing/requests", &mut other);
+        assert_eq!(other, list());
     }
 
     #[test]

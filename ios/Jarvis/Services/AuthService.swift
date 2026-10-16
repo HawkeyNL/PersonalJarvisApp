@@ -337,7 +337,8 @@ actor AuthService {
     } }
 
     /// Revokes another device of this account. The prompt names it from a fresh device
-    /// list; an id Core does not list as active is refused before anything is signed.
+    /// list, with its short id; an id Core does not list as active is refused before
+    /// anything is signed.
     func revokeDevice(_ id: UUID) async throws { try await exclusive {
         let signedIn = try await signedIn()
         guard id != signedIn.device else {
@@ -351,14 +352,14 @@ actor AuthService {
             throw JarvisAPIError.rejected(status: 404, message: "Core no longer lists this device as active.")
         }
         try await revoke(signedIn, target: id, reason: "Revoke \"\(PairingFingerprint.displayName(target.name, max: 40))\" "
-            + "(\(PairingFingerprint.displayName(target.platform, max: 16)))")
+            + "(\(PairingFingerprint.displayName(target.platform, max: 16)), \(Self.shortId(id)))")
     } }
 
     /// Changes the account password with the current one. Core binds the new verifier to
     /// this device's signed approval and then ends every session, so this session is
     /// cleared here and the user signs in again with the new password.
     func changePassword(current: String, new: String) async throws { try await exclusive {
-        guard Self.acceptablePassword(current) else {
+        guard Self.acceptableCurrentPassword(current) else {
             throw JarvisAPIError.rejected(status: 400, message: "Enter the current account password.")
         }
         guard Self.acceptablePassword(new) else {
@@ -406,6 +407,15 @@ actor AuthService {
                                  expectedStatus: "pending_confirmation")
         return approval.request_id
     } }
+
+    /// The current password is only checked by Core; here just non-empty, bounded, no controls.
+    static func acceptableCurrentPassword(_ password: String) -> Bool {
+        !password.isEmpty && password.utf8.count <= 1024
+            && !password.unicodeScalars.contains { $0.properties.generalCategory == .control }
+    }
+
+    /// First 8 hex digits of a device id, shown next to its (server-chosen) name.
+    static func shortId(_ id: UUID) -> String { String(id.uuidString.lowercased().prefix(8)) }
 
     /// Core's account password rules: at least 15 characters, at most 1024 UTF-8 bytes, no controls.
     static func acceptablePassword(_ password: String) -> Bool {
@@ -493,19 +503,21 @@ actor AuthService {
         let now = Int64(Date().timeIntervalSince1970)
         unlockChoiceSets = unlockChoiceSets.filter { now - $0.value.createdAt <= 130 }
         if let cached = unlockChoiceSets[item.id]?.choices, cached.contains(code) { return cached }
-        if unlockChoiceSets.count >= 16, let oldest = unlockChoiceSets.min(by: { $0.value.createdAt < $1.value.createdAt }) {
-            unlockChoiceSets[oldest.key] = nil
-        }
+        // Never evict a live set: that would hand out new decoys for it.
+        guard unlockChoiceSets[item.id] != nil || unlockChoiceSets.count < Self.maxUnlockChoiceSets else { throw UnlockChoicesFull() }
         var random = SystemRandomNumberGenerator()
         let choices = UnlockCode.choices(for: code, using: &random)
         unlockChoiceSets[item.id] = (item.created_at, choices)
         return choices
     }
 
+    static let maxUnlockChoiceSets = 16
+
     /// Approve another device's unlock with the owner's number pick: re-read the request by
     /// id and refuse a stale one. A wrong pick denies it without any prompt or signature;
-    /// the right one signs the exact v1 unlock message after one Face ID / Touch ID prompt.
-    func approveUnlock(_ id: UUID, choice: Int) async throws { try await exclusive {
+    /// the right one signs the exact v1 unlock message after one Face ID / Touch ID prompt,
+    /// only if `unlocked` still holds once the prompt is done.
+    func approveUnlock(_ id: UUID, choice: Int, unlocked: @Sendable () async -> Bool = { true }) async throws { try await exclusive {
         let (binding, token, item) = try await currentUnlock(id)
         let code = try UnlockCode.code(requestId: item.id, nonceHex: item.nonce)
         guard choice == code else {
@@ -519,9 +531,9 @@ actor AuthService {
         let context = try await requireBiometric("Unlock \"\(PairingFingerprint.displayName(item.device_name, max: 40))\" "
             + "(\(PairingFingerprint.displayName(item.platform, max: 16)))")
         defer { context.invalidate() }
-        guard await api.binding() == binding, try await credentials.session()?.token == token,
+        guard await unlocked(), await api.binding() == binding, try await credentials.session()?.token == token,
               try await credentials.deviceId() == device, Self.fresh(item) else {
-            throw JarvisAPIError.rejected(status: 409, message: "Request expired or session changed.")
+            throw JarvisAPIError.rejected(status: 409, message: "Request expired, session changed or Jarvis locked.")
         }
         try Task.checkCancellation()
         let signature = try await identity.signUnlockApproval(requestId: item.id, approverDeviceId: device, nonceHex: item.nonce, context: context)
@@ -558,7 +570,8 @@ actor AuthService {
         let list: UnlockRequestList = try await accountDecision {
             try await api.get("/v1/auth/unlock/pending?wait=0", token: token, expectedBinding: binding)
         }
-        guard let item = list.requests.first(where: { $0.id == id }) else {
+        let matches = list.requests.filter { $0.id == id }
+        guard matches.count == 1, let item = matches.first else {
             throw JarvisAPIError.rejected(status: 404, message: "This unlock request is no longer pending.")
         }
         guard Self.fresh(item) else {
@@ -646,6 +659,11 @@ actor AuthService {
 }
 
 private struct StatusResponse: Decodable { let status: String; let request_id: UUID? }
+
+/// Too many unlock requests have live choice sets; deny some before picking another.
+struct UnlockChoicesFull: LocalizedError {
+    var errorDescription: String? { "Too many unlock requests; deny some first." }
+}
 
 /// The owner picked the wrong number; the unlock request has been denied.
 struct UnlockWrongNumber: LocalizedError {

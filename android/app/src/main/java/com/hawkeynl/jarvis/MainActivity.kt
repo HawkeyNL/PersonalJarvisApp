@@ -63,6 +63,7 @@ class MainActivity : FragmentActivity() {
             container.api, container.sessions, { container.settings.endpoint.first() }, container.identity, container.approvals,
             { reason -> strongBiometric("Unlock request", reason) is BiometricResult.Authenticated },
             { !viewModel.state.value.locked && viewModel.state.value.authenticated },
+            container.unlockChoices,
         )
     }
 

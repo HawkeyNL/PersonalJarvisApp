@@ -98,6 +98,31 @@ class UnlockApprovalTest {
         repeat(20) { assertEquals(first, fixture.service.choices(REQUEST_ID.uppercase())) }
     }
 
+    /** The sets live in AppContainer: a new service (new Activity after a rotation) must not re-roll them. */
+    @Test fun servicesSharingTheContainerCacheShowTheSameChoices() = runTest {
+        val shared = UnlockChoiceSets { NOW }
+        val first = Fixture(createdAt = NOW, choiceSets = shared).service.choices(REQUEST_ID)
+        assertEquals(first, Fixture(createdAt = NOW, choiceSets = shared).service.choices(REQUEST_ID))
+    }
+
+    /** A full cache refuses a new set instead of evicting a live one (that would re-roll it). */
+    @Test fun aFullChoiceCacheRefusesInsteadOfReRolling() {
+        var now = NOW
+        val sets = UnlockChoiceSets { now }
+        val ids = (0 until UnlockChoiceSets.MAX).map { "00000000-0000-0000-0000-%012d".format(it) }
+        val first = ids.map { sets.choices(it, NOW, 89) }
+        assertEquals(
+            "Too many unlock requests; deny some first.",
+            runCatching { sets.choices(REQUEST_ID, NOW, 89) }.exceptionOrNull()?.message,
+        )
+        assertEquals(first, ids.map { sets.choices(it, NOW, 89) })
+        // Deciding one, or letting them expire, frees room.
+        sets.forget(ids[0])
+        assertTrue(89 in sets.choices(REQUEST_ID, NOW, 89))
+        now += 131
+        assertTrue(89 in sets.choices(OTHER_ID, now, 89))
+    }
+
     @Test fun wrongPickDeniesWithoutPromptOrSignature() = runTest {
         for (choice in listOf(0, 88, 90, 99)) {
             val fixture = Fixture(createdAt = NOW)
@@ -118,7 +143,9 @@ class UnlockApprovalTest {
         assertEquals("Deny unlock of \"Work Mac\"", accepted.reason)
     }
 
-    private inner class Fixture(createdAt: Long, private val accept: Boolean = true) {
+    private inner class Fixture(
+        createdAt: Long, private val accept: Boolean = true, choiceSets: UnlockChoiceSets = UnlockChoiceSets { NOW },
+    ) {
         val paths = mutableListOf<String>()
         val bodies = mutableListOf<String>()
         val waits = mutableListOf<String?>()
@@ -153,7 +180,7 @@ class UnlockApprovalTest {
         )
         val service = UnlockApprovalService(
             api, sessions, { endpoint }, identity, ApprovalLock(),
-            authenticate = { text -> prompts++; reason = text; accept }, unlocked = { true }, now = { NOW },
+            authenticate = { text -> prompts++; reason = text; accept }, unlocked = { true }, choiceSets = choiceSets, now = { NOW },
         )
     }
 

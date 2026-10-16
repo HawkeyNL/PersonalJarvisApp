@@ -755,7 +755,9 @@ struct ContextPage: View {
             Button("Revoke", role: .destructive) { Task { await revoke(device) } }
             Button("Cancel", role: .cancel) { }
         } message: { device in
-            Text(verbatim: "\"\(PairingFingerprint.displayName(device.name, max: 40))\" (\(PairingFingerprint.displayName(device.platform, max: 16))) is signed out at once and must be paired again to use Jarvis.")
+            let short = UUID(uuidString: device.id).map(AuthService.shortId) ?? "unknown"
+            let linked = device.created_at.map { ", linked \(Date(timeIntervalSince1970: $0).formatted(date: .abbreviated, time: .omitted))" } ?? ""
+            Text(verbatim: "\"\(PairingFingerprint.displayName(device.name, max: 40))\" (\(PairingFingerprint.displayName(device.platform, max: 16))), device \(short)\(linked), is signed out at once and must be paired again to use Jarvis.")
         }
     }
 
@@ -903,7 +905,8 @@ struct PairingApprovalsPage: View {
             // No extra list read: the 30-second poll picks up any other change.
             requests = requests.map { list in list.filter { $0.id != item.id } }
         } catch {
-            decisionError = (error as? LocalizedError)?.errorDescription ?? "The decision could not be completed."
+            // Server text is shown sanitised and bounded.
+            decisionError = PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "The decision could not be completed.", max: 160)
         }
         busy = nil
         biometrics = BiometricLock.biometricsAvailable
@@ -1028,7 +1031,8 @@ struct UnlockRequestsBanner: View {
                 requests.removeAll { $0.id == item.id }
             }
         } catch {
-            decisionError = (error as? LocalizedError)?.errorDescription ?? "The decision could not be completed."
+            // Server text is shown sanitised and bounded.
+            decisionError = PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "The decision could not be completed.", max: 160)
         }
         busy = nil
     }
@@ -1043,7 +1047,7 @@ struct UnlockRequestsBanner: View {
             requests.removeAll { $0.id == item.id }
         } catch {
             if error is UnlockWrongNumber { requests.removeAll { $0.id == item.id } }
-            decisionError = (error as? LocalizedError)?.errorDescription ?? "The decision could not be completed."
+            decisionError = PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "The decision could not be completed.", max: 160)
         }
         busy = nil
     }

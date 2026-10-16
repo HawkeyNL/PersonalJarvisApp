@@ -1352,7 +1352,7 @@ final class AccountApprovalTests: XCTestCase {
         try await auth.revokeDevice(other)
         XCTAssertEqual(AccountDecisionProtocol.calls().map { $0.path }.dropFirst(2).first, "/v1/devices/\(other.uuidString)/revoke-request")
         let reasons = await prompts.reasons
-        XCTAssertEqual(reasons, ["Revoke \"Old laptop\" (linux)"])
+        XCTAssertEqual(reasons, ["Revoke \"Old laptop\" (linux, 05050505)"])
         for id in [UUID(), gone, AccountDecisionProtocol.device] {
             let (refused, _, _, refusedPrompts) = try await fixture(revoke: AccountDecisionProtocol.json(approval(target: id)), devices: devices)
             do { try await refused.revokeDevice(id); XCTFail("Must refuse \(id)") } catch { }
@@ -1374,6 +1374,20 @@ final class AccountApprovalTests: XCTestCase {
         XCTAssertTrue(verifier.isValidSignature(signature, for: try challenge.message()))
         let session = try await credentials.session()
         XCTAssertNil(session)
+    }
+
+    func testTheCurrentPasswordIsOnlyCheckedByCore() async throws {
+        let challenge = approval(action: AccountApproval.passwordSet, target: AccountDecisionProtocol.user)
+        // Short or old-style current passwords still reach Core.
+        let (auth, _, _, _) = try await fixture(revoke: AccountDecisionProtocol.json(challenge))
+        try await auth.changePassword(current: "old", new: "fixture new password only")
+        XCTAssertEqual(AccountDecisionProtocol.calls().dropFirst().first?.path, "/v1/auth/account/password/requests")
+        for current in ["", "old\u{7}pw", String(repeating: "x", count: 1025)] {
+            let (refused, _, _, _) = try await fixture(revoke: AccountDecisionProtocol.json(challenge))
+            do { try await refused.changePassword(current: current, new: "fixture new password only"); XCTFail("Must refuse") }
+            catch { XCTAssertEqual((error as? LocalizedError)?.errorDescription, "Enter the current account password.") }
+            XCTAssertTrue(AccountDecisionProtocol.calls().isEmpty)
+        }
     }
 
     func testPasswordChangeRefusesBeforeSigning() async throws {
@@ -1646,6 +1660,35 @@ final class UnlockApprovalTests: XCTestCase {
         }
     }
 
+    /// A full cache refuses a new set instead of evicting a live one (that would re-roll it).
+    func testAFullChoiceCacheRefusesInsteadOfReRolling() async throws {
+        let others = (0..<AuthService.maxUnlockChoiceSets).map { _ in UUID() }
+        let (auth, _, _) = try await fixture(createdAt: Int64(Date().timeIntervalSince1970), others: others)
+        var sets: [[Int]] = []
+        for id in others { sets.append(try await auth.unlockChoices(id)) }
+        do { _ = try await auth.unlockChoices(UnlockDecisionProtocol.request); XCTFail("Must refuse") }
+        catch { XCTAssertTrue(error is UnlockChoicesFull, "\(error)") }
+        for (id, set) in zip(others, sets) {
+            let again = try await auth.unlockChoices(id)
+            XCTAssertEqual(again, set)
+        }
+    func testApprovalStopsWhenJarvisLockedDuringFaceID() async throws {
+        let (auth, _, prompts) = try await fixture(createdAt: Int64(Date().timeIntervalSince1970))
+        do { try await auth.approveUnlock(UnlockDecisionProtocol.request, choice: 89, unlocked: { false }); XCTFail("Must refuse") } catch { }
+        let promptCount = await prompts.count
+        XCTAssertEqual(promptCount, 1)
+        XCTAssertFalse(UnlockDecisionProtocol.calls().contains { $0.path.hasSuffix("/approve") })
+    }
+
+    func testADuplicatedRequestIdIsRefused() async throws {
+        let (auth, _, prompts) = try await fixture(createdAt: Int64(Date().timeIntervalSince1970), copies: 2)
+        do { try await auth.approveUnlock(UnlockDecisionProtocol.request, choice: 89); XCTFail("Must refuse") } catch { }
+        do { try await auth.denyUnlock(UnlockDecisionProtocol.request); XCTFail("Must refuse") } catch { }
+        let promptCount = await prompts.count
+        XCTAssertEqual(promptCount, 0)
+        XCTAssertFalse(UnlockDecisionProtocol.calls().contains { $0.path.hasSuffix("/approve") || $0.path.hasSuffix("/deny") })
+    }
+
     func testDenyNeedsFaceIDToo() async throws {
         let (auth, _, prompts) = try await fixture(createdAt: Int64(Date().timeIntervalSince1970))
         await prompts.set(.cancelled)
@@ -1656,14 +1699,16 @@ final class UnlockApprovalTests: XCTestCase {
         XCTAssertEqual(UnlockDecisionProtocol.calls().last?.path, "/v1/auth/unlock/\(UnlockDecisionProtocol.request.uuidString)/deny")
     }
 
-    private func fixture(createdAt: Int64) async throws -> (AuthService, String, PairingPromptCounter) {
+    private func fixture(createdAt: Int64, copies: Int = 1, others: [UUID] = []) async throws -> (AuthService, String, PairingPromptCounter) {
         let store = FixtureSecureStorage()
         let credentials = SecureCredentialStore(keychain: store)
         let identity = DeviceIdentityStore(keychain: store)
         let publicKey = try await identity.publicKeyHex()
         try await credentials.save(deviceId: UnlockDecisionProtocol.device)
         try await credentials.save(session: SecureSession(token: "fixture-session-not-a-secret", expiresAt: Int64(Date().timeIntervalSince1970) + 3600))
-        UnlockDecisionProtocol.reset(pending: #"{"requests":[{"id":"\#(UnlockDecisionProtocol.request)","device_name":"Work Mac","platform":"macos","nonce":"\#(nonce)","created_at":\#(createdAt)}]}"#)
+        let item = #"{"id":"\#(UnlockDecisionProtocol.request)","device_name":"Work Mac","platform":"macos","nonce":"\#(nonce)","created_at":\#(createdAt)}"#
+        let otherItems = others.map { #"{"id":"\#($0)","device_name":"Other Mac","platform":"macos","nonce":"\#(nonce)","created_at":\#(createdAt)}"# }
+        UnlockDecisionProtocol.reset(pending: #"{"requests":["# + (Array(repeating: item, count: copies) + otherItems).joined(separator: ",") + "]}")
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [UnlockDecisionProtocol.self]
         let api = JarvisAPIClient(baseURL: URL(string: "https://jarvis.example.com")!, session: URLSession(configuration: configuration))
@@ -1711,4 +1756,29 @@ private final class UnlockDecisionProtocol: URLProtocol {
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() { }
+}
+
+/// A failed or unconfirmed revoke of this device never erases it silently.
+@MainActor
+final class UnlinkOutcomeTests: XCTestCase {
+    private struct Refusal: LocalizedError {
+        var errorDescription: String? { "Core refused\u{202E} this change.\n" + String(repeating: "x", count: 300) }
+    }
+
+    func testOnlyAConfirmedRevokeErases() {
+        XCTAssertEqual(JarvisAppModel.afterUnlink(nil), .erase)
+    }
+
+    func testARefusalOnlyOffersErasingWithSanitisedText() {
+        guard case let .offerLocalErase(reason) = JarvisAppModel.afterUnlink(Refusal()) else { return XCTFail("Must offer") }
+        XCTAssertTrue(reason.hasPrefix("Core refused this change."))
+        XCTAssertFalse(reason.unicodeScalars.contains { $0 == "\u{202E}" || $0 == "\n" })
+        XCTAssertLessThanOrEqual(reason.count, 160)
+    }
+
+    func testACancelledOrBusyPromptOffersNothing() {
+        XCTAssertEqual(JarvisAppModel.afterUnlink(ApprovalInterrupted.busy), .notice("Another approval is in progress."))
+        XCTAssertEqual(JarvisAppModel.afterUnlink(ApprovalInterrupted.cancelled), .notice("Cancelled; Face ID or Touch ID is required."))
+        XCTAssertEqual(JarvisAppModel.afterUnlink(CancellationError()), .nothing)
+    }
 }

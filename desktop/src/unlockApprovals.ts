@@ -14,7 +14,7 @@ export interface UnlockReq {
   id: string;
   device_name: string;
   platform: string;
-  nonce: string;
+  // No nonce: the native proxy strips it; native code re-fetches by id.
   created_at: number;
 }
 
