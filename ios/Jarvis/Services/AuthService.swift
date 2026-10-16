@@ -548,12 +548,13 @@ actor AuthService {
         unlockChoiceSets[item.id] = nil
     } }
 
-    /// Deny another device's unlock. Also re-read by id and gated on Face ID / Touch ID.
-    func denyUnlock(_ id: UUID) async throws { try await exclusive {
+    /// Deny another device's unlock. Also re-read by id and gated on Face ID / Touch ID; `unlocked`
+    /// is checked again after the prompt.
+    func denyUnlock(_ id: UUID, unlocked: @Sendable () async -> Bool = { true }) async throws { try await exclusive {
         let (binding, token, item) = try await currentUnlock(id)
         try await requireBiometric("Deny unlock of \"\(PairingFingerprint.displayName(item.device_name, max: 40))\"").invalidate()
-        guard await api.binding() == binding, try await credentials.session()?.token == token else {
-            throw JarvisAPIError.rejected(status: 409, message: "Session changed; try again.")
+        guard await unlocked(), await api.binding() == binding, try await credentials.session()?.token == token else {
+            throw JarvisAPIError.rejected(status: 409, message: "Session changed or Jarvis locked; try again.")
         }
         try await postUnlockDeny(item.id, token: token, binding: binding)
         unlockChoiceSets[item.id] = nil

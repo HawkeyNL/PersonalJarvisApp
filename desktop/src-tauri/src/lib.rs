@@ -417,14 +417,24 @@ fn native_only_route(path: &str) -> bool {
 
 /// The webview lists unlock requests but never needs their nonces: native code
 /// re-fetches a request by id to build the number choices and the signed bytes.
+/// Every unlock route is covered (`/v1/auth/unlock` and below, any query,
+/// trailing or repeated slashes), and nonces are removed at any depth.
 fn strip_unlock_nonces(path: &str, body: &mut serde_json::Value) {
-    if path.split('?').next() != Some("/v1/auth/unlock/pending") {
-        return;
+    let route = path.split('?').next().unwrap_or(path);
+    let segments = route.split('/').filter(|segment| !segment.is_empty());
+    if segments.take(3).eq(["v1", "auth", "unlock"]) {
+        strip_nonces(body);
     }
-    if let Some(requests) = body.get_mut("requests").and_then(|r| r.as_array_mut()) {
-        for request in requests.iter_mut().filter_map(|r| r.as_object_mut()) {
-            request.remove("nonce");
+}
+
+fn strip_nonces(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.remove("nonce");
+            map.values_mut().for_each(strip_nonces);
         }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(strip_nonces),
+        _ => {}
     }
 }
 
@@ -1163,21 +1173,36 @@ mod tests {
         let list = || {
             serde_json::json!({ "requests": [
                 { "id": "a", "device_name": "Mac", "nonce": "00", "created_at": 1 },
-                { "id": "b", "nonce": "11" },
-            ]})
+                { "id": "b", "nonce": "11", "inner": { "nonce": "22", "keep": 1 } },
+            ], "nonce": "33" })
         };
-        let mut pending = list();
-        strip_unlock_nonces("/v1/auth/unlock/pending?wait=20", &mut pending);
-        assert_eq!(
-            pending,
-            serde_json::json!({ "requests": [
-                { "id": "a", "device_name": "Mac", "created_at": 1 },
-                { "id": "b" },
-            ]})
-        );
-        let mut other = list();
-        strip_unlock_nonces("/v1/auth/pairing/requests", &mut other);
-        assert_eq!(other, list());
+        let stripped = serde_json::json!({ "requests": [
+            { "id": "a", "device_name": "Mac", "created_at": 1 },
+            { "id": "b", "inner": { "keep": 1 } },
+        ]});
+        for path in [
+            "/v1/auth/unlock/pending?wait=20",
+            "/v1/auth/unlock/pending/",
+            "/v1/auth/unlock//pending",
+            "/v1/auth/unlock/00112233-4455-6677-8899-aabbccddeeff",
+            "/v1/auth/unlock/00112233-4455-6677-8899-aabbccddeeff/?wait=20",
+            "/v1/auth/unlock",
+            "/v1/auth/unlock/",
+            "/v1/auth/unlock?x=1",
+        ] {
+            let mut body = list();
+            strip_unlock_nonces(path, &mut body);
+            assert_eq!(body, stripped, "{path}");
+        }
+        for path in [
+            "/v1/auth/pairing/requests",
+            "/v1/auth/unlocked",
+            "/v1/auth/me",
+        ] {
+            let mut other = list();
+            strip_unlock_nonces(path, &mut other);
+            assert_eq!(other, list(), "{path}");
+        }
     }
 
     #[test]

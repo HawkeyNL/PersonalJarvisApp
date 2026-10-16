@@ -1692,6 +1692,14 @@ final class UnlockApprovalTests: XCTestCase {
         XCTAssertFalse(UnlockDecisionProtocol.calls().contains { $0.path.hasSuffix("/approve") })
     }
 
+    func testDenyStopsWhenJarvisLockedDuringFaceID() async throws {
+        let (auth, _, prompts) = try await fixture(createdAt: Int64(Date().timeIntervalSince1970))
+        do { try await auth.denyUnlock(UnlockDecisionProtocol.request, unlocked: { false }); XCTFail("Must refuse") } catch { }
+        let promptCount = await prompts.count
+        XCTAssertEqual(promptCount, 1)
+        XCTAssertFalse(UnlockDecisionProtocol.calls().contains { $0.path.hasSuffix("/deny") })
+    }
+
     func testADuplicatedRequestIdIsRefused() async throws {
         let (auth, _, prompts) = try await fixture(createdAt: Int64(Date().timeIntervalSince1970), copies: 2)
         do { try await auth.approveUnlock(UnlockDecisionProtocol.request, choice: 89); XCTFail("Must refuse") } catch { }

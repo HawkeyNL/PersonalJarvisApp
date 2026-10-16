@@ -307,10 +307,12 @@ fn unlock_item(
     items: &[UnlockItem],
     request_id: uuid::Uuid,
 ) -> Result<(&UnlockItem, [u8; 32]), String> {
-    let item = items
-        .iter()
-        .find(|item| item.id == request_id)
-        .ok_or("unlock request is no longer pending")?;
+    // Exactly one: a duplicated id is refused rather than guessed.
+    let mut matches = items.iter().filter(|item| item.id == request_id);
+    let item = match (matches.next(), matches.next()) {
+        (Some(item), None) => item,
+        _ => return Err("unlock request is no longer pending".into()),
+    };
     let nonce = hex32(&item.nonce).ok_or("invalid unlock request")?;
     Ok((item, nonce))
 }
@@ -849,6 +851,19 @@ mod tests {
         assert!(
             cached_unlock_choices(&mut sets, id(REQUEST), 89, start + UNLOCK_TTL, &mut rng).is_ok()
         );
+    }
+
+    #[test]
+    fn a_duplicated_unlock_id_is_refused() {
+        let item = serde_json::json!({
+            "id": REQUEST, "device_name": "Mac", "platform": "macos", "nonce": NONCE, "created_at": 1,
+        });
+        let items: UnlockList =
+            serde_json::from_value(serde_json::json!({ "requests": [item.clone(), item] }))
+                .unwrap();
+        assert!(unlock_item(&items.requests, id(REQUEST)).is_err());
+        assert!(unlock_decision(&items.requests, id(REQUEST), id(DEVICE), 89).is_err());
+        assert!(unlock_item(&unlock_list("Mac").requests, id(REQUEST)).is_ok());
     }
 
     #[test]
