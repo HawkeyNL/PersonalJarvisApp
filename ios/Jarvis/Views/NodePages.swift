@@ -788,15 +788,21 @@ struct PairingApprovalsPage: View {
         let checked = Result { try PairingFingerprint.verified(item) }
         let fingerprint = try? checked.get()
         return VStack(alignment: .leading, spacing: 8) {
-            Text(verbatim: PairingFingerprint.hint(item.device_name, max: 128))
+            Text(verbatim: PairingFingerprint.displayName(item.device_name, max: 128))
                 .font(JarvisFont.body(15, 600))
                 .foregroundStyle(JarvisTheme.text1)
             VStack(alignment: .leading, spacing: 4) {
-                detail("Platform", PairingFingerprint.hint(item.platform, max: 32))
-                detail("Model", PairingFingerprint.hint(item.model))
-                detail("App version", PairingFingerprint.hint(item.app_version, max: 32))
-                detail("IP address", PairingFingerprint.hint(item.ip))
-                detail("User agent", PairingFingerprint.hint(item.user_agent, max: 128))
+                detail("Platform", PairingFingerprint.displayName(item.platform, max: 32))
+                if let warning = PairingFingerprint.approverWarning(platform: item.platform) {
+                    Text(verbatim: warning)
+                        .font(JarvisFont.body(12, 500))
+                        .foregroundStyle(JarvisTheme.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                detail("Model", PairingFingerprint.displayName(item.model))
+                detail("App version", PairingFingerprint.displayName(item.app_version, max: 32))
+                detail("IP address", PairingFingerprint.displayName(item.ip))
+                detail("User agent", PairingFingerprint.displayName(item.user_agent, max: 128))
                 detail("Requested", Date(timeIntervalSince1970: TimeInterval(item.created_at)).formatted(date: .abbreviated, time: .standard))
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     detail("Expires in", pairingCountdown(item.expires_at, now: context.date))

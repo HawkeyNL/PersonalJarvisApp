@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,6 +51,25 @@ fun JarvisApp(
             }
         }
     }
+    state.localEraseOffer?.let { reason -> LocalEraseDialog(reason, actions::eraseLocally, actions::keepDevice) }
+}
+
+/** Shown only when Core did not confirm revoking this device: erasing is then the user's
+ *  explicit choice, never a silent fallback. */
+@Composable
+private fun LocalEraseDialog(reason: String, onErase: () -> Unit, onKeep: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onKeep,
+        title = { Text("Erase locally only?") },
+        text = {
+            Text(
+                "$reason\n\nThis phone may stay active on your Home Node until you revoke it from another device. " +
+                    "Erase locally only if you will do that.",
+            )
+        },
+        dismissButton = { TextButton(onClick = onKeep) { Text("Keep this device") } },
+        confirmButton = { TextButton(onClick = onErase) { Text("Erase locally only", color = Jv.Danger) } },
+    )
 }
 
 @Composable

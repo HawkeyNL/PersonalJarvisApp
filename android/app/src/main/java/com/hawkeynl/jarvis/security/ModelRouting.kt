@@ -267,7 +267,7 @@ fun relaxation(current: Routing?, next: Routing): Relaxation {
 data class ModelRoutingApproval(
     val request: UUID, val nonce: ByteArray, val user: UUID, val device: UUID,
     val issued: Long, val expires: Long, val routing: Routing, val hash: String,
-) {
+) : DeviceMessage {
     /** Canonical payload: compact JSON of the operation, in client-core field order. */
     fun canonicalPayload(): String {
         require(hash.matches(Regex("[0-9a-fA-F]{64}")))
@@ -279,7 +279,7 @@ data class ModelRoutingApproval(
 
     fun operation(): JsonObject = Json.parseToJsonElement(canonicalPayload()).jsonObject
 
-    fun message(): ByteArray {
+    override fun message(): ByteArray {
         require(routing.version == 1)
         return approvalMessage(
             "model.routing_set", MessageDigest.getInstance("SHA-256").digest(canonicalPayload().toByteArray(Charsets.UTF_8)),

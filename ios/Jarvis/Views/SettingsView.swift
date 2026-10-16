@@ -102,10 +102,17 @@ private struct SecuritySettingsView: View {
             Text("This ends your session. Your Home Node address and device identity are kept so you can sign in again without resetting this device.")
         }
         .confirmationDialog("Remove this device identity?", isPresented: $showResetConfirmation, titleVisibility: .visible) {
-            Button("Reset and require re-enrollment", role: .destructive) { Task { await model.resetDevice() } }
+            Button("Revoke and require re-enrollment", role: .destructive) { Task { await model.resetDevice() } }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("Jarvis will attempt to revoke this device, then remove its local key and session even if the Home Node is offline.")
+            Text("Jarvis asks your Home Node to revoke this device, confirmed with Face ID or Touch ID, then removes its local key and session. If the Home Node does not confirm, nothing is erased until you choose.")
+        }
+        .alert("Erase locally only?", isPresented: Binding(get: { model.localEraseOffer != nil },
+                                                          set: { if !$0 { model.localEraseOffer = nil } })) {
+            Button("Erase locally only", role: .destructive) { Task { await model.eraseLocally() } }
+            Button("Keep this device", role: .cancel) { model.localEraseOffer = nil }
+        } message: {
+            Text(verbatim: "\(model.localEraseOffer ?? "")\n\nThis device may stay active on your Home Node until you revoke it from another device. Erase locally only if you will do that.")
         }
     }
 }

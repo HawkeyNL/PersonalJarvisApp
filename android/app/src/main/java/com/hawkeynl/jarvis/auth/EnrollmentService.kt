@@ -12,7 +12,6 @@ import com.hawkeynl.jarvis.network.UnreachableReason
 import com.hawkeynl.jarvis.security.DeviceIdentity
 import com.hawkeynl.jarvis.security.DeviceKeyInvalidatedException
 import com.hawkeynl.jarvis.security.DeviceSigningException
-import com.hawkeynl.jarvis.security.Hex
 import com.hawkeynl.jarvis.security.LoginMessage
 import com.hawkeynl.jarvis.storage.ProtectedSession
 import com.hawkeynl.jarvis.storage.SessionRepository
@@ -111,11 +110,9 @@ class EnrollmentService(
         sessions.clearToken()
     }
 
-    suspend fun resetDevice(endpoint: HomeNodeEndpoint?) {
-        val session = sessions.session()
-        if (endpoint != null && session.token != null && session.deviceId != null) {
-            api.deleteDevice(endpoint, session.token, session.deviceId)
-        }
+    /** Erases this device's session, binding and key here only. Revoking it on Core is a
+     *  separate signed approval ([com.hawkeynl.jarvis.security.AccountApprovalService]). */
+    suspend fun eraseLocally() {
         sessions.reset()
         identity.reset()
     }
@@ -169,7 +166,7 @@ class EnrollmentService(
             return EnrollmentOutcome.InvalidResponse("Login challenge has an invalid nonce.")
         }
         val signature = try {
-            identity.signHex(Hex.encode(LoginMessage.build(challenge.challenge_id, deviceId, challenge.nonce)), "Sign in to Jarvis")
+            identity.sign(LoginMessage(challenge.challenge_id, deviceId, challenge.nonce), "Sign in to Jarvis")
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: DeviceKeyInvalidatedException) {

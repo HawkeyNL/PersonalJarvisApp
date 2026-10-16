@@ -38,7 +38,7 @@ class MainActivity : FragmentActivity() {
     private val viewModel: JarvisViewModel by viewModels { JarvisViewModel.factory(container) }
     private val coreViewModel: CoreViewModel by viewModels { CoreViewModel.factory(container) }
     private var biometricPromptActive = false
-    private val modelControls by lazy { ModelControlService(container.api, container.sessions, container.settings, container.identity,
+    private val modelControls by lazy { ModelControlService(container.api, container.sessions, container.settings, container.identity, container.approvals,
         { !viewModel.state.value.locked && viewModel.state.value.authenticated }) }
 
     // Every device signature: one strong-biometric prompt that authorises the device key's cipher.
@@ -50,7 +50,7 @@ class MainActivity : FragmentActivity() {
     // Pairing decisions accept only strong biometrics: no device credential fallback.
     private val pairingApprovals by lazy {
         PairingApprovalService(
-            container.api, container.sessions, { container.settings.endpoint.first() }, container.identity,
+            container.api, container.sessions, { container.settings.endpoint.first() }, container.identity, container.approvals,
             ::authenticatePairing,
             { container.biometricGate.availability(this) == BiometricAvailability.Available },
             { !viewModel.state.value.locked && viewModel.state.value.authenticated },

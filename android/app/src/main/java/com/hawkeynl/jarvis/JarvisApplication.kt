@@ -11,6 +11,7 @@ import com.hawkeynl.jarvis.storage.AndroidKeystoreSecureValueStore
 import com.hawkeynl.jarvis.storage.EndpointSettingsRepository
 import com.hawkeynl.jarvis.storage.SessionRepository
 import com.hawkeynl.jarvis.update.AndroidUpdateService
+import kotlinx.coroutines.flow.first
 
 class JarvisApplication : Application() {
     val container: AppContainer by lazy { AppContainer(this) }
@@ -27,6 +28,11 @@ class AppContainer(application: Application) {
     val identity = KeystoreBackedEd25519Identity(secureValues, AndroidDeviceKeyVault(application))
     val api = KtorJarvisApi()
     val enrollment = EnrollmentService(api, identity, sessions)
+    /** One approval prompt at a time, shared by every signing service. */
+    val approvals = com.hawkeynl.jarvis.security.ApprovalLock()
+    val accountApprovals = com.hawkeynl.jarvis.security.AccountApprovalService(
+        api, sessions, { settings.endpoint.first() }, identity, approvals,
+    )
     val conversations = ConversationService(api, sessions)
     val core = com.hawkeynl.jarvis.network.CoreReader(api, sessions)
     val appUpdates = AndroidUpdateService(application, api, sessions)

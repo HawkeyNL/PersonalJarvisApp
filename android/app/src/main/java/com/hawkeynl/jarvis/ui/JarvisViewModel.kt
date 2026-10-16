@@ -13,13 +13,16 @@ import com.hawkeynl.jarvis.network.ConversationSummary
 import com.hawkeynl.jarvis.network.EndpointValidation
 import com.hawkeynl.jarvis.network.HomeNodeEndpoint
 import com.hawkeynl.jarvis.network.UnreachableReason
+import com.hawkeynl.jarvis.security.ApprovalBusyException
 import com.hawkeynl.jarvis.security.BiometricAvailability
 import com.hawkeynl.jarvis.security.BiometricResult
 import com.hawkeynl.jarvis.security.PairingApproval
+import com.hawkeynl.jarvis.security.SigningCancelledException
 import com.hawkeynl.jarvis.update.AndroidUpdateCheck
 import com.hawkeynl.jarvis.update.AndroidUpdateDownload
 import com.hawkeynl.jarvis.update.InstallerHandoff
 import java.time.Instant
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -68,6 +71,8 @@ data class JarvisUiState(
     val deviceKeyLost: Boolean = false,
     /** This device's key fingerprint, shown while waiting for approval. */
     val ownFingerprint: String? = null,
+    /** Why Core did not revoke this device; set while the user decides on erasing locally only. */
+    val localEraseOffer: String? = null,
     val conversations: List<ConversationSummary> = emptyList(),
     val conversationId: String? = null,
     val conversationTitle: String = "New conversation",
@@ -81,6 +86,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     private val speech = RealtimeSpeech(container.localSpeech)
     private var realtimeAvailable = false
     private val pending = com.hawkeynl.jarvis.chat.PendingRuns()
+    private var unlinking = false
     private val _state = MutableStateFlow(
         JarvisUiState(locked = container.sessions.hasSessionRecord(), voiceEnabled = container.voicePreferences.getBoolean("enabled", false),
             voiceRate = SpeechRate.normalize(container.voicePreferences.getFloat("rate", 1f)),
@@ -303,17 +309,49 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         if (container.sessions.hasSessionRecord()) _state.update { it.copy(locked = true) }
     }
 
+    /** Revokes this device on Core with a signed approval, then erases it here. If Core
+     *  does not confirm, nothing is erased: the user is asked about erasing locally only. */
     fun resetDevice() {
+        if (unlinking) return
+        unlinking = true
+        viewModelScope.launch {
+            val failure = try {
+                container.accountApprovals.unlinkThisDevice()
+                null
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                error
+            } finally {
+                unlinking = false
+            }
+            when (failure) {
+                null -> eraseLocally()
+                // The user stopped, or another prompt is open: nothing to offer.
+                is ApprovalBusyException, is SigningCancelledException -> _state.update { it.copy(error = failure.message) }
+                // Server text is shown sanitised and bounded.
+                else -> _state.update {
+                    it.copy(localEraseOffer = PairingApproval.displayName(failure.message ?: "Core did not confirm the revocation.", 160))
+                }
+            }
+        }
+    }
+
+    /** The user chose to erase this device here although Core still lists it as active. */
+    fun eraseLocally() {
+        _state.update { it.copy(localEraseOffer = null) }
         container.sessions.modelAuthorization.invalidate()
         pending.clear()
         container.realtime.stop(); speech.stop()
         viewModelScope.launch {
-            container.enrollment.resetDevice(_state.value.endpoint)
+            container.enrollment.eraseLocally()
             _state.update {
                 JarvisUiState(endpoint = it.endpoint, endpointDraft = it.endpointDraft, connection = it.connection)
             }
         }
     }
+
+    fun keepDevice() = _state.update { it.copy(localEraseOffer = null) }
 
     private suspend fun refreshAfterUnlock(endpoint: HomeNodeEndpoint) {
         checkConnection(endpoint)

@@ -75,12 +75,20 @@ actor DeviceIdentityStore {
 
     /// Exact v1 client-core `login_message`: domain, challenge id, device id, 32-byte nonce.
     static func loginMessage(challengeId: UUID, deviceId: UUID, nonceHex: String) throws -> Data {
-        guard let nonce = Data(hexEncoded: nonceHex), nonce.count == 32 else {
+        try challengeMessage("jarvis-login-v1", id: challengeId, deviceId: deviceId, nonceHex: nonceHex)
+    }
+
+    /// Exact v1 client-core `unlock_approval_message`: domain, request id, approver device id, 32-byte nonce.
+    static func unlockApprovalMessage(requestId: UUID, approverDeviceId: UUID, nonceHex: String) throws -> Data {
+        try challengeMessage("jarvis-unlock-approval-v1", id: requestId, deviceId: approverDeviceId, nonceHex: nonceHex)
+    }
+
+    private static func challengeMessage(_ domain: String, id: UUID, deviceId: UUID, nonceHex: String) throws -> Data {
+        guard let nonce = Data(strictHex: nonceHex), nonce.count == 32 else {
             throw DeviceIdentityError.invalidChallenge
         }
-        func bytes(_ value: UUID) -> Data { var raw = value.uuid; return withUnsafeBytes(of: &raw) { Data($0) } }
-        var result = Data("jarvis-login-v1\0".utf8)
-        result.append(bytes(challengeId)); result.append(bytes(deviceId)); result.append(nonce)
+        var result = Data("\(domain)\0".utf8)
+        result.append(id.rawBytes); result.append(deviceId.rawBytes); result.append(nonce)
         return result
     }
 
@@ -92,37 +100,51 @@ actor DeviceIdentityStore {
               let key = Data(strictHex: candidatePublicKeyHex), key.count == 32 else {
             throw DeviceIdentityError.invalidChallenge
         }
-        func bytes(_ value: UUID) -> Data { var raw = value.uuid; return withUnsafeBytes(of: &raw) { Data($0) } }
         var result = Data("jarvis-device-pairing-v1\0".utf8)
-        result.append(bytes(requestId)); result.append(nonce); result.append(key)
-        result.append(bytes(userId)); result.append(bytes(approverDeviceId))
+        result.append(requestId.rawBytes); result.append(nonce); result.append(key)
+        result.append(userId.rawBytes); result.append(approverDeviceId.rawBytes)
         withUnsafeBytes(of: expiresAt.bigEndian) { result.append(contentsOf: $0) }
         return result
     }
 
-    // Signing never creates a replacement key for an existing registration and
-    // reads the seed only with a context Face ID / Touch ID has just evaluated.
-    func signPairingApproval(_ message: Data, context: LAContext) throws -> String {
-        try signingKey(context: context).signature(for: message).hexEncodedString()
+    // Signing takes typed fields only: each method builds its exact client-core
+    // message here, so raw server bytes never reach the key. It never creates a
+    // replacement key and reads the seed only with a context Face ID / Touch ID
+    // has just evaluated.
+    func signLogin(challengeId: UUID, deviceId: UUID, nonceHex: String, context: LAContext) throws -> String {
+        try sign(Self.loginMessage(challengeId: challengeId, deviceId: deviceId, nonceHex: nonceHex), context: context)
     }
 
-    func signLogin(challengeId: UUID, deviceId: UUID, nonceHex: String, context: LAContext) throws -> String {
-        let message = try Self.loginMessage(challengeId: challengeId, deviceId: deviceId, nonceHex: nonceHex)
-        return try signingKey(context: context).signature(for: message).hexEncodedString()
+    func signPairingApproval(requestId: UUID, nonceHex: String, candidatePublicKeyHex: String, userId: UUID,
+                             approverDeviceId: UUID, expiresAt: Int64, context: LAContext) throws -> String {
+        try sign(Self.pairingApprovalMessage(requestId: requestId, nonceHex: nonceHex, candidatePublicKeyHex: candidatePublicKeyHex,
+                                             userId: userId, approverDeviceId: approverDeviceId, expiresAt: expiresAt), context: context)
+    }
+
+    func signUnlockApproval(requestId: UUID, approverDeviceId: UUID, nonceHex: String, context: LAContext) throws -> String {
+        try sign(Self.unlockApprovalMessage(requestId: requestId, approverDeviceId: approverDeviceId, nonceHex: nonceHex), context: context)
+    }
+
+    func signAccountApproval(_ approval: AccountApproval, context: LAContext) throws -> String {
+        try sign(approval.message(), context: context)
+    }
+
+    func signModelToggle(_ approval: ModelToggleApproval, context: LAContext) throws -> String {
+        try sign(approval.message(), context: context)
+    }
+
+    func signModelRouting(_ approval: ModelRoutingApproval, context: LAContext) throws -> String {
+        try sign(approval.message(), context: context)
+    }
+
+    private func sign(_ message: Data, context: LAContext) throws -> String {
+        try signingKey(context: context).signature(for: message).hexEncodedString()
     }
 
     func reset() throws {
         try keychain.delete(account: account)
         try keychain.delete(account: publicAccount)
         try keychain.delete(account: legacyAccount)
-    }
-
-    func signModelToggle(_ approval: ModelToggleApproval, context: LAContext) throws -> String {
-        try signingKey(context: context).signature(for: approval.message()).hexEncodedString()
-    }
-
-    func signModelRouting(_ approval: ModelRoutingApproval, context: LAContext) throws -> String {
-        try signingKey(context: context).signature(for: approval.message()).hexEncodedString()
     }
 
     private func signingKey(context: LAContext) throws -> Curve25519.Signing.PrivateKey {
@@ -188,18 +210,105 @@ enum PairingFingerprint {
         }.joined(separator: " ")
     }
 
-    /// An unauthenticated candidate hint as bounded plain text: control and
-    /// format (bidi, zero-width) characters dropped, at most `max` characters.
-    static func hint(_ value: String?, max: Int = 64) -> String {
+    /// Server text for display and prompts, ported from desktop `display_name`:
+    /// control, hidden and quote characters dropped (prompts quote it), at most two
+    /// combining marks per character, whitespace collapsed, at most `max` scalars.
+    /// Longer text keeps its start and end, so a long name cannot push its end out of view.
+    static func displayName(_ value: String?, max: Int = 64) -> String {
         guard let value else { return "unknown" }
-        var scalars = String.UnicodeScalarView()
-        scalars.append(contentsOf: value.unicodeScalars.filter {
-            $0.properties.generalCategory != .control && $0.properties.generalCategory != .format
-        })
-        let clean = String(scalars).trimmingCharacters(in: .whitespacesAndNewlines)
+        var marks = 0
+        var kept = String.UnicodeScalarView()
+        for scalar in value.unicodeScalars {
+            let c: Unicode.Scalar = scalar.properties.isWhitespace ? " " : scalar
+            guard c.properties.generalCategory != .control, !isHidden(c.value), c != "\"" else { continue }
+            marks = isCombining(c.value) ? marks + 1 : 0
+            if marks <= 2 { kept.append(c) }
+        }
+        var clean: [Unicode.Scalar] = []
+        for word in kept.split(separator: " ") {
+            if !clean.isEmpty { clean.append(" ") }
+            clean.append(contentsOf: word)
+        }
         if clean.isEmpty { return "unknown" }
-        return clean.count > max ? String(clean.prefix(max)) + "…" : clean
+        guard clean.count > max else { return String(String.UnicodeScalarView(clean)) }
+        let head = max / 2, tail = max - head - 1
+        return String(String.UnicodeScalarView(clean[..<head])) + "…" + String(String.UnicodeScalarView(clean[(clean.count - tail)...]))
     }
+
+    /// Unicode category Cf (bidi controls, zero-width, tags) plus other invisible or
+    /// blank-looking default-ignorable and private-use characters, and quotation marks.
+    private static func isHidden(_ c: UInt32) -> Bool {
+        switch c {
+        case 0xAD, 0x34F, 0x600...0x605, 0x61C, 0x6DD, 0x70F, 0x890...0x891, 0x8E2, 0x115F...0x1160,
+             0x17B4...0x17B5, 0x180B...0x180F, 0x200B...0x200F, 0x202A...0x202E, 0x2060...0x2064, 0x2066...0x206F,
+             // Quotation marks (Pi/Pf and fullwidth): prompts quote server text.
+             0xAB, 0xBB, 0x2018...0x201F, 0x2039...0x203A, 0x2E02...0x2E05, 0x2E09...0x2E0A, 0x2E0C...0x2E0D,
+             0x2E1C...0x2E1D, 0x2E20...0x2E21, 0xFF02,
+             0x2800, 0x3164, 0xE000...0xF8FF, 0xFE00...0xFE0F, 0xFEFF, 0xFFA0, 0xFFF9...0xFFFC, 0x110BD, 0x110CD,
+             0x13430...0x1343F, 0x1BCA0...0x1BCA3, 0x1D173...0x1D17A, 0xE0000...0xE0FFF, 0xF0000...0x10FFFF:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Common combining-mark blocks, as on desktop.
+    private static func isCombining(_ c: UInt32) -> Bool {
+        switch c {
+        case 0x300...0x36F, 0x1AB0...0x1AFF, 0x1DC0...0x1DFF, 0x20D0...0x20FF, 0xFE20...0xFE2F: return true
+        default: return false
+        }
+    }
+
+    /// A device on these platforms can approve unlocks, account changes and agent
+    /// actions once paired, so its pairing card says so.
+    static func approverWarning(platform: String) -> String? {
+        guard ["ios", "android", "macos"].contains(platform.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) else { return nil }
+        return "Once paired, this \(displayName(platform, max: 16)) device can approve unlocks, account changes and agent actions."
+    }
+}
+
+/// client-core `AccountApproval`: Core's challenge for one account action. It is
+/// signed only after `require` matched every bound field to what this device asked for.
+struct AccountApproval: Decodable, Equatable {
+    static let deviceRevoke = "device-revoke"
+    static let passwordSet = "password-set"
+
+    let request_id: UUID
+    let user_id: UUID
+    let device_id: UUID
+    let action: String
+    let target: UUID
+    let nonce: String
+    let expires_at: Int64
+
+    /// Exact v1 client-core `account_approval_message`: domain, action name, request,
+    /// user, device and target ids, 32-byte nonce, big-endian i64 expiry.
+    func message() throws -> Data {
+        guard [Self.deviceRevoke, Self.passwordSet].contains(action),
+              let nonce = Data(strictHex: nonce), nonce.count == 32, expires_at > 0 else {
+            throw DeviceIdentityError.invalidChallenge
+        }
+        var result = Data("jarvis-account-approval-v1\0".utf8)
+        result.append(Data(action.utf8)); result.append(0)
+        for id in [request_id, user_id, device_id, target] { result.append(id.rawBytes) }
+        result.append(nonce)
+        withUnsafeBytes(of: expires_at.bigEndian) { result.append(contentsOf: $0) }
+        return result
+    }
+
+    /// Core must have issued exactly the challenge this device asked for, still unexpired.
+    func require(action: String, user: UUID, device: UUID, target: UUID, now: Int64) throws {
+        _ = try message()
+        guard self.action == action, user_id == user, device_id == device, self.target == target, expires_at > now else {
+            throw JarvisAPIError.rejected(status: 409, message: "Core returned a different or expired approval request; nothing was signed.")
+        }
+    }
+}
+
+extension UUID {
+    /// The 16 bytes client-core signs, in RFC 4122 order.
+    var rawBytes: Data { withUnsafeBytes(of: uuid) { Data($0) } }
 }
 
 extension Data {
