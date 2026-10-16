@@ -102,7 +102,7 @@ private fun AuthenticatedShell(
                     HealthScreen(state, data, mood, navigate, core::refreshHealth, actions::checkConnection, modelControls, state.healthNode)
                 }
                 Screen.MEMORY -> MemoryScreen(mood, navigate)
-                Screen.CONTEXT -> ContextScreen(data, mood, navigate, core::refreshContext)
+                Screen.CONTEXT -> ContextScreen(data, mood, navigate, core::refreshContext, core::revokeDevice)
                 Screen.PAIRING_APPROVALS -> PairingApprovalsScreen(data, navigate, core::refreshPairing, core::dropPairing, pairingApprovals)
             }
         }

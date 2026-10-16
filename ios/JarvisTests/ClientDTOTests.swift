@@ -1223,9 +1223,10 @@ final class PairingApprovalTests: XCTestCase {
 
 private actor PairingPromptCounter {
     private(set) var count = 0
+    private(set) var reasons: [String] = []
     private var result = LocalUnlockResult.unlocked
     func set(_ value: LocalUnlockResult) { result = value }
-    func authenticate() -> LocalUnlockResult { count += 1; return result }
+    func authenticate(_ reason: String = "") -> LocalUnlockResult { count += 1; reasons.append(reason); return result }
 }
 
 private final class PairingDecisionProtocol: URLProtocol {
@@ -1334,6 +1335,26 @@ final class AccountApprovalTests: XCTestCase {
         }
     }
 
+    func testRevokingAnotherDeviceUsesAFreshListAndRefusesUnknownIds() async throws {
+        let other = UUID(uuidString: "05050505-0505-0505-0505-050505050505")!
+        let gone = UUID(uuidString: "06060606-0606-0606-0606-060606060606")!
+        let devices = #"{"devices":[{"id":"\#(other)","name":"Old\u202E laptop","platform":"linux","status":"active","created_at":1},"#
+            + #"{"id":"\#(gone)","name":"Gone","platform":"ios","status":"revoked","created_at":1},"#
+            + #"{"id":"\#(AccountDecisionProtocol.device)","name":"Me","platform":"ios","status":"active","created_at":1}]}"#
+        let (auth, _, _, prompts) = try await fixture(revoke: AccountDecisionProtocol.json(approval(target: other)), devices: devices)
+        try await auth.revokeDevice(other)
+        XCTAssertEqual(AccountDecisionProtocol.calls().map { $0.path }.dropFirst(2).first, "/v1/devices/\(other.uuidString)/revoke-request")
+        let reasons = await prompts.reasons
+        XCTAssertEqual(reasons, ["Revoke \"Old laptop\" (linux)"])
+        for id in [UUID(), gone, AccountDecisionProtocol.device] {
+            let (refused, _, _, refusedPrompts) = try await fixture(revoke: AccountDecisionProtocol.json(approval(target: id)), devices: devices)
+            do { try await refused.revokeDevice(id); XCTFail("Must refuse \(id)") } catch { }
+            let count = await refusedPrompts.count
+            XCTAssertEqual(count, 0)
+            XCTAssertFalse(AccountDecisionProtocol.calls().contains { $0.path.hasSuffix("/revoke-request") })
+        }
+    }
+
     func testASecondApprovalIsRefusedWhileOneIsPrompting() async throws {
         let gate = PromptGate()
         let (auth, _, _, _) = try await fixture(revoke: AccountDecisionProtocol.json(approval()), prompt: { await gate.wait() })
@@ -1345,7 +1366,7 @@ final class AccountApprovalTests: XCTestCase {
         try await first.value
     }
 
-    private func fixture(revoke: String?, prompt: (@Sendable () async -> Void)? = nil) async throws
+    private func fixture(revoke: String?, devices: String = #"{"devices":[]}"#, prompt: (@Sendable () async -> Void)? = nil) async throws
         -> (AuthService, SecureCredentialStore, String, PairingPromptCounter) {
         let store = FixtureSecureStorage()
         let credentials = SecureCredentialStore(keychain: store)
@@ -1353,14 +1374,14 @@ final class AccountApprovalTests: XCTestCase {
         let publicKey = try await identity.publicKeyHex()
         try await credentials.save(deviceId: AccountDecisionProtocol.device)
         try await credentials.save(session: SecureSession(token: "fixture-session-not-a-secret", expiresAt: Int64(Date().timeIntervalSince1970) + 3600))
-        AccountDecisionProtocol.reset(revoke: revoke)
+        AccountDecisionProtocol.reset(revoke: revoke, devices: devices)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [AccountDecisionProtocol.self]
         let api = JarvisAPIClient(baseURL: URL(string: "https://jarvis.example.com")!, session: URLSession(configuration: configuration))
         let prompts = PairingPromptCounter()
-        let auth = AuthService(api: api, identity: identity, credentials: credentials, authenticateBiometric: { _ in
+        let auth = AuthService(api: api, identity: identity, credentials: credentials, authenticateBiometric: { reason in
             await prompt?()
-            return store.prompt(await prompts.authenticate())
+            return store.prompt(await prompts.authenticate(reason))
         })
         return (auth, credentials, publicKey, prompts)
     }
@@ -1388,8 +1409,11 @@ private final class AccountDecisionProtocol: URLProtocol {
     static let request = UUID(uuidString: "00112233-4455-6677-8899-aabbccddeeff")!
     private static let lock = NSLock()
     private static var revoke: String?
+    private static var devices = #"{"devices":[]}"#
     private static var captured: [(path: String, body: [String: String])] = []
-    static func reset(revoke: String?) { lock.withLock { self.revoke = revoke; captured = [] } }
+    static func reset(revoke: String?, devices: String = #"{"devices":[]}"#) {
+        lock.withLock { self.revoke = revoke; self.devices = devices; captured = [] }
+    }
     static func calls() -> [(path: String, body: [String: String])] { lock.withLock { captured } }
     static func json(_ approval: AccountApproval) -> String {
         #"{"request_id":"\#(approval.request_id)","user_id":"\#(approval.user_id)","device_id":"\#(approval.device_id)","action":"\#(approval.action)","target":"\#(approval.target)","nonce":"\#(approval.nonce)","expires_at":\#(approval.expires_at)}"#
@@ -1412,6 +1436,8 @@ private final class AccountDecisionProtocol: URLProtocol {
         Self.lock.withLock { Self.captured.append((path, body)) }
         if path == "/v1/auth/me" {
             respond(200, #"{"user_id":"\#(Self.user)","device_id":"\#(Self.device)"}"#)
+        } else if path == "/v1/devices" {
+            respond(200, Self.lock.withLock { Self.devices })
         } else if path.hasSuffix("/revoke-request") {
             // No configured answer: Core refuses.
             if let revoke = Self.lock.withLock({ Self.revoke }) { respond(200, revoke) } else { respond(401, #"{"error":"unauthorized"}"#) }

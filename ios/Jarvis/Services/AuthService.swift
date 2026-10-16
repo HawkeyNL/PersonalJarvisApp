@@ -331,36 +331,72 @@ actor AuthService {
     /// Revokes this device on Core with a signed device-revoke approval. Throws unless
     /// Core confirmed; erases nothing (the user decides, see `eraseLocally`).
     func unlinkDevice() async throws { try await exclusive {
-        let binding = await api.binding()
-        guard let token = try await credentials.session()?.token else {
-            throw JarvisAPIError.rejected(status: 401, message: "Not signed in, so Core cannot be asked to revoke this device.")
+        let signedIn = try await signedIn()
+        try await revoke(signedIn, target: signedIn.device, reason: "Unlink this device from Jarvis")
+    } }
+
+    /// Revokes another device of this account. The prompt names it from a fresh device
+    /// list; an id Core does not list as active is refused before anything is signed.
+    func revokeDevice(_ id: UUID) async throws { try await exclusive {
+        let signedIn = try await signedIn()
+        guard id != signedIn.device else {
+            throw JarvisAPIError.rejected(status: 409, message: "Use Reset this device to remove this iPhone.")
         }
+        let list: DeviceListResponse = try await accountDecision {
+            try await api.get("/v1/devices", token: signedIn.token, expectedBinding: signedIn.binding)
+        }
+        let matches = list.devices.filter { UUID(uuidString: $0.id) == id && $0.status == "active" }
+        guard matches.count == 1, let target = matches.first else {
+            throw JarvisAPIError.rejected(status: 404, message: "Core no longer lists this device as active.")
+        }
+        try await revoke(signedIn, target: id, reason: "Revoke \"\(PairingFingerprint.displayName(target.name, max: 40))\" "
+            + "(\(PairingFingerprint.displayName(target.platform, max: 16)))")
+    } }
+
+    private struct SignedIn { let binding: UUID; let token: String; let device: UUID; let user: UUID }
+
+    /// The signed-in session, confirmed by Core to belong to this device.
+    private func signedIn() async throws -> SignedIn {
+        let binding = await api.binding()
         guard let device = try await credentials.deviceId() else {
             throw JarvisAPIError.rejected(status: 409, message: "This device is not paired, so there is nothing to revoke on Core.")
+        }
+        guard let token = try await credentials.session()?.token else {
+            throw JarvisAPIError.rejected(status: 401, message: "Not signed in, so Core cannot be asked for this change.")
         }
         let me: AuthenticatedIdentity = try await accountDecision {
             try await api.get("/v1/auth/me", token: token, expectedBinding: binding)
         }
         guard me.deviceId == device else { throw JarvisAPIError.rejected(status: 401, message: "Session does not belong to this device.") }
+        return SignedIn(binding: binding, token: token, device: device, user: me.userId)
+    }
+
+    private func revoke(_ signedIn: SignedIn, target: UUID, reason: String) async throws {
         let approval: AccountApproval = try await accountDecision {
-            try await api.post("/v1/devices/\(device.uuidString)/revoke-request", body: [String: String](), token: token, expectedBinding: binding)
+            try await api.post("/v1/devices/\(target.uuidString)/revoke-request", body: [String: String](),
+                               token: signedIn.token, expectedBinding: signedIn.binding)
         }
-        try approval.require(action: AccountApproval.deviceRevoke, user: me.userId, device: device, target: device,
+        try approval.require(action: AccountApproval.deviceRevoke, user: signedIn.user, device: signedIn.device, target: target,
                              now: Int64(Date().timeIntervalSince1970))
-        let context = try await requireBiometric("Unlink this device from Jarvis")
+        try await signAndApprove(approval, signedIn: signedIn, reason: reason)
+    }
+
+    /// One Face ID / Touch ID prompt, then the approval, only while nothing changed.
+    private func signAndApprove(_ approval: AccountApproval, signedIn: SignedIn, reason: String) async throws {
+        let context = try await requireBiometric(reason)
         defer { context.invalidate() }
-        guard await api.binding() == binding, try await credentials.session()?.token == token,
-              try await credentials.deviceId() == device, approval.expires_at > Int64(Date().timeIntervalSince1970) else {
+        guard await api.binding() == signedIn.binding, try await credentials.session()?.token == signedIn.token,
+              try await credentials.deviceId() == signedIn.device, approval.expires_at > Int64(Date().timeIntervalSince1970) else {
             throw JarvisAPIError.rejected(status: 409, message: "Approval expired or session changed.")
         }
         try Task.checkCancellation()
         let signature = try await identity.signAccountApproval(approval, context: context)
         let result: StatusResponse = try await accountDecision {
             try await api.post("/v1/auth/account/requests/\(approval.request_id.uuidString)/approve",
-                               body: ["signature": signature], token: token, expectedBinding: binding)
+                               body: ["signature": signature], token: signedIn.token, expectedBinding: signedIn.binding)
         }
         guard result.status == "completed" else { throw JarvisAPIError.rejected(status: 503, message: "Core did not confirm the change.") }
-    } }
+    }
 
     /// Core answers 401 for a refused account action too; report it instead of ending
     /// the session here.
