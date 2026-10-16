@@ -30,6 +30,8 @@ class AppContainer(application: Application) {
     val enrollment = EnrollmentService(api, identity, sessions)
     /** One approval prompt at a time, shared by every signing service. */
     val approvals = com.hawkeynl.jarvis.security.ApprovalLock()
+    /** Unlock number choices outlive the Activity, so a rotation cannot re-roll them. */
+    val unlockChoices = com.hawkeynl.jarvis.security.UnlockChoiceSets()
     val accountApprovals = com.hawkeynl.jarvis.security.AccountApprovalService(
         api, sessions, { settings.endpoint.first() }, identity, approvals,
     )

@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import NavIcon from "./NavIcon.vue";
-import { pending, approve, deny, approving, approvalError } from "../unlockApprovals";
+import { pending, approve, deny, pick, picking, approving, approvalError } from "../unlockApprovals";
 import { platformCapabilities } from "../platform";
 
 // Only a Mac approves here, behind Touch ID; other desktops can deny.
 const signer = computed(() => platformCapabilities.value.supportsBiometricSigning);
+const two = (n: number) => String(n).padStart(2, "0");
 </script>
 
 <template>
@@ -13,19 +14,34 @@ const signer = computed(() => platformCapabilities.value.supportsBiometricSignin
     <div v-if="pending.length" class="wrap">
       <div class="sheet">
         <div class="lead"><NavIcon name="link" /> Unlock request</div>
-        <div v-for="r in pending" :key="r.id" class="req">
-          <div class="who">
-            <strong>{{ r.device_name }}</strong>
-            <span class="plat">{{ r.platform }}</span>
-            wants to unlock
+        <template v-for="r in pending" :key="r.id">
+          <div class="req">
+            <div class="who">
+              <strong>{{ r.device_name }}</strong>
+              <span class="plat">{{ r.platform }}</span>
+              wants to unlock
+            </div>
+            <div class="actions">
+              <button class="deny" :disabled="approving === r.id" @click="deny(r)">Deny</button>
+              <button
+                v-if="signer && picking?.id !== r.id"
+                class="approve"
+                :disabled="approving === r.id"
+                @click="approve(r)"
+              >
+                {{ approving === r.id ? "Verifying…" : "Approve" }}
+              </button>
+            </div>
           </div>
-          <div class="actions">
-            <button class="deny" :disabled="approving === r.id" @click="deny(r)">Deny</button>
-            <button v-if="signer" class="approve" :disabled="approving === r.id" @click="approve(r)">
-              {{ approving === r.id ? "Verifying…" : "Approve" }}
-            </button>
+          <div v-if="picking?.id === r.id" class="pick">
+            <p>Pick the number shown on that device. A wrong number denies the request.</p>
+            <div class="choices">
+              <button v-for="c in picking.choices" :key="c" class="choice" @click="pick(r.id, c)">
+                {{ two(c) }}
+              </button>
+            </div>
           </div>
-        </div>
+        </template>
         <p v-if="approvalError" class="err">{{ approvalError }}</p>
         <p class="hint">{{ signer ? "Confirm with Touch ID on this Mac." : "Approve on a Mac with Touch ID; you can deny here." }}</p>
       </div>
@@ -120,6 +136,27 @@ const signer = computed(() => platformCapabilities.value.supportsBiometricSignin
 .deny:disabled {
   opacity: 0.6;
   cursor: default;
+}
+.pick p {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 6px 0 8px;
+}
+.choices {
+  display: flex;
+  gap: 10px;
+}
+.choice {
+  flex: 1;
+  border-radius: 11px;
+  padding: 10px 0;
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 700;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--text);
+  cursor: pointer;
 }
 .err {
   color: #f87171;

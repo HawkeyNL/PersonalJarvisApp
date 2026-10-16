@@ -439,10 +439,19 @@ final class JarvisAppModel: ObservableObject {
         return requests
     }
 
-    func approveUnlock(_ id: UUID) async throws {
+    func unlockChoices(_ id: UUID) async throws -> [Int] {
         guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
-        // Checked again after Face ID: the app may have locked while the prompt was open.
-        try await auth.approveUnlock(id) { @MainActor [weak self] in
+        return try await auth.unlockChoices(id)
+    }
+
+    func approveUnlock(_ id: UUID, choice: Int) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        try await auth.approveUnlock(id, choice: choice, unlocked: stillUnlocked)
+    }
+
+    /// Checked again after Face ID: the app may have locked while the prompt was open.
+    private var stillUnlocked: @Sendable () async -> Bool {
+        { @MainActor [weak self] in
             guard let self else { return false }
             return self.isAuthenticated && self.lockState == .unlocked
         }
@@ -450,7 +459,7 @@ final class JarvisAppModel: ObservableObject {
 
     func denyUnlock(_ id: UUID) async throws {
         guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
-        try await auth.denyUnlock(id)
+        try await auth.denyUnlock(id, unlocked: stillUnlocked)
     }
 
     /// Changes the account password (one Face ID / Touch ID prompt). Core then ends every
@@ -476,11 +485,7 @@ final class JarvisAppModel: ObservableObject {
     /// Revokes another device of this account (one Face ID / Touch ID prompt).
     func revokeDevice(_ id: UUID) async throws {
         guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.rejected(status: 423, message: "Unlock Jarvis first.") }
-        // Checked again after Face ID: the app may have locked while the prompt was open.
-        try await auth.revokeDevice(id) { @MainActor [weak self] in
-            guard let self else { return false }
-            return self.isAuthenticated && self.lockState == .unlocked
-        }
+        try await auth.revokeDevice(id, unlocked: stillUnlocked)
     }
 
     /// Erases this device here only; after a failed revoke this is the user's explicit choice.

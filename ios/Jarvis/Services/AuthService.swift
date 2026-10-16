@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import LocalAuthentication
 import Security
@@ -492,11 +493,41 @@ actor AuthService {
         return list.requests
     }
 
-    /// Approve another device's unlock: re-read the request by id, refuse a stale one,
-    /// then sign the exact v1 unlock message after one Face ID / Touch ID prompt, only if
-    /// `unlocked` still holds once the prompt is done.
-    func approveUnlock(_ id: UUID, unlocked: @Sendable () async -> Bool = { true }) async throws { try await exclusive {
+    /// Choice sets by request id, kept until decided or expired. Fresh decoys on every look
+    /// would leak the code: it is the one number in every set.
+    private var unlockChoiceSets: [UUID: (createdAt: Int64, choices: [Int])] = [:]
+
+    /// Three numbers for the owner to pick from, built here from the request Core lists for
+    /// this id; one of them is the code the other device shows. Asking again for the same
+    /// request returns the same three.
+    func unlockChoices(_ id: UUID) async throws -> [Int] {
+        let (_, _, item) = try await currentUnlock(id)
+        let code = try UnlockCode.code(requestId: item.id, nonceHex: item.nonce)
+        let now = Int64(Date().timeIntervalSince1970)
+        unlockChoiceSets = unlockChoiceSets.filter { now - $0.value.createdAt <= 130 }
+        if let cached = unlockChoiceSets[item.id]?.choices, cached.contains(code) { return cached }
+        // Never evict a live set: that would hand out new decoys for it.
+        guard unlockChoiceSets[item.id] != nil || unlockChoiceSets.count < Self.maxUnlockChoiceSets else { throw UnlockChoicesFull() }
+        var random = SystemRandomNumberGenerator()
+        let choices = UnlockCode.choices(for: code, using: &random)
+        unlockChoiceSets[item.id] = (item.created_at, choices)
+        return choices
+    }
+
+    static let maxUnlockChoiceSets = 16
+
+    /// Approve another device's unlock with the owner's number pick: re-read the request by
+    /// id and refuse a stale one. A wrong pick denies it without any prompt or signature;
+    /// the right one signs the exact v1 unlock message after one Face ID / Touch ID prompt,
+    /// only if `unlocked` still holds once the prompt is done.
+    func approveUnlock(_ id: UUID, choice: Int, unlocked: @Sendable () async -> Bool = { true }) async throws { try await exclusive {
         let (binding, token, item) = try await currentUnlock(id)
+        let code = try UnlockCode.code(requestId: item.id, nonceHex: item.nonce)
+        guard choice == code else {
+            try await postUnlockDeny(item.id, token: token, binding: binding)
+            unlockChoiceSets[item.id] = nil
+            throw UnlockWrongNumber()
+        }
         guard let device = try await credentials.deviceId() else { throw JarvisAPIError.unauthorized }
         // Built once before prompting, so a malformed request never prompts.
         _ = try DeviceIdentityStore.unlockApprovalMessage(requestId: item.id, approverDeviceId: device, nonceHex: item.nonce)
@@ -514,20 +545,27 @@ actor AuthService {
                                token: token, expectedBinding: binding)
         }
         guard result.status == "approved" else { throw JarvisAPIError.rejected(status: 503, message: "Core did not confirm the decision.") }
+        unlockChoiceSets[item.id] = nil
     } }
 
-    /// Deny another device's unlock. Also re-read by id and gated on Face ID / Touch ID.
-    func denyUnlock(_ id: UUID) async throws { try await exclusive {
+    /// Deny another device's unlock. Also re-read by id and gated on Face ID / Touch ID; `unlocked`
+    /// is checked again after the prompt.
+    func denyUnlock(_ id: UUID, unlocked: @Sendable () async -> Bool = { true }) async throws { try await exclusive {
         let (binding, token, item) = try await currentUnlock(id)
         try await requireBiometric("Deny unlock of \"\(PairingFingerprint.displayName(item.device_name, max: 40))\"").invalidate()
-        guard await api.binding() == binding, try await credentials.session()?.token == token else {
-            throw JarvisAPIError.rejected(status: 409, message: "Session changed; try again.")
+        guard await unlocked(), await api.binding() == binding, try await credentials.session()?.token == token else {
+            throw JarvisAPIError.rejected(status: 409, message: "Session changed or Jarvis locked; try again.")
         }
+        try await postUnlockDeny(item.id, token: token, binding: binding)
+        unlockChoiceSets[item.id] = nil
+    } }
+
+    private func postUnlockDeny(_ id: UUID, token: String, binding: UUID) async throws {
         let result: StatusResponse = try await accountDecision {
-            try await api.post("/v1/auth/unlock/\(item.id.uuidString)/deny", body: [String: String](), token: token, expectedBinding: binding)
+            try await api.post("/v1/auth/unlock/\(id.uuidString)/deny", body: [String: String](), token: token, expectedBinding: binding)
         }
         guard result.status == "denied" else { throw JarvisAPIError.rejected(status: 503, message: "Core did not confirm the decision.") }
-    } }
+    }
 
     /// The request as Core lists it right now, never a copy the UI held on to.
     private func currentUnlock(_ id: UUID) async throws -> (UUID, String, UnlockRequestItem) {
@@ -625,3 +663,38 @@ actor AuthService {
 }
 
 private struct StatusResponse: Decodable { let status: String; let request_id: UUID? }
+
+/// Too many unlock requests have live choice sets; deny some before picking another.
+struct UnlockChoicesFull: LocalizedError {
+    var errorDescription: String? { "Too many unlock requests; deny some first." }
+}
+
+/// The owner picked the wrong number; the unlock request has been denied.
+struct UnlockWrongNumber: LocalizedError {
+    var errorDescription: String? { "Wrong number. The unlock request was denied." }
+}
+
+/// Unlock number matching, mirroring client-core `unlock_code`: the first two bytes
+/// (big-endian) of SHA-256("jarvis-unlock-code-v1\0" || request id || 32-byte nonce),
+/// modulo 100. The requesting device shows it; the owner must pick it here.
+enum UnlockCode {
+    static func code(requestId: UUID, nonceHex: String) throws -> Int {
+        guard let nonce = Data(strictHex: nonceHex), nonce.count == 32 else { throw DeviceIdentityError.invalidChallenge }
+        var input = Data("jarvis-unlock-code-v1\0".utf8)
+        input.append(requestId.rawBytes); input.append(nonce)
+        let digest = Array(SHA256.hash(data: input))
+        return (Int(digest[0]) << 8 | Int(digest[1])) % 100
+    }
+
+    /// The code and two distinct random decoys, shuffled.
+    static func choices<R: RandomNumberGenerator>(for code: Int, using random: inout R) -> [Int] {
+        var choices = [code]
+        while choices.count < 3 {
+            let decoy = Int.random(in: 0..<100, using: &random)
+            if !choices.contains(decoy) { choices.append(decoy) }
+        }
+        return choices.shuffled(using: &random)
+    }
+
+    static func display(_ code: Int) -> String { String(format: "%02d", code) }
+}

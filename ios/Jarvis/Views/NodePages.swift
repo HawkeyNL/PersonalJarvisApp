@@ -948,13 +948,15 @@ struct VoicePage: View {
 
 // MARK: - Unlock requests
 
-/// Other devices of this account asking to be unlocked. Approve and Deny need Face ID /
-/// Touch ID; each decision re-reads the request by id. Polls only in the foreground.
+/// Other devices of this account asking to be unlocked. Approve first asks the owner to pick
+/// the number the other device shows (a wrong pick denies); Approve and Deny then need
+/// Face ID / Touch ID. Each step re-reads the request by id. Polls only in the foreground.
 struct UnlockRequestsBanner: View {
     @ObservedObject var model: JarvisAppModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var requests: [UnlockRequestItem] = []
     @State private var busy: UUID?
+    @State private var picking: (id: UUID, choices: [Int])?
     @State private var decisionError: String?
 
     var body: some View {
@@ -984,12 +986,28 @@ struct UnlockRequestsBanner: View {
                 .font(JarvisFont.body(12))
                 .foregroundStyle(JarvisTheme.text2)
                 .fixedSize(horizontal: false, vertical: true)
+            if let picking, picking.id == item.id {
+                Text("Pick the number shown on that device. A wrong number denies the request.")
+                    .font(JarvisFont.body(12))
+                    .foregroundStyle(JarvisTheme.text2)
+                HStack(spacing: 10) {
+                    ForEach(picking.choices, id: \.self) { choice in
+                        Button(UnlockCode.display(choice)) { Task { await pick(item, choice) } }
+                            .buttonStyle(.bordered)
+                            .font(.system(size: 22, weight: .bold, design: .monospaced))
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .disabled(busy != nil)
+            }
             HStack(spacing: 10) {
                 Button("Deny", role: .destructive) { Task { await decide(item, approve: false) } }
                     .buttonStyle(.bordered)
                 Spacer()
-                Button(busy == item.id ? "Verifying…" : "Approve") { Task { await decide(item, approve: true) } }
-                    .buttonStyle(.borderedProminent)
+                if picking?.id != item.id {
+                    Button(busy == item.id ? "Verifying…" : "Approve") { Task { await decide(item, approve: true) } }
+                        .buttonStyle(.borderedProminent)
+                }
             }
             .font(JarvisFont.body(13, 500))
             .disabled(busy != nil)
@@ -1003,11 +1021,32 @@ struct UnlockRequestsBanner: View {
         guard busy == nil else { return }
         busy = item.id
         decisionError = nil
+        picking = nil
         do {
-            if approve { try await model.approveUnlock(item.id) } else { try await model.denyUnlock(item.id) }
-            requests.removeAll { $0.id == item.id }
+            if approve {
+                let choices = try await model.unlockChoices(item.id)
+                picking = (item.id, choices)
+            } else {
+                try await model.denyUnlock(item.id)
+                requests.removeAll { $0.id == item.id }
+            }
         } catch {
             // Server text is shown sanitised and bounded.
+            decisionError = PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "The decision could not be completed.", max: 160)
+        }
+        busy = nil
+    }
+
+    private func pick(_ item: UnlockRequestItem, _ choice: Int) async {
+        guard busy == nil, picking?.id == item.id else { return }
+        busy = item.id
+        picking = nil
+        decisionError = nil
+        do {
+            try await model.approveUnlock(item.id, choice: choice)
+            requests.removeAll { $0.id == item.id }
+        } catch {
+            if error is UnlockWrongNumber { requests.removeAll { $0.id == item.id } }
             decisionError = PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "The decision could not be completed.", max: 160)
         }
         busy = nil

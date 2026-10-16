@@ -15,6 +15,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
+import java.security.SecureRandom
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -30,7 +31,7 @@ class UnlockApprovalTest {
 
     @Test fun approvalRereadsTheRequestAndSignsTheUnlockMessage() = runTest {
         val fixture = Fixture(createdAt = NOW - 10)
-        fixture.service.approve(REQUEST_ID.uppercase())
+        fixture.service.approve(REQUEST_ID.uppercase(), 89)
         assertEquals(1, fixture.prompts)
         assertEquals("Unlock \"Work Mac\" (macos)", fixture.reason)
         assertEquals(listOf("/v1/auth/unlock/pending", "/v1/auth/unlock/$REQUEST_ID/approve"), fixture.paths)
@@ -47,13 +48,89 @@ class UnlockApprovalTest {
     @Test fun staleOrUnlistedRequestsNeverPrompt() = runTest {
         for ((createdAt, id) in listOf(NOW - 131 to REQUEST_ID, NOW to OTHER_ID)) {
             val fixture = Fixture(createdAt = createdAt)
-            assertTrue(runCatching { fixture.service.approve(id) }.isFailure)
+            assertTrue(runCatching { fixture.service.approve(id, 89) }.isFailure)
+            assertTrue(runCatching { fixture.service.choices(id) }.isFailure)
             assertTrue(runCatching { fixture.service.deny(id) }.isFailure)
             assertEquals(0, fixture.prompts)
             assertTrue(fixture.paths.none { it.endsWith("/approve") || it.endsWith("/deny") })
         }
         // Listing shows what Core returns; only a decision refuses a stale request.
         assertEquals(1, Fixture(createdAt = NOW - 131).service.pending(0).size)
+    }
+
+    /** Same vectors as client-core `unlock_code` and the desktop and iOS clients. */
+    @Test fun unlockCodeMatchesClientCoreVectors() {
+        assertEquals(89, UnlockCode.code(REQUEST_ID, NONCE))
+        assertEquals(89, UnlockCode.code(REQUEST_ID.uppercase(), NONCE.uppercase()))
+        assertEquals(0, UnlockCode.code("ffeeddcc-bbaa-9988-7766-554433221100", "0b".repeat(32)))
+        assertEquals("00", UnlockCode.display(0))
+        assertEquals("89", UnlockCode.display(89))
+        assertTrue(runCatching { UnlockCode.code(REQUEST_ID, NONCE.drop(2)) }.isFailure)
+        assertTrue(runCatching { UnlockCode.code("not-a-uuid", NONCE) }.isFailure)
+    }
+
+    @Test fun choicesHoldTheCodeAndTwoDistinctDecoys() {
+        val random = SecureRandom()
+        val positions = IntArray(3)
+        for (code in (0 until 3000).map { it % 100 }) {
+            val choices = UnlockCode.choices(code, random)
+            assertEquals(3, choices.toSet().size)
+            assertTrue(choices.all { it in 0..99 })
+            positions[choices.indexOf(code)]++
+        }
+        // Shuffled: the code is not stuck in one place (each slot ~1000 of 3000).
+        assertTrue(positions.contentToString(), positions.all { it > 800 })
+    }
+
+    @Test fun choicesComeFromTheRequestListedForThatId() = runTest {
+        val fixture = Fixture(createdAt = NOW)
+        val choices = fixture.service.choices(REQUEST_ID)
+        assertTrue(89 in choices)
+        assertEquals(3, choices.toSet().size)
+        assertEquals(0, fixture.prompts)
+        assertEquals(listOf("/v1/auth/unlock/pending"), fixture.paths)
+    }
+
+    /** Fresh decoys per look would leak the code: it is the one number in every set. */
+    @Test fun repeatedLooksAtOneRequestShowTheSameChoices() = runTest {
+        val fixture = Fixture(createdAt = NOW)
+        val first = fixture.service.choices(REQUEST_ID)
+        repeat(20) { assertEquals(first, fixture.service.choices(REQUEST_ID.uppercase())) }
+    }
+
+    /** The sets live in AppContainer: a new service (new Activity after a rotation) must not re-roll them. */
+    @Test fun servicesSharingTheContainerCacheShowTheSameChoices() = runTest {
+        val shared = UnlockChoiceSets { NOW }
+        val first = Fixture(createdAt = NOW, choiceSets = shared).service.choices(REQUEST_ID)
+        assertEquals(first, Fixture(createdAt = NOW, choiceSets = shared).service.choices(REQUEST_ID))
+    }
+
+    /** A full cache refuses a new set instead of evicting a live one (that would re-roll it). */
+    @Test fun aFullChoiceCacheRefusesInsteadOfReRolling() {
+        var now = NOW
+        val sets = UnlockChoiceSets { now }
+        val ids = (0 until UnlockChoiceSets.MAX).map { "00000000-0000-0000-0000-%012d".format(it) }
+        val first = ids.map { sets.choices(it, NOW, 89) }
+        assertEquals(
+            "Too many unlock requests; deny some first.",
+            runCatching { sets.choices(REQUEST_ID, NOW, 89) }.exceptionOrNull()?.message,
+        )
+        assertEquals(first, ids.map { sets.choices(it, NOW, 89) })
+        // Deciding one, or letting them expire, frees room.
+        sets.forget(ids[0])
+        assertTrue(89 in sets.choices(REQUEST_ID, NOW, 89))
+        now += 131
+        assertTrue(89 in sets.choices(OTHER_ID, now, 89))
+    }
+
+    @Test fun wrongPickDeniesWithoutPromptOrSignature() = runTest {
+        for (choice in listOf(0, 88, 90, 99)) {
+            val fixture = Fixture(createdAt = NOW)
+            assertTrue(runCatching { fixture.service.approve(REQUEST_ID, choice) }.exceptionOrNull() is WrongUnlockNumber)
+            assertEquals(0, fixture.prompts)
+            assertEquals(listOf("/v1/auth/unlock/pending", "/v1/auth/unlock/$REQUEST_ID/deny"), fixture.paths)
+            assertTrue(fixture.bodies.none { "signature" in it })
+        }
     }
 
     @Test fun denyNeedsBiometricsToo() = runTest {
@@ -66,7 +143,9 @@ class UnlockApprovalTest {
         assertEquals("Deny unlock of \"Work Mac\"", accepted.reason)
     }
 
-    private inner class Fixture(createdAt: Long, private val accept: Boolean = true) {
+    private inner class Fixture(
+        createdAt: Long, private val accept: Boolean = true, choiceSets: UnlockChoiceSets = UnlockChoiceSets { NOW },
+    ) {
         val paths = mutableListOf<String>()
         val bodies = mutableListOf<String>()
         val waits = mutableListOf<String?>()
@@ -101,7 +180,7 @@ class UnlockApprovalTest {
         )
         val service = UnlockApprovalService(
             api, sessions, { endpoint }, identity, ApprovalLock(),
-            authenticate = { text -> prompts++; reason = text; accept }, unlocked = { true }, now = { NOW },
+            authenticate = { text -> prompts++; reason = text; accept }, unlocked = { true }, choiceSets = choiceSets, now = { NOW },
         )
     }
 
