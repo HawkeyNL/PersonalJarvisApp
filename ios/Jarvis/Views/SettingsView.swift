@@ -87,6 +87,7 @@ private struct SecuritySettingsView: View {
             Section("Device security") {
                 Text("The device key, pairing nonce, device ID, and session token are stored in the device-only Keychain and are never synchronized through iCloud.").font(.footnote)
                 if model.isAuthenticated {
+                    NavigationLink { PasswordChangeView(model: model) } label: { Text("Change account password") }
                     Button("Lock now") { model.lockWhenBackgrounded() }
                     Button("Log out") { showLogoutConfirmation = true }
                 }
@@ -114,6 +115,52 @@ private struct SecuritySettingsView: View {
         } message: {
             Text(verbatim: "\(model.localEraseOffer ?? "")\n\nThis device may stay active on your Home Node until you revoke it from another device. Erase locally only if you will do that.")
         }
+    }
+}
+
+/// Change the account password with the current one; the change is signed with the device key.
+private struct PasswordChangeView: View {
+    @ObservedObject var model: JarvisAppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var current = ""
+    @State private var new = ""
+    @State private var repeated = ""
+    @State private var busy = false
+    @State private var error: String?
+
+    var body: some View {
+        Form {
+            Section {
+                SecureField("Current password", text: $current).textContentType(.password)
+                SecureField("New password (at least 15 characters)", text: $new).textContentType(.newPassword)
+                SecureField("Repeat new password", text: $repeated).textContentType(.newPassword)
+            } footer: {
+                Text("Confirmed with Face ID or Touch ID. Every device is signed out after the change; sign in again with the new password.")
+            }
+            if let error { Section { Text(verbatim: error).foregroundStyle(JarvisTheme.danger) } }
+            Section {
+                Button(busy ? "Verifying…" : "Change password") { Task { await change() } }
+                    .disabled(busy || current.isEmpty || new.isEmpty)
+            }
+        }
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+        .navigationTitle("Account password")
+        .settingsBackground()
+    }
+
+    private func change() async {
+        guard new == repeated else { error = "The new passwords do not match."; return }
+        busy = true
+        error = nil
+        do {
+            try await model.changePassword(current: current, new: new)
+            current = ""; new = ""; repeated = ""
+            dismiss()
+        } catch {
+            self.error = PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "The password was not changed.", max: 160)
+        }
+        busy = false
     }
 }
 

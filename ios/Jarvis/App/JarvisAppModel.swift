@@ -434,6 +434,17 @@ final class JarvisAppModel: ObservableObject {
         try await auth.denyUnlock(id)
     }
 
+    /// Changes the account password (one Face ID / Touch ID prompt). Core then ends every
+    /// session, so this device signs in again with the new password.
+    func changePassword(current: String, new: String) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.rejected(status: 423, message: "Unlock Jarvis first.") }
+        try await auth.changePassword(current: current, new: new)
+        invalidatePresentation(clearIdentity: true)
+        realtime.stop(); speech.stop(); voiceReleaseTask?.cancel()
+        enrollmentState = .signedOut
+        notice = "Password changed. Sign in with the new password."
+    }
+
     /// Revokes another device of this account (one Face ID / Touch ID prompt).
     func revokeDevice(_ id: UUID) async throws {
         guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.rejected(status: 423, message: "Unlock Jarvis first.") }

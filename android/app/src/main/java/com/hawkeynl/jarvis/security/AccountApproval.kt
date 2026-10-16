@@ -101,6 +101,29 @@ class AccountApprovalService(
         )
     }
 
+    /** Changes the account password with the current one. Core binds the new verifier to
+     *  this device's signed approval and then ends every session, so this session is
+     *  cleared here and the user signs in again with the new password. */
+    suspend fun changePassword(current: String, new: String) = approvals.exclusive {
+        require(acceptable(current)) { "Enter the current account password." }
+        require(acceptable(new)) { "Choose a new password of at least 15 characters and at most 1024 bytes, without control characters." }
+        val signedIn = signedIn()
+        val body = JsonObject(mapOf("password" to JsonPrimitive(new), "current_password" to JsonPrimitive(current)))
+        val approval = request(
+            signedIn.origin, signedIn.token, "/v1/auth/account/password/requests", body,
+            unauthorized = "The current password was not accepted, or the session expired.",
+        )
+        // Sign only the request Core just issued for this account's own password.
+        approval.requireFor(AccountApproval.PASSWORD_SET, signedIn.user, signedIn.device, signedIn.user, now())
+        signAndApprove(signedIn, approval, "Change the Jarvis account password")
+        sessions.clearToken()
+    }
+
+    /** Core's account password rules: at least 15 characters, at most 1024 UTF-8 bytes, no controls. */
+    private fun acceptable(password: String) =
+        password.codePointCount(0, password.length) >= 15 && password.toByteArray(Charsets.UTF_8).size <= 1024 &&
+            password.codePoints().noneMatch { Character.getType(it) == Character.CONTROL.toInt() }
+
     private class SignedIn(
         val origin: HomeNodeEndpoint, val session: ProtectedSession, val token: String, val device: String, val user: String,
     )
@@ -136,10 +159,13 @@ class AccountApprovalService(
         approve(signedIn.origin, signedIn.token, approval, signature)
     }
 
-    private suspend fun request(origin: HomeNodeEndpoint, token: String, path: String, body: JsonObject): AccountApproval =
+    private suspend fun request(
+        origin: HomeNodeEndpoint, token: String, path: String, body: JsonObject, unauthorized: String = REFUSED,
+    ): AccountApproval =
         when (val result = api.postAuthorizedJson(origin, token, path, body)) {
             is ApiResult.Success -> runCatching { json.decodeFromJsonElement(AccountApproval.serializer(), result.value) }
                 .getOrElse { error("Core returned an invalid approval request.") }
+            ApiResult.Unauthorized -> error(unauthorized)
             else -> error(refusal(result))
         }
 
@@ -149,6 +175,8 @@ class AccountApprovalService(
             is ApiResult.Success -> check(
                 runCatching { result.value.jsonObject["status"]?.jsonPrimitive?.content }.getOrNull() == "completed",
             ) { "Core did not confirm the change." }
+            // The signed approval may have reached Core before the connection failed.
+            is ApiResult.Unreachable -> error("Home Node unreachable; the outcome is unknown. Refresh, or sign in again if asked.")
             else -> error(refusal(result))
         }
     }
@@ -156,9 +184,13 @@ class AccountApprovalService(
     // Core answers 401 for a refused account action too; report it, do not end the session here.
     private fun refusal(result: ApiResult<JsonElement>): String = when (result) {
         is ApiResult.Success -> "Core did not confirm the change."
-        ApiResult.Unauthorized -> "Core refused this change."
+        ApiResult.Unauthorized -> REFUSED
         is ApiResult.HttpError -> result.message ?: "Core refused this change (HTTP ${result.status})."
         is ApiResult.Unreachable -> "Home Node unreachable; the change was not confirmed."
         is ApiResult.InvalidResponse -> result.message
+    }
+
+    private companion object {
+        const val REFUSED = "Core refused this change."
     }
 }

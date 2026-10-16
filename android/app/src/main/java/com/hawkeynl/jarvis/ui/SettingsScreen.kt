@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -20,11 +21,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun SettingsScreen(
@@ -85,10 +90,56 @@ internal fun SettingsScreen(
             Panel(JvIcon.SHIELD, "This device", Tone.OK, "Signed in with a device-bound key") {
                 MutedText("Model access moved to System Health → Models.")
                 ActionButton("Sign out", actions::logout)
+                PasswordChange(actions)
                 GhostButton("Erase this device and pair again", actions::resetDevice, Modifier.fillMaxWidth(), danger = true)
             }
         }
     }
+}
+
+/** Change the account password with the current one; the change is signed with the device key. */
+@Composable
+private fun PasswordChange(actions: JarvisViewModel) {
+    var open by remember { mutableStateOf(false) }
+    var current by remember { mutableStateOf("") }
+    var next by remember { mutableStateOf("") }
+    var repeat by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    if (!open) {
+        GhostButton("Change account password", { open = true }, Modifier.fillMaxWidth())
+        return
+    }
+    @Composable
+    fun field(label: String, value: String, onChange: (String) -> Unit) = OutlinedTextField(
+        value = value, onValueChange = onChange, modifier = Modifier.fillMaxWidth(),
+        label = { Text(label) }, singleLine = true, visualTransformation = PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
+    )
+    field("Current password", current) { current = it }
+    field("New password (at least 15 characters)", next) { next = it }
+    field("Repeat new password", repeat) { repeat = it }
+    MutedText("Every device is signed out after the change; sign in again with the new password.")
+    error?.let { ErrorText(it) }
+    ActionButton(
+        if (busy) "Verifying…" else "Change password",
+        {
+            if (next != repeat) {
+                error = "The new passwords do not match."
+            } else {
+                busy = true
+                error = null
+                scope.launch {
+                    error = actions.changePassword(current, next)
+                    busy = false
+                    if (error == null) { current = ""; next = ""; repeat = ""; open = false }
+                }
+            }
+        },
+        enabled = !busy && current.isNotEmpty() && next.isNotEmpty(),
+    )
+    GhostButton("Cancel", { open = false; current = ""; next = ""; repeat = ""; error = null }, Modifier.fillMaxWidth(), enabled = !busy)
 }
 
 @Composable
