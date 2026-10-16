@@ -1559,6 +1559,16 @@ final class UnlockApprovalTests: XCTestCase {
         XCTAssertEqual(UnlockDecisionProtocol.calls().map { $0.path }, ["/v1/auth/unlock/pending"])
     }
 
+    /// Fresh decoys per look would leak the code: it is the one number in every set.
+    func testRepeatedLooksAtOneRequestShowTheSameChoices() async throws {
+        let (auth, _, _) = try await fixture(createdAt: Int64(Date().timeIntervalSince1970))
+        let first = try await auth.unlockChoices(UnlockDecisionProtocol.request)
+        for _ in 0..<20 {
+            let again = try await auth.unlockChoices(UnlockDecisionProtocol.request)
+            XCTAssertEqual(again, first)
+        }
+    }
+
     func testWrongPickDeniesWithoutPromptOrSignature() async throws {
         for choice in [0, 88, 90, 99] {
             let (auth, _, prompts) = try await fixture(createdAt: Int64(Date().timeIntervalSince1970))

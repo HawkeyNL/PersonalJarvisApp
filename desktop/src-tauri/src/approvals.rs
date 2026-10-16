@@ -7,6 +7,8 @@ use model_control::Session;
 use rand::{seq::SliceRandom, Rng};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 /// Pending lists are small; agent previews are their largest field.
 const LIST_BYTES: usize = 1024 * 1024;
@@ -17,6 +19,14 @@ const PREVIEW_CHARS: usize = 80;
 const UNLOCK_CODE_DOMAIN: &[u8] = b"jarvis-unlock-code-v1\0";
 const WRONG_CODE: &str = "Wrong number. The unlock request was denied.";
 const DENY_UNCONFIRMED: &str = "Wrong number, but Core did not confirm the deny. Deny it again.";
+/// Core expires unlock requests after two minutes.
+const UNLOCK_TTL: Duration = Duration::from_secs(130);
+const CHOICE_SETS: usize = 16;
+
+type ChoiceSet = (uuid::Uuid, Instant, [u8; 3]);
+/// Choice sets by request id, kept until decided or expired. Fresh decoys on
+/// every look would leak the code: it is the one number in every set.
+static UNLOCK_CHOICES: Mutex<Vec<ChoiceSet>> = Mutex::new(Vec::new());
 
 #[derive(Deserialize)]
 struct StatusReply {
@@ -261,6 +271,34 @@ fn unlock_choices<R: Rng + ?Sized>(code: u8, rng: &mut R) -> [u8; 3] {
     choices
 }
 
+/// The request's choice set: the cached one while it lives, else a new one.
+fn cached_unlock_choices<R: Rng + ?Sized>(
+    sets: &mut Vec<ChoiceSet>,
+    request_id: uuid::Uuid,
+    code: u8,
+    now: Instant,
+    rng: &mut R,
+) -> [u8; 3] {
+    sets.retain(|(id, at, choices)| {
+        now.duration_since(*at) < UNLOCK_TTL && (*id != request_id || choices.contains(&code))
+    });
+    if let Some((_, _, choices)) = sets.iter().find(|(id, _, _)| *id == request_id) {
+        return *choices;
+    }
+    if sets.len() >= CHOICE_SETS {
+        sets.remove(0);
+    }
+    let choices = unlock_choices(code, rng);
+    sets.push((request_id, now, choices));
+    choices
+}
+
+fn forget_unlock_choices(request_id: uuid::Uuid) {
+    if let Ok(mut sets) = UNLOCK_CHOICES.lock() {
+        sets.retain(|(id, _, _)| *id != request_id);
+    }
+}
+
 fn unlock_item(
     items: &[UnlockItem],
     request_id: uuid::Uuid,
@@ -456,6 +494,7 @@ pub(super) async fn auth_approve_pairing(app: AppHandle, request_id: String) -> 
 
 /// Three numbers for the owner to pick from, built here from the request
 /// Core lists for this id; one of them is the code the other device shows.
+/// Asking again for the same request returns the same three.
 #[tauri::command]
 pub(super) async fn auth_unlock_choices(
     app: AppHandle,
@@ -465,8 +504,14 @@ pub(super) async fn auth_unlock_choices(
     let session = Session::load(app)?;
     let list: UnlockList = fetch(&session, "/v1/auth/unlock/pending?wait=0").await?;
     let (item, nonce) = unlock_item(&list.requests, request_id)?;
-    Ok(unlock_choices(
+    let mut sets = UNLOCK_CHOICES
+        .lock()
+        .map_err(|_| "unlock choices unavailable")?;
+    Ok(cached_unlock_choices(
+        &mut sets,
+        item.id,
         unlock_code(item.id, &nonce),
+        Instant::now(),
         &mut rand::rngs::OsRng,
     ))
 }
@@ -486,7 +531,9 @@ pub(super) async fn auth_approve_unlock(
     match unlock_decision(&list.requests, request_id, device, choice)? {
         UnlockDecision::Approve(approval) => {
             let path = format!("/v1/auth/unlock/{request_id}/approve");
-            sign_and_post(session, approval, path).await
+            sign_and_post(session, approval, path).await?;
+            forget_unlock_choices(request_id);
+            Ok(())
         }
         UnlockDecision::Deny => {
             let response = session
@@ -507,7 +554,10 @@ pub(super) async fn auth_approve_unlock(
                 .await
                 .map_err(|_| DENY_UNCONFIRMED)?;
             match serde_json::from_slice::<StatusReply>(&body) {
-                Ok(reply) if reply.status == "denied" => Err(WRONG_CODE.into()),
+                Ok(reply) if reply.status == "denied" => {
+                    forget_unlock_choices(request_id);
+                    Err(WRONG_CODE.into())
+                }
                 _ => Err(DENY_UNCONFIRMED.into()),
             }
         }
@@ -683,6 +733,28 @@ mod tests {
         }
         // Shuffled: the code is not stuck in one place (each slot ~1000 of 3000).
         assert!(positions.iter().all(|n| *n > 800), "{positions:?}");
+    }
+
+    #[test]
+    fn a_request_keeps_its_choice_set_until_it_expires() {
+        let (mut sets, mut rng, start) = (Vec::new(), rand::rngs::OsRng, Instant::now());
+        let first = cached_unlock_choices(&mut sets, id(REQUEST), 89, start, &mut rng);
+        for _ in 0..20 {
+            assert_eq!(
+                cached_unlock_choices(&mut sets, id(REQUEST), 89, start, &mut rng),
+                first
+            );
+        }
+        // Expired: dropped from the cache (a new set is built on the next look).
+        cached_unlock_choices(&mut sets, id(USER), 1, start + UNLOCK_TTL, &mut rng);
+        assert!(sets.iter().all(|(set, _, _)| *set != id(REQUEST)));
+        // Bounded: the oldest set goes first.
+        for n in 0..CHOICE_SETS as u128 + 4 {
+            let other = uuid::Uuid::from_u128(n + 1);
+            cached_unlock_choices(&mut sets, other, 7, start + UNLOCK_TTL, &mut rng);
+        }
+        assert_eq!(sets.len(), CHOICE_SETS);
+        assert!(sets.iter().all(|(set, _, _)| *set != id(USER)));
     }
 
     #[test]

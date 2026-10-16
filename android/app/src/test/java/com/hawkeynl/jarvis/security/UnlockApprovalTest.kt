@@ -91,6 +91,13 @@ class UnlockApprovalTest {
         assertEquals(listOf("/v1/auth/unlock/pending"), fixture.paths)
     }
 
+    /** Fresh decoys per look would leak the code: it is the one number in every set. */
+    @Test fun repeatedLooksAtOneRequestShowTheSameChoices() = runTest {
+        val fixture = Fixture(createdAt = NOW)
+        val first = fixture.service.choices(REQUEST_ID)
+        repeat(20) { assertEquals(first, fixture.service.choices(REQUEST_ID.uppercase())) }
+    }
+
     @Test fun wrongPickDeniesWithoutPromptOrSignature() = runTest {
         for (choice in listOf(0, 88, 90, 99)) {
             val fixture = Fixture(createdAt = NOW)

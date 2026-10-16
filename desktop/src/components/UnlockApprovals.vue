@@ -30,7 +30,7 @@ const two = (n: number) => String(n).padStart(2, "0");
             </div>
           </div>
           <div v-if="picking?.id === r.id" class="pick">
-            <p>Pick the number shown on {{ r.device_name }}. A wrong number denies the request.</p>
+            <p>Pick the number shown on that device. A wrong number denies the request.</p>
             <div class="choices">
               <button v-for="c in picking.choices" :key="c" class="choice" @click="pick(r.id, c)">
                 {{ two(c) }}

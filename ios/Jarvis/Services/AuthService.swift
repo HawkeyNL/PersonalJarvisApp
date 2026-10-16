@@ -451,13 +451,26 @@ actor AuthService {
         return list.requests
     }
 
+    /// Choice sets by request id, kept until decided or expired. Fresh decoys on every look
+    /// would leak the code: it is the one number in every set.
+    private var unlockChoiceSets: [UUID: (createdAt: Int64, choices: [Int])] = [:]
+
     /// Three numbers for the owner to pick from, built here from the request Core lists for
-    /// this id; one of them is the code the other device shows.
+    /// this id; one of them is the code the other device shows. Asking again for the same
+    /// request returns the same three.
     func unlockChoices(_ id: UUID) async throws -> [Int] {
         let (_, _, item) = try await currentUnlock(id)
         let code = try UnlockCode.code(requestId: item.id, nonceHex: item.nonce)
+        let now = Int64(Date().timeIntervalSince1970)
+        unlockChoiceSets = unlockChoiceSets.filter { now - $0.value.createdAt <= 130 }
+        if let cached = unlockChoiceSets[item.id]?.choices, cached.contains(code) { return cached }
+        if unlockChoiceSets.count >= 16, let oldest = unlockChoiceSets.min(by: { $0.value.createdAt < $1.value.createdAt }) {
+            unlockChoiceSets[oldest.key] = nil
+        }
         var random = SystemRandomNumberGenerator()
-        return UnlockCode.choices(for: code, using: &random)
+        let choices = UnlockCode.choices(for: code, using: &random)
+        unlockChoiceSets[item.id] = (item.created_at, choices)
+        return choices
     }
 
     /// Approve another device's unlock with the owner's number pick: re-read the request by
@@ -468,6 +481,7 @@ actor AuthService {
         let code = try UnlockCode.code(requestId: item.id, nonceHex: item.nonce)
         guard choice == code else {
             try await postUnlockDeny(item.id, token: token, binding: binding)
+            unlockChoiceSets[item.id] = nil
             throw UnlockWrongNumber()
         }
         guard let device = try await credentials.deviceId() else { throw JarvisAPIError.unauthorized }
@@ -487,6 +501,7 @@ actor AuthService {
                                token: token, expectedBinding: binding)
         }
         guard result.status == "approved" else { throw JarvisAPIError.rejected(status: 503, message: "Core did not confirm the decision.") }
+        unlockChoiceSets[item.id] = nil
     } }
 
     /// Deny another device's unlock. Also re-read by id and gated on Face ID / Touch ID.
@@ -497,6 +512,7 @@ actor AuthService {
             throw JarvisAPIError.rejected(status: 409, message: "Session changed; try again.")
         }
         try await postUnlockDeny(item.id, token: token, binding: binding)
+        unlockChoiceSets[item.id] = nil
     } }
 
     private func postUnlockDeny(_ id: UUID, token: String, binding: UUID) async throws {

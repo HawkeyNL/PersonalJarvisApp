@@ -43,17 +43,33 @@ class UnlockApprovalService(
         }
     }
 
+    // Choice sets by request id. Fresh decoys on every look would leak the code (it is the
+    // one number in every set), so a request keeps its set until decided or expired.
+    private val choiceSets = LinkedHashMap<String, Pair<Long, List<Int>>>()
+
     /** Three numbers for the owner to pick from, built here from the request Core lists
-     *  for this id; one of them is the code the other device shows. */
+     *  for this id; one of them is the code the other device shows. Asking again for the
+     *  same request returns the same three. */
     suspend fun choices(id: String): List<Int> {
         val (_, _, item) = current(id)
-        return UnlockCode.choices(UnlockCode.code(item.id, item.nonce))
+        val code = UnlockCode.code(item.id, item.nonce)
+        val key = item.id.lowercase()
+        return synchronized(choiceSets) {
+            choiceSets.values.removeAll { now() - it.first > MAX_AGE_SECONDS }
+            choiceSets[key]?.second?.takeIf { code in it } ?: UnlockCode.choices(code).also {
+                if (choiceSets.size >= MAX_CHOICE_SETS) choiceSets.remove(choiceSets.keys.first())
+                choiceSets[key] = item.created_at to it
+            }
+        }
     }
+
+    private fun forgetChoices(id: String) = synchronized(choiceSets) { choiceSets.remove(id.lowercase()) }
 
     suspend fun approve(id: String, choice: Int) = approvals.exclusive {
         val (origin, token, item) = current(id)
         if (choice != UnlockCode.code(item.id, item.nonce)) {
             decide(origin, token, "/v1/auth/unlock/${item.id}/deny", JsonObject(emptyMap()), "denied")
+            forgetChoices(item.id)
             throw WrongUnlockNumber()
         }
         val session = sessions.session()
@@ -63,6 +79,7 @@ class UnlockApprovalService(
         currentCoroutineContext().ensureActive()
         check(unlocked() && endpoint() == origin && sessions.session() == session && fresh(item)) { "Request expired or session changed" }
         decide(origin, token, "/v1/auth/unlock/${item.id}/approve", JsonObject(mapOf("signature" to JsonPrimitive(signature))), "approved")
+        forgetChoices(item.id)
     }
 
     suspend fun deny(id: String) = approvals.exclusive {
@@ -74,6 +91,7 @@ class UnlockApprovalService(
         currentCoroutineContext().ensureActive()
         check(unlocked() && endpoint() == origin && sessions.session() == session) { "Session changed; try again" }
         decide(origin, token, "/v1/auth/unlock/${item.id}/deny", JsonObject(emptyMap()), "denied")
+        forgetChoices(item.id)
     }
 
     /** The request as Core lists it right now, never a copy the UI held on to. */
@@ -113,5 +131,6 @@ class UnlockApprovalService(
 
     private companion object {
         const val MAX_AGE_SECONDS = 130L
+        const val MAX_CHOICE_SETS = 16
     }
 }
