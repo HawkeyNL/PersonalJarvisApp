@@ -273,6 +273,7 @@ enum PairingFingerprint {
 struct AccountApproval: Decodable, Equatable {
     static let deviceRevoke = "device-revoke"
     static let passwordSet = "password-set"
+    static let passwordReset = "password-reset"
 
     let request_id: UUID
     let user_id: UUID
@@ -285,7 +286,7 @@ struct AccountApproval: Decodable, Equatable {
     /// Exact v1 client-core `account_approval_message`: domain, action name, request,
     /// user, device and target ids, 32-byte nonce, big-endian i64 expiry.
     func message() throws -> Data {
-        guard [Self.deviceRevoke, Self.passwordSet].contains(action),
+        guard [Self.deviceRevoke, Self.passwordSet, Self.passwordReset].contains(action),
               let nonce = Data(strictHex: nonce), nonce.count == 32, expires_at > 0 else {
             throw DeviceIdentityError.invalidChallenge
         }

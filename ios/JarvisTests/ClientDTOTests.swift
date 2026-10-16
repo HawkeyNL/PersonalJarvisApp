@@ -1293,6 +1293,13 @@ final class AccountApprovalTests: XCTestCase {
                                        action: AccountApproval.passwordSet, target: vector.target, nonce: nonce, expires_at: 1_800_000_000)
         XCTAssertEqual(try password.message().hexEncodedString(),
                        "6a61727669732d6163636f756e742d617070726f76616c2d76310070617373776f72642d73657400" + tail)
+        // client-core `password_reset_approval_matches_golden_bytes`: target is the user.
+        let reset = AccountApproval(request_id: vector.request_id, user_id: vector.user_id, device_id: vector.device_id,
+                                    action: AccountApproval.passwordReset, target: vector.user_id, nonce: nonce, expires_at: 1_800_000_000)
+        XCTAssertEqual(try reset.message().hexEncodedString(),
+                       "6a61727669732d6163636f756e742d617070726f76616c2d763100" + "70617373776f72642d726573657400"
+                       + "00112233445566778899aabbccddeeff" + "102132435465768798a9bacbdcedfe0f"
+                       + "ffeeddccbbaa99887766554433221100" + "102132435465768798a9bacbdcedfe0f" + nonce + "000000006b49d200")
         for bad in [approval(action: "device-delete"), approval(expiresAt: 0),
                     AccountApproval(request_id: UUID(), user_id: UUID(), device_id: UUID(), action: AccountApproval.deviceRevoke,
                                     target: UUID(), nonce: String(repeating: "ab", count: 31), expires_at: 1)] {
@@ -1386,6 +1393,61 @@ final class AccountApprovalTests: XCTestCase {
         }
     }
 
+    func testPasswordResetSignsCoresResetChallengeAndKeepsTheSession() async throws {
+        let challenge = approval(action: AccountApproval.passwordReset, target: AccountDecisionProtocol.user)
+        let pending = #"{"status":"pending_confirmation","request_id":"\#(AccountDecisionProtocol.request)","expires_in_seconds":900}"#
+        let (auth, credentials, publicKey, prompts) = try await fixture(revoke: AccountDecisionProtocol.json(challenge), approve: pending)
+        let id = try await auth.resetPassword(new: "fixture new password only")
+        XCTAssertEqual(id, AccountDecisionProtocol.request)
+        let reasons = await prompts.reasons
+        XCTAssertEqual(reasons, ["Reset Jarvis account password"])
+        let calls = AccountDecisionProtocol.calls()
+        XCTAssertEqual(calls.dropFirst().first?.path, "/v1/auth/account/password/reset-requests")
+        XCTAssertEqual(calls.dropFirst().first?.body, ["password": "fixture new password only"])
+        let signature = try XCTUnwrap(calls.last?.body["signature"].flatMap { Data(hexEncoded: $0) })
+        let verifier = try Curve25519.Signing.PublicKey(rawRepresentation: XCTUnwrap(Data(hexEncoded: publicKey)))
+        XCTAssertTrue(verifier.isValidSignature(signature, for: try challenge.message()))
+        let session = try await credentials.session()
+        XCTAssertNotNil(session, "Core ends the session only after the Home Node confirms")
+    }
+
+    func testPasswordResetRefusesBeforeSigningOrWithoutPendingConfirmation() async throws {
+        let (short, _, _, _) = try await fixture(revoke: nil)
+        do { _ = try await short.resetPassword(new: "too short"); XCTFail("Must refuse") } catch { }
+        XCTAssertTrue(AccountDecisionProtocol.calls().isEmpty)
+        // A password-set challenge, or a reset for another target, is never signed.
+        for swapped in [approval(action: AccountApproval.passwordSet, target: AccountDecisionProtocol.user),
+                        approval(action: AccountApproval.passwordReset)] {
+            let (auth, _, _, prompts) = try await fixture(revoke: AccountDecisionProtocol.json(swapped))
+            do { _ = try await auth.resetPassword(new: "fixture new password only"); XCTFail("Must refuse") } catch { }
+            let count = await prompts.count
+            XCTAssertEqual(count, 0)
+        }
+        // "completed" or another request id is not a pending reset.
+        let challenge = approval(action: AccountApproval.passwordReset, target: AccountDecisionProtocol.user)
+        for answer in [#"{"status":"completed"}"#, #"{"status":"pending_confirmation","request_id":"\#(UUID())"}"#] {
+            let (auth, _, _, prompts) = try await fixture(revoke: AccountDecisionProtocol.json(challenge), approve: answer)
+            do { _ = try await auth.resetPassword(new: "fixture new password only"); XCTFail("Must refuse") }
+            catch { XCTAssertEqual((error as? LocalizedError)?.errorDescription, "Core did not confirm the change.") }
+            let count = await prompts.count
+            XCTAssertEqual(count, 1)
+            XCTAssertTrue(AccountDecisionProtocol.calls().last?.path.hasSuffix("/approve") ?? false)
+        }
+    }
+
+    func testAPendingConfirmationIsNotACompletedChangeOrUnlink() async throws {
+        let pending = #"{"status":"pending_confirmation","request_id":"\#(AccountDecisionProtocol.request)"}"#
+        let change = approval(action: AccountApproval.passwordSet, target: AccountDecisionProtocol.user)
+        let (auth, credentials, _, _) = try await fixture(revoke: AccountDecisionProtocol.json(change), approve: pending)
+        do { try await auth.changePassword(current: "fixture old password only", new: "fixture new password only"); XCTFail("Must refuse") }
+        catch { XCTAssertEqual((error as? LocalizedError)?.errorDescription, "Core did not confirm the change.") }
+        let session = try await credentials.session()
+        XCTAssertNotNil(session)
+        let (unlink, _, _, _) = try await fixture(revoke: AccountDecisionProtocol.json(approval()), approve: pending)
+        do { try await unlink.unlinkDevice(); XCTFail("Must refuse") }
+        catch { XCTAssertEqual((error as? LocalizedError)?.errorDescription, "Core did not confirm the change.") }
+    }
+
     func testASecondApprovalIsRefusedWhileOneIsPrompting() async throws {
         let gate = PromptGate()
         let (auth, _, _, _) = try await fixture(revoke: AccountDecisionProtocol.json(approval()), prompt: { await gate.wait() })
@@ -1397,7 +1459,8 @@ final class AccountApprovalTests: XCTestCase {
         try await first.value
     }
 
-    private func fixture(revoke: String?, devices: String = #"{"devices":[]}"#, prompt: (@Sendable () async -> Void)? = nil) async throws
+    private func fixture(revoke: String?, devices: String = #"{"devices":[]}"#, approve: String = #"{"status":"completed"}"#,
+                         prompt: (@Sendable () async -> Void)? = nil) async throws
         -> (AuthService, SecureCredentialStore, String, PairingPromptCounter) {
         let store = FixtureSecureStorage()
         let credentials = SecureCredentialStore(keychain: store)
@@ -1405,7 +1468,7 @@ final class AccountApprovalTests: XCTestCase {
         let publicKey = try await identity.publicKeyHex()
         try await credentials.save(deviceId: AccountDecisionProtocol.device)
         try await credentials.save(session: SecureSession(token: "fixture-session-not-a-secret", expiresAt: Int64(Date().timeIntervalSince1970) + 3600))
-        AccountDecisionProtocol.reset(revoke: revoke, devices: devices)
+        AccountDecisionProtocol.reset(revoke: revoke, devices: devices, approve: approve)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [AccountDecisionProtocol.self]
         let api = JarvisAPIClient(baseURL: URL(string: "https://jarvis.example.com")!, session: URLSession(configuration: configuration))
@@ -1441,9 +1504,10 @@ private final class AccountDecisionProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var revoke: String?
     private static var devices = #"{"devices":[]}"#
+    private static var approve = #"{"status":"completed"}"#
     private static var captured: [(path: String, body: [String: String])] = []
-    static func reset(revoke: String?, devices: String = #"{"devices":[]}"#) {
-        lock.withLock { self.revoke = revoke; self.devices = devices; captured = [] }
+    static func reset(revoke: String?, devices: String = #"{"devices":[]}"#, approve: String = #"{"status":"completed"}"#) {
+        lock.withLock { self.revoke = revoke; self.devices = devices; self.approve = approve; captured = [] }
     }
     static func calls() -> [(path: String, body: [String: String])] { lock.withLock { captured } }
     static func json(_ approval: AccountApproval) -> String {
@@ -1469,11 +1533,11 @@ private final class AccountDecisionProtocol: URLProtocol {
             respond(200, #"{"user_id":"\#(Self.user)","device_id":"\#(Self.device)"}"#)
         } else if path == "/v1/devices" {
             respond(200, Self.lock.withLock { Self.devices })
-        } else if path.hasSuffix("/revoke-request") || path == "/v1/auth/account/password/requests" {
+        } else if path.hasSuffix("/revoke-request") || path.hasPrefix("/v1/auth/account/password/") {
             // No configured answer: Core refuses.
             if let revoke = Self.lock.withLock({ Self.revoke }) { respond(200, revoke) } else { respond(401, #"{"error":"unauthorized"}"#) }
         } else {
-            respond(200, #"{"status":"completed"}"#)
+            respond(200, Self.lock.withLock { Self.approve })
         }
     }
     private func respond(_ status: Int, _ answer: String) {

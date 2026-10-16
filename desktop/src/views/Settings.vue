@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { computed, ref, onMounted } from "vue";
 import AccountAdministration from "../components/AccountAdministration.vue";
 import JvBackdrop from "../components/jv/JvBackdrop.vue";
 import JvTopBar from "../components/jv/JvTopBar.vue";
 import { ACCENTS, PRESETS, currentAccent, applyAccent, type Accent } from "../theme";
 import { currentAuthStatus, deregisterDevice, type AuthStatus } from "../auth";
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
-import { lockEnabled, isDesktop, setLockEnabled, initLock } from "../lock";
+import { lockEnabled, lockAvailable, setLockEnabled, initLock } from "../lock";
+import { platformCapabilities } from "../platform";
 import {
   voiceSupported,
   enrolled,
@@ -68,15 +69,22 @@ function pick(a: Accent) {
 }
 
 const confirmUnlink = ref(false);
+// A Mac revokes itself with a Touch ID approval; other desktops only sign out.
+const signer = computed(() => platformCapabilities.value.supportsBiometricSigning);
 const unlinking = ref(false);
+const unlinkMessage = ref<string | null>(null);
 
 async function doUnlink() {
   unlinking.value = true;
+  unlinkMessage.value = null;
+  const deviceId = session.value?.device_id;
   try {
     await deregisterDevice();
     session.value = await currentAuthStatus();
+    // Off macOS the device stays active until revoked on the Home Node.
+    if (!signer.value && deviceId) unlinkMessage.value = `Unlinked. Revoke it on the Home Node: sudo jarvis devices revoke ${deviceId}`;
   } catch {
-    homeNodeMessage.value = "Unlinking did not finish. Confirm on your device and try again.";
+    unlinkMessage.value = "Unlinking did not finish. Try again.";
   } finally {
     unlinking.value = false;
     confirmUnlink.value = false;
@@ -103,7 +111,7 @@ onMounted(async () => {
   const homeNode = await loadHomeNodeConfig();
   homeNodeOriginInput.value = homeNode.origin ?? "";
   await loadUpdateStatus();
-  await initLock(); // resolves isDesktop for the lock toggle
+  await initLock(); // resolves lockAvailable for the lock toggle
   await refreshVoiceStatus();
   await listMics();
 });
@@ -186,28 +194,30 @@ onMounted(async () => {
       >
         Unlink this device
       </button>
+      <p v-if="unlinkMessage" class="small muted unlink-message" role="status">{{ unlinkMessage }}</p>
     </div>
 
     <div v-if="section === 'Account & security'" class="panel glass">
       <div class="panel-head">SECURITY <span class="hint">app lock</span></div>
-      <label class="toggle" :class="{ off: !isDesktop }">
+      <label class="toggle" :class="{ off: !lockAvailable }">
         <span class="tl">
           <span class="tt">Lock on open</span>
           <span class="td">
             When Jarvis opens and after 15 minutes without input: Touch ID,
-            Face ID or your computer password, or approve from your phone.
+            Windows Hello or your computer password. It hides the app; it signs
+            nothing.
           </span>
         </span>
         <input
           type="checkbox"
           :checked="lockEnabled"
-          :disabled="!isDesktop"
+          :disabled="!lockAvailable"
           @change="setLockEnabled(($event.target as HTMLInputElement).checked)"
         />
         <span class="sw"></span>
       </label>
-      <p v-if="!isDesktop" class="muted small">
-        This device approves unlocks for your desktop, so it needs no lock of its own.
+      <p v-if="!lockAvailable" class="muted small">
+        This computer has no local unlock prompt, so the app lock is off.
       </p>
     </div>
 
@@ -361,11 +371,23 @@ onMounted(async () => {
       <div v-if="confirmUnlink" class="modal-overlay" @click.self="confirmUnlink = false">
         <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="unlink-title">
           <h2 id="unlink-title">Unlink this device?</h2>
-          <p>
-            This revokes the device on the server and erases its device key here.
-            You then have to pair (enroll) this device again to sign in.
-            Your data on the server stays.
+          <p v-if="signer">
+            This revokes the device on the server after Touch ID and erases its
+            device key here. You then have to pair (enroll) this device again to
+            sign in. Your data on the server stays.
           </p>
+          <template v-else>
+            <p>
+              This signs the device out and erases its device key here. You then
+              have to pair (enroll) this device again to sign in. Your data on the
+              server stays.
+            </p>
+            <p>
+              The device stays active on the Home Node (and trusted for model
+              changes, if its key is pinned) until you revoke it there:
+            </p>
+            <pre class="mono">sudo jarvis devices revoke {{ session?.device_id ?? "<device id>" }}</pre>
+          </template>
           <div class="modal-actions">
             <button class="ghost" :disabled="unlinking" @click="confirmUnlink = false">
               Cancel
@@ -455,6 +477,8 @@ onMounted(async () => {
 }
 .modal h2 { margin: 0 0 10px; font-size: 16px; }
 .modal p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.unlink-message { overflow-wrap: anywhere; user-select: text; }
+.modal pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 .modal-actions .ghost { margin-top: 0; }
 

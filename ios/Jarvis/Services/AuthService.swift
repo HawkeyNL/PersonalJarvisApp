@@ -382,6 +382,31 @@ actor AuthService {
         try? await credentials.clearSession()
     } }
 
+    /// Forgotten-password recovery from this signed-in device: no current password. The
+    /// signed request only waits on Core until the owner confirms it as root on the Home Node;
+    /// Core then ends every session. Returns the request id to confirm there.
+    func resetPassword(new: String) async throws -> UUID { try await exclusive {
+        guard Self.acceptablePassword(new) else {
+            throw JarvisAPIError.rejected(status: 400, message: "Choose a new password of at least 15 characters and at most 1024 bytes, without control characters.")
+        }
+        let signedIn = try await signedIn()
+        let approval: AccountApproval
+        do {
+            approval = try await accountDecision {
+                try await api.post("/v1/auth/account/password/reset-requests", body: ["password": new],
+                                   token: signedIn.token, expectedBinding: signedIn.binding)
+            }
+        } catch JarvisAPIError.rejected(let status, _) where status == 401 {
+            throw JarvisAPIError.rejected(status: 401, message: "Not accepted on this device, or the session expired.")
+        }
+        // Sign only the reset Core just issued for this account's own password.
+        try approval.require(action: AccountApproval.passwordReset, user: signedIn.user, device: signedIn.device,
+                             target: signedIn.user, now: Int64(Date().timeIntervalSince1970))
+        try await signAndApprove(approval, signedIn: signedIn, reason: "Reset Jarvis account password",
+                                 expectedStatus: "pending_confirmation")
+        return approval.request_id
+    } }
+
     /// Core's account password rules: at least 15 characters, at most 1024 UTF-8 bytes, no controls.
     static func acceptablePassword(_ password: String) -> Bool {
         password.unicodeScalars.count >= 15 && password.utf8.count <= 1024
@@ -417,7 +442,8 @@ actor AuthService {
     }
 
     /// One Face ID / Touch ID prompt, then the approval, only while nothing changed.
-    private func signAndApprove(_ approval: AccountApproval, signedIn: SignedIn, reason: String) async throws {
+    private func signAndApprove(_ approval: AccountApproval, signedIn: SignedIn, reason: String,
+                                expectedStatus: String = "completed") async throws {
         let context = try await requireBiometric(reason)
         defer { context.invalidate() }
         guard await api.binding() == signedIn.binding, try await credentials.session()?.token == signedIn.token,
@@ -436,7 +462,10 @@ actor AuthService {
             // The signed approval may have reached Core before the connection failed.
             throw JarvisAPIError.rejected(status: 503, message: "Home Node unreachable; the outcome is unknown. Refresh, or sign in again if asked.")
         }
-        guard result.status == "completed" else { throw JarvisAPIError.rejected(status: 503, message: "Core did not confirm the change.") }
+        // A pending reset must name the request this device signed.
+        guard result.status == expectedStatus, expectedStatus == "completed" || result.request_id == approval.request_id else {
+            throw JarvisAPIError.rejected(status: 503, message: "Core did not confirm the change.")
+        }
     }
 
     /// Unlock requests waiting for this device, held up to `wait` seconds until one appears.
@@ -616,7 +645,7 @@ actor AuthService {
     }
 }
 
-private struct StatusResponse: Decodable { let status: String }
+private struct StatusResponse: Decodable { let status: String; let request_id: UUID? }
 
 /// The owner picked the wrong number; the unlock request has been denied.
 struct UnlockWrongNumber: LocalizedError {

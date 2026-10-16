@@ -1,12 +1,9 @@
-//! In-memory, model-only OS authorization. Never stores passwords or signatures.
+//! One OS prompt at a time for every signing path. Holds no grant: every
+//! signed change or approval needs its own prompt.
 use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
-use std::time::{Duration, Instant, SystemTime};
 
-const TTL: Duration = Duration::from_secs(300);
-static GRANT: Mutex<Option<Grant>> = Mutex::new(None);
-// One OS prompt at a time for every signing path. Taken before AUTH_STORAGE
-// and never acquired by lock/logout paths. It guards no data, so a poisoned
-// lock is still usable.
+// Taken before AUTH_STORAGE and never acquired by lock/logout paths. It
+// guards no data, so a poisoned lock is still usable.
 static PROMPT: Mutex<()> = Mutex::new(());
 
 /// Wait for the OS prompt (model changes queue behind an open prompt).
@@ -23,49 +20,22 @@ pub(super) fn try_prompt() -> Result<MutexGuard<'static, ()>, String> {
     }
 }
 
-struct Grant {
-    epoch: u64,
-    monotonic: Instant,
-    wall: SystemTime,
-}
-
-impl Grant {
-    fn valid_at(&self, epoch: u64, monotonic: Instant, wall: SystemTime) -> bool {
-        self.epoch == epoch
-            && within_window(monotonic.checked_duration_since(self.monotonic))
-            && within_window(wall.duration_since(self.wall).ok())
+/// Every signature needs Touch ID, never the device password. Only macOS can
+/// enforce that: Windows Hello always offers its PIN and Linux has no
+/// biometric prompt, so both refuse to sign without prompting. A Mac without
+/// Touch ID, or a cancelled prompt, fails with the same `hint`.
+///
+/// This is a prompt gate in native code; the macOS device key itself is not
+/// bound to biometry.
+pub(super) fn touch_id(
+    macos: bool,
+    hint: &str,
+    authenticate: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    if !macos {
+        return Err(hint.into());
     }
-}
-
-fn within_window(elapsed: Option<Duration>) -> bool {
-    elapsed.is_some_and(|elapsed| elapsed < TTL)
-}
-
-pub(super) fn valid(epoch: u64) -> Result<bool, String> {
-    let grant = GRANT
-        .lock()
-        .map_err(|_| "Model authorization unavailable")?;
-    Ok(grant
-        .as_ref()
-        .is_some_and(|grant| grant.valid_at(epoch, Instant::now(), SystemTime::now())))
-}
-
-pub(super) fn remember(epoch: u64) -> Result<(), String> {
-    *GRANT
-        .lock()
-        .map_err(|_| "Model authorization unavailable")? = Some(Grant {
-        epoch,
-        monotonic: Instant::now(),
-        wall: SystemTime::now(),
-    });
-    Ok(())
-}
-
-pub(super) fn clear() -> Result<(), String> {
-    *GRANT
-        .lock()
-        .map_err(|_| "Model authorization unavailable")? = None;
-    Ok(())
+    authenticate().map_err(|_| format!("Touch ID did not confirm. {hint}"))
 }
 
 #[cfg(test)]
@@ -73,27 +43,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fixed_five_minutes_and_clock_reversal_fail_closed() {
-        assert!(within_window(Some(Duration::from_secs(299))));
-        assert!(!within_window(Some(TTL)));
-        assert!(!within_window(Some(TTL + Duration::from_secs(1))));
-        assert!(!within_window(None));
-    }
-
-    #[test]
-    fn session_bound_and_explicitly_revocable() {
-        let start = Instant::now();
-        let wall = SystemTime::now();
-        let grant = Grant {
-            epoch: 10,
-            monotonic: start,
-            wall,
-        };
-        assert!(grant.valid_at(10, start, wall));
-        assert!(!grant.valid_at(11, start, wall));
-        assert!(grant.valid_at(10, start + TTL - Duration::from_secs(1), wall));
-        assert!(!grant.valid_at(10, start + TTL, wall));
-        assert!(!grant.valid_at(10, start, wall + TTL));
-        assert!(!grant.valid_at(10, start, wall - Duration::from_secs(1)));
+    fn signing_needs_touch_id_and_is_refused_off_macos() {
+        assert!(touch_id(true, "hint", || Ok(())).is_ok());
+        assert_eq!(
+            touch_id(true, "Use your phone", || Err(
+                "biometrics not supported".into()
+            ))
+            .unwrap_err(),
+            "Touch ID did not confirm. Use your phone"
+        );
+        // Off macOS the OS prompt is never shown.
+        assert_eq!(
+            touch_id(false, "Use your phone", || panic!("prompted")).unwrap_err(),
+            "Use your phone"
+        );
     }
 }

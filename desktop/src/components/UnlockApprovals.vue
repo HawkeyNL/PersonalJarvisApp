@@ -1,7 +1,11 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import NavIcon from "./NavIcon.vue";
 import { pending, approve, deny, pick, picking, approving, approvalError } from "../unlockApprovals";
+import { platformCapabilities } from "../platform";
 
+// Only a Mac approves here, behind Touch ID; other desktops can deny.
+const signer = computed(() => platformCapabilities.value.supportsBiometricSigning);
 const two = (n: number) => String(n).padStart(2, "0");
 </script>
 
@@ -20,7 +24,7 @@ const two = (n: number) => String(n).padStart(2, "0");
             <div class="actions">
               <button class="deny" :disabled="approving === r.id" @click="deny(r)">Deny</button>
               <button
-                v-if="picking?.id !== r.id"
+                v-if="signer && picking?.id !== r.id"
                 class="approve"
                 :disabled="approving === r.id"
                 @click="approve(r)"
@@ -39,7 +43,7 @@ const two = (n: number) => String(n).padStart(2, "0");
           </div>
         </template>
         <p v-if="approvalError" class="err">{{ approvalError }}</p>
-        <p class="hint">Confirm with Face ID / Touch ID on this device.</p>
+        <p class="hint">{{ signer ? "Confirm with Touch ID on this Mac." : "Approve on a Mac with Touch ID; you can deny here." }}</p>
       </div>
     </div>
   </Transition>
