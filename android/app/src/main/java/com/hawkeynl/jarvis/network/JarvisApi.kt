@@ -16,6 +16,9 @@ interface JarvisApi {
     /** Authenticated POST of a JSON body to an owner route under /v1/, returning Core's JSON answer. */
     suspend fun postAuthorizedJson(endpoint: HomeNodeEndpoint, token: String, path: String, body: kotlinx.serialization.json.JsonObject): ApiResult<kotlinx.serialization.json.JsonElement> =
         ApiResult.InvalidResponse("Not supported")
+    /** Unlock requests for this device to decide, held up to [waitSeconds] until one appears. */
+    suspend fun unlockPending(endpoint: HomeNodeEndpoint, token: String, waitSeconds: Int): ApiResult<UnlockRequestList> =
+        ApiResult.InvalidResponse("Not supported")
     suspend fun accountStatus(endpoint: HomeNodeEndpoint): ApiResult<AccountStatus>
     suspend fun activateFirstDevice(endpoint: HomeNodeEndpoint, request: BootstrapRequest, code: String): ApiResult<FirstDeviceResponse>
     suspend fun ready(endpoint: HomeNodeEndpoint): ApiResult<HealthResponse>

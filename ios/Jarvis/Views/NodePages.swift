@@ -942,3 +942,70 @@ struct VoicePage: View {
         .jarvisNavigationBar(title: "Voice", subtitle: "Talk to Jarvis")
     }
 }
+
+// MARK: - Unlock requests
+
+/// Other devices of this account asking to be unlocked. Approve and Deny need Face ID /
+/// Touch ID; each decision re-reads the request by id. Polls only in the foreground.
+struct UnlockRequestsBanner: View {
+    @ObservedObject var model: JarvisAppModel
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var requests: [UnlockRequestItem] = []
+    @State private var busy: UUID?
+    @State private var decisionError: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let decisionError {
+                Text(verbatim: decisionError).font(JarvisFont.body(12)).foregroundStyle(JarvisTheme.danger)
+            }
+            ForEach(requests) { item in card(item) }
+        }
+        .padding(.horizontal, 16)
+        .task(id: scenePhase == .active) {
+            guard scenePhase == .active else { requests = []; return }
+            while !Task.isCancelled {
+                let result = await model.pendingUnlocks()
+                guard !Task.isCancelled else { break }
+                requests = result ?? []
+                // An answer with requests or an error returns at once: never spin.
+                try? await Task.sleep(for: .seconds(result == nil || !requests.isEmpty ? 10 : 2))
+            }
+        }
+    }
+
+    private func card(_ item: UnlockRequestItem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Unlock request").font(JarvisFont.body(14, 600)).foregroundStyle(JarvisTheme.text1)
+            Text(verbatim: "\"\(PairingFingerprint.displayName(item.device_name, max: 40))\" (\(PairingFingerprint.displayName(item.platform, max: 16))) asks to unlock Jarvis. Approve only if you just asked on that device.")
+                .font(JarvisFont.body(12))
+                .foregroundStyle(JarvisTheme.text2)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 10) {
+                Button("Deny", role: .destructive) { Task { await decide(item, approve: false) } }
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button(busy == item.id ? "Verifying…" : "Approve") { Task { await decide(item, approve: true) } }
+                    .buttonStyle(.borderedProminent)
+            }
+            .font(JarvisFont.body(13, 500))
+            .disabled(busy != nil)
+        }
+        .padding(12)
+        .background(JarvisTheme.tile, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(JarvisTheme.warn.opacity(0.4), lineWidth: 1))
+    }
+
+    private func decide(_ item: UnlockRequestItem, approve: Bool) async {
+        guard busy == nil else { return }
+        busy = item.id
+        decisionError = nil
+        do {
+            if approve { try await model.approveUnlock(item.id) } else { try await model.denyUnlock(item.id) }
+            requests.removeAll { $0.id == item.id }
+        } catch {
+            decisionError = (error as? LocalizedError)?.errorDescription ?? "The decision could not be completed."
+        }
+        busy = nil
+    }
+}

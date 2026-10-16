@@ -31,6 +31,10 @@ struct RootView: View {
                     }
                     .navigationDestination(for: HubRoute.self) { route in destination(route) }
                 }
+                // Polls only while unlocked and signed in: this branch is gone once locked.
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if model.isAuthenticated { UnlockRequestsBanner(model: model) }
+                }
                 // Owner pages must not stay mounted after logout, reset or a 401.
                 .onChange(of: model.isAuthenticated) { _, authenticated in
                     if authenticated { openPendingLink() } else { path.removeAll() }

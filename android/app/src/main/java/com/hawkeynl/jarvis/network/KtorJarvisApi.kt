@@ -11,6 +11,7 @@ import io.ktor.client.network.sockets.ConnectTimeoutException
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
@@ -86,6 +87,11 @@ class KtorJarvisApi(
                 bearerAuth(token); contentType(ContentType.Application.Json); setBody(body)
             }
         }
+    }
+
+    // Core holds the call at most 25 s; stay well inside the 30 s request timeout.
+    override suspend fun unlockPending(endpoint: HomeNodeEndpoint, token: String, waitSeconds: Int) = request<UnlockRequestList> {
+        client.get(endpoint.url("/v1/auth/unlock/pending")) { bearerAuth(token); parameter("wait", waitSeconds.coerceIn(0, 20)) }
     }
 
     override suspend fun accountStatus(endpoint: HomeNodeEndpoint) = request<AccountStatus> {

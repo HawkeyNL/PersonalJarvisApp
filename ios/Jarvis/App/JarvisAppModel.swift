@@ -414,6 +414,26 @@ final class JarvisAppModel: ObservableObject {
         await eraseLocally()
     }
 
+    /// Unlock requests for this device; nil when signed out, locked or on any error.
+    func pendingUnlocks() async -> [UnlockRequestItem]? {
+        guard isAuthenticated, lockState == .unlocked else { return nil }
+        let generation = presentation.id
+        // Errors only pause polling; any other owner read still handles a real 401.
+        let requests = try? await auth.pendingUnlocks(wait: 10)
+        guard presentation.accepts(generation), lockState == .unlocked else { return nil }
+        return requests
+    }
+
+    func approveUnlock(_ id: UUID) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        try await auth.approveUnlock(id)
+    }
+
+    func denyUnlock(_ id: UUID) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        try await auth.denyUnlock(id)
+    }
+
     /// Revokes another device of this account (one Face ID / Touch ID prompt).
     func revokeDevice(_ id: UUID) async throws {
         guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.rejected(status: 423, message: "Unlock Jarvis first.") }

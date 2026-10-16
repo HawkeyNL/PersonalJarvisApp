@@ -24,6 +24,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hawkeynl.jarvis.network.ConnectionState
 import com.hawkeynl.jarvis.security.ModelControlService
 import com.hawkeynl.jarvis.security.PairingApprovalService
+import com.hawkeynl.jarvis.security.UnlockApprovalService
 
 @Composable
 fun JarvisApp(
@@ -34,6 +35,7 @@ fun JarvisApp(
     onInstallUpdate: () -> Unit,
     modelControls: ModelControlService? = null,
     pairingApprovals: PairingApprovalService? = null,
+    unlockApprovals: UnlockApprovalService? = null,
 ) {
     val signedIn = !state.locked && state.endpoint != null && state.authenticated
     // Locking or signing out drops every Core read and cancels running ones.
@@ -47,7 +49,7 @@ fun JarvisApp(
                     onReset = actions::resetDevice,
                 )
                 state.endpoint == null || !state.authenticated -> OnboardingScreen(state, actions)
-                else -> AuthenticatedShell(state, actions, core, onInstallUpdate, modelControls, pairingApprovals)
+                else -> AuthenticatedShell(state, actions, core, onInstallUpdate, modelControls, pairingApprovals, unlockApprovals)
             }
         }
     }
@@ -80,6 +82,7 @@ private fun AuthenticatedShell(
     onInstallUpdate: () -> Unit,
     modelControls: ModelControlService?,
     pairingApprovals: PairingApprovalService?,
+    unlockApprovals: UnlockApprovalService?,
 ) {
     val data by core.state.collectAsStateWithLifecycle()
     val screen = state.screen
@@ -89,6 +92,7 @@ private fun AuthenticatedShell(
     Column(Modifier.fillMaxSize()) {
         ConnectionBanner(state.connection, actions::checkConnection)
         state.error?.let { ErrorText(it, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) }
+        unlockApprovals?.let { UnlockRequests(it) }
         Box(Modifier.weight(1f)) {
             when (screen) {
                 Screen.HUB -> HubScreen(state, data, mood, navigate, core::refreshHub)
