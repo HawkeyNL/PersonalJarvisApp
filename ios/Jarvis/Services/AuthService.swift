@@ -140,13 +140,6 @@ actor AuthService {
         return try await api.get(path, token: token, expectedBinding: binding)
     }
 
-    /// Authenticated POST with an empty JSON body, bound to the current origin.
-    func ownerPost(_ path: String) async throws {
-        let binding = await api.binding()
-        guard let token = try await credentials.session()?.token else { throw JarvisAPIError.unauthorized }
-        try await api.postDiscardingResponse(path, body: [String: String](), token: token, expectedBinding: binding)
-    }
-
     func registeredDeviceID() async -> UUID? { try? await credentials.deviceId() }
 
     /// PUT or DELETE this device's own APNs push target. Core binds it to the
@@ -612,6 +605,86 @@ actor AuthService {
         }
     }
 
+    /// Approve a pending agent action: re-read the list, take the one entry with this id,
+    /// and sign only if it still reviews as approvable with the hash the owner was shown.
+    /// One Face ID / Touch ID prompt; `unlocked` is checked again once it is done.
+    func approveAgentAction(_ id: UUID, shownSha256: String, unlocked: @Sendable () async -> Bool = { true }) async throws { try await exclusive {
+        let (binding, token, item) = try await currentAgentAction(id)
+        guard case let .approvable(action, sha256) = AgentReview.of(item) else {
+            throw JarvisAPIError.rejected(status: 409, message: "This action cannot be approved on this iPhone.")
+        }
+        guard sha256 == shownSha256.lowercased() else {
+            throw JarvisAPIError.rejected(status: 409, message: "The action changed since it was shown. Review it again.")
+        }
+        guard let device = try await credentials.deviceId() else { throw JarvisAPIError.unauthorized }
+        let nonce = item.nonce ?? ""
+        // Built once before prompting, so a malformed entry never prompts.
+        _ = try DeviceIdentityStore.agentApprovalMessage(pendingId: id, nonceHex: nonce, actionSha256Hex: sha256, deviceId: device)
+        let context = try await requireBiometric(Self.agentPrompt(action))
+        defer { context.invalidate() }
+        guard await unlocked(), await api.binding() == binding, try await credentials.session()?.token == token,
+              try await credentials.deviceId() == device else {
+            throw JarvisAPIError.rejected(status: 409, message: "Session changed or Jarvis locked; nothing was approved.")
+        }
+        try Task.checkCancellation()
+        let signature = try await identity.signAgentApproval(pendingId: id, nonceHex: nonce, actionSha256Hex: sha256,
+                                                             deviceId: device, context: context)
+        let result: AgentApprovalResult
+        do {
+            result = try await accountDecision {
+                try await api.post("/v1/agent/pending/\(id.uuidString)/approve", body: ["signature": signature],
+                                   token: token, expectedBinding: binding)
+            }
+        } catch JarvisAPIError.rejected(let status, let message) where status == 400 && message == "agent action failed" {
+            // Core claims the action before it runs: a failed run is not pending any more.
+            throw JarvisAPIError.rejected(status: 400, message: "Approved, but the action failed on the Home Node.")
+        } catch JarvisAPIError.unauthorized, JarvisAPIError.rejected(401, _) {
+            throw JarvisAPIError.rejected(status: 401, message: "Core refused this approval. The action may have expired or been handled already.")
+        } catch {
+            // A refusal is final; anything else may have reached Core before the answer failed.
+            if let refusal = error as? JarvisAPIError, case let .rejected(status, _) = refusal, status != 503 { throw error }
+            throw JarvisAPIError.rejected(status: 503, message: "The outcome is unknown. Refresh to see whether it ran.")
+        }
+        guard result.action == item.action else { throw JarvisAPIError.rejected(status: 503, message: "Core did not confirm the approval.") }
+    } }
+
+    /// Deny a pending agent action, re-read by id and gated on Face ID / Touch ID; `unlocked`
+    /// is checked again after the prompt. Also offered for actions this app cannot show.
+    /// The prompt guards the phone UI; Core deny is unsigned by design: any owner session
+    /// can cancel a pending action.
+    func denyAgentAction(_ id: UUID, unlocked: @Sendable () async -> Bool = { true }) async throws { try await exclusive {
+        let (binding, token, item) = try await currentAgentAction(id)
+        try await requireBiometric("Deny agent action \(PairingFingerprint.displayName(item.action, max: 32))").invalidate()
+        guard await unlocked(), await api.binding() == binding, try await credentials.session()?.token == token else {
+            throw JarvisAPIError.rejected(status: 409, message: "Session changed or Jarvis locked; try again.")
+        }
+        let result: StatusResponse = try await accountDecision {
+            try await api.post("/v1/agent/pending/\(id.uuidString)/deny", body: [String: String](), token: token, expectedBinding: binding)
+        }
+        guard result.status == "denied" else { throw JarvisAPIError.rejected(status: 503, message: "Core did not confirm the denial.") }
+    } }
+
+    /// The entry as Core lists it right now, never a copy the UI held on to.
+    private func currentAgentAction(_ id: UUID) async throws -> (UUID, String, PendingAction) {
+        let binding = await api.binding()
+        guard let token = try await credentials.session()?.token else { throw JarvisAPIError.unauthorized }
+        let list: PendingActionList = try await accountDecision {
+            try await api.get("/v1/agent/pending", token: token, expectedBinding: binding)
+        }
+        let matches = list.pending.filter { UUID(uuidString: $0.pending_id) == id }
+        guard matches.count == 1, let item = matches.first else {
+            throw JarvisAPIError.rejected(status: 404, message: "This agent action is no longer pending.")
+        }
+        return (binding, token, item)
+    }
+
+    static func agentPrompt(_ action: ReviewedAgentAction) -> String {
+        switch action {
+        case let .writeFile(path, content):
+            "Write \(PairingFingerprint.displayName(AgentReview.asciiPath(path), max: 60)) (\(content.utf8.count) bytes)"
+        }
+    }
+
     /// Erases this device's session, binding and key here only.
     func eraseLocally() async throws {
         var resetError: Error?
@@ -676,6 +749,7 @@ actor AuthService {
 }
 
 private struct StatusResponse: Decodable { let status: String; let request_id: UUID? }
+private struct AgentApprovalResult: Decodable { let action: String }
 
 /// Too many unlock requests have live choice sets; deny some before picking another.
 struct UnlockChoicesFull: LocalizedError {

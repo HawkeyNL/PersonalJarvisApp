@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
+import com.hawkeynl.jarvis.security.AgentApprovalService
 import com.hawkeynl.jarvis.security.BiometricAvailability
 import com.hawkeynl.jarvis.security.BiometricResult
 import com.hawkeynl.jarvis.security.ModelControlService
@@ -67,6 +68,14 @@ class MainActivity : FragmentActivity() {
         )
     }
 
+    private val agentApprovals by lazy {
+        AgentApprovalService(
+            container.api, container.sessions, { container.settings.endpoint.first() }, container.identity, container.approvals,
+            { reason -> strongBiometric("Agent action", reason) is BiometricResult.Authenticated },
+            { !viewModel.state.value.locked && viewModel.state.value.authenticated },
+        )
+    }
+
     private suspend fun authenticatePairing(reason: String): Boolean =
         strongBiometric("Pairing request", reason) is BiometricResult.Authenticated
 
@@ -123,6 +132,7 @@ class MainActivity : FragmentActivity() {
                     modelControls = modelControls,
                     pairingApprovals = pairingApprovals,
                     unlockApprovals = unlockApprovals,
+                    agentApprovals = agentApprovals,
                 )
             }
         }
