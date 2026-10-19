@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 struct RootView: View {
@@ -43,6 +44,11 @@ struct RootView: View {
             }
         }
         .onOpenURL { url in pendingLink = deepLinkRoute(url) }
+        // A tapped approval push uses the same router; the link was checked by the app delegate.
+        .onReceive(tappedPushLink.compactMap { $0 }) { url in
+            tappedPushLink.send(nil)
+            pendingLink = deepLinkRoute(url)
+        }
     }
 
     /// Links only navigate, and only once the app is unlocked and signed in.

@@ -86,7 +86,7 @@ object PairingApproval {
         0x1D173..0x1D17A, 0xE0000..0xE0FFF, 0xF0000..0x10FFFF,
     )
 
-    private fun isHidden(c: Int) = hidden.any { c in it }
+    internal fun isHidden(c: Int) = hidden.any { c in it }
 
     /** Common combining-mark blocks, as on desktop. */
     private fun isCombining(c: Int) =

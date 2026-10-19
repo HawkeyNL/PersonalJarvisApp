@@ -24,6 +24,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hawkeynl.jarvis.network.ConnectionState
 import com.hawkeynl.jarvis.security.ModelControlService
 import com.hawkeynl.jarvis.security.PairingApprovalService
+import com.hawkeynl.jarvis.security.AgentApprovalService
 import com.hawkeynl.jarvis.security.UnlockApprovalService
 
 @Composable
@@ -36,6 +37,7 @@ fun JarvisApp(
     modelControls: ModelControlService? = null,
     pairingApprovals: PairingApprovalService? = null,
     unlockApprovals: UnlockApprovalService? = null,
+    agentApprovals: AgentApprovalService? = null,
 ) {
     val signedIn = !state.locked && state.endpoint != null && state.authenticated
     // Locking or signing out drops every Core read and cancels running ones.
@@ -49,7 +51,7 @@ fun JarvisApp(
                     onReset = actions::resetDevice,
                 )
                 state.endpoint == null || !state.authenticated -> OnboardingScreen(state, actions)
-                else -> AuthenticatedShell(state, actions, core, onInstallUpdate, modelControls, pairingApprovals, unlockApprovals)
+                else -> AuthenticatedShell(state, actions, core, onInstallUpdate, modelControls, pairingApprovals, unlockApprovals, agentApprovals)
             }
         }
     }
@@ -83,6 +85,7 @@ private fun AuthenticatedShell(
     modelControls: ModelControlService?,
     pairingApprovals: PairingApprovalService?,
     unlockApprovals: UnlockApprovalService?,
+    agentApprovals: AgentApprovalService?,
 ) {
     val data by core.state.collectAsStateWithLifecycle()
     val screen = state.screen
@@ -100,7 +103,7 @@ private fun AuthenticatedShell(
                 Screen.SETTINGS -> SettingsScreen(state, actions, onInstallUpdate)
                 Screen.CONVERSATIONS -> ConversationsScreen(state, actions, mood)
                 Screen.AGENTS -> AgentsScreen(data, mood, navigate, core::refreshAgents)
-                Screen.TASKS -> TasksScreen(data, mood, navigate, core::refreshTasks, core::deny)
+                Screen.TASKS -> TasksScreen(data, mood, navigate, core::refreshTasks, agentApprovals)
                 Screen.INTEGRATIONS -> IntegrationsScreen(data, mood, navigate, core::refreshIntegrations)
                 Screen.HEALTH -> key(state.healthNode) {
                     HealthScreen(state, data, mood, navigate, core::refreshHealth, actions::checkConnection, modelControls, state.healthNode)

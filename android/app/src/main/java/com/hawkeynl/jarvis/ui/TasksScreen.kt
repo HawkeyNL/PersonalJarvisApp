@@ -1,9 +1,9 @@
 package com.hawkeynl.jarvis.ui
 
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -11,10 +11,11 @@ import androidx.compose.runtime.setValue
 import com.hawkeynl.jarvis.network.Availability
 import com.hawkeynl.jarvis.network.CodingSession
 import com.hawkeynl.jarvis.network.valueOrNull
+import com.hawkeynl.jarvis.security.AgentApprovalService
 
 private val TASK_DETAILS = mapOf(
     "active" to "Coding sessions Jarvis is running or has paused on your Home Node.",
-    "waiting" to "Changes an agent proposed. Nothing runs until you approve it on a trusted desktop.",
+    "waiting" to "Changes an agent proposed. Nothing runs until you approve it with this phone's key or on a trusted desktop.",
     "completed" to "Coding sessions that ended, and every agent action Core recorded.",
     "scheduled" to "Core cannot run tasks at a set time yet.",
     "recurring" to "Core cannot repeat tasks on a schedule yet.",
@@ -24,10 +25,11 @@ private val TASK_DETAILS = mapOf(
 private const val AGENT_OFF = "Agent is turned off in Core."
 
 /** Tasks: coding sessions, agent actions waiting for the owner and the agent
- *  audit history. Approving needs the desktop app's signed approval; this app
- *  can only deny. Scheduled and recurring tasks and goals need Core support. */
+ *  audit history. Each waiting action is shown in full and approved or denied
+ *  with a strong-biometric prompt. Scheduled and recurring tasks and goals need
+ *  Core support. */
 @Composable
-fun TasksScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRefresh: () -> Unit, onDeny: (String) -> Unit) {
+fun TasksScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRefresh: () -> Unit, agentApprovals: AgentApprovalService?) {
     LaunchedEffect(Unit) { onRefresh() }
     val now = remember(data.loadedAt) { System.currentTimeMillis() }
     val sessionList = data.sessions.valueOrNull?.sessions.orEmpty()
@@ -51,7 +53,6 @@ fun TasksScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRefr
     )
     var selected by rememberSaveable { mutableStateOf("active") }
     var sub by rememberSaveable { mutableStateOf("sessions") }
-    var confirming by remember { mutableStateOf<String?>(null) }
     val current = items.first { it.id == selected }
 
     fun sessionRows(list: List<CodingSession>) = list.map { s ->
@@ -88,24 +89,10 @@ fun TasksScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRefr
                     ActivityList("Active & paused", sessionRows(open).take(5), "No coding session is running.")
                 }
                 "waiting" -> Loaded(data.pending, "Approvals", JvIcon.ALERT, "Loading approvals…", AGENT_OFF) {
-                    MutedText("Read the full preview first. Approving signs this exact action with a desktop's device key, so approve on the desktop app. You can deny here.")
-                    data.denyError?.let { ErrorText(it) }
-                    ActivityList(
-                        "Waiting for approval",
-                        waiting.map { p ->
-                            ActivityItem(p.pending_id, JvIcon.ALERT, p.action, p.preview, relativeTime(p.created_at, now), Tone.WARN, "Waiting for approval")
-                        },
-                        "Nothing is waiting for you.",
-                        fullDetail = true,
-                    ) { item ->
-                        val busy = data.denying != null
-                        if (confirming == item.id) {
-                            GhostButton("Deny for good", { confirming = null; onDeny(item.id) }, enabled = !busy, danger = true)
-                            GhostButton("Cancel", { confirming = null }, enabled = !busy)
-                        } else {
-                            Text("Approve on desktop", style = exo(11f, color = Jv.Text5))
-                            GhostButton(if (data.denying == item.id) "Denying…" else "Deny", { confirming = item.id }, enabled = !busy, danger = true)
-                        }
+                    MutedText("Read the whole action first. Approving signs exactly what is shown with this phone's device key; anything this app cannot show in full can only be denied here.")
+                    if (waiting.isEmpty()) ActivityList("Waiting for approval", emptyList(), "Nothing is waiting for you.")
+                    waiting.forEach { p ->
+                        key(p.pending_id) { AgentActionCard(p, relativeTime(p.created_at, now), agentApprovals, onRefresh) }
                     }
                 }
                 "completed" -> {

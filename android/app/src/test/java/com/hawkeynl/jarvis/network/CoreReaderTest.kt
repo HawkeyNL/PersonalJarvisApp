@@ -7,7 +7,6 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
@@ -80,18 +79,5 @@ class CoreReaderTest {
             assertEquals(Availability.Failed(LoadFailure.FAILED), core.read(endpoint, path, AgentsResponse.serializer()))
         }
         assertTrue(engine.requestHistory.isEmpty())
-    }
-
-    @Test
-    fun `deny posts to the pending action and refuses malformed ids`() = runTest {
-        val (core, engine) = reader()
-        assertTrue(core.denyPending(endpoint, "../x") is ApiResult.InvalidResponse)
-        assertTrue(engine.requestHistory.isEmpty())
-
-        assertEquals(ApiResult.Success(Unit), core.denyPending(endpoint, "p-1_a"))
-        val request = engine.requestHistory.single()
-        assertEquals(HttpMethod.Post, request.method)
-        assertEquals("https://jarvis.test/v1/agent/pending/p-1_a/deny", request.url.toString())
-        assertEquals("Bearer token", request.headers[HttpHeaders.Authorization])
     }
 }
