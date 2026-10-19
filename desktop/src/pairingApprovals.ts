@@ -1,6 +1,7 @@
-// Pending device pairing approvals. Approving passes only the request id: the
-// native layer re-fetches the request, checks its key fingerprint, shows it in
-// the OS prompt, signs the pairing protocol and posts the approval.
+// Pending device pairing approvals. Approving (macOS only) passes only the
+// request id: the native layer re-fetches the request, checks its key
+// fingerprint, shows it in the Touch ID prompt, signs the pairing protocol and
+// posts the approval. Other desktops can only deny.
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { currentAuthStatus } from "./auth";

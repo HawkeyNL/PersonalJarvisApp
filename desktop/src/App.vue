@@ -42,7 +42,7 @@ onMounted(async () => {
     }
   })();
   await initLock();
-  startApprovalPolling(); // this device can approve other devices' unlocks
+  startApprovalPolling(); // other devices' unlock requests (a Mac approves them)
   startPairingPolling();
   maybeStartWake(); // resume "Hey Jarvis" if it was enabled
   window.addEventListener("pointerdown", noteActivity, { passive: true });
@@ -64,7 +64,7 @@ onBeforeUnmount(() => {
       <RouterView />
     </main>
 
-    <!-- Incoming unlock approvals for other devices (phone side). -->
+    <!-- Other devices' unlock and pairing requests; a Mac approves them. -->
     <UnlockApprovals />
     <PairingApprovals />
     <!-- Full-screen biometric gate on desktop when the lock is enabled. -->

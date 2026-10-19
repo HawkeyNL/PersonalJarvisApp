@@ -1,7 +1,8 @@
 // Unlock approvals. This device long-polls for pending unlock requests from
-// the user's other devices. Approving passes only the request id: the native
-// layer re-fetches the request, runs the OS check (biometrics, passcode
+// the user's other devices. Approving (macOS only) passes only the request id:
+// the native layer re-fetches the request, asks for Touch ID (no password
 // fallback), signs the v1 unlock approval with the device key and posts it.
+// Other desktops can only deny.
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { currentAuthStatus } from "./auth";
