@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct JarvisApp: App {
+    @UIApplicationDelegateAdaptor(JarvisAppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model = JarvisAppModel()
 

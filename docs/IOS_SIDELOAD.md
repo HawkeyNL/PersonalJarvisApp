@@ -42,9 +42,45 @@ Core pins bundle id `com.hawkeynl.jarvis` and the iOS 17.0 deployment target
 target in `ios/project.yml`, and any new entitlement or Info.plist privacy
 key, must be mirrored there.
 
-Source-based Xcode Run remains supported separately. With a free Apple
-account, provisioning expires and needs renewal. Paid-account signing is
-expected to work the same way but is still to be verified on a device.
+## Approval notifications (APNs)
+
+The app carries `aps-environment` in `ios/Jarvis/Jarvis.entitlements`
+(declared in Core's AltStore source as well). Settings → **Approval
+notifications** asks for notification permission only when turned on, then
+registers this device's APNs token with Core (`PUT /v1/devices/self/push`).
+Turning it off, logging out or resetting the device removes the token when
+the Home Node is reachable (best effort, a few seconds at most); revoking the
+device on the Home Node always removes it. A reset also turns the setting
+off. A push only says "Approval waiting". Tapping a pairing push opens the
+pairing requests; tapping an unlock push opens Jarvis, where the unlock
+request is shown once the app has its unlock approval view. In the
+foreground a push shows no banner; an open pairing requests page reloads at
+once. Approving still needs Face ID / Touch ID. No silent pushes, no
+notification actions and no notification service extension.
+
+How sideloading affects it (from the AltStore and SideStore signing code; not
+yet confirmed on a device):
+
+- The CI IPA is unsigned and carries no entitlements. AltStore and SideStore
+  sign it with entitlements taken from the owner's **development**
+  provisioning profile, not from the app.
+- They register the app ID as `com.hawkeynl.jarvis.<TEAMID>` and install the
+  app under that id, so that is the APNs topic.
+- They never enable Push Notifications on that app ID. With a paid Apple
+  Developer account the owner enables it once in the developer portal and
+  refreshes Jarvis; the new profile then carries
+  `aps-environment = development`, which means the APNs **sandbox**. A free
+  account cannot use push.
+- Jarvis reads the environment from its embedded profile. Without the
+  entitlement the setting says so and registers nothing.
+
+The owner setup (APNs key, Core settings) is in Core's `docs/NOTIFICATIONS.md`.
+
+Source-based Xcode Run remains supported separately. Because of the push
+entitlement, Xcode's automatic signing now needs a paid team; with a free
+Apple account, remove `CODE_SIGN_ENTITLEMENTS` locally (no approval
+notifications then), and provisioning expires and needs renewal.
+Paid-account signing is still to be verified on a device.
 
 Before production promotion, test on a real iPhone:
 

@@ -233,6 +233,18 @@ actor JarvisAPIClient {
                               expectedBinding: expectedBinding, response: EmptyOrJSON.self)
     }
 
+    func put<Body: Encodable>(_ path: String, body: Body, token: String, expectedBinding: UUID) async throws {
+        _ = try await request(path: path, method: "PUT", body: body, token: token,
+                              expectedBinding: expectedBinding, response: EmptyOrJSON.self)
+    }
+
+    /// The only DELETE: this device's own APNs push target. A device is revoked with a
+    /// signed approval, never with a bearer-only DELETE.
+    func deletePushTarget(token: String, expectedBinding: UUID) async throws {
+        _ = try await request(path: "/v1/devices/self/push", method: "DELETE", token: token,
+                              expectedBinding: expectedBinding, response: EmptyOrJSON.self)
+    }
+
     private func request<Response: Decodable>(
         path: String,
         method: String,
