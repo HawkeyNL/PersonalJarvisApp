@@ -25,7 +25,7 @@ data class ModelApproval(
     val request: UUID, val nonce: ByteArray, val user: UUID, val device: UUID,
     val issued: Long, val expires: Long, val provider: String, val model: String,
     val enabled: Boolean, val hash: String,
-) {
+) : DeviceMessage {
     fun operation(): JsonObject {
         require(provider in setOf("anthropic-api", "openai-api", "deepseek-api", "xai-api", "zai-api", "ollama", "ollama-cloud", "huggingface", "claude-cli", "codex-cli"))
         require(model.isNotEmpty() && model.toByteArray(Charsets.UTF_8).size <= 256 && model.none { it.isISOControl() })
@@ -36,7 +36,7 @@ data class ModelApproval(
         }
     }
 
-    fun message(): ByteArray {
+    override fun message(): ByteArray {
         require(nonce.size == 32 && issued >= 0 && expires > issued && expires - issued <= 300)
         val payload = MessageDigest.getInstance("SHA-256").digest(operation().toString().toByteArray(Charsets.UTF_8))
         return approvalMessage("model.set_enabled", payload, request, nonce, user, device, issued, expires, Hex.decode(hash))

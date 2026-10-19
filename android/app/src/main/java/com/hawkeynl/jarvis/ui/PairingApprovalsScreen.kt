@@ -56,7 +56,8 @@ fun PairingApprovalsScreen(
             error = null
             scope.launch {
                 val failure = runCatching { if (approve) service.approve(item) else service.deny(item) }.exceptionOrNull()
-                error = failure?.let { it.message ?: "The decision could not be completed." }
+                // Server text is shown sanitised and bounded.
+                error = failure?.let { PairingApproval.displayName(it.message ?: "The decision could not be completed.", 160) }
                 busy = null
                 // No extra list read: the 30-second poll picks up any other change.
                 if (failure == null) onDecided(item.id)
@@ -92,12 +93,13 @@ private fun PairingRequestCard(
     val checked = remember(item) { runCatching { PairingApproval.verifiedFingerprint(item) } }
     val fingerprint = checked.getOrNull()
     val left = PairingApproval.countdown(item.expires_at, now)
-    Panel(JvIcon.PHONE, PairingApproval.hint(item.device_name, 128), Tone.WARN, if (left == "Expired") left else "Expires in $left") {
-        Detail("Platform", PairingApproval.hint(item.platform, 32))
-        Detail("Model", PairingApproval.hint(item.model))
-        Detail("App version", PairingApproval.hint(item.app_version, 32))
-        Detail("IP address", PairingApproval.hint(item.ip))
-        Detail("User agent", PairingApproval.hint(item.user_agent, 128))
+    Panel(JvIcon.PHONE, PairingApproval.displayName(item.device_name, 128), Tone.WARN, if (left == "Expired") left else "Expires in $left") {
+        Detail("Platform", PairingApproval.displayName(item.platform, 32))
+        PairingApproval.approverWarning(item.platform)?.let { Text(it, style = exo(13f, color = Jv.Warn)) }
+        Detail("Model", PairingApproval.displayName(item.model))
+        Detail("App version", PairingApproval.displayName(item.app_version, 32))
+        Detail("IP address", PairingApproval.displayName(item.ip))
+        Detail("User agent", PairingApproval.displayName(item.user_agent, 128))
         Detail("Requested", TIME.format(Instant.ofEpochSecond(item.created_at)))
         Eyebrow("Key fingerprint")
         if (fingerprint != null) {

@@ -18,6 +18,10 @@ final class JarvisAppModel: ObservableObject {
     @Published private(set) var isSending = false
     @Published var endpointText: String
     @Published var notice: String?
+    /// A signed password reset waiting for root confirmation on the Home Node.
+    @Published var pendingPasswordReset: UUID?
+    /// Why Core did not revoke this device; set while the user decides on erasing locally only.
+    @Published var localEraseOffer: String?
     @Published private(set) var availableVoices: [LocalSpeechVoice] = []
     @Published var selectedVoice = UserDefaults.standard.string(forKey: "jarvis.voice.identifier") ?? "" {
         didSet {
@@ -49,7 +53,10 @@ final class JarvisAppModel: ObservableObject {
     private func invalidatePresentation(clearIdentity: Bool) {
         presentation.invalidate()
         messages = []; conversations = []; isSending = false; realtimeAvailable = false
-        if clearIdentity { pendingRequests.clear(); currentConversationId = nil; currentConversationTitle = "New conversation" }
+        if clearIdentity {
+            pendingRequests.clear(); currentConversationId = nil; currentConversationTitle = "New conversation"
+            pendingPasswordReset = nil
+        }
     }
 
     func stopSpeaking() {
@@ -394,7 +401,96 @@ final class JarvisAppModel: ObservableObject {
         } catch { if presentation.accepts(generation) { handle(error) } }
     }
 
+    /// Revokes this device on Core with a signed approval, then erases it here. If Core
+    /// does not confirm, nothing is erased: `localEraseOffer` asks the user instead.
     func resetDevice() async {
+        var failure: Error?
+        do { try await auth.unlinkDevice() } catch { failure = error }
+        switch Self.afterUnlink(failure) {
+        case .erase: await eraseLocally()
+        case .nothing: break
+        case let .notice(message): notice = message
+        case let .offerLocalErase(reason): localEraseOffer = reason
+        }
+    }
+
+    enum UnlinkOutcome: Equatable { case erase, nothing, notice(String), offerLocalErase(String) }
+
+    /// Only a confirmed revoke erases. A refusal or unconfirmed revoke offers erasing locally;
+    /// a cancelled or busy prompt offers nothing.
+    static func afterUnlink(_ failure: Error?) -> UnlinkOutcome {
+        guard let failure else { return .erase }
+        switch failure {
+        // The user stopped, or another prompt is open: nothing to offer.
+        case let interrupted as ApprovalInterrupted: return .notice(safeMessage(interrupted))
+        case is CancellationError: return .nothing
+        // Server text is shown sanitised and bounded.
+        default: return .offerLocalErase(PairingFingerprint.displayName(safeMessage(failure), max: 160))
+        }
+    }
+
+    /// Unlock requests for this device; nil when signed out, locked or on any error.
+    func pendingUnlocks() async -> [UnlockRequestItem]? {
+        guard isAuthenticated, lockState == .unlocked else { return nil }
+        let generation = presentation.id
+        // Errors only pause polling; any other owner read still handles a real 401.
+        let requests = try? await auth.pendingUnlocks(wait: 10)
+        guard presentation.accepts(generation), lockState == .unlocked else { return nil }
+        return requests
+    }
+
+    func unlockChoices(_ id: UUID) async throws -> [Int] {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        return try await auth.unlockChoices(id)
+    }
+
+    func approveUnlock(_ id: UUID, choice: Int) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        try await auth.approveUnlock(id, choice: choice, unlocked: stillUnlocked)
+    }
+
+    /// Checked again after Face ID: the app may have locked while the prompt was open.
+    private var stillUnlocked: @Sendable () async -> Bool {
+        { @MainActor [weak self] in
+            guard let self else { return false }
+            return self.isAuthenticated && self.lockState == .unlocked
+        }
+    }
+
+    func denyUnlock(_ id: UUID) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
+        try await auth.denyUnlock(id, unlocked: stillUnlocked)
+    }
+
+    /// Changes the account password (one Face ID / Touch ID prompt). Core then ends every
+    /// session, so this device signs in again with the new password.
+    func changePassword(current: String, new: String) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.rejected(status: 423, message: "Unlock Jarvis first.") }
+        try await auth.changePassword(current: current, new: new)
+        invalidatePresentation(clearIdentity: true)
+        realtime.stop(); speech.stop(); voiceReleaseTask?.cancel()
+        enrollmentState = .signedOut
+        notice = "Password changed. Sign in with the new password."
+    }
+
+    /// Starts a forgotten-password reset (one Face ID / Touch ID prompt). Nothing changes until
+    /// the owner confirms the returned request id as root on the Home Node.
+    func resetPassword(new: String) async throws -> UUID {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.rejected(status: 423, message: "Unlock Jarvis first.") }
+        let id = try await auth.resetPassword(new: new)
+        pendingPasswordReset = id
+        return id
+    }
+
+    /// Revokes another device of this account (one Face ID / Touch ID prompt).
+    func revokeDevice(_ id: UUID) async throws {
+        guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.rejected(status: 423, message: "Unlock Jarvis first.") }
+        try await auth.revokeDevice(id, unlocked: stillUnlocked)
+    }
+
+    /// Erases this device here only; after a failed revoke this is the user's explicit choice.
+    func eraseLocally() async {
+        localEraseOffer = nil
         invalidatePresentation(clearIdentity: true)
         let generation = presentation.id
         enrollmentState = .notStarted
@@ -402,7 +498,7 @@ final class JarvisAppModel: ObservableObject {
         pendingRequests.clear()
         realtime.stop(); speech.stop()
         do {
-            try await auth.resetDevice()
+            try await auth.eraseLocally()
             guard presentation.accepts(generation) else { return }
             enrollmentState = .notStarted
             lockState = .unlocked
@@ -622,7 +718,9 @@ final class JarvisAppModel: ObservableObject {
         if !inserted { messages.append(row) }
     }
 
-    private func safeMessage(_ error: Error) -> String {
+    private func safeMessage(_ error: Error) -> String { Self.safeMessage(error) }
+
+    private static func safeMessage(_ error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? "Jarvis could not complete the request."
     }
 }

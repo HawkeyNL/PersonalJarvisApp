@@ -1,0 +1,232 @@
+package com.hawkeynl.jarvis.security
+
+import com.hawkeynl.jarvis.network.ApiResult
+import com.hawkeynl.jarvis.network.AuthMe
+import com.hawkeynl.jarvis.network.DevicesResponse
+import com.hawkeynl.jarvis.network.HomeNodeEndpoint
+import com.hawkeynl.jarvis.network.JarvisApi
+import com.hawkeynl.jarvis.storage.ProtectedSession
+import com.hawkeynl.jarvis.storage.SessionRepository
+import java.nio.ByteBuffer
+import java.util.UUID
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+
+/** client-core `AccountApproval`: Core's challenge for one account action. It is signed
+ *  only after [requireFor] matched every bound field to what this device asked for. */
+@Serializable
+data class AccountApproval(
+    val request_id: String,
+    val user_id: String,
+    val device_id: String,
+    val action: String,
+    val target: String,
+    val nonce: String,
+    val expires_at: Long,
+) : DeviceMessage {
+    /** Exact v1 client-core `account_approval_message`: domain, action name, request,
+     *  user, device and target ids, 32-byte nonce, big-endian i64 expiry. */
+    override fun message(): ByteArray {
+        val ids = listOf(request_id, user_id, device_id, target)
+        require(ids.all(PairingApproval.canonicalUuid::matches)) { "Invalid UUID" }
+        require(action in ACTIONS && HEX64.matches(nonce) && expires_at > 0) { "Invalid account approval" }
+        val domain = "jarvis-account-approval-v1\u0000".toByteArray(Charsets.UTF_8)
+        val name = "$action\u0000".toByteArray(Charsets.UTF_8)
+        val buffer = ByteBuffer.allocate(domain.size + name.size + 4 * 16 + 32 + 8).put(domain).put(name)
+        for (id in ids.map(UUID::fromString)) buffer.putLong(id.mostSignificantBits).putLong(id.leastSignificantBits)
+        return buffer.put(Hex.decode(nonce)).putLong(expires_at).array()
+    }
+
+    /** Core must have issued exactly the challenge this device asked for, still unexpired. */
+    fun requireFor(action: String, user: String, device: String, target: String, now: Long) {
+        message()
+        check(
+            this.action == action && user_id.equals(user, ignoreCase = true) && device_id.equals(device, ignoreCase = true) &&
+                this.target.equals(target, ignoreCase = true) && expires_at > now,
+        ) { "Core returned a different or expired approval request; nothing was signed." }
+    }
+
+    companion object {
+        const val DEVICE_REVOKE = "device-revoke"
+        const val PASSWORD_SET = "password-set"
+        const val PASSWORD_RESET = "password-reset"
+        private val ACTIONS = setOf(DEVICE_REVOKE, PASSWORD_SET, PASSWORD_RESET)
+        private val HEX64 = Regex("[0-9a-fA-F]{64}")
+    }
+}
+
+/** Device-signed account actions. Core lets only the requesting device approve its own
+ *  request: ask Core, check every bound field, one strong-biometric prompt, sign, approve.
+ *  Unlike the pairing and model services there is no app-unlocked check: unlinking is also
+ *  offered on the lock screen, and the biometric prompt gates the signature itself. Revoking
+ *  another device is only offered on the device list, which exists only while unlocked and
+ *  whose calls are cancelled when the app locks. */
+class AccountApprovalService(
+    private val api: JarvisApi,
+    private val sessions: SessionRepository,
+    private val endpoint: suspend () -> HomeNodeEndpoint?,
+    private val identity: DeviceIdentity,
+    private val approvals: ApprovalLock,
+    private val now: () -> Long = { System.currentTimeMillis() / 1000 },
+) {
+    private val json = Json { ignoreUnknownKeys = true }
+
+    /** Revokes this device on Core. Throws unless Core confirmed; erases nothing itself. */
+    suspend fun unlinkThisDevice() = approvals.exclusive {
+        val signedIn = signedIn()
+        revoke(signedIn, signedIn.device, "Unlink this device from Jarvis")
+    }
+
+    /** Revokes another device of this account. The prompt names it from a fresh device
+     *  list, with its short id; an id Core does not list as active is refused before
+     *  anything is signed. [unlocked] is checked before and again after the prompt. */
+    suspend fun revokeDevice(id: String, unlocked: () -> Boolean) = approvals.exclusive {
+        check(unlocked()) { "Unlock Jarvis first." }
+        val signedIn = signedIn()
+        check(!id.equals(signedIn.device, ignoreCase = true)) { "Use \"Erase this device\" to remove this phone." }
+        val list = when (val result = api.getAuthorized(signedIn.origin, signedIn.token, "/v1/devices")) {
+            is ApiResult.Success -> runCatching { json.decodeFromJsonElement(DevicesResponse.serializer(), result.value) }.getOrNull()
+                ?: error("Core returned an invalid device list.")
+            else -> error(refusal(result))
+        }
+        val target = list.devices.singleOrNull { it.id.equals(id, ignoreCase = true) && it.status == "active" }
+            ?: error("Core no longer lists this device as active.")
+        revoke(
+            signedIn, target.id,
+            "Revoke \"${PairingApproval.displayName(target.name, 40)}\" (${PairingApproval.displayName(target.platform, 16)}, ${target.id.take(8).lowercase()})",
+            unlocked,
+        )
+    }
+
+    /** Changes the account password with the current one. Core binds the new verifier to
+     *  this device's signed approval and then ends every session, so this session is
+     *  cleared here and the user signs in again with the new password. */
+    suspend fun changePassword(current: String, new: String) = approvals.exclusive {
+        require(acceptableCurrent(current)) { "Enter the current account password." }
+        require(acceptable(new)) { "Choose a new password of at least 15 characters and at most 1024 bytes, without control characters." }
+        val signedIn = signedIn()
+        val body = JsonObject(mapOf("password" to JsonPrimitive(new), "current_password" to JsonPrimitive(current)))
+        val approval = request(
+            signedIn.origin, signedIn.token, "/v1/auth/account/password/requests", body,
+            unauthorized = "The current password was not accepted, or the session expired.",
+        )
+        // Sign only the request Core just issued for this account's own password.
+        approval.requireFor(AccountApproval.PASSWORD_SET, signedIn.user, signedIn.device, signedIn.user, now())
+        signAndApprove(signedIn, approval, "Change the Jarvis account password")
+        sessions.clearToken()
+    }
+
+    /** Forgotten-password recovery from this signed-in device: no current password. The
+     *  signed request only waits on Core until the owner confirms it as root on the Home
+     *  Node; Core then ends every session. Returns the request id to confirm there. */
+    suspend fun resetPassword(new: String): String = approvals.exclusive {
+        require(acceptable(new)) { "Choose a new password of at least 15 characters and at most 1024 bytes, without control characters." }
+        val signedIn = signedIn()
+        val approval = request(
+            signedIn.origin, signedIn.token, "/v1/auth/account/password/reset-requests",
+            JsonObject(mapOf("password" to JsonPrimitive(new))),
+            unauthorized = "Not accepted on this device, or the session expired.",
+        )
+        // Sign only the reset Core just issued for this account's own password.
+        approval.requireFor(AccountApproval.PASSWORD_RESET, signedIn.user, signedIn.device, signedIn.user, now())
+        signAndApprove(signedIn, approval, "Reset Jarvis account password", expected = PENDING_CONFIRMATION)
+        approval.request_id
+    }
+
+    /** Core's account password rules: at least 15 characters, at most 1024 UTF-8 bytes, no controls. */
+    private fun acceptable(password: String) =
+        password.codePointCount(0, password.length) >= 15 && password.toByteArray(Charsets.UTF_8).size <= 1024 &&
+            password.codePoints().noneMatch { Character.getType(it) == Character.CONTROL.toInt() }
+
+    /** The current password is only checked by Core; here just non-empty, bounded, no controls. */
+    private fun acceptableCurrent(password: String) =
+        password.isNotEmpty() && password.toByteArray(Charsets.UTF_8).size <= 1024 &&
+            password.codePoints().noneMatch { Character.getType(it) == Character.CONTROL.toInt() }
+
+    private class SignedIn(
+        val origin: HomeNodeEndpoint, val session: ProtectedSession, val token: String, val device: String, val user: String,
+    )
+
+    /** The signed-in session, confirmed by Core to belong to this device. */
+    private suspend fun signedIn(): SignedIn {
+        val origin = endpoint() ?: error("Home Node missing")
+        val session = sessions.session()
+        val device = session.deviceId ?: error("This device is not paired, so there is nothing to revoke on Core.")
+        val token = session.token ?: error("Not signed in, so Core cannot be asked for this change.")
+        val me = when (val result = api.getAuthorized(origin, token, "/v1/auth/me")) {
+            is ApiResult.Success -> runCatching { json.decodeFromJsonElement(AuthMe.serializer(), result.value) }.getOrNull()
+            else -> null
+        } ?: error("Could not confirm this device's session; try again.")
+        check(me.device_id.equals(device, ignoreCase = true)) { "Session does not belong to this device" }
+        return SignedIn(origin, session, token, device, me.user_id)
+    }
+
+    private suspend fun revoke(signedIn: SignedIn, target: String, reason: String, unlocked: () -> Boolean = { true }) {
+        require(PairingApproval.canonicalUuid.matches(target)) { "Invalid device id" }
+        val approval = request(signedIn.origin, signedIn.token, "/v1/devices/$target/revoke-request", JsonObject(emptyMap()))
+        approval.requireFor(AccountApproval.DEVICE_REVOKE, signedIn.user, signedIn.device, target, now())
+        signAndApprove(signedIn, approval, reason, unlocked = unlocked)
+    }
+
+    /** One strong-biometric prompt, then the approval, only while nothing changed. */
+    private suspend fun signAndApprove(
+        signedIn: SignedIn, approval: AccountApproval, reason: String, expected: String = COMPLETED, unlocked: () -> Boolean = { true },
+    ) {
+        val signature = identity.sign(approval, reason)
+        currentCoroutineContext().ensureActive()
+        check(unlocked() && endpoint() == signedIn.origin && sessions.session() == signedIn.session && approval.expires_at > now()) {
+            "Approval expired or session changed"
+        }
+        approve(signedIn.origin, signedIn.token, approval, signature, expected)
+    }
+
+    private suspend fun request(
+        origin: HomeNodeEndpoint, token: String, path: String, body: JsonObject, unauthorized: String = REFUSED,
+    ): AccountApproval =
+        when (val result = api.postAuthorizedJson(origin, token, path, body)) {
+            is ApiResult.Success -> runCatching { json.decodeFromJsonElement(AccountApproval.serializer(), result.value) }
+                .getOrElse { error("Core returned an invalid approval request.") }
+            ApiResult.Unauthorized -> error(unauthorized)
+            else -> error(refusal(result))
+        }
+
+    private suspend fun approve(origin: HomeNodeEndpoint, token: String, approval: AccountApproval, signature: String, expected: String) {
+        val body = JsonObject(mapOf("signature" to JsonPrimitive(signature)))
+        when (val result = api.postAuthorizedJson(origin, token, "/v1/auth/account/requests/${approval.request_id}/approve", body)) {
+            is ApiResult.Success -> {
+                val answer = runCatching { result.value.jsonObject }.getOrNull()
+                val status = runCatching { answer?.get("status")?.jsonPrimitive?.content }.getOrNull()
+                val request = runCatching { answer?.get("request_id")?.jsonPrimitive?.content }.getOrNull()
+                // A pending reset must name the request this device signed.
+                check(status == expected && (expected == COMPLETED || request.equals(approval.request_id, ignoreCase = true))) {
+                    "Core did not confirm the change."
+                }
+            }
+            // The signed approval may have reached Core before the connection failed.
+            is ApiResult.Unreachable -> error("Home Node unreachable; the outcome is unknown. Refresh, or sign in again if asked.")
+            else -> error(refusal(result))
+        }
+    }
+
+    // Core answers 401 for a refused account action too; report it, do not end the session here.
+    private fun refusal(result: ApiResult<JsonElement>): String = when (result) {
+        is ApiResult.Success -> "Core did not confirm the change."
+        ApiResult.Unauthorized -> REFUSED
+        is ApiResult.HttpError -> result.message ?: "Core refused this change (HTTP ${result.status})."
+        is ApiResult.Unreachable -> "Home Node unreachable; the change was not confirmed."
+        is ApiResult.InvalidResponse -> result.message
+    }
+
+    private companion object {
+        const val REFUSED = "Core refused this change."
+        const val COMPLETED = "completed"
+        const val PENDING_CONFIRMATION = "pending_confirmation"
+    }
+}

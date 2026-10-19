@@ -233,10 +233,6 @@ actor JarvisAPIClient {
                               expectedBinding: expectedBinding, response: EmptyOrJSON.self)
     }
 
-    func delete(_ path: String, token: String) async throws {
-        _ = try await request(path: path, method: "DELETE", token: token, response: EmptyOrJSON.self)
-    }
-
     private func request<Response: Decodable>(
         path: String,
         method: String,

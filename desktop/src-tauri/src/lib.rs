@@ -415,6 +415,29 @@ fn native_only_route(path: &str) -> bool {
         .any(|prefix| route.starts_with(prefix))
 }
 
+/// The webview lists unlock requests but never needs their nonces: native code
+/// re-fetches a request by id to build the number choices and the signed bytes.
+/// Every unlock route is covered (`/v1/auth/unlock` and below, any query,
+/// trailing or repeated slashes), and nonces are removed at any depth.
+fn strip_unlock_nonces(path: &str, body: &mut serde_json::Value) {
+    let route = path.split('?').next().unwrap_or(path);
+    let segments = route.split('/').filter(|segment| !segment.is_empty());
+    if segments.take(3).eq(["v1", "auth", "unlock"]) {
+        strip_nonces(body);
+    }
+}
+
+fn strip_nonces(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.remove("nonce");
+            map.values_mut().for_each(strip_nonces);
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(strip_nonces),
+        _ => {}
+    }
+}
+
 fn api_url(origin: Option<&str>, path: &str) -> Result<String, String> {
     if !authenticated_api_path(path) {
         return Err("authenticated API path is invalid".to_string());
@@ -672,11 +695,12 @@ async fn auth_request(
     let body = if bytes.is_empty() {
         None
     } else {
-        let value = serde_json::from_slice(&bytes)
+        let mut value = serde_json::from_slice(&bytes)
             .map_err(|_| "Home Node response is not valid JSON".to_string())?;
         if contains_secret_response_field(&value) {
             return Err("Home Node response contains a forbidden secret field".to_string());
         }
+        strip_unlock_nonces(&path, &mut value);
         Some(value)
     };
     Ok(NativeApiResponse { status, body })
@@ -912,6 +936,7 @@ pub fn run() {
             realtime::realtime_stop_speech,
             device_info,
             auth_public_key,
+            approvals::auth_unlock_choices,
             approvals::auth_approve_unlock,
             approvals::auth_approve_pairing,
             approvals::auth_approve_agent,
@@ -1141,6 +1166,43 @@ mod tests {
         assert!(read_only_route("/v1/devices?x=1"));
         assert!(!read_only_route("/v1/conversations"));
         assert!(!read_only_route("/v1/devices/fixture/revoke-request"));
+    }
+
+    #[test]
+    fn webview_proxy_strips_unlock_nonces() {
+        let list = || {
+            serde_json::json!({ "requests": [
+                { "id": "a", "device_name": "Mac", "nonce": "00", "created_at": 1 },
+                { "id": "b", "nonce": "11", "inner": { "nonce": "22", "keep": 1 } },
+            ], "nonce": "33" })
+        };
+        let stripped = serde_json::json!({ "requests": [
+            { "id": "a", "device_name": "Mac", "created_at": 1 },
+            { "id": "b", "inner": { "keep": 1 } },
+        ]});
+        for path in [
+            "/v1/auth/unlock/pending?wait=20",
+            "/v1/auth/unlock/pending/",
+            "/v1/auth/unlock//pending",
+            "/v1/auth/unlock/00112233-4455-6677-8899-aabbccddeeff",
+            "/v1/auth/unlock/00112233-4455-6677-8899-aabbccddeeff/?wait=20",
+            "/v1/auth/unlock",
+            "/v1/auth/unlock/",
+            "/v1/auth/unlock?x=1",
+        ] {
+            let mut body = list();
+            strip_unlock_nonces(path, &mut body);
+            assert_eq!(body, stripped, "{path}");
+        }
+        for path in [
+            "/v1/auth/pairing/requests",
+            "/v1/auth/unlocked",
+            "/v1/auth/me",
+        ] {
+            let mut other = list();
+            strip_unlock_nonces(path, &mut other);
+            assert_eq!(other, list(), "{path}");
+        }
     }
 
     #[test]

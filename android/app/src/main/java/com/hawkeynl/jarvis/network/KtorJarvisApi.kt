@@ -9,9 +9,9 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.timeout
 import io.ktor.client.network.sockets.ConnectTimeoutException
 import io.ktor.client.request.bearerAuth
-import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
@@ -80,6 +80,20 @@ class KtorJarvisApi(
         }
     }
 
+    override suspend fun postAuthorizedJson(endpoint: HomeNodeEndpoint, token: String, path: String, body: kotlinx.serialization.json.JsonObject): ApiResult<kotlinx.serialization.json.JsonElement> {
+        if (!OWNER_PATH.matches(path)) return ApiResult.InvalidResponse("Invalid Core path")
+        return request<kotlinx.serialization.json.JsonElement> {
+            client.post(endpoint.url(path)) {
+                bearerAuth(token); contentType(ContentType.Application.Json); setBody(body)
+            }
+        }
+    }
+
+    // Core holds the call at most 25 s; stay well inside the 30 s request timeout.
+    override suspend fun unlockPending(endpoint: HomeNodeEndpoint, token: String, waitSeconds: Int) = request<UnlockRequestList> {
+        client.get(endpoint.url("/v1/auth/unlock/pending")) { bearerAuth(token); parameter("wait", waitSeconds.coerceIn(0, 20)) }
+    }
+
     override suspend fun accountStatus(endpoint: HomeNodeEndpoint) = request<AccountStatus> {
         client.get(endpoint.url("/v1/auth/account/status"))
     }
@@ -131,11 +145,6 @@ class KtorJarvisApi(
     override suspend fun logout(endpoint: HomeNodeEndpoint, token: String) = request<Unit> {
         client.post(endpoint.url("/v1/auth/logout")) { bearerAuth(token) }
     }
-
-    override suspend fun deleteDevice(endpoint: HomeNodeEndpoint, token: String, deviceId: String) =
-        request<Unit> {
-            client.delete(endpoint.url("/v1/devices/$deviceId")) { bearerAuth(token) }
-        }
 
     override suspend fun conversations(endpoint: HomeNodeEndpoint, token: String) =
         request<ConversationListResponse> {

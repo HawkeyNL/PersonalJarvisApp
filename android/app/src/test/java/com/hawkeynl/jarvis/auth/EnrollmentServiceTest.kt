@@ -7,7 +7,6 @@ import com.hawkeynl.jarvis.network.BootstrapRequest
 import com.hawkeynl.jarvis.network.FirstDeviceResponse
 import com.hawkeynl.jarvis.network.ChallengeRequest
 import com.hawkeynl.jarvis.network.ChallengeResponse
-import com.hawkeynl.jarvis.security.Hex
 import com.hawkeynl.jarvis.security.LoginMessage
 import com.hawkeynl.jarvis.network.ChatRequest
 import com.hawkeynl.jarvis.network.ChatResponse
@@ -23,6 +22,7 @@ import com.hawkeynl.jarvis.network.PairingCreateRequest
 import com.hawkeynl.jarvis.network.PairingStatusResponse
 import com.hawkeynl.jarvis.network.PairingTicket
 import com.hawkeynl.jarvis.security.DeviceIdentity
+import com.hawkeynl.jarvis.security.DeviceMessage
 import com.hawkeynl.jarvis.security.DeviceKeyInvalidatedException
 import com.hawkeynl.jarvis.security.DeviceSigningException
 import com.hawkeynl.jarvis.storage.SessionRepository
@@ -97,8 +97,7 @@ class EnrollmentServiceTest {
         assertEquals(null, api.loginRequest)
 
         // The user taps "Erase this device and pair again".
-        service.resetDevice(endpoint)
-        assertEquals(DEVICE_ID, api.deletedDevice)
+        service.eraseLocally()
         assertEquals(null, sessions.session().deviceId)
         assertEquals(1, identity.resets)
     }
@@ -144,7 +143,7 @@ class EnrollmentServiceTest {
         assertEquals(DEVICE_ID, sessions.session().deviceId)
         assertEquals("token", sessions.session().token)
         assertEquals("cd".repeat(64), api.loginRequest?.signature)
-        assertEquals(Hex.encode(LoginMessage.build(CHALLENGE_ID, DEVICE_ID, "02".repeat(32))), identity.signedHex)
+        assertEquals(LoginMessage(CHALLENGE_ID, DEVICE_ID, "02".repeat(32)), identity.signed)
     }
 }
 
@@ -152,14 +151,14 @@ private const val DEVICE_ID = "ffeeddcc-bbaa-9988-7766-554433221100"
 private const val CHALLENGE_ID = "00112233-4455-6677-8899-aabbccddeeff"
 
 private class FakeIdentity : DeviceIdentity {
-    var signedHex: String? = null
+    var signed: DeviceMessage? = null
     var failure: Exception? = null
     var resets = 0
     override fun publicKeyHex() = "ab".repeat(32)
     override suspend fun enrollmentKeyHex(reason: String) = publicKeyHex()
-    override suspend fun signHex(messageHex: String, reason: String): String {
+    override suspend fun sign(message: DeviceMessage, reason: String): String {
         failure?.let { throw it }
-        signedHex = messageHex
+        signed = message
         return "cd".repeat(64)
     }
     override suspend fun reset() { resets++ }
@@ -189,11 +188,6 @@ private class FakeApi : JarvisApi {
         return ApiResult.Success(LoginResponse("token", 900))
     }
     override suspend fun logout(endpoint: HomeNodeEndpoint, token: String) = ApiResult.Success(Unit)
-    var deletedDevice: String? = null
-    override suspend fun deleteDevice(endpoint: HomeNodeEndpoint, token: String, deviceId: String): ApiResult<Unit> {
-        deletedDevice = deviceId
-        return ApiResult.Success(Unit)
-    }
     override suspend fun conversations(endpoint: HomeNodeEndpoint, token: String): ApiResult<ConversationListResponse> = error("unused")
     override suspend fun conversation(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<ConversationDetailResponse> = error("unused")
     override suspend fun chat(endpoint: HomeNodeEndpoint, token: String, request: ChatRequest): ApiResult<ChatResponse> = error("unused")

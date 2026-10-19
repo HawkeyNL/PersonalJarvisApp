@@ -20,6 +20,9 @@ class DeviceKeyInvalidatedException : DeviceSigningException(
     "Fingerprint or face data on this phone changed, so its Jarvis device key no longer works. Erase this device and pair it again.",
 )
 
+/** The user cancelled or failed the biometric prompt; nothing was signed. */
+class SigningCancelledException : DeviceSigningException("Cancelled; fingerprint or face unlock is required.")
+
 /** Android Keystore side of the device key, replaced by a fake in JVM tests. */
 interface DeviceKeyVault {
     /** Plain app-private storage: the public key and the seed ciphertext. */
@@ -91,8 +94,8 @@ class KeystoreBackedEd25519Identity(
         }
     }
 
-    override suspend fun signHex(messageHex: String, reason: String): String = signing.withLock {
-        val message = Hex.decode(messageHex)
+    override suspend fun sign(message: DeviceMessage, reason: String): String = signing.withLock {
+        val bytes = message.message()
         val sealed = io { synchronized(lock) { vault.load(SEED) } }
         val seed = if (sealed != null) unseal(sealed, reason) else migrate(reason)
         try {
@@ -100,7 +103,7 @@ class KeystoreBackedEd25519Identity(
             // parameters, which cannot be cleared; it is garbage once signing returns.
             val signer = Ed25519Signer()
             signer.init(true, Ed25519PrivateKeyParameters(seed, 0))
-            signer.update(message, 0, message.size)
+            signer.update(bytes, 0, bytes.size)
             Hex.encode(signer.generateSignature())
         } finally {
             seed.fill(0)
@@ -178,7 +181,7 @@ class KeystoreBackedEd25519Identity(
     private suspend fun authorise(reason: String, cipher: Cipher) {
         val authenticate = prompt ?: throw DeviceSigningException("Open Jarvis to confirm with biometrics.")
         val result = withTimeoutOrNull(PROMPT_TIMEOUT_MS) { authenticate(reason, cipher) }
-        if (result !== cipher) throw DeviceSigningException("Cancelled; fingerprint or face unlock is required.")
+        if (result !== cipher) throw SigningCancelledException()
     }
 
     private fun publicKey(seed: ByteArray): ByteArray = Ed25519PrivateKeyParameters(seed, 0).generatePublicKey().encoded

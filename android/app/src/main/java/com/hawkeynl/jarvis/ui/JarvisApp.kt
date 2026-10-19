@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -22,6 +24,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hawkeynl.jarvis.network.ConnectionState
 import com.hawkeynl.jarvis.security.ModelControlService
 import com.hawkeynl.jarvis.security.PairingApprovalService
+import com.hawkeynl.jarvis.security.UnlockApprovalService
 
 @Composable
 fun JarvisApp(
@@ -32,6 +35,7 @@ fun JarvisApp(
     onInstallUpdate: () -> Unit,
     modelControls: ModelControlService? = null,
     pairingApprovals: PairingApprovalService? = null,
+    unlockApprovals: UnlockApprovalService? = null,
 ) {
     val signedIn = !state.locked && state.endpoint != null && state.authenticated
     // Locking or signing out drops every Core read and cancels running ones.
@@ -45,10 +49,29 @@ fun JarvisApp(
                     onReset = actions::resetDevice,
                 )
                 state.endpoint == null || !state.authenticated -> OnboardingScreen(state, actions)
-                else -> AuthenticatedShell(state, actions, core, onInstallUpdate, modelControls, pairingApprovals)
+                else -> AuthenticatedShell(state, actions, core, onInstallUpdate, modelControls, pairingApprovals, unlockApprovals)
             }
         }
     }
+    state.localEraseOffer?.let { reason -> LocalEraseDialog(reason, actions::eraseLocally, actions::keepDevice) }
+}
+
+/** Shown only when Core did not confirm revoking this device: erasing is then the user's
+ *  explicit choice, never a silent fallback. */
+@Composable
+private fun LocalEraseDialog(reason: String, onErase: () -> Unit, onKeep: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onKeep,
+        title = { Text("Erase locally only?") },
+        text = {
+            Text(
+                "$reason\n\nThis phone may stay active on your Home Node until you revoke it from another device. " +
+                    "Erase locally only if you will do that.",
+            )
+        },
+        dismissButton = { TextButton(onClick = onKeep) { Text("Keep this device") } },
+        confirmButton = { TextButton(onClick = onErase) { Text("Erase locally only", color = Jv.Danger) } },
+    )
 }
 
 @Composable
@@ -59,6 +82,7 @@ private fun AuthenticatedShell(
     onInstallUpdate: () -> Unit,
     modelControls: ModelControlService?,
     pairingApprovals: PairingApprovalService?,
+    unlockApprovals: UnlockApprovalService?,
 ) {
     val data by core.state.collectAsStateWithLifecycle()
     val screen = state.screen
@@ -68,6 +92,7 @@ private fun AuthenticatedShell(
     Column(Modifier.fillMaxSize()) {
         ConnectionBanner(state.connection, actions::checkConnection)
         state.error?.let { ErrorText(it, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) }
+        unlockApprovals?.let { UnlockRequests(it) }
         Box(Modifier.weight(1f)) {
             when (screen) {
                 Screen.HUB -> HubScreen(state, data, mood, navigate, core::refreshHub)
@@ -81,7 +106,9 @@ private fun AuthenticatedShell(
                     HealthScreen(state, data, mood, navigate, core::refreshHealth, actions::checkConnection, modelControls, state.healthNode)
                 }
                 Screen.MEMORY -> MemoryScreen(mood, navigate)
-                Screen.CONTEXT -> ContextScreen(data, mood, navigate, core::refreshContext)
+                Screen.CONTEXT -> ContextScreen(data, mood, navigate, core::refreshContext) { id ->
+                    core.revokeDevice(id) { actions.state.value.let { !it.locked && it.authenticated } }
+                }
                 Screen.PAIRING_APPROVALS -> PairingApprovalsScreen(data, navigate, core::refreshPairing, core::dropPairing, pairingApprovals)
             }
         }
