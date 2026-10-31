@@ -37,7 +37,7 @@ import { biometricUnlock, unlocking, lockError, signOutFromLock } from "../lock"
   display: grid;
   place-items: center;
   padding: 24px;
-  background: radial-gradient(ellipse at 50% 40%, rgba(8, 20, 14, 0.86), rgba(3, 7, 5, 0.96));
+  background: var(--bg-page);
   backdrop-filter: blur(26px) saturate(1.2);
   -webkit-backdrop-filter: blur(26px) saturate(1.2);
 }
@@ -62,7 +62,7 @@ import { biometricUnlock, unlocking, lockError, signOutFromLock } from "../lock"
   inset: 0;
   border-radius: 50%;
   border: 1.5px solid var(--accent);
-  box-shadow: 0 0 26px rgba(52, 245, 160, 0.4), inset 0 0 18px rgba(52, 245, 160, 0.25);
+  box-shadow: 0 0 26px rgba(var(--accent-rgb), 0.4), inset 0 0 18px rgba(var(--accent-rgb), 0.25);
   animation: pulse 2.6s ease-in-out infinite;
 }
 .mark .glyph {
@@ -70,7 +70,7 @@ import { biometricUnlock, unlocking, lockError, signOutFromLock } from "../lock"
   font-size: 30px;
   font-weight: 700;
   color: var(--accent);
-  text-shadow: 0 0 14px rgba(52, 245, 160, 0.6);
+  text-shadow: 0 0 14px rgba(var(--accent-rgb), 0.6);
 }
 h1 {
   font-size: 19px;
@@ -94,8 +94,8 @@ h1 {
   cursor: pointer;
 }
 .primary {
-  background: linear-gradient(180deg, var(--accent), var(--accent-2));
-  color: #04140c;
+  background: var(--accent-solid);
+  color: var(--text-on-accent);
   border: none;
 }
 .primary:disabled {
@@ -122,14 +122,14 @@ h1 {
   font-size: 12px;
 }
 .err {
-  color: #f87171;
+  color: var(--danger-text);
   font-size: 12px;
   margin: 4px 0 0;
 }
 
 @keyframes pulse {
-  0%, 100% { box-shadow: 0 0 18px rgba(52, 245, 160, 0.28), inset 0 0 14px rgba(52, 245, 160, 0.2); }
-  50% { box-shadow: 0 0 34px rgba(52, 245, 160, 0.55), inset 0 0 22px rgba(52, 245, 160, 0.32); }
+  0%, 100% { box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.28), inset 0 0 14px rgba(var(--accent-rgb), 0.2); }
+  50% { box-shadow: 0 0 34px rgba(var(--accent-rgb), 0.55), inset 0 0 22px rgba(var(--accent-rgb), 0.32); }
 }
 @media (prefers-reduced-motion: reduce) {
   .mark .ring {

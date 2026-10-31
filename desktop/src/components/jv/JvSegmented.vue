@@ -48,14 +48,14 @@ button {
   font: inherit; font-weight: 400; letter-spacing: 0.03em; cursor: pointer; white-space: nowrap;
 }
 button:hover { filter: none; color: var(--text-0); }
-button :deep(svg) { flex: none; color: #9fb8ad; }
-button.on { color: #f8fffb; font-weight: 500; border-color: var(--accent); }
+button :deep(svg) { flex: none; color: var(--text-secondary); }
+button.on { color: var(--text-primary); font-weight: 500; border-color: var(--accent); }
 button.on :deep(svg) { color: var(--accent); }
 button span { overflow: hidden; text-overflow: ellipsis; }
 
 .sub {
   height: 40px; box-sizing: border-box; border: 1px solid var(--line-a30); border-radius: var(--r-12);
-  background: rgba(3, 24, 19, 0.8);
+  background: var(--bg-surface);
 }
 .sub button { font-size: var(--fs-13); border-radius: var(--r-12); }
 .sub button + button { border-left: 1px solid var(--line-a18); }

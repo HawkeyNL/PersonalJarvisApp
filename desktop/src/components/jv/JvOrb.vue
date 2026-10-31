@@ -118,13 +118,13 @@ const nodes = [
 .membrane { box-sizing: border-box; }
 .membrane.outer {
   left: -2%; top: -2%; width: 104%; height: 104%;
-  border: 1px solid rgba(150, 255, 210, 0.3);
+  border: 1px solid var(--accent-border);
   border-radius: 46% 54% 51% 49% / 52% 45% 55% 48% !important;
   animation: jvSpin 14s ease-in-out infinite;
 }
 .membrane.main {
   inset: 0;
-  border: 1.5px solid rgba(150, 255, 210, 0.5);
+  border: 1.5px solid var(--accent-border);
   border-radius: 49% 51% 52% 48% / 51% 48% 52% 49% !important;
   box-shadow: 0 0 22px rgba(var(--accent-rgb), 0.4), inset 0 0 22px rgba(var(--accent-rgb), 0.22);
   animation: jvSpin 14s ease-in-out infinite;
@@ -169,7 +169,7 @@ const nodes = [
   inset: 0; border-radius: 0 !important;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   font-family: var(--font-display); font-weight: 600; font-size: var(--label);
-  letter-spacing: 0.4em; padding-left: 0.4em; color: var(--text-0);
+  letter-spacing: 0.4em; padding-left: 0.4em; color: #f4fffa; /* on the fixed-colour orb, not the theme */
   text-shadow: 0 0 12px rgba(0, 30, 20, 0.85), 0 0 2px rgba(0, 30, 20, 0.9);
 }
 .label .bar {

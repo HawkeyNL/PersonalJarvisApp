@@ -96,15 +96,15 @@ const core = computed(() =>
   box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.7), inset 0 0 8px rgba(var(--accent-rgb), 0.45);
 }
 .words { display: flex; flex-direction: column; }
-.name { font-family: var(--font-display); font-weight: 500; font-size: 19px; letter-spacing: 0.5em; line-height: 24px; color: #eaf7f1; }
+.name { font-family: var(--font-display); font-weight: 500; font-size: 19px; letter-spacing: 0.5em; line-height: 24px; color: var(--text-primary); }
 .tag { margin-top: 2px; font-size: 11px; letter-spacing: 0.32em; color: var(--text-5); }
 
 .back {
   display: inline-flex; align-items: center; justify-content: center; gap: 14px;
   height: 43px; padding: 0 24px; box-sizing: border-box;
   border-radius: var(--r-22); border: 1px solid rgba(var(--accent-rgb), 0.75);
-  background: rgba(5, 40, 30, 0.65); box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.25);
-  color: #f1faf6; font-size: 14.5px; letter-spacing: 0.06em; text-decoration: none;
+  background: var(--bg-surface); box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.25);
+  color: var(--text-primary); font-size: 14.5px; letter-spacing: 0.06em; text-decoration: none;
 }
 .back :deep(svg) { color: var(--accent); stroke-width: 2; }
 
@@ -113,7 +113,7 @@ const core = computed(() =>
   margin: 0; font-family: var(--font-display); font-weight: 600; font-size: var(--fs-23);
   letter-spacing: 0.5em; padding-left: 0.5em; line-height: 30px; color: var(--text-0);
 }
-.title p { margin: 10px 0 0; font-size: 11px; letter-spacing: 0.38em; padding-left: 0.38em; color: #9fb8ad; }
+.title p { margin: 10px 0 0; font-size: 11px; letter-spacing: 0.38em; padding-left: 0.38em; color: var(--text-secondary); }
 .title::before, .title::after {
   content: ""; position: absolute; top: 20px; width: 68px; height: 1px;
 }
@@ -126,18 +126,18 @@ const core = computed(() =>
 .item :deep(svg) { width: 16px; height: 16px; color: var(--accent); }
 .sep { width: 1px; height: 30px; background: rgba(var(--accent-rgb), 0.3); }
 .update {
-  padding: 4px 10px; border: 1px solid rgba(245, 184, 74, 0.5); border-radius: 999px;
-  color: #fde68a; font-size: 11px; text-decoration: none;
+  padding: 4px 10px; border: 1px solid var(--negative-solid); border-radius: 999px;
+  color: var(--negative-text); font-size: 11px; text-decoration: none;
 }
 
 .profile {
   position: relative; flex: none; width: 44px; height: 44px; box-sizing: border-box;
   display: grid; place-items: center; border-radius: 50%;
-  border: 1.5px solid rgba(var(--accent-rgb), 0.7); background: rgba(5, 40, 30, 0.8);
-  color: #f1faf6; box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.25);
+  border: 1.5px solid rgba(var(--accent-rgb), 0.7); background: var(--bg-surface);
+  color: var(--text-primary); box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.25);
 }
 .profile :deep(svg) { width: 20px; height: 20px; }
-.pdot { position: absolute; right: 1px; bottom: 1px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: var(--glow-sm); }
+.pdot { position: absolute; right: 1px; bottom: 1px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent-solid); box-shadow: var(--glow-sm); }
 
 .is-hub .center { width: min(584px, 44vw); }
 /* Narrow windows: the command bar or page title needs the room. */

@@ -32,12 +32,12 @@ const scale = useFitScale(room, stage, () => 1.6);
       <div ref="stage" class="stage">
         <svg v-if="items.length" class="wires" viewBox="0 0 981 363" aria-hidden="true">
           <g transform="translate(-234 -97)">
-            <circle cx="725" cy="288" r="168" fill="none" stroke="rgba(150,255,210,.55)" stroke-width="1.5" />
+            <circle cx="725" cy="288" r="168" fill="none" class="ring" stroke-width="1.5" />
             <circle cx="725" cy="288" r="180" fill="none" class="a20" stroke-width="1" />
             <circle cx="725" cy="288" r="212" fill="none" class="a22" stroke-width="1" stroke-dasharray="1 6" />
             <path d="M596.1 180.2L538 150M557.0 284.8L512 268M578.5 370.2L527 396M853.5 179.7L912 150M893.0 285.8L934 268M871.5 370.3L920 398M725 456V462" class="a55" stroke-width="1" />
             <g class="fill-accent"><circle cx="538" cy="150" r="2.5" /><circle cx="512" cy="268" r="2.5" /><circle cx="527" cy="396" r="2.5" /><circle cx="912" cy="150" r="2.5" /><circle cx="934" cy="268" r="2.5" /><circle cx="920" cy="398" r="2.5" /></g>
-            <g fill="rgba(2,20,15,.9)" stroke="rgba(150,255,210,.85)" stroke-width="1.4"><circle cx="596.1" cy="180.2" r="6.5" /><circle cx="557" cy="284.8" r="6.5" /><circle cx="578.5" cy="370.2" r="6.5" /><circle cx="853.5" cy="179.7" r="6.5" /><circle cx="893" cy="285.8" r="6.5" /><circle cx="871.5" cy="370.3" r="6.5" /><circle cx="725" cy="456" r="5" /></g>
+            <g class="hub-node" stroke-width="1.4"><circle cx="596.1" cy="180.2" r="6.5" /><circle cx="557" cy="284.8" r="6.5" /><circle cx="578.5" cy="370.2" r="6.5" /><circle cx="853.5" cy="179.7" r="6.5" /><circle cx="893" cy="285.8" r="6.5" /><circle cx="871.5" cy="370.3" r="6.5" /><circle cx="725" cy="456" r="5" /></g>
             <g class="fill-accent"><circle cx="596.1" cy="180.2" r="2" /><circle cx="557" cy="284.8" r="2" /><circle cx="578.5" cy="370.2" r="2" /><circle cx="853.5" cy="179.7" r="2" /><circle cx="893" cy="285.8" r="2" /><circle cx="871.5" cy="370.3" r="2" /><circle cx="725" cy="456" r="1.6" /></g>
           </g>
         </svg>
@@ -82,13 +82,15 @@ const scale = useFitScale(room, stage, () => 1.6);
 .a22 { stroke: rgba(var(--accent-rgb), 0.22); }
 .a55 { stroke: rgba(var(--accent-rgb), 0.55); }
 .fill-accent { fill: var(--accent); }
+.ring { stroke: var(--accent-border); }
+.hub-node { fill: var(--bg-surface); stroke: var(--accent-border); }
 .orb { position: absolute !important; left: 346px; top: 46px; }
 
 .sat {
   position: absolute; width: 277px; height: 102px; box-sizing: border-box;
   display: flex; align-items: center; gap: 24px; padding: 0 22px 0 20px; text-align: left;
   border-radius: var(--r-24); border: 1px solid var(--line-a45); background: var(--sat-bg);
-  box-shadow: 0 0 22px rgba(var(--accent-rgb), 0.12); color: #f1faf6; font: inherit; font-weight: 400; cursor: pointer;
+  box-shadow: 0 0 22px rgba(var(--accent-rgb), 0.12); color: var(--text-primary); font: inherit; font-weight: 400; cursor: pointer;
 }
 .sat:hover { filter: none; border-color: rgba(var(--accent-rgb), 0.7); }
 .sat.on { border: 2px solid var(--accent); background: var(--sel-bg); box-shadow: 0 0 28px rgba(var(--accent-rgb), 0.45), inset 0 0 18px rgba(var(--accent-rgb), 0.12); }

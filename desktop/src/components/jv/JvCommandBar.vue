@@ -24,7 +24,7 @@ const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator
 <style scoped>
 .jv-command {
   display: flex; align-items: center; height: 50px; box-sizing: border-box;
-  border-radius: var(--r-16); border: 1px solid rgba(160, 255, 215, 0.14);
+  border-radius: var(--r-16); border: 1px solid var(--border);
   background: var(--field-bg);
 }
 .disabled { opacity: 0.55; }
@@ -41,7 +41,7 @@ button:hover { filter: none; }
 .placeholder { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-13); letter-spacing: 0.22em; color: var(--text-5); }
 kbd {
   flex: none; min-width: 60px; height: 26px; box-sizing: border-box; padding: 0 8px;
-  display: grid; place-items: center; border-radius: var(--r-8); background: rgba(255, 255, 255, 0.06);
+  display: grid; place-items: center; border-radius: var(--r-8); background: var(--bg-sunken);
   font: 12px var(--font-body); letter-spacing: 0.1em; color: var(--text-4);
 }
 @media (max-width: 1099px), (max-height: 759px) {

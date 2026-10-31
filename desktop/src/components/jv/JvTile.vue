@@ -22,6 +22,6 @@ defineProps<{ icon: IconName; label: string; value: string }>();
 }
 .icon { flex: none; width: 30px; height: 30px; color: var(--accent); stroke-width: 1.5; }
 .text { min-width: 0; }
-.label { font-size: var(--fs-12); font-weight: 500; color: #f1faf6; line-height: 1.3; }
+.label { font-size: var(--fs-12); font-weight: 500; color: var(--text-primary); line-height: 1.3; }
 .value { margin-top: 3px; font-size: 11px; color: var(--text-5); line-height: 1.3; overflow-wrap: anywhere; }
 </style>

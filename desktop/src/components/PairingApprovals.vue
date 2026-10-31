@@ -39,5 +39,5 @@ dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margi
 dt { color: var(--muted); }
 dd { margin: 0; }
 .fingerprint { font-family: var(--mono); }
-.error { color: #f87171; }
+.error { color: var(--danger-text); }
 </style>

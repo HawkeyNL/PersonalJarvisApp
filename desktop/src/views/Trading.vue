@@ -220,14 +220,14 @@ onMounted(() => {
   display: flex; flex-direction: column; gap: 6px;
 }
 .t-k { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; color: var(--muted); }
-.t-v { font-size: 26px; font-weight: 700; color: #eafff4; font-variant-numeric: tabular-nums; }
+.t-v { font-size: 26px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .t-v.small { font-size: 15px; display: inline-flex; align-items: center; gap: 8px; }
 .mono { font-family: var(--mono); }
 
 .seg {
   display: inline-flex; gap: 4px; padding: 4px; margin-bottom: 16px;
   border-radius: 14px;
-  background: rgba(3, 24, 19, 0.8);
+  background: var(--bg-surface);
   border: 1px solid var(--line-a30);
 }
 .seg a {

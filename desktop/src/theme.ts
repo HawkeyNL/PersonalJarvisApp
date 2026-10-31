@@ -1,42 +1,44 @@
-// Accent colour theming. Green is the Jarvis default; the user can switch the
-// accent from Settings. The choice is persisted and re-applied on launch.
-// The preset names are unchanged from the previous palette, so a saved choice
-// keeps working and maps onto the new hue of the same name.
-export type Accent = "green" | "cyan" | "amber" | "violet";
+// Light / Dark / System theme. The choice is persisted; "system" (the default)
+// follows prefers-color-scheme and updates live when the OS switches.
+// The resolved theme lands on <html data-theme="light|dark">, see tokens.css.
+export type ThemeChoice = "light" | "dark" | "system";
+export type Theme = "light" | "dark";
 
-/** [accent, light companion] per preset. */
-export const PRESETS: Record<Accent, [string, string]> = {
-  green: ["#2ee6a2", "#9bffd6"],
-  cyan: ["#38bdf8", "#a5e3fc"],
-  amber: ["#fbbf24", "#fde08a"],
-  violet: ["#a78bfa", "#d6cbfd"],
-};
+export const THEMES: ThemeChoice[] = ["light", "dark", "system"];
 
-export const ACCENTS = Object.keys(PRESETS) as Accent[];
+const KEY = "jarvis.theme";
+const DARK_QUERY = "(prefers-color-scheme: dark)";
 
-const KEY = "jarvis.accent";
+type Env = Pick<Window, "localStorage" | "matchMedia" | "document" | "requestAnimationFrame">;
 
-export function currentAccent(): Accent {
-  const v = localStorage.getItem(KEY) as Accent | null;
-  return v && v in PRESETS ? v : "green";
+export function currentTheme(env: Env = window): ThemeChoice {
+  const v = env.localStorage.getItem(KEY);
+  return v === "light" || v === "dark" ? v : "system";
 }
 
-/** "#2ee6a2" -> "46, 230, 162", for `rgba(var(--accent-rgb), .3)`. */
-function rgbTriplet(hex: string): string {
-  const n = parseInt(hex.slice(1), 16);
-  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+export function resolveTheme(choice: ThemeChoice, prefersDark: boolean): Theme {
+  return choice === "system" ? (prefersDark ? "dark" : "light") : choice;
 }
 
-export function applyAccent(a: Accent): void {
-  const [c1, c2] = PRESETS[a] ?? PRESETS.green;
-  const root = document.documentElement;
-  root.style.setProperty("--accent", c1);
-  root.style.setProperty("--accent-2", c2);
-  root.style.setProperty("--accent-rgb", rgbTriplet(c1));
-  localStorage.setItem(KEY, a);
+function paint(env: Env): void {
+  const root = env.document.documentElement;
+  const next = resolveTheme(currentTheme(env), env.matchMedia(DARK_QUERY).matches);
+  if (root.dataset.theme === next) return;
+  // Swap without every colour transition firing at once.
+  root.classList.add("no-tx");
+  root.dataset.theme = next;
+  void root.offsetHeight; // commit the new colours while transitions are off
+  env.requestAnimationFrame(() => env.requestAnimationFrame(() => root.classList.remove("no-tx")));
 }
 
-/** Apply the saved accent on app start. */
-export function initAccent(): void {
-  applyAccent(currentAccent());
+export function setTheme(choice: ThemeChoice, env: Env = window): void {
+  env.localStorage.setItem(KEY, choice);
+  paint(env);
+}
+
+/** Apply the saved theme on app start and follow OS changes while on "system". */
+export function initTheme(env: Env = window): void {
+  env.localStorage.removeItem("jarvis.accent"); // the old accent picker's key
+  paint(env);
+  env.matchMedia(DARK_QUERY).addEventListener("change", () => paint(env));
 }

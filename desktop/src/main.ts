@@ -2,9 +2,10 @@ import { createApp } from "vue";
 import { createPinia } from "pinia";
 import App from "./App.vue";
 import { router } from "./router";
-import { initAccent } from "./theme";
+import { initTheme } from "./theme";
+import "./tokens.css";
 import "./styles.css";
 
-initAccent();
+initTheme();
 
 createApp(App).use(createPinia()).use(router).mount("#app");

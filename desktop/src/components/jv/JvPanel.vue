@@ -50,10 +50,10 @@ defineProps<{ icon: IconName; title: string; tone: Tone; status: string; descrip
 .icon :deep(svg) { width: 34px; height: 34px; stroke-width: 1.5; }
 .meta { flex: 1; min-width: 0; }
 .line1 { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-h2 { margin: 0; font-size: var(--fs-20); font-weight: 500; letter-spacing: 0.04em; color: #f8fffb; }
+h2 { margin: 0; font-size: var(--fs-20); font-weight: 500; letter-spacing: 0.04em; color: var(--text-primary); }
 .line1 :deep(.jv-status) { font-size: var(--fs-13); }
 .desc { margin: 6px 0 0; font-size: var(--fs-14); color: var(--text-2); }
-.quote { margin: 5px 0 0; font-size: var(--fs-12); font-style: italic; font-weight: 300; color: #9fb8ad; overflow-wrap: anywhere; }
+.quote { margin: 5px 0 0; font-size: var(--fs-12); font-style: italic; font-weight: 300; color: var(--text-secondary); overflow-wrap: anywhere; }
 .action { flex: none; align-self: flex-start; margin-top: 20px; }
 @media (max-width: 1099px), (max-height: 759px) {
   .jv-panel { padding: 14px 16px 18px; border-radius: var(--r-22); }

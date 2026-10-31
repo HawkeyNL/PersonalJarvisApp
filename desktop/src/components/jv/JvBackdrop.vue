@@ -70,6 +70,13 @@ withDefaults(defineProps<{ glowY?: string; horizon?: string }>(), {
   border-top: 2px solid rgba(150, 255, 210, 0.7);
   box-shadow: 0 -10px 50px rgba(var(--accent-rgb), 0.45), 0 -3px 160px rgba(var(--accent-rgb), 0.15);
 }
+/* The neon space scene belongs to the dark design; the light theme stays plain. */
+:root[data-theme="light"] .jv-backdrop {
+  background: var(--bg);
+}
+:root[data-theme="light"] .jv-backdrop > * {
+  display: none;
+}
 .flare {
   position: absolute;
   left: calc(50% - 150px);

@@ -26,7 +26,7 @@ withDefaults(defineProps<{ title: string; kind?: "planned" | "core-update" | "er
 <style scoped>
 .jv-unavailable {
   display: flex; align-items: flex-start; gap: 16px; padding: 18px 20px; box-sizing: border-box;
-  border: 1px dashed var(--line-a30); border-radius: var(--r-12); background: rgba(8, 40, 32, 0.3);
+  border: 1px dashed var(--line-a30); border-radius: var(--r-12); background: var(--bg-surface);
 }
 .icon {
   flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%;

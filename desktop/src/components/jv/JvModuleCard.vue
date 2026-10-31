@@ -38,7 +38,7 @@ const accessibleName = computed(() => [props.title, ...props.lines.filter(Boolea
 .line { font-size: var(--fs-11); letter-spacing: 0.06em; color: var(--text-5); line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .title + .line { margin-top: 5px; }
 .dot { position: absolute; top: 16px; right: 18px; width: 5px; height: 5px; border-radius: 50%; background: var(--idle); }
-.dot.ok { background: var(--accent); box-shadow: var(--glow-sm); }
+.dot.ok { background: var(--accent-solid); box-shadow: var(--glow-sm); }
 .dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
 .dot.error { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
 

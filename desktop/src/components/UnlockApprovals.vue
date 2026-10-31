@@ -66,9 +66,9 @@ const two = (n: number) => String(n).padStart(2, "0");
   pointer-events: auto;
   border-radius: 18px;
   padding: 14px 16px 12px;
-  background: linear-gradient(180deg, rgba(16, 34, 26, 0.86), rgba(8, 18, 14, 0.82));
+  background: var(--bg-surface);
   border: 1px solid var(--accent);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55), 0 0 22px rgba(52, 245, 160, 0.22);
+  box-shadow: var(--shadow-pop);
   backdrop-filter: blur(22px) saturate(1.3);
   -webkit-backdrop-filter: blur(22px) saturate(1.3);
 }
@@ -118,8 +118,8 @@ const two = (n: number) => String(n).padStart(2, "0");
   cursor: pointer;
 }
 .approve {
-  background: linear-gradient(180deg, var(--accent), var(--accent-2));
-  color: #04140c;
+  background: var(--accent-solid);
+  color: var(--text-on-accent);
   border: none;
 }
 .deny {
@@ -129,8 +129,8 @@ const two = (n: number) => String(n).padStart(2, "0");
   font-weight: 500;
 }
 .deny:hover:not(:disabled) {
-  border-color: #f87171;
-  color: #f87171;
+  border-color: var(--danger-text);
+  color: var(--danger-text);
 }
 .approve:disabled,
 .deny:disabled {
@@ -159,7 +159,7 @@ const two = (n: number) => String(n).padStart(2, "0");
   cursor: pointer;
 }
 .err {
-  color: #f87171;
+  color: var(--danger-text);
   font-size: 12px;
   margin: 6px 0 0;
 }
