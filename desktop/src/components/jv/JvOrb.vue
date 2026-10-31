@@ -118,13 +118,13 @@ const nodes = [
 .membrane { box-sizing: border-box; }
 .membrane.outer {
   left: -2%; top: -2%; width: 104%; height: 104%;
-  border: 1px solid rgba(150, 255, 210, 0.3);
+  border: 1px solid var(--accent-border);
   border-radius: 46% 54% 51% 49% / 52% 45% 55% 48% !important;
   animation: jvSpin 14s ease-in-out infinite;
 }
 .membrane.main {
   inset: 0;
-  border: 1.5px solid rgba(150, 255, 210, 0.5);
+  border: 1.5px solid var(--accent-border);
   border-radius: 49% 51% 52% 48% / 51% 48% 52% 49% !important;
   box-shadow: 0 0 22px rgba(var(--accent-rgb), 0.4), inset 0 0 22px rgba(var(--accent-rgb), 0.22);
   animation: jvSpin 14s ease-in-out infinite;

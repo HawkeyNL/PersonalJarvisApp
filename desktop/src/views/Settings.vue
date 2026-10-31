@@ -147,14 +147,13 @@ onMounted(async () => {
 
     <div v-if="section === 'General'" class="panel glass">
       <div class="panel-head">APPEARANCE <span class="hint">theme</span></div>
-      <div class="swatches" role="radiogroup" aria-label="Theme">
+      <div class="swatches" aria-label="Theme">
         <button
           v-for="t in THEMES"
           :key="t"
           class="swatch"
           :class="{ on: theme === t }"
-          role="radio"
-          :aria-checked="theme === t"
+          :aria-pressed="theme === t"
           @click="pickTheme(t)"
         >
           {{ themeLabels[t] }}

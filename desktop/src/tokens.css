@@ -101,6 +101,15 @@
   --shadow-pop: 0 0 0 1px oklch(1 0 0 / 0.1), 0 12px 32px -6px oklch(0 0 0 / 0.6);
 }
 
+/* Before main.ts sets data-theme only the empty page shows: paint it dark
+   for dark-OS users so there is no white flash. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --bg-page: oklch(0.165 0.008 255);
+  }
+}
+
 /* Theme switch: no transition smear (theme.ts adds this for two frames). */
 .no-tx,
 .no-tx *,

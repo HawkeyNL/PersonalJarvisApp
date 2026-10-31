@@ -340,17 +340,17 @@ onBeforeUnmount(() => {
             </radialGradient>
           </defs>
           <g transform="translate(-199 -125)">
-            <circle cx="725" cy="473" r="196" fill="none" stroke="rgba(150,255,210,.6)" stroke-width="1.5" />
+            <circle cx="725" cy="473" r="196" fill="none" class="ring" stroke-width="1.5" />
             <circle cx="725" cy="473" r="208" fill="none" class="a22" stroke-width="1" />
             <circle cx="725" cy="473" r="250" fill="none" class="a30" stroke-width="1" stroke-dasharray="1 6" />
-            <ellipse cx="725" cy="473" rx="330" ry="74" transform="rotate(9 725 473)" fill="none" stroke="rgba(120,255,200,.28)" stroke-width="1" />
+            <ellipse cx="725" cy="473" rx="330" ry="74" transform="rotate(9 725 473)" fill="none" class="ring" stroke-width="1" />
             <path d="M724 222V282" class="a60" stroke-width="1" />
             <path d="M552 373L478 332M897 373L970 332M536 539L443 563M912 539L1007 563M622 641L574 701M826 641L875 703" class="a55" stroke-width="1" />
             <g class="fill-accent"><circle cx="724" cy="222" r="2.5" /><circle cx="478" cy="332" r="2.5" /><circle cx="970" cy="332" r="2.5" /><circle cx="443" cy="563" r="2.5" /><circle cx="1007" cy="563" r="2.5" /><circle cx="574" cy="701" r="2.5" /><circle cx="875" cy="703" r="2.5" /></g>
-            <g fill="rgba(2,20,15,.9)" stroke="rgba(150,255,210,.85)" stroke-width="1.4"><circle cx="552" cy="373" r="6.5" /><circle cx="897" cy="373" r="6.5" /><circle cx="536" cy="539" r="6.5" /><circle cx="912" cy="539" r="6.5" /><circle cx="622" cy="641" r="6.5" /><circle cx="826" cy="641" r="6.5" /></g>
+            <g class="hub-node" stroke-width="1.4"><circle cx="552" cy="373" r="6.5" /><circle cx="897" cy="373" r="6.5" /><circle cx="536" cy="539" r="6.5" /><circle cx="912" cy="539" r="6.5" /><circle cx="622" cy="641" r="6.5" /><circle cx="826" cy="641" r="6.5" /></g>
             <g class="fill-accent"><circle cx="552" cy="373" r="2" /><circle cx="897" cy="373" r="2" /><circle cx="536" cy="539" r="2" /><circle cx="912" cy="539" r="2" /><circle cx="622" cy="641" r="2" /><circle cx="826" cy="641" r="2" /></g>
-            <circle cx="397" cy="459" r="11" fill="url(#hubPlanet)" stroke="rgba(190,255,225,.8)" stroke-width="1" />
-            <circle cx="941" cy="500" r="6" fill="url(#hubPlanet)" stroke="rgba(190,255,225,.8)" stroke-width="1" />
+            <circle cx="397" cy="459" r="11" fill="url(#hubPlanet)" class="ring" stroke-width="1" />
+            <circle cx="941" cy="500" r="6" fill="url(#hubPlanet)" class="ring" stroke-width="1" />
           </g>
         </svg>
         <JvOrb class="orb" :size="346" :mood="mood" />
@@ -441,6 +441,8 @@ onBeforeUnmount(() => {
 .a55 { stroke: rgba(var(--accent-rgb), 0.55); }
 .a60 { stroke: rgba(var(--accent-rgb), 0.6); }
 .fill-accent { fill: var(--accent); }
+.ring { stroke: var(--accent-border); }
+.hub-node { fill: var(--bg-surface); stroke: var(--accent-border); }
 .orb { position: absolute !important; left: 353px; top: 175px; }
 .stage .jv-card { position: absolute; max-width: 270px; }
 .card-chat { left: 528px; top: 6px; min-width: 249px; transform: translateX(-50%); }

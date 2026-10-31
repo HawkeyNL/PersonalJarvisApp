@@ -424,6 +424,7 @@ onMounted(async () => {
 .transcript.scrim {
   padding: 12px 16px 10px;
   border-radius: 16px;
+  background: var(--bg-scrim); /* fallback where color-mix() is unsupported */
   background: radial-gradient(
     130% 100% at 22% 40%,
     color-mix(in oklab, var(--bg-page) 72%, transparent) 0%,

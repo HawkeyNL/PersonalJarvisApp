@@ -11,7 +11,7 @@ function fakeEnv({dark = false, saved = null} = {}) {
   const env = {
     dark,
     classes,
-    localStorage: {getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v))},
+    localStorage: {getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: k => store.delete(k), has: k => store.has(k)},
     matchMedia: () => mql,
     document: {documentElement: root},
     requestAnimationFrame: fn => fn(),
@@ -32,8 +32,10 @@ test("default is system and unknown saved values fall back to it", () => {
   assert.equal(currentTheme(fakeEnv()), "system");
   assert.equal(currentTheme(fakeEnv({saved: "green"})), "system");
   const env = fakeEnv({dark: true});
+  env.localStorage.setItem("jarvis.accent", "green");
   initTheme(env);
   assert.equal(theme(env), "dark");
+  assert.equal(env.localStorage.has("jarvis.accent"), false);
 });
 
 test("system follows live OS switches; an explicit choice does not", () => {

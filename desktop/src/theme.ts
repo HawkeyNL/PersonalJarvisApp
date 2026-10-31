@@ -38,6 +38,7 @@ export function setTheme(choice: ThemeChoice, env: Env = window): void {
 
 /** Apply the saved theme on app start and follow OS changes while on "system". */
 export function initTheme(env: Env = window): void {
+  env.localStorage.removeItem("jarvis.accent"); // the old accent picker's key
   paint(env);
   env.matchMedia(DARK_QUERY).addEventListener("change", () => paint(env));
 }
