@@ -453,7 +453,7 @@ onBeforeUnmount(() => {
 
 .pill {
   display: flex; align-items: center; gap: 22px; height: 44px; box-sizing: border-box; padding: 0 20px 0 14px;
-  border-radius: var(--r-22); border: 1px solid rgba(160, 255, 215, 0.14); background: rgba(6, 22, 18, 0.7);
+  border-radius: var(--r-22); border: 1px solid var(--border); background: var(--bg-surface);
   white-space: nowrap;
 }
 .stage .pill { position: absolute; left: 525px; top: 690px; min-width: 354px; transform: translateX(-50%); }
@@ -462,7 +462,7 @@ onBeforeUnmount(() => {
   border-radius: 50%; border: 1.5px solid rgba(var(--accent-rgb), 0.6);
 }
 .pill-label { font-size: 13.5px; font-weight: 600; letter-spacing: 0.08em; color: var(--accent); }
-.pill-sep { width: 1px; height: 16px; background: rgba(160, 255, 215, 0.3); }
+.pill-sep { width: 1px; height: 16px; background: var(--border); }
 .pill-hint { font-size: 11px; letter-spacing: 0.05em; color: var(--text-4); }
 
 .pairing-wait, .connection-error {
@@ -470,8 +470,8 @@ onBeforeUnmount(() => {
   width: min(34rem, calc(100% - 2rem)); margin: 0; padding: 0.75rem 1rem; box-sizing: border-box;
   border-radius: var(--r-12); text-align: center; font-size: var(--fs-13);
 }
-.pairing-wait { border: 1px solid var(--line-a45); background: rgba(5, 36, 28, 0.9); color: var(--text-1); }
-.connection-error { border: 1px solid rgba(248, 113, 113, 0.45); background: rgba(30, 8, 8, 0.85); color: #fecaca; }
+.pairing-wait { border: 1px solid var(--line-a45); background: var(--bg-surface); color: var(--text-1); }
+.connection-error { border: 1px solid var(--danger-text); background: var(--bg-surface); color: var(--danger-text); }
 
 /* --- Onboarding gate --- */
 /* A tall sign-in form scrolls inside the gate; `safe` keeps its top reachable. */
@@ -491,16 +491,16 @@ onBeforeUnmount(() => {
 .password-input { display: flex; align-items: stretch; gap: 8px; margin-bottom: .8rem; }
 .password-input input { flex: 1; min-width: 0; margin-bottom: 0; }
 .password-toggle { min-width: 44px; min-height: 44px; display: grid; place-items: center; }
-.config-error { color: #fecaca !important; }
+.config-error { color: var(--danger-text) !important; }
 .setup-hint { color: var(--muted) !important; font-size: 0.82rem !important; }
 
 /* --- Decorations --- */
 .tagline { position: absolute; top: 150px; font-size: 10px; letter-spacing: 0.32em; line-height: 16.5px; color: var(--text-4); }
 .tagline.left { left: 66px; }
-.tagline.left::before { content: ""; position: absolute; left: -23px; top: 2px; width: 2px; height: 92px; background: linear-gradient(180deg, rgba(150, 255, 210, 0.7), rgba(var(--accent-rgb), 0.15)); }
-.tagline.left::after { content: ""; position: absolute; left: -10px; top: 105px; width: 15px; height: 1px; background: rgba(150, 255, 210, 0.7); }
+.tagline.left::before { content: ""; position: absolute; left: -23px; top: 2px; width: 2px; height: 92px; background: linear-gradient(180deg, var(--border), rgba(var(--accent-rgb), 0.15)); }
+.tagline.left::after { content: ""; position: absolute; left: -10px; top: 105px; width: 15px; height: 1px; background: var(--border); }
 .tagline.right { right: 57px; top: 158px; text-align: right; }
-.tagline.right::after { content: ""; position: absolute; right: -18px; top: 4px; width: 1px; height: 40px; background: rgba(150, 255, 210, 0.5); }
+.tagline.right::after { content: ""; position: absolute; right: -18px; top: 4px; width: 1px; height: 40px; background: var(--border); }
 .footer {
   position: absolute; z-index: 1; left: 33px; right: 36px; bottom: 24px;
   display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; pointer-events: none;
@@ -508,14 +508,14 @@ onBeforeUnmount(() => {
 .node { display: flex; align-items: center; gap: 20px; }
 .node-icon {
   width: 40px; height: 40px; box-sizing: border-box; display: grid; place-items: center; border-radius: 50%;
-  border: 1.5px solid rgba(160, 255, 215, 0.3); background: rgba(3, 22, 18, 0.8); color: var(--accent);
+  border: 1.5px solid var(--border); background: var(--bg-surface); color: var(--accent);
 }
 .node-icon :deep(svg) { width: 18px; height: 18px; }
 .node-text { display: flex; flex-direction: column; font-size: 11px; letter-spacing: 0.16em; line-height: 16px; color: var(--text-2); }
 .node-state { font-size: 11px; font-weight: 600; letter-spacing: 0.22em; color: var(--accent); }
 .node-state.off { color: var(--danger); }
 .motto { display: flex; flex-direction: column; align-items: center; gap: 16px; font-size: 11.5px; letter-spacing: 0.5em; padding-left: 0.5em; color: var(--text-1); }
-.motto .bar { width: 36px; height: 2px; margin-left: -0.5em; background: rgba(244, 255, 250, 0.8); }
+.motto .bar { width: 36px; height: 2px; margin-left: -0.5em; background: var(--border-strong); }
 .tagline-foot { justify-self: end; text-align: right; font-size: 11px; letter-spacing: 0.28em; line-height: 15px; color: var(--text-4); }
 @media (max-width: 1299px) { .tagline { display: none; } }
 
@@ -528,12 +528,12 @@ onBeforeUnmount(() => {
 .compact-orb { position: relative; width: 320px; height: 320px; display: grid; place-items: center; flex: none; }
 .compact-orb::before {
   content: ""; position: absolute; inset: 36px; border-radius: 50%;
-  border: 1.3px solid rgba(150, 255, 210, 0.5); box-shadow: 0 0 0 10px rgba(var(--accent-rgb), 0.06);
+  border: 1.3px solid var(--border); box-shadow: 0 0 0 10px rgba(var(--accent-rgb), 0.06);
 }
 .orbit-link {
   position: absolute; left: calc(50% - 23px); top: calc(50% - 23px); width: 46px; height: 46px; box-sizing: border-box;
   display: grid; place-items: center; border-radius: 50%; border: 1.5px solid rgba(var(--accent-rgb), 0.6);
-  background: rgba(3, 24, 19, 0.95); color: var(--accent);
+  background: var(--bg-surface); color: var(--accent);
 }
 .orbit-link :deep(svg) { width: 20px; height: 20px; }
 .compact-side { width: min(560px, 100%); display: flex; flex-direction: column; gap: 18px; }
@@ -546,7 +546,7 @@ onBeforeUnmount(() => {
 /* --- Chat overlay --- */
 .console-overlay {
   position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 24px;
-  background: rgba(1, 9, 10, 0.82);
+  background: var(--bg-scrim);
 }
 .console-frame {
   position: relative; width: min(780px, 100%); height: min(78vh, 720px);

@@ -212,8 +212,8 @@ li button { flex: none; padding: 4px 8px; }
 .actions { display: flex; gap: 12px; flex-wrap: wrap; }
 button { padding: 8px 12px; cursor: pointer; border-radius: var(--r-8); }
 button:disabled { opacity: 0.5; cursor: default; }
-.model-confirm { position: fixed; inset: 0; z-index: 100; background: #000b; display: grid; place-items: center; padding: 20px; }
-.model-confirm > div { max-width: 560px; background: #12201b; border: 1px solid #365447; padding: 24px; border-radius: 12px; }
+.model-confirm { position: fixed; inset: 0; z-index: 100; background: var(--bg-scrim); display: grid; place-items: center; padding: 20px; }
+.model-confirm > div { max-width: 560px; background: var(--bg-raised); border: 1px solid var(--border); padding: 24px; border-radius: 12px; }
 .model-confirm p, .summary { color: var(--text-4); overflow-wrap: anywhere; }
 .summary { padding-left: 18px; font-size: var(--fs-12); }
 .summary li { display: list-item; border: none; padding: 2px 0; }

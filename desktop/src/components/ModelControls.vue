@@ -92,19 +92,19 @@ onMounted(reload);
 
 <style scoped>
 .model-controls { width: 100%; min-width: 0; }
-.model-controls p { color: var(--muted, #9eaba7); overflow-wrap: anywhere; }
+.model-controls p { color: var(--muted); overflow-wrap: anywhere; }
 .model-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 input { flex: 1; min-width: 120px; padding: 10px; }
 select { padding: 10px; min-width: 150px; }
 ul { list-style: none; padding: 0; }
-li { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid #ffffff12; }
+li { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--separator); }
 li div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-small { display: block; color: #9eaba7; }
-.model-summary { font-weight: 600; color: #d7efe1 !important; }
+small { display: block; color: var(--text-secondary); }
+.model-summary { font-weight: 600; color: var(--text-primary) !important; }
 .access-badge { border: 1px solid; border-radius: 999px; padding: 5px 10px; font-size: .85rem; white-space: nowrap; }
-.access-enabled { color: #8ce0ae; border-color: #43855a; background: #183626; }
-.access-disabled { color: #aeb8b3; border-color: #53615a; background: #26312b; }
-.model-confirm { position: fixed; inset: 0; z-index: 100; background: #000b; display: grid; place-items: center; padding: 20px; }
-.model-confirm > div { max-width: 520px; background: #12201b; border: 1px solid #365447; padding: 24px; border-radius: 12px; }
+.access-enabled { color: var(--positive-text); border-color: var(--positive-solid); background: var(--positive-subtle); }
+.access-disabled { color: var(--text-secondary); border-color: var(--border-strong); background: var(--bg-sunken); }
+.model-confirm { position: fixed; inset: 0; z-index: 100; background: var(--bg-scrim); display: grid; place-items: center; padding: 20px; }
+.model-confirm > div { max-width: 520px; background: var(--bg-raised); border: 1px solid var(--border); padding: 24px; border-radius: 12px; }
 button { padding: 8px 12px; }
 </style>

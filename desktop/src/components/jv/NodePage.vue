@@ -88,7 +88,7 @@ const scale = useFitScale(room, stage, () => 1.6);
   position: absolute; width: 277px; height: 102px; box-sizing: border-box;
   display: flex; align-items: center; gap: 24px; padding: 0 22px 0 20px; text-align: left;
   border-radius: var(--r-24); border: 1px solid var(--line-a45); background: var(--sat-bg);
-  box-shadow: 0 0 22px rgba(var(--accent-rgb), 0.12); color: #f1faf6; font: inherit; font-weight: 400; cursor: pointer;
+  box-shadow: 0 0 22px rgba(var(--accent-rgb), 0.12); color: var(--text-primary); font: inherit; font-weight: 400; cursor: pointer;
 }
 .sat:hover { filter: none; border-color: rgba(var(--accent-rgb), 0.7); }
 .sat.on { border: 2px solid var(--accent); background: var(--sel-bg); box-shadow: 0 0 28px rgba(var(--accent-rgb), 0.45), inset 0 0 18px rgba(var(--accent-rgb), 0.12); }

@@ -3,7 +3,7 @@ import { computed, ref, onMounted } from "vue";
 import AccountAdministration from "../components/AccountAdministration.vue";
 import JvBackdrop from "../components/jv/JvBackdrop.vue";
 import JvTopBar from "../components/jv/JvTopBar.vue";
-import { ACCENTS, PRESETS, currentAccent, applyAccent, type Accent } from "../theme";
+import { THEMES, currentTheme, setTheme, type ThemeChoice } from "../theme";
 import { currentAuthStatus, deregisterDevice, type AuthStatus } from "../auth";
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
 import { lockEnabled, lockAvailable, setLockEnabled, initLock } from "../lock";
@@ -48,7 +48,7 @@ async function onEnroll() {
   await listMics(); // labels become available once mic permission is granted
 }
 
-const accent = ref<Accent>(currentAccent());
+const theme = ref<ThemeChoice>(currentTheme());
 const sections = ["General", "Account & security", "Voice", "Updates"] as const;
 const section = ref<(typeof sections)[number]>("General");
 const session = ref<AuthStatus | null>(null);
@@ -56,16 +56,11 @@ const homeNodeOriginInput = ref("");
 const homeNodeSaving = ref(false);
 const homeNodeMessage = ref<string | null>(null);
 
-const labels: Record<Accent, string> = {
-  green: "Jarvis green",
-  cyan: "Cyan",
-  amber: "Amber",
-  violet: "Violet",
-};
+const themeLabels: Record<ThemeChoice, string> = { light: "Light", dark: "Dark", system: "System" };
 
-function pick(a: Accent) {
-  accent.value = a;
-  applyAccent(a);
+function pickTheme(t: ThemeChoice) {
+  theme.value = t;
+  setTheme(t);
 }
 
 const confirmUnlink = ref(false);
@@ -151,21 +146,21 @@ onMounted(async () => {
     </div>
 
     <div v-if="section === 'General'" class="panel glass">
-      <div class="panel-head">APPEARANCE <span class="hint">accent colour</span></div>
-      <div class="swatches">
+      <div class="panel-head">APPEARANCE <span class="hint">theme</span></div>
+      <div class="swatches" role="radiogroup" aria-label="Theme">
         <button
-          v-for="a in ACCENTS"
-          :key="a"
+          v-for="t in THEMES"
+          :key="t"
           class="swatch"
-          :class="{ on: accent === a }"
-          :style="{ '--c1': PRESETS[a][0], '--c2': PRESETS[a][1] }"
-          @click="pick(a)"
+          :class="{ on: theme === t }"
+          role="radio"
+          :aria-checked="theme === t"
+          @click="pickTheme(t)"
         >
-          <span class="chip-dot"></span>
-          {{ labels[a] }}
+          {{ themeLabels[t] }}
         </button>
       </div>
-      <p class="muted small">Green is the Jarvis default.</p>
+      <p class="muted small">System follows your computer's light or dark setting.</p>
     </div>
 
     <div v-if="section === 'Account & security'" class="panel glass">
@@ -409,8 +404,8 @@ onMounted(async () => {
 .settings { max-width: 1180px; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; align-items: start; overflow-wrap: anywhere; }
 .settings-sections, .full-width, .account-administration { grid-column: 1 / -1; }
 .settings-sections { display: flex; flex-wrap: wrap; gap: 8px; }
-.settings-sections button { background: rgba(3, 24, 19, 0.8); border: 1px solid var(--line-a30); color: var(--text-3); font-weight: 400; border-radius: var(--r-12); }
-.settings-sections button.selected { color: #f8fffb; border-color: var(--accent); background: rgba(var(--accent-rgb), 0.1); box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.35); }
+.settings-sections button { background: var(--bg-surface); border: 1px solid var(--line-a30); color: var(--text-3); font-weight: 400; border-radius: var(--r-12); }
+.settings-sections button.selected { color: var(--text-primary); border-color: var(--accent); background: rgba(var(--accent-rgb), 0.1); box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.35); }
 .settings-sections button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media (max-width: 760px) { .settings { grid-template-columns: minmax(0,1fr); } }
 .panel {
@@ -435,18 +430,13 @@ onMounted(async () => {
 .swatches { display: flex; flex-wrap: wrap; gap: 10px; }
 .swatch {
   display: inline-flex; align-items: center; gap: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--bg-sunken);
   border: 1px solid var(--border); color: var(--text);
   border-radius: 999px; padding: 7px 14px; font-size: 13px; cursor: pointer;
   font-weight: 500;
 }
-.swatch .chip-dot {
-  width: 12px; height: 12px; border-radius: 50%;
-  background: linear-gradient(135deg, var(--c1), var(--c2));
-  box-shadow: 0 0 8px var(--c1);
-}
-.swatch.on { border-color: var(--c1); box-shadow: 0 0 0 1px var(--c1), 0 0 14px rgba(255,255,255,0.06); }
-.swatch:hover { border-color: var(--c1); }
+.swatch:hover { border-color: var(--accent-border); }
+.swatch.on { border-color: var(--accent-solid); box-shadow: 0 0 0 1px var(--accent-solid); }
 
 .small { font-size: 12px; margin: 12px 0 0; }
 
@@ -460,20 +450,20 @@ onMounted(async () => {
   color: var(--text-3); font-size: 12px; font-weight: 400;
 }
 .ghost:hover { color: var(--accent-2); border-color: var(--accent-2); filter: none; }
-.ghost.danger { color: #f87171; border-color: rgba(248, 113, 113, 0.4); }
-.ghost.danger:hover { color: #fca5a5; border-color: #f87171; }
+.ghost.danger { color: var(--danger-text); border-color: var(--danger-text); }
+.ghost.danger:hover { color: var(--danger-text); border-color: var(--danger-text); background: var(--danger-subtle); }
 .ghost:disabled { opacity: 0.5; cursor: default; }
 
 /* Destructive confirmation modal. */
 .modal-overlay {
   position: fixed; inset: 0; z-index: 50;
   display: flex; align-items: center; justify-content: center; padding: 20px;
-  background: rgba(1, 9, 10, 0.82);
+  background: var(--bg-scrim);
 }
 .modal {
   width: min(420px, 100%);
   border: 1px solid var(--border); border-radius: 14px; padding: 20px;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-pop);
 }
 .modal h2 { margin: 0 0 10px; font-size: 16px; }
 .modal p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
@@ -496,7 +486,7 @@ onMounted(async () => {
 .sw {
   margin-left: auto; flex: none; position: relative;
   width: 46px; height: 27px; border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08); border: 1px solid var(--border);
+  background: var(--bg-sunken); border: 1px solid var(--border);
   transition: background 0.2s ease, border-color 0.2s ease;
 }
 .sw::after {
@@ -505,14 +495,14 @@ onMounted(async () => {
   background: var(--muted); transition: transform 0.2s ease, background 0.2s ease;
 }
 .toggle input:checked ~ .sw { background: rgba(var(--accent-rgb), 0.25); border-color: var(--accent); }
-.toggle input:checked ~ .sw::after { transform: translateX(19px); background: var(--accent); }
+.toggle input:checked ~ .sw::after { transform: translateX(19px); background: var(--accent-solid); }
 .toggle input:disabled ~ .sw { opacity: 0.5; }
 
 .enroll { display: flex; align-items: center; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
 .miclabel { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
 .fl { font-size: 13px; color: var(--muted); }
 .micsel {
-  background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border); color: var(--text);
+  background: var(--bg-surface); border: 1px solid var(--border); color: var(--text);
   border-radius: 10px; padding: 8px 10px; font: inherit; font-size: 13px;
 }
 .micsel:focus { outline: none; border-color: var(--accent); }
@@ -525,12 +515,12 @@ onMounted(async () => {
 .update-actions .ghost { margin-top: 14px; }
 .update-progress {
   height: 6px; margin-top: 14px; overflow: hidden; border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-sunken);
 }
 .update-progress span {
   display: block; height: 100%; min-width: 8px; border-radius: inherit;
-  background: var(--accent); transition: width 0.2s ease;
+  background: var(--accent-solid); transition: width 0.2s ease;
 }
 .okc { color: var(--accent); }
-.errc { color: #f87171; }
+.errc { color: var(--danger-text); }
 </style>

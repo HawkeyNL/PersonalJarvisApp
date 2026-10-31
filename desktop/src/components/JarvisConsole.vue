@@ -349,7 +349,7 @@ onMounted(async () => {
   padding: 4px 10px;
   border-radius: 999px;
   cursor: pointer;
-  background: rgba(6, 22, 18, 0.9);
+  background: var(--bg-surface);
   border: 1px solid var(--border);
   color: var(--muted);
   font-size: 11px;
@@ -375,7 +375,7 @@ onMounted(async () => {
 }
 .tab-x:hover {
   opacity: 1;
-  color: #ff6b6b;
+  color: var(--danger-text);
 }
 .tab.new {
   position: sticky;
@@ -417,7 +417,7 @@ onMounted(async () => {
   opacity: 0;
   transform: translateY(14px);
 }
-/* When a conversation is on screen, a soft dark scrim sits behind the transcript
+/* When a conversation is on screen, a soft page-coloured scrim sits behind the transcript
    so the text stays legible over the living HUD "brain". Feathered (radial fade
    plus the existing top scroll-mask) and lightly blurred, so it reads as a
    shadow/haze rather than a hard card. */
@@ -426,12 +426,11 @@ onMounted(async () => {
   border-radius: 16px;
   background: radial-gradient(
     130% 100% at 22% 40%,
-    rgba(2, 10, 7, 0.72) 0%,
-    rgba(2, 10, 7, 0.55) 46%,
-    rgba(2, 10, 7, 0.18) 82%,
-    rgba(2, 10, 7, 0) 100%
+    color-mix(in oklab, var(--bg-page) 72%, transparent) 0%,
+    color-mix(in oklab, var(--bg-page) 55%, transparent) 46%,
+    color-mix(in oklab, var(--bg-page) 18%, transparent) 82%,
+    transparent 100%
   );
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .line {
@@ -439,7 +438,7 @@ onMounted(async () => {
   font-size: 14px;
   line-height: 1.5;
   color: var(--text);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 16px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 0 12px var(--bg-page); /* halo keeps text legible over the HUD */
 }
 .line .who {
   font-family: var(--mono);
@@ -501,13 +500,13 @@ onMounted(async () => {
   font-size: 0.88em;
   padding: 1px 5px;
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--bg-sunken);
 }
 .md pre {
   margin: 6px 0;
   padding: 10px 12px;
   border-radius: 10px;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--bg-sunken);
   border: 1px solid var(--border);
   overflow-x: auto;
 }
@@ -560,7 +559,7 @@ onMounted(async () => {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-solid);
   opacity: 0.4;
   animation: cdot 1.1s infinite ease-in-out;
 }
@@ -639,7 +638,7 @@ onMounted(async () => {
   margin-bottom: 9px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(6, 22, 18, 0.9);
+  background: var(--bg-surface);
   border: 1px solid var(--border);
   font-family: var(--mono);
   font-size: 10px;
@@ -656,7 +655,7 @@ onMounted(async () => {
   background: var(--muted);
 }
 .pdot.on {
-  background: var(--accent);
+  background: var(--accent-solid);
   box-shadow: 0 0 8px var(--accent);
 }
 
@@ -666,9 +665,9 @@ onMounted(async () => {
   gap: 7px;
   padding: 8px;
   border-radius: 16px;
-  background: rgba(8, 26, 22, 0.92);
+  background: var(--bg-surface);
   border: 1px solid rgba(var(--accent-rgb), 0.3);
-  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  box-shadow: var(--shadow-pop);
 }
 .row input {
   flex: 1;
@@ -717,8 +716,8 @@ onMounted(async () => {
   color: var(--accent);
 }
 .ic.send {
-  background: var(--accent);
-  color: #04140c;
+  background: var(--accent-solid);
+  color: var(--text-on-accent);
   border: none;
 }
 .ic :deep(svg) {

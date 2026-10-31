@@ -169,7 +169,7 @@ const nodes = [
   inset: 0; border-radius: 0 !important;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   font-family: var(--font-display); font-weight: 600; font-size: var(--label);
-  letter-spacing: 0.4em; padding-left: 0.4em; color: var(--text-0);
+  letter-spacing: 0.4em; padding-left: 0.4em; color: #f4fffa; /* on the fixed-colour orb, not the theme */
   text-shadow: 0 0 12px rgba(0, 30, 20, 0.85), 0 0 2px rgba(0, 30, 20, 0.9);
 }
 .label .bar {
