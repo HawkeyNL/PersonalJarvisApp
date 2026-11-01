@@ -230,8 +230,8 @@ struct ApprovalNotificationsView: View {
         }
         .navigationTitle("Notifications")
         .scrollContentBackground(.hidden)
-        .background(JarvisTheme.background)
-        .toolbarBackground(JarvisTheme.background, for: .navigationBar)
+        .background(JV.bgPage)
+        .toolbarBackground(JV.bgPage, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
     }
 }

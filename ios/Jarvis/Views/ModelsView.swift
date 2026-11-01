@@ -24,7 +24,7 @@ struct ModelsView: View {
             Section {
                 Text("Changes apply to every device. Every change needs Face ID or Touch ID. Budget limits remain in effect.")
                     .font(.footnote)
-                if let notice { Text(notice).foregroundStyle(JarvisTheme.accent) }
+                if let notice { Text(notice).foregroundStyle(JV.accentText) }
                 Button("Refresh") { Task { await reload() } }.disabled(busy)
                 NavigationLink("Model routing") { RoutingEditorView(model: model) }
                 if let policy, !policy.mutable { Text(policy.unavailableMessage) }
@@ -157,7 +157,7 @@ struct RoutingEditorView: View {
     var body: some View {
         List {
             if loadFailed {
-                Section { Text("Model policy unreachable. Check the connection and session.").foregroundStyle(JarvisTheme.danger) }
+                Section { Text("Model policy unreachable. Check the connection and session.").foregroundStyle(JV.dangerText) }
             } else if let policy {
                 if mode == .unsupported {
                     Section { Text("This Core cannot change routing from the app. Update Core to choose the model order per tier.") }
@@ -182,7 +182,7 @@ struct RoutingEditorView: View {
                     .disabled(!editable)
                     ForEach(RoutingTier.allCases) { tier in tierSection(tier, policy) }
                     Section {
-                        if canApply, let issue { Text(issue).foregroundStyle(JarvisTheme.danger) }
+                        if canApply, let issue { Text(issue).foregroundStyle(JV.dangerText) }
                         Button("Apply routing") { confirming = true }.disabled(!editable || !canApply || issue != nil)
                         Button("Discard changes", role: .destructive) { draft = base }.disabled(!editable || !dirty)
                     }
@@ -190,7 +190,7 @@ struct RoutingEditorView: View {
             } else {
                 Section { ProgressView("Loading routing") }
             }
-            if let notice { Section { Text(notice).foregroundStyle(JarvisTheme.accent) } }
+            if let notice { Section { Text(notice).foregroundStyle(JV.accentText) } }
             Section { Button("Refresh") { Task { await reload() } }.disabled(busy) }
         }
         .navigationTitle("Model routing")
@@ -205,10 +205,10 @@ struct RoutingEditorView: View {
         Section {
             Text("Routing only orders models per tier. A model still has to be allowed, within budget and healthy; a tier on the built-in order keeps Core's own choice. Changes apply to all devices and need Face ID or Touch ID.")
                 .font(.footnote)
-            if let reason = policy.routingReasonText { Text(reason).foregroundStyle(JarvisTheme.warn) }
+            if let reason = policy.routingReasonText { Text(reason).foregroundStyle(JV.negativeText) }
             if mode == .readonly {
                 Text("Routing changes are unavailable on this Core right now (privileged broker unavailable or routing file unreadable).")
-                    .foregroundStyle(JarvisTheme.warn)
+                    .foregroundStyle(JV.negativeText)
             }
         }
     }
@@ -218,7 +218,7 @@ struct RoutingEditorView: View {
             if let route = draft.tiers[tier] {
                 ForEach(Array(route.chain.enumerated()), id: \.element.id) { index, entry in
                     HStack(spacing: 10) {
-                        Text("\(index + 1)").foregroundStyle(JarvisTheme.accent).monospacedDigit()
+                        Text("\(index + 1)").foregroundStyle(JV.accentText).monospacedDigit()
                         VStack(alignment: .leading, spacing: 2) {
                             Text(entry.model).font(.headline)
                             Text("\(entry.provider) · \(kind(entry.provider))\(enabledIDs.contains(entry.id) ? "" : " · blocked")")
@@ -257,7 +257,7 @@ struct RoutingEditorView: View {
                 }
                 if route.metered_after_subscription {
                     Text("When the subscription is unavailable or its plan is used up, this tier may fall back to a paid API and cost money.")
-                        .font(.caption).foregroundStyle(JarvisTheme.warn)
+                        .font(.caption).foregroundStyle(JV.negativeText)
                 }
                 if draft.paidApi == .off && route.chain.contains(where: { RoutingRules.isMetered($0.provider) }) {
                     Text("Paid APIs are off: paid entries in this tier are skipped.").font(.caption).foregroundStyle(.secondary)

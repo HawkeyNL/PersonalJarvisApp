@@ -15,7 +15,7 @@ struct ChatView: View {
         }
         .navigationTitle(model.currentConversationTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(JarvisTheme.background, for: .navigationBar)
+        .toolbarBackground(JV.bgPage, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -54,22 +54,23 @@ struct ChatView: View {
                     }
                     .padding()
                 }
-                .background(JarvisTheme.background)
+                .background(JV.bgPage)
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: model.messages.count) { _, _ in
                     if let last = model.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
-            Divider().overlay(JarvisTheme.accent.opacity(0.2))
+            Divider().overlay(JV.separator)
             HStack(alignment: .bottom, spacing: 10) {
                 TextField("Message Jarvis", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
-                    .font(JarvisFont.body(15))
+                    .font(JV.font(16))
+                    .foregroundStyle(JV.textPrimary)
                     .lineLimit(1...3)
                     .focused($composerFocused)
                     .padding(14)
-                    .background(JarvisTheme.panel, in: RoundedRectangle(cornerRadius: 18))
-                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(JarvisTheme.accent.opacity(0.25)))
+                    .background(JV.bgSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(JV.borderStrong, lineWidth: 1))
                     .submitLabel(.send)
                     .onSubmit { send() }
                 Button(action: send) { Image(systemName: "arrow.up.circle.fill").font(.largeTitle).frame(width: 44, height: 44) }
@@ -77,7 +78,7 @@ struct ChatView: View {
                     .accessibilityLabel("Send message")
             }
             .padding()
-            .background(JarvisTheme.background)
+            .background(JV.bgPage)
         }
     }
 
@@ -95,13 +96,14 @@ private struct MessageBubble: View {
         HStack {
             if !message.isAssistant { Spacer(minLength: 48) }
             Text(message.content)
-                .font(JarvisFont.body(15))
-                .foregroundStyle(JarvisTheme.text2)
+                .font(JV.font(16))
+                .foregroundStyle(JV.textPrimary)
                 .textSelection(.enabled)
                 .padding(12)
-                .background(message.isAssistant ? JarvisTheme.tile : JarvisTheme.accent.opacity(0.18))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(JarvisTheme.accent.opacity(message.isAssistant ? 0.3 : 0.45), lineWidth: 1))
+                .background(message.isAssistant ? JV.bgSurface : JV.accentSubtle)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(message.isAssistant ? JV.shadowRing : JV.accentBorder, lineWidth: 1))
             if message.isAssistant { Spacer(minLength: 48) }
         }
     }

@@ -169,6 +169,8 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks
           xcrun simctl list devices available
+      - name: Check Instrument tokens match desktop
+        run: python3 scripts/instrument_tokens.py --check
       - name: Build unsigned simulator app
         run: |
           xcodebuild \

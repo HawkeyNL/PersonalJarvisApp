@@ -10,20 +10,23 @@ struct EnrollmentView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Label(title, systemImage: symbol)
-                    .font(.title2.bold())
-                    .foregroundStyle(JarvisTheme.accent)
-                Text(detail).foregroundStyle(.secondary)
+                Label {
+                    Text(title).foregroundStyle(JV.textPrimary)
+                } icon: {
+                    Image(systemName: symbol).foregroundStyle(JV.accentText)
+                }
+                .font(JV.font(22, .semibold, relativeTo: .title2))
+                .accessibilityAddTraits(.isHeader)
+                Text(detail).font(JV.font(15)).foregroundStyle(JV.textSecondary)
                 actions
             }
             .frame(maxWidth: 480, alignment: .leading)
-            .padding(24)
-            .background(JarvisTheme.panel, in: RoundedRectangle(cornerRadius: 20))
+            .jvCard(padding: 24)
             .frame(maxWidth: .infinity)
             .padding()
         }
         .scrollDismissesKeyboard(.interactively)
-        .background(JarvisTheme.background)
+        .background(JV.bgPage)
         .onDisappear { password = ""; activationCode = "" }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { password = ""; activationCode = "" }
@@ -76,7 +79,7 @@ struct EnrollmentView: View {
             ProgressView()
         case .unreachable:
             Button("Retry") { Task { _ = await model.checkConnection() } }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(JVButtonStyle(size: .large))
         case .reachable:
             switch model.enrollmentState {
             case .awaitingApproval:
@@ -91,7 +94,7 @@ struct EnrollmentView: View {
                     }
                 }
                 Button("Check approval") { Task { await model.refreshEnrollment() } }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(JVButtonStyle(size: .large))
                     .task { ownFingerprint = await model.ownKeyFingerprint() }
             case .requesting, .authenticating:
                 ProgressView()
@@ -176,9 +179,7 @@ struct EnrollmentCredentialsForm: View {
             }
             Button("Continue") { passwordVisible = false; focused = nil; submit() }
                 .disabled(!canSubmit)
-                .buttonStyle(.borderedProminent)
-                .tint(JarvisTheme.accent)
-                .foregroundStyle(JarvisTheme.background)
+                .buttonStyle(JVButtonStyle(size: .large))
         }
         .textFieldStyle(.roundedBorder)
         .onChange(of: scenePhase) { _, phase in if phase != .active { passwordVisible = false } }
