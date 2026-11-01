@@ -4,10 +4,11 @@ import AccountAdministration from "../components/AccountAdministration.vue";
 import JvBackdrop from "../components/jv/JvBackdrop.vue";
 import JvTopBar from "../components/jv/JvTopBar.vue";
 import { THEMES, currentTheme, setTheme, type ThemeChoice } from "../theme";
-import { currentAuthStatus, deregisterDevice, type AuthStatus } from "../auth";
+import { currentAuthStatus, currentShellMode, deregisterDevice, type AuthStatus } from "../auth";
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
 import { lockEnabled, lockAvailable, lockMode, setLockEnabled } from "../lock";
 import { initPlatformCapabilities, platformCapabilities } from "../platform";
+import { useAppStore } from "../stores/app";
 import {
   voiceSupported,
   enrolled,
@@ -68,6 +69,7 @@ const confirmUnlink = ref(false);
 const signer = computed(() => platformCapabilities.value.supportsBiometricSigning);
 const unlinking = ref(false);
 const unlinkMessage = ref<string | null>(null);
+const app = useAppStore();
 
 async function doUnlink() {
   unlinking.value = true;
@@ -75,11 +77,14 @@ async function doUnlink() {
   const deviceId = session.value?.device_id;
   try {
     await deregisterDevice();
-    session.value = await currentAuthStatus();
-    // Off macOS the device stays active until revoked on the Home Node.
-    if (!signer.value && deviceId) unlinkMessage.value = `Unlinked. Revoke it on the Home Node: sudo jarvis devices revoke ${deviceId}`;
+    session.value = await currentAuthStatus().catch(() => null);
+    // Off macOS the device stays active until revoked on the Home Node. The
+    // sign-in screen replaces this page, so the hint travels with the app store.
+    if (!signer.value && deviceId) app.notice = `Unlinked. Revoke it on the Home Node: sudo jarvis devices revoke ${deviceId}`;
   } catch {
     unlinkMessage.value = "Unlinking did not finish. Try again.";
+    // Signing out may already have replaced this page with the sign-in screen.
+    if (currentShellMode.value !== "app") app.notice = unlinkMessage.value;
   } finally {
     unlinking.value = false;
     confirmUnlink.value = false;
@@ -91,6 +96,8 @@ async function saveHomeNodeOrigin() {
   homeNodeMessage.value = null;
   try {
     const value = await configureHomeNode(homeNodeOriginInput.value);
+    // A new origin drops the session natively; leave the app if it did.
+    await currentAuthStatus().catch(() => {});
     homeNodeOriginInput.value = value.origin ?? "";
     homeNodeMessage.value = "Home Node origin saved.";
     await loadUpdateStatus();

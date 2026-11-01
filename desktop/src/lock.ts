@@ -9,11 +9,16 @@
 // Only a set-up device locks. A fresh install goes straight to first run.
 import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { currentAuthStatus, logout } from "./auth";
+import { currentAuthStatus, currentShellMode, logout } from "./auth";
 import { initPlatformCapabilities, platformCapabilities } from "./platform";
 import { hasSomethingToLock, lockModeFor, shouldLockOnLaunch } from "./lockPolicy";
 
 export const locked = ref(false); // resolved by initLock()
+/** Whether initLock() has decided; until then the app shell stays hidden. */
+export const lockDecided = ref(false);
+/** The shell to render: no app (sidebar, links) until the launch lock has
+ *  decided, because a Windows lock ends the session. */
+export const shownShellMode = computed(() => (lockDecided.value ? currentShellMode.value : "signin"));
 watch(locked, (value) => {
   if (value) void invoke("revoke_model_authorization").catch(() => {
     // Fail closed if native revocation cannot be acknowledged.
@@ -52,6 +57,7 @@ export async function initLock(): Promise<boolean> {
   locked.value = shouldLockOnLaunch({
     mode: lockMode.value, enabled: lockEnabled.value, alreadyUnlocked, setUp: await somethingToLock(),
   });
+  lockDecided.value = true;
   return locked.value && lockMode.value === "password" && (await signOutFromLock());
 }
 
