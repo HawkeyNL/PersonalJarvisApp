@@ -1,20 +1,17 @@
 // App-lock: a privacy screen in front of the desktop app. It signs nothing.
 //
-// Unlock is the local OS prompt: biometrics, or the computer password the OS
-// offers as fallback. Linux has no such prompt, so the lock is off there. If
-// the prompt is unavailable (for example Windows Hello not set up), signing
-// out ends the session; signing in again needs the account password.
+// macOS unlocks with the local OS prompt: Touch ID, or the computer password
+// as fallback. It is on by default and can be switched off in Settings.
+// Windows never uses Windows Hello: locking ends the session, and unlocking is
+// signing in again with the account password. That lock cannot be switched off.
+// Linux has no prompt, so the lock is off there.
 //
-// The lock is on by default where the OS prompt exists and can be switched
-// off in Settings.
+// Only a set-up device locks. A fresh install goes straight to first run.
 import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { logout } from "./auth";
-import {
-  initPlatformCapabilities,
-  isDesktop,
-  platformCapabilities,
-} from "./platform";
+import { currentAuthStatus, logout } from "./auth";
+import { initPlatformCapabilities, platformCapabilities } from "./platform";
+import { hasSomethingToLock, lockModeFor, shouldLockOnLaunch } from "./lockPolicy";
 
 export const locked = ref(false); // resolved by initLock()
 watch(locked, (value) => {
@@ -25,10 +22,11 @@ watch(locked, (value) => {
 }, { flush: "sync" });
 export const unlocking = ref(false);
 export const lockError = ref<string | null>(null);
-/** Only where the OS offers a local unlock prompt. */
-export const lockAvailable = computed(
-  () => isDesktop.value && platformCapabilities.value.supportsBiometrics,
-);
+export const lockMode = computed(() => lockModeFor(platformCapabilities.value.platform));
+/** The local OS prompt lock, which Settings can switch off. */
+export const lockAvailable = computed(() => lockMode.value === "biometric");
+const lockActive = () =>
+  lockMode.value === "password" || (lockAvailable.value && lockEnabled.value);
 
 const LKEY = "jarvis.lock.enabled";
 export const lockEnabled = ref(localStorage.getItem(LKEY) !== "false");
@@ -42,18 +40,26 @@ const SESSION_UNLOCKED = "jarvis.unlocked";
 const INACTIVITY_MS = 15 * 60 * 1000;
 let idleTimer: number | undefined;
 
-/** Decide whether this platform locks in-app (only with a local OS prompt). */
-export async function initLock(): Promise<void> {
+const somethingToLock = async () =>
+  hasSomethingToLock(lockMode.value, await currentAuthStatus().catch(() => null));
+
+/** Decide whether to lock at launch. A Windows lock ends the session at once,
+ *  so the next screen asks for the account password. Returns true while that
+ *  reload is pending. */
+export async function initLock(): Promise<boolean> {
   await initPlatformCapabilities();
   const alreadyUnlocked = sessionStorage.getItem(SESSION_UNLOCKED) === "1";
-  locked.value = lockAvailable.value && lockEnabled.value && !alreadyUnlocked;
+  locked.value = shouldLockOnLaunch({
+    mode: lockMode.value, enabled: lockEnabled.value, alreadyUnlocked, setUp: await somethingToLock(),
+  });
+  return locked.value && lockMode.value === "password" && (await signOutFromLock());
 }
 
 export function setLockEnabled(v: boolean): void {
   lockEnabled.value = v;
   localStorage.setItem(LKEY, String(v));
   if (!v) unlockApp();
-  else if (lockAvailable.value) locked.value = true;
+  else void lockApp();
 }
 
 export function unlockApp(): void {
@@ -63,16 +69,18 @@ export function unlockApp(): void {
   armIdle();
 }
 
-export function lockApp(): void {
-  if (lockAvailable.value && lockEnabled.value) {
-    sessionStorage.removeItem(SESSION_UNLOCKED);
-    locked.value = true;
-  }
+/** Lock a set-up device. Before set-up there is nothing to protect, and a
+ *  Windows lock would wipe a half-typed password. */
+export async function lockApp(): Promise<void> {
+  if (!lockActive() || !(await somethingToLock())) return;
+  sessionStorage.removeItem(SESSION_UNLOCKED);
+  locked.value = true;
+  if (lockMode.value === "password") await signOutFromLock();
 }
 
 /** Local unlock: biometrics, or the OS password where the OS offers it. */
 export async function biometricUnlock(): Promise<boolean> {
-  if (unlocking.value) return false;
+  if (unlocking.value || !lockAvailable.value) return false;
   unlocking.value = true;
   lockError.value = null;
   try {
@@ -87,25 +95,30 @@ export async function biometricUnlock(): Promise<boolean> {
   }
 }
 
-/** Way out when the OS prompt is unavailable: end the session, then reload
- *  to the sign-in screen with no app state left in memory. Stays locked if
- *  the local session could not be cleared. */
-export async function signOutFromLock(): Promise<void> {
+/** End the session, then reload to the sign-in screen with no app state left
+ *  in memory. The lock stays up until the reload, and stays up if the local
+ *  session could not be cleared. Returns true when the reload is under way. */
+export async function signOutFromLock(): Promise<boolean> {
+  if (unlocking.value) return false;
+  unlocking.value = true;
   lockError.value = null;
   try {
     await logout();
   } catch (e) {
     lockError.value = e instanceof Error ? e.message : String(e);
-    return;
+    unlocking.value = false;
+    return false;
   }
-  unlockApp();
+  // The session is gone; skip the lock on the reload this window session.
+  sessionStorage.setItem(SESSION_UNLOCKED, "1");
   window.location.reload();
+  return true;
 }
 
 function armIdle(): void {
-  if (!INACTIVITY_MS || !lockAvailable.value || !lockEnabled.value) return;
+  if (!INACTIVITY_MS || !lockActive()) return;
   clearTimeout(idleTimer);
-  idleTimer = window.setTimeout(() => lockApp(), INACTIVITY_MS);
+  idleTimer = window.setTimeout(() => void lockApp(), INACTIVITY_MS);
 }
 
 /** Reset the inactivity timer on user interaction while unlocked. */

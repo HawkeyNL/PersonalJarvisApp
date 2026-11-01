@@ -19,7 +19,8 @@ export function capabilitiesFor(platform: Platform): PlatformCapabilities {
   const desktop = platform !== "unknown";
   return {
     platform,
-    supportsBiometrics: platform === "macos" || platform === "windows",
+    // Windows Hello is off; Windows unlocks with the account password.
+    supportsBiometrics: platform === "macos",
     supportsBiometricSigning: platform === "macos",
     supportsWakeWord: desktop,
     supportsBackgroundAudio: false,

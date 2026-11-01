@@ -9,9 +9,9 @@ test("desktop platform decisions are centralized and explicit", () => {
   const windows = capabilitiesFor("windows");
 
   assert.equal(macos.supportsBiometrics, true);
-  assert.equal(windows.supportsBiometrics, true);
+  assert.equal(windows.supportsBiometrics, false);
   assert.equal(linux.supportsBiometrics, false);
-  // Windows Hello always offers its PIN; Linux has no biometric prompt.
+  // Windows Hello is not used; Linux has no biometric prompt.
   assert.equal(macos.supportsBiometricSigning, true);
   assert.equal(windows.supportsBiometricSigning, false);
   assert.equal(linux.supportsBiometricSigning, false);
