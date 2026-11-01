@@ -2,6 +2,7 @@ package com.hawkeynl.jarvis.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -76,7 +77,9 @@ fun PendingActions(waiting: List<PendingAction>, now: Long, service: AgentApprov
 }
 
 /** What a pending action is called in lists and on its sheet. */
-fun pendingTitle(item: PendingAction): String = when ((AgentReview.of(item) as? AgentReview.Approvable)?.action) {
+fun pendingTitle(item: PendingAction): String = reviewTitle(AgentReview.of(item), item)
+
+private fun reviewTitle(review: AgentReview, item: PendingAction): String = when ((review as? AgentReview.Approvable)?.action) {
     is ReviewedAgentAction.WriteFile -> "Write a file"
     null -> PairingApproval.displayName(item.action, 40)
 }
@@ -84,7 +87,8 @@ fun pendingTitle(item: PendingAction): String = when ((AgentReview.of(item) as? 
 @Composable
 private fun PendingActionRow(item: PendingAction, time: String, onOpen: () -> Unit) {
     val c = JvTheme.colors
-    val approvable = remember(item) { AgentReview.of(item) is AgentReview.Approvable }
+    val review = remember(item) { AgentReview.of(item) }
+    val approvable = review is AgentReview.Approvable
     Column(
         Modifier
             .fillMaxWidth()
@@ -101,7 +105,7 @@ private fun PendingActionRow(item: PendingAction, time: String, onOpen: () -> Un
             Text("Agent action", Modifier.weight(1f), color = c.accentText, style = MaterialTheme.typography.labelSmall)
             Text(time, color = c.textSecondary, style = MaterialTheme.typography.labelSmall.tabular())
         }
-        Text(pendingTitle(item), style = MaterialTheme.typography.titleSmall)
+        Text(reviewTitle(review, item), style = MaterialTheme.typography.titleSmall)
         MutedText(if (approvable) "Read all of it before you approve" else "Can only be denied on this phone")
     }
 }
@@ -119,8 +123,10 @@ private fun ApproveSheet(item: PendingAction, time: String, service: AgentApprov
     val c = JvTheme.colors
     val review = remember(item) { AgentReview.of(item) }
     var busy by remember { mutableStateOf(false) }
+    var denying by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    val body = rememberScrollState()
+    // Keyed on the action like the gate: new content never inherits an old scroll position.
+    val body = remember(item) { ScrollState(0) }
     var seen by remember(item) { mutableStateOf(false) }
     LaunchedEffect(body, item) {
         snapshotFlow { body.value to body.maxValue }.collect { (value, max) -> seen = reviewedToEnd(seen, value, max) }
@@ -128,9 +134,10 @@ private fun ApproveSheet(item: PendingAction, time: String, service: AgentApprov
     val scope = rememberCoroutineScope()
     // No swipe-away while a prompt or request runs: the result must reach this sheet.
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true, confirmValueChange = { it != SheetValue.Hidden || !busy })
-    fun decide(done: String, step: suspend (AgentApprovalService) -> Unit) {
+    fun decide(deny: Boolean, done: String, step: suspend (AgentApprovalService) -> Unit) {
         if (busy || service == null) return
         busy = true
+        denying = deny
         error = null
         scope.launch {
             val failure = try {
@@ -167,19 +174,20 @@ private fun ApproveSheet(item: PendingAction, time: String, service: AgentApprov
                 }
                 Spacer(Modifier.width(JvSpace.md))
                 Column(Modifier.weight(1f)) {
-                    Text(pendingTitle(item) + "?", Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge)
+                    Text(reviewTitle(review, item) + "?", Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge)
                     if (time.isNotEmpty()) MutedText("Proposed $time")
                 }
             }
             when (review) {
                 is AgentReview.Approvable -> when (val action = review.action) {
                     is ReviewedAgentAction.WriteFile -> {
+                        val size = remember(action) { "${action.content.toByteArray(Charsets.UTF_8).size} bytes · ${action.content.lineSequence().count()} lines" }
                         Column(
                             Modifier.fillMaxWidth().clip(JvShapes.md).background(c.bgSunken).padding(JvSpace.md),
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             Fact("Path", AgentReview.asciiPath(action.path), mono = true)
-                            Fact("Size", "${action.content.toByteArray(Charsets.UTF_8).size} bytes · ${action.content.lineSequence().count()} lines", mono = true)
+                            Fact("Size", size, mono = true)
                             // Whether the file existed is Home Node state, not part of what is signed.
                             item.preview.lineSequence().first().takeIf { it.isNotBlank() }?.let {
                                 MutedText("When proposed (not signed): " + AgentReview.visible(it, keepNewlines = false))
@@ -197,17 +205,17 @@ private fun ApproveSheet(item: PendingAction, time: String, service: AgentApprov
             if (review is AgentReview.Approvable && service != null) {
                 ActionButton(
                     when {
-                        busy -> "Verifying…"
+                        busy && !denying -> "Verifying…"
                         seen -> "Approve with fingerprint or face"
                         else -> "Scroll to the end to approve"
                     },
-                    { if (seen) decide("Approved. Core runs the action now.") { it.approve(item.pending_id, review.sha256) } },
+                    { if (seen) decide(false, "Approved. Core runs the action now.") { it.approve(item.pending_id, review.sha256) } },
                     enabled = canApprove(approvable = true, seen = seen, busy = busy, hasService = service != null),
                 )
                 MutedText("You can only approve what you have seen in full. Approving signs exactly what is shown with this phone's key.")
             }
             GhostButton(
-                "Deny", { decide("Denied. Nothing was run.") { it.deny(item.pending_id) } }, Modifier.fillMaxWidth(),
+                if (busy && denying) "Verifying…" else "Deny", { decide(true, "Denied. Nothing was run.") { it.deny(item.pending_id) } }, Modifier.fillMaxWidth(),
                 enabled = !busy && service != null, danger = true,
             )
         }
@@ -238,6 +246,8 @@ private fun Content(label: String, value: String, scroll: ScrollState) {
                 .heightIn(max = 280.dp)
                 .clip(JvShapes.md)
                 .background(JvTheme.colors.bgSunken)
+                // Focusable, so a keyboard or switch user can scroll it to the end too.
+                .focusable()
                 .verticalScroll(scroll)
                 .padding(JvSpace.md),
             style = TextStyle(

@@ -142,7 +142,7 @@ internal fun SettingsScreen(
                     Screen.CONTEXT -> contextCard(data.devices.map { it.devices.size }).let {
                         NavRow(JvIcon.CONTEXT, "Context and devices", it.detail, { actions.navigate(screen) }, it.tone)
                     }
-                    else -> Unit
+                    else -> error("No Settings row for $screen")
                 }
             }
         }

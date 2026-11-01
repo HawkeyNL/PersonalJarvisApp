@@ -67,7 +67,7 @@ fun HomeScreen(state: JarvisUiState, data: CoreData, onNavigate: (Screen) -> Uni
                             NavRow(JvIcon.CHAT, "Conversations", it.detail, { onNavigate(screen) }, it.tone)
                         }
                         Screen.MEMORY -> NavRow(JvIcon.MEMORY, "Memory", "Not yet available · needs Core support", { onNavigate(screen) }, Tone.IDLE)
-                        else -> Unit
+                        else -> error("No Home row for $screen")
                     }
                 }
             }
@@ -81,7 +81,9 @@ fun HomeScreen(state: JarvisUiState, data: CoreData, onNavigate: (Screen) -> Uni
 private fun WaitingCard(data: CoreData, onClick: () -> Unit) {
     val actions = data.pending.valueOrNull?.pending
     val pairing = data.pairing.valueOrNull?.requests.orEmpty()
-    val lines = actions.orEmpty().map { pendingTitle(it) } + pairing.map { "${PairingApproval.displayName(it.device_name, 40)} wants to pair" }
+    val lines = remember(actions, pairing) {
+        actions.orEmpty().map { pendingTitle(it) } + pairing.map { "${PairingApproval.displayName(it.device_name, 40)} wants to pair" }
+    }
     HomeCard(onClick) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(30.dp).clip(JvShapes.md).background(JvTheme.colors.accentSubtle), contentAlignment = Alignment.Center) {

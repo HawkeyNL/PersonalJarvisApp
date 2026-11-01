@@ -129,6 +129,7 @@ fun ActionButton(
     enabled: Boolean = true,
     arrow: Boolean = false,
     style: TextStyle = MaterialTheme.typography.labelLarge,
+    maxLines: Int = Int.MAX_VALUE,
 ) {
     val c = JvTheme.colors
     val content = if (enabled) c.textOnAccent else c.textSecondary
@@ -145,7 +146,7 @@ fun ActionButton(
         horizontalArrangement = Arrangement.spacedBy(JvSpace.sm, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text, color = content, style = style)
+        Text(text, color = content, style = style, maxLines = maxLines, softWrap = maxLines != 1)
         if (arrow) JvIconView(JvIcon.ARROW_RIGHT, tint = content, size = 16.dp)
     }
 }

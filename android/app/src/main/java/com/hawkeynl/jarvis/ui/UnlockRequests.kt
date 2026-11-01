@@ -82,7 +82,10 @@ fun UnlockRequests(service: UnlockApprovalService) {
             error = null
             scope.launch {
                 val failure = try {
-                    if (step()) requests = requests.filter { it.id != item.id }
+                    if (step()) {
+                        requests = requests.filter { it.id != item.id }
+                        open = null
+                    }
                     null
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -92,14 +95,25 @@ fun UnlockRequests(service: UnlockApprovalService) {
                 // Server text is shown sanitised and bounded.
                 error = failure?.let { PairingApproval.displayName(it.message ?: "The decision could not be completed.", 160) }
                 // A wrong number already denied it.
-                if (failure is WrongUnlockNumber) requests = requests.filter { it.id != item.id }
+                if (failure is WrongUnlockNumber) {
+                    requests = requests.filter { it.id != item.id }
+                    open = null
+                }
                 busy = null
             }
         }
     }
+    // A request that left the list (decided, expired or a failed poll) never reopens its sheet by itself.
+    LaunchedEffect(requests) {
+        if (busy == null && requests.none { it.id == open }) {
+            open = null
+            picking = null
+        }
+    }
     if (requests.isEmpty() && error == null) return
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        error?.let { ErrorText(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+        // While the sheet is open it shows the error itself.
+        if (open == null) error?.let { ErrorText(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
         if (requests.isNotEmpty()) {
             ListSection(null) {
                 requests.forEachIndexed { i, item ->
@@ -153,7 +167,7 @@ fun UnlockRequests(service: UnlockApprovalService) {
                         ActionButton(UnlockCode.display(choice), {
                             picking = null
                             launchStep(item) { service.approve(item.id, choice); true }
-                        }, Modifier.weight(1f).heightIn(min = 72.dp), enabled = busy == null, style = MaterialTheme.typography.displaySmall.copy(fontFamily = PlexMono))
+                        }, Modifier.weight(1f).heightIn(min = 72.dp), enabled = busy == null, style = MaterialTheme.typography.titleLarge.tabular(), maxLines = 1)
                     }
                 }
             } else {
