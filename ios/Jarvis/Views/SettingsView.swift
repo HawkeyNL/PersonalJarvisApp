@@ -1,35 +1,116 @@
 import SwiftUI
 
+/// Instellingen (I-Settings). On the enrollment screen (`inTabs` false) it shows
+/// only what works before sign-in, as before.
 struct SettingsView: View {
     @ObservedObject var model: JarvisAppModel
+    var inTabs = false
     @AppStorage(Appearance.storageKey) private var appearance = Appearance.system
 
     var body: some View {
-        List {
-            Section("Appearance") {
-                Picker("Appearance", selection: $appearance) {
-                    ForEach(Appearance.allCases) { Text($0.label).tag($0) }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                ListSection(title: "Appearance") { appearancePicker }
+                ListSection(title: "Home Node") {
+                    VStack(spacing: 0) {
+                        NavigationLink { HomeNodeSettingsView(model: model) } label: {
+                            ListRow(title: "Connection", symbol: "network", value: connectionValue)
+                        }
+                        if model.isAuthenticated {
+                            ListDivider()
+                            NavigationLink { ResourcesSettingsView(model: model) } label: { ListRow(title: "Resources", symbol: "cpu") }
+                            if inTabs {
+                                ForEach(AppTab.settings.links, id: \.self) { route in
+                                    ListDivider()
+                                    NavigationLink(value: route) { ListRow(title: route.title, symbol: route.symbol) }
+                                }
+                            } else {
+                                ListDivider()
+                                NavigationLink { ModelsView(model: model) } label: { ListRow(title: "Models", symbol: "square.stack.3d.up") }
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .jvCard(padding: 0)
                 }
-                .pickerStyle(.segmented)
-            }
-            Section("Home Node") {
-                NavigationLink { HomeNodeSettingsView(model: model) } label: { Label("Connection", systemImage: "network") }
-                if model.isAuthenticated {
-                    NavigationLink { ResourcesSettingsView(model: model) } label: { Label("Resources", systemImage: "cpu") }
-                    NavigationLink { ModelsView(model: model) } label: { Label("Models", systemImage: "square.stack.3d.up") }
+                ListSection(title: "This device") {
+                    VStack(spacing: 0) {
+                        NavigationLink { VoiceSettingsView(model: model) } label: { ListRow(title: "Voice", symbol: "waveform") }
+                        ListDivider()
+                        NavigationLink { SecuritySettingsView(model: model) } label: { ListRow(title: "Security", symbol: "lock.shield") }
+                        if model.isAuthenticated {
+                            ListDivider()
+                            NavigationLink { ApprovalNotificationsView(push: model.approvalPush) } label: {
+                                ListRow(title: "Approval notifications", symbol: "bell.badge")
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .jvCard(padding: 0)
+                }
+                ListSection(title: "App") {
+                    HStack {
+                        Text("Version").font(JV.font(15, .medium)).foregroundStyle(JV.textPrimary)
+                        Spacer()
+                        Text(verbatim: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "\u{2014}")
+                            .font(JV.mono(13))
+                            .foregroundStyle(JV.textSecondary)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 52)
+                    .jvCard(padding: 0)
+                    .accessibilityElement(children: .combine)
+                }
+                if let notice = model.notice {
+                    ListSection(title: "Status") {
+                        Text(notice)
+                            .font(JV.font(15))
+                            .foregroundStyle(JV.textPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .jvCard(padding: 12)
+                    }
                 }
             }
-            Section("This device") {
-                NavigationLink { VoiceSettingsView(model: model) } label: { Label("Voice", systemImage: "waveform") }
-                NavigationLink { SecuritySettingsView(model: model) } label: { Label("Security", systemImage: "lock.shield") }
-                if model.isAuthenticated {
-                    NavigationLink { ApprovalNotificationsView(push: model.approvalPush) } label: { Label("Approval notifications", systemImage: "bell.badge") }
-                }
-            }
-            if let notice = model.notice { Section("Status") { Text(notice) } }
+            .padding(16)
         }
-        .navigationTitle("Settings")
-        .settingsBackground()
+        .background(JV.bgPage)
+        .navigationTitle(AppTab.settings.title)
+        .toolbarBackground(JV.bgPage, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+    }
+
+    /// Light, Dark or System with 44 pt segments; the selected one has a 3:1 outline.
+    private var appearancePicker: some View {
+        HStack(spacing: 4) {
+            ForEach(Appearance.allCases) { option in
+                let selected = option == appearance
+                let shape = RoundedRectangle(cornerRadius: JV.Radius.md - 2, style: .continuous)
+                Button { appearance = option } label: {
+                    Text(option.label)
+                        .font(JV.font(14, selected ? .semibold : .medium))
+                        .foregroundStyle(selected ? JV.textPrimary : JV.textSecondary)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(selected ? JV.bgRaised : Color.clear, in: shape)
+                        .overlay { if selected { shape.strokeBorder(JV.borderStrong, lineWidth: 1) } }
+                        .contentShape(shape)
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md + 2, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Appearance")
+    }
+
+    private var connectionValue: String {
+        switch model.connectionState {
+        case .unconfigured: "Not configured"
+        case .checking: "Checking"
+        case .reachable: "Reachable"
+        case .unreachable: "Unreachable"
+        }
     }
 }
 

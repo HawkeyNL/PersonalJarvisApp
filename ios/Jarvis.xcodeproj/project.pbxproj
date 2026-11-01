@@ -10,6 +10,7 @@
         A00000000000000000000051 /* JarvisComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000051 /* JarvisComponents.swift */; };
         A00000000000000000000052 /* HubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000052 /* HubView.swift */; };
         A00000000000000000000053 /* NodePages.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000053 /* NodePages.swift */; };
+        A00000000000000000000080 /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000080 /* ActivityView.swift */; };
         A00000000000000000000070 /* PushRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000070 /* PushRegistration.swift */; };
         A00000000000000000000072 /* PushRegistrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000072 /* PushRegistrationTests.swift */; };
         A00000000000000000000054 /* HubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000054 /* HubModel.swift */; };
@@ -63,6 +64,7 @@
         B00000000000000000000051 /* JarvisComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/JarvisComponents.swift; sourceTree = "<group>"; };
         B00000000000000000000052 /* HubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/HubView.swift; sourceTree = "<group>"; };
         B00000000000000000000053 /* NodePages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NodePages.swift; sourceTree = "<group>"; };
+        B00000000000000000000080 /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ActivityView.swift; sourceTree = "<group>"; };
         B00000000000000000000070 /* PushRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/PushRegistration.swift; sourceTree = "<group>"; };
         B00000000000000000000071 /* Jarvis.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Jarvis.entitlements; sourceTree = "<group>"; };
         B00000000000000000000072 /* PushRegistrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistrationTests.swift; sourceTree = "<group>"; };
@@ -147,6 +149,7 @@
                 B00000000000000000000051 /* JarvisComponents.swift */,
                 B00000000000000000000052 /* HubView.swift */,
                 B00000000000000000000053 /* NodePages.swift */,
+                B00000000000000000000080 /* ActivityView.swift */,
                 B00000000000000000000054 /* HubModel.swift */,
                 B00000000000000000000070 /* PushRegistration.swift */,
                 B00000000000000000000071 /* Jarvis.entitlements */,
@@ -279,6 +282,7 @@
                 A00000000000000000000051 /* JarvisComponents.swift in Sources */,
                 A00000000000000000000052 /* HubView.swift in Sources */,
                 A00000000000000000000053 /* NodePages.swift in Sources */,
+                A00000000000000000000080 /* ActivityView.swift in Sources */,
                 A00000000000000000000054 /* HubModel.swift in Sources */,
                 A00000000000000000000070 /* PushRegistration.swift in Sources */,
 			);

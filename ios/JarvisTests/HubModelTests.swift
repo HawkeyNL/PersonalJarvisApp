@@ -53,15 +53,11 @@ final class HubModelTests: XCTestCase {
         let conversations = conversationsCard([iso(3600), iso(2 * 86_400), iso(10 * 86_400)], now: now)
         XCTAssertEqual(conversations, CardSummary(line1: "2 this week", line2: "Last: 1h ago", tone: .ok))
 
-        XCTAssertEqual(agentsCard(.ok(1)), CardSummary(line1: "1 agent", line2: "Configured on Core", tone: .ok))
-        XCTAssertEqual(agentsCard(.ok(0)).tone, .idle)
-        XCTAssertEqual(agentsCard(.unsupported).line1, "Requires newer Core")
-        XCTAssertEqual(agentsCard(.error(.network)), CardSummary(line1: "Unavailable", line2: "Check the connection", tone: .warn))
-        XCTAssertEqual(agentsCard(.loading).line1, "Loading…")
-
-        XCTAssertEqual(healthCard(online: nil, registry: .loading).line1, "Checking…")
-        XCTAssertEqual(healthCard(online: false, registry: .loading).tone, .error)
-        XCTAssertEqual(healthCard(online: true, registry: .unsupported), CardSummary(line1: "Core ready", line2: "", tone: .ok))
+        XCTAssertEqual(tasksCard(sessions: .ok([]), pending: .ok([])), CardSummary(line1: "0 active", line2: "0 awaiting approval", tone: .idle))
+        XCTAssertEqual(tasksCard(sessions: .unsupported, pending: .ok([])).line1, "Requires newer Core")
+        XCTAssertEqual(tasksCard(sessions: .error(.network), pending: .ok([])),
+                       CardSummary(line1: "Unavailable", line2: "Check the connection", tone: .warn))
+        XCTAssertEqual(tasksCard(sessions: .loading, pending: .ok([])).line1, "Loading…")
     }
 
     func testUsageSummaryDecodesBudgetFlags() throws {
@@ -168,9 +164,7 @@ final class HubModelTests: XCTestCase {
         """)
         XCTAssertNil(registry.brains)
         XCTAssertNil(registry.liveHost)
-        XCTAssertEqual(integrationsCard(.ok(registry.software)),
-                       CardSummary(line1: "1 of 2 present", line2: "1 missing", tone: .warn))
-        XCTAssertEqual(healthCard(online: true, registry: .ok(registry)).line2, "Live vitals need newer Core")
+        XCTAssertEqual(registry.software.filter(\.present).count, 1)
     }
 
     func testStatusPillAndMood() {
@@ -202,5 +196,69 @@ final class HubModelTests: XCTestCase {
         XCTAssertEqual(rootScreen(lock: .unlocked, connection: .reachable, authenticated: true), .hub)
         XCTAssertEqual(rootScreen(lock: .locked, connection: .reachable, authenticated: true), .lock)
         XCTAssertEqual(rootScreen(lock: .denied, connection: .unconfigured, authenticated: false), .lock)
+    }
+
+    func testRootScreenDecisionIsUnchanged() {
+        let locks: [AppLockState] = [.unlocked, .locked, .denied, .unavailable("no biometrics")]
+        let connections: [ConnectionState] = [.unconfigured, .checking, .reachable, .unreachable("offline")]
+        for lock in locks {
+            for connection in connections {
+                for authenticated in [false, true] {
+                    // The pre-tabs rule: lock first, then the hub only with a reachable node and a session.
+                    let expected: RootScreen = lock != .unlocked ? .lock
+                        : (connection == .reachable && authenticated ? .hub : .enrollment)
+                    XCTAssertEqual(rootScreen(lock: lock, connection: connection, authenticated: authenticated), expected,
+                                   "\(lock) \(connection) \(authenticated)")
+                }
+            }
+        }
+    }
+
+    func testEveryRouteIsReachableFromATab() {
+        XCTAssertEqual(AppTab.allCases.map(\.title), ["Jarvis", "Trading", "Activiteit", "Instellingen"])
+        XCTAssertEqual(HubRoute.allCases.count, 13)
+        for route in HubRoute.allCases {
+            let destination = tabDestination(route)
+            if destination.path.isEmpty {
+                // Shown on the tab's root screen itself.
+                XCTAssertEqual(destination.tab.root, route, "\(route)")
+            } else {
+                // One push from a row the tab's root screen draws from `links`.
+                XCTAssertEqual(destination.path, [route], "\(route)")
+                XCTAssertTrue(destination.tab.links.contains(route), "\(route)")
+            }
+        }
+        // Each route has exactly one home: no tab links to a route another tab owns.
+        for tab in AppTab.allCases {
+            for route in tab.links { XCTAssertEqual(tabDestination(route).tab, tab, "\(route)") }
+        }
+        XCTAssertEqual(tabDestination(.pairingApprovals).tab, .activity)
+        XCTAssertEqual(tabDestination(.healthUsage).tab, .settings)
+        XCTAssertEqual(tabDestination(.settings).path, [])
+    }
+
+    func testApproveStaysOffUntilTheEndOfTheDetailsWasShown() {
+        var gate = ReviewGate()
+        XCTAssertFalse(gate.reachedEnd)
+        // Before layout: zero viewport, infinite marker. Never opens.
+        gate.observe(endY: 0, viewport: 0)
+        gate.observe(endY: .infinity, viewport: 600)
+        gate.observe(endY: .nan, viewport: 600)
+        XCTAssertFalse(gate.reachedEnd)
+        // Long details: the end marker is below the visible area while scrolling.
+        gate.observe(endY: 2400, viewport: 600)
+        gate.observe(endY: 1200, viewport: 600)
+        gate.observe(endY: 601, viewport: 600)
+        XCTAssertFalse(gate.reachedEnd)
+        gate.observe(endY: 580, viewport: 600)
+        XCTAssertTrue(gate.reachedEnd)
+        // Scrolling back up keeps it open for this review.
+        gate.observe(endY: 2400, viewport: 600)
+        XCTAssertTrue(gate.reachedEnd)
+        // A new review starts closed; details that fit open it at once.
+        var short = ReviewGate()
+        XCTAssertFalse(short.reachedEnd)
+        short.observe(endY: 320, viewport: 600)
+        XCTAssertTrue(short.reachedEnd)
     }
 }

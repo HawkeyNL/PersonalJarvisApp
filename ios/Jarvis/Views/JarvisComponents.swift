@@ -5,223 +5,32 @@ import SwiftUI
 
 // MARK: - Orb
 
-/// The living Jarvis orb. Mood speeds the animation up (idle ×1, listening
-/// ×0.7, thinking ×0.4); Reduce Motion shows a still frame.
+/// The Jarvis orb in Instrument accent colours, light and dark. It breathes
+/// slowly; mood speeds it up (idle ×1, listening ×0.7, thinking ×0.4).
+/// Reduce Motion shows a still frame.
 struct JarvisOrb: View {
     var size: CGFloat
     var mood: Mood = .idle
-    var showsLabel = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { context in
-            OrbFrame(size: size, factor: moodFactor(mood),
-                     time: reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate,
-                     showsLabel: showsLabel)
+            let time = reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate
+            let breathe = (sin(time / (4 * moodFactor(mood)) * 2 * .pi) + 1) / 2
+            ZStack {
+                Circle()
+                    .fill(JV.accentSubtle)
+                    .overlay(Circle().strokeBorder(JV.accentBorder, lineWidth: 1))
+                    .scaleEffect(0.94 + 0.06 * breathe)
+                Circle()
+                    .fill(RadialGradient(colors: [JV.focusRing, JV.accentSolid], center: UnitPoint(x: 0.4, y: 0.35),
+                                         startRadius: 0, endRadius: size * 0.36))
+                    .frame(width: size * 0.6, height: size * 0.6)
+                    .scaleEffect(0.97 + 0.04 * breathe)
+            }
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
-    }
-}
-
-private struct OrbFrame: View {
-    let size: CGFloat
-    let factor: Double
-    let time: Double
-    let showsLabel: Bool
-
-    /// The orb keeps its own mint palette in both appearances.
-    private static let accent = Color(hex: 0x2EE6A2)
-    private static let mint = Color(red: 150 / 255.0, green: 1, blue: 210 / 255.0)
-    private static let spark = Color(hex: 0xB8FFDF)
-    // Sparkle positions as fractions of their ring box, plus size and phase.
-    private static let innerSparks: [(CGFloat, CGFloat, CGFloat, Double)] = [
-        (0.50, 0.00, 4, 0), (0.85, 0.15, 3, 1.1), (0.99, 0.58, 4, 2.3), (0.70, 0.96, 3, 0.6),
-        (0.22, 0.91, 4, 1.8), (0.01, 0.44, 3, 2.7), (0.16, 0.12, 2, 0.3),
-    ]
-    private static let outerSparks: [(CGFloat, CGFloat, CGFloat, Double)] = [
-        (0.30, 0.04, 2, 1.4), (0.96, 0.34, 3, 2.1), (0.80, 0.90, 2, 0.9), (0.04, 0.68, 3, 2.9),
-    ]
-    // Neural paths in a 100×100 box: end, control 1, control 2 (from the centre).
-    private static let signals: [(CGPoint, CGPoint, CGPoint, Double, Double)] = [
-        (CGPoint(x: 24, y: 30), CGPoint(x: 42, y: 40), CGPoint(x: 35, y: 38), 3.4, 0),
-        (CGPoint(x: 77, y: 28), CGPoint(x: 58, y: 41), CGPoint(x: 66, y: 36), 4.1, 1.3),
-        (CGPoint(x: 80, y: 70), CGPoint(x: 60, y: 55), CGPoint(x: 70, y: 62), 3.8, 2.2),
-        (CGPoint(x: 22, y: 72), CGPoint(x: 41, y: 58), CGPoint(x: 32, y: 64), 4.6, 0.7),
-        (CGPoint(x: 49, y: 88), CGPoint(x: 50, y: 62), CGPoint(x: 47, y: 74), 3.1, 1.9),
-        (CGPoint(x: 50, y: 12), CGPoint(x: 51, y: 38), CGPoint(x: 54, y: 24), 4.3, 2.8),
-    ]
-    private static let nodes: [(CGFloat, CGFloat, CGFloat, Double)] = [
-        (35, 38, 1.1, 0), (66, 36, 1.1, 0.4), (70, 62, 1.1, 0.9), (32, 64, 1.1, 1.3), (54, 24, 1, 1.7), (47, 74, 1, 2.1),
-        (24, 30, 0.8, 0.6), (77, 28, 0.8, 1.1), (80, 70, 0.8, 1.5), (22, 72, 0.8, 1.9), (14, 52, 0.7, 2.4), (88, 48, 0.7, 0.2),
-    ]
-
-    /// 0…1 sine wave with the given period in seconds.
-    private func wave(_ period: Double, _ offset: Double = 0) -> Double {
-        (sin((time + offset) / period * 2 * .pi) + 1) / 2
-    }
-
-    /// 0…1 position within a repeating period.
-    private func phase(_ period: Double, _ offset: Double = 0) -> Double {
-        let value = (time + offset) / period
-        return value - value.rounded(.down)
-    }
-
-    /// Heartbeat keyframes of the export (1 → 1.03 → .995 → 1.018 → 1).
-    private func beat() -> Double {
-        let p = phase(3.2 * factor)
-        let keys: [(Double, Double)] = [(0, 1), (0.1, 1.03), (0.2, 0.995), (0.3, 1.018), (0.45, 1), (1, 1)]
-        for index in 1..<keys.count where p <= keys[index].0 {
-            let (p0, v0) = keys[index - 1], (p1, v1) = keys[index]
-            return v0 + (v1 - v0) * (p - p0) / (p1 - p0)
-        }
-        return 1
-    }
-
-    var body: some View {
-        let accent = Self.accent
-        let breathe = wave(6)
-        let core = size * 0.87
-        let morph = sin(time / 14 * 2 * .pi) * 0.015
-        ZStack {
-            Circle()
-                .fill(RadialGradient(gradient: Gradient(stops: [
-                    .init(color: accent.opacity(0.34), location: 0),
-                    .init(color: accent.opacity(0.12), location: 0.36),
-                    .init(color: .clear, location: 0.62),
-                ]), center: .center, startRadius: 0, endRadius: size * 1.13))
-                .frame(width: size * 1.6, height: size * 1.6)
-                .scaleEffect(0.97 + 0.08 * breathe)
-                .opacity(0.6 + 0.4 * breathe)
-            sparkRing(Self.innerSparks, box: size * 1.22)
-                .rotationEffect(.degrees(phase(60) * 360))
-            sparkRing(Self.outerSparks, box: size * 1.44)
-                .rotationEffect(.degrees(-phase(95) * 360))
-                .opacity(0.7)
-            Circle()
-                .stroke(Self.mint.opacity(0.3), lineWidth: 1)
-                .frame(width: size * 1.04, height: size * 1.04)
-                .scaleEffect(x: 1 - morph, y: 1 + morph)
-            Circle()
-                .stroke(Self.mint.opacity(0.5), lineWidth: 1.5)
-                .shadow(color: accent.opacity(0.4), radius: 11)
-                .frame(width: size, height: size)
-                .scaleEffect(x: 1 + morph, y: 1 - morph)
-            Circle()
-                .stroke(accent.opacity(0.38), lineWidth: 1)
-                .frame(width: size * 0.94, height: size * 0.94)
-                .scaleEffect(x: 1 - morph * 0.7, y: 1 + morph * 0.7)
-            sphere(core: core)
-                .frame(width: core, height: core)
-                .scaleEffect(beat())
-            if showsLabel {
-                VStack(spacing: 7) {
-                    Text("Jarvis")
-                        .font(JV.font(size * 0.1, .semibold))
-                        .foregroundStyle(Color.white)
-                        .shadow(color: Color(red: 0, green: 30 / 255.0, blue: 20 / 255.0).opacity(0.85), radius: 6)
-                    Rectangle()
-                        .fill(Color.white.opacity(0.85))
-                        .frame(width: size * 0.18, height: 2)
-                }
-            }
-        }
-        .frame(width: size * 1.6, height: size * 1.6)
-        .drawingGroup()
-        .frame(width: size, height: size)
-    }
-
-    private func sparkRing(_ sparks: [(CGFloat, CGFloat, CGFloat, Double)], box: CGFloat) -> some View {
-        ZStack {
-            ForEach(sparks.indices, id: \.self) { index in
-                let spark = sparks[index]
-                Circle()
-                    .fill(Self.spark)
-                    .frame(width: spark.2, height: spark.2)
-                    .shadow(color: Self.accent, radius: spark.2 > 2 ? 3 : 0)
-                    .opacity(0.2 + 0.8 * wave(3.2, spark.3))
-                    .position(x: spark.0 * box, y: spark.1 * box)
-            }
-        }
-        .frame(width: box, height: box)
-    }
-
-    private func sphere(core: CGFloat) -> some View {
-        let scale = core / 100
-        let factor = self.factor
-        // Blob offsets as fractions of the core (export keyframes jvoDrift A/B/C).
-        let drift: [CGFloat] = [
-            CGFloat(-0.16 + 0.3 * wave(9)), CGFloat(-0.12 + 0.3 * wave(9, 2)),
-            CGFloat(0.19 - 0.34 * wave(12, 3)), CGFloat(0.21 - 0.38 * wave(12, 5)),
-            CGFloat(-0.16 + 0.4 * wave(15, 1)), CGFloat(0.22 - 0.26 * wave(15, 4)),
-        ]
-        return ZStack {
-            Circle()
-                .fill(RadialGradient(gradient: Gradient(stops: [
-                    .init(color: Color(hex: 0x3FF0A2), location: 0),
-                    .init(color: Color(hex: 0x14A868), location: 0.28),
-                    .init(color: Color(hex: 0x0A6744), location: 0.56),
-                    .init(color: Color(hex: 0x05301F), location: 0.84),
-                    .init(color: Color(hex: 0x03190F), location: 1),
-                ]), center: UnitPoint(x: 0.42, y: 0.38), startRadius: 0, endRadius: core * 0.85))
-            blob(color: Color(red: 170 / 255.0, green: 1, blue: 215 / 255.0).opacity(0.75), diameter: core * 0.56,
-                 x: drift[0], y: drift[1], core: core)
-            blob(color: Color(red: 90 / 255.0, green: 1, blue: 175 / 255.0).opacity(0.65), diameter: core * 0.5,
-                 x: drift[2], y: drift[3], core: core)
-            blob(color: Color(red: 205 / 255.0, green: 1, blue: 232 / 255.0).opacity(0.5), diameter: core * 0.4,
-                 x: drift[4], y: drift[5], core: core)
-            ForEach(Self.signals.indices, id: \.self) { index in
-                let signal = Self.signals[index]
-                let path = Self.neuralPath(signal, scale: scale)
-                path.stroke(Color(red: 210 / 255.0, green: 1, blue: 235 / 255.0).opacity(0.26), lineWidth: max(0.5, 0.45 * scale))
-                let head = CGFloat(phase(signal.3 * factor, signal.4) * 2.6)
-                let tail: CGFloat = min(max(0, head - 0.18), 1)
-                let tip: CGFloat = min(max(0, head), 1)
-                path.trim(from: tail, to: tip)
-                    .stroke(Color(hex: 0xEAFFF5), style: StrokeStyle(lineWidth: max(0.8, scale), lineCap: .round))
-                    .opacity(head - 0.18 < 1 ? 1 : 0)
-            }
-            ForEach(Self.nodes.indices, id: \.self) { index in
-                let node = Self.nodes[index]
-                Circle()
-                    .fill(Color(hex: 0xDFFFEE))
-                    .frame(width: node.2 * 2 * scale, height: node.2 * 2 * scale)
-                    .position(x: node.0 * scale, y: node.1 * scale)
-                    .opacity(0.3 + 0.7 * wave(2.6, node.3))
-            }
-            let nucleus = wave(4 * factor)
-            Circle()
-                .fill(RadialGradient(colors: [Color(red: 200 / 255.0, green: 1, blue: 228 / 255.0).opacity(0.75),
-                                              Color(red: 80 / 255.0, green: 240 / 255.0, blue: 165 / 255.0).opacity(0.35), .clear],
-                                     center: .center, startRadius: 0, endRadius: core * 0.17))
-                .frame(width: core * 0.34, height: core * 0.34)
-                .scaleEffect(0.88 + 0.26 * nucleus)
-                .opacity(0.5 + 0.45 * nucleus)
-            Ellipse()
-                .fill(RadialGradient(colors: [Color.white.opacity(0.32), .clear], center: .center, startRadius: 0, endRadius: core * 0.18))
-                .frame(width: core * 0.36, height: core * 0.22)
-                .rotationEffect(.degrees(-22))
-                .offset(x: -core * 0.16, y: -core * 0.29)
-        }
-        .frame(width: core, height: core)
-        .clipShape(Circle())
-        .shadow(color: Self.accent.opacity(0.55), radius: 30)
-    }
-
-    private func blob(color: Color, diameter: CGFloat, x: CGFloat, y: CGFloat, core: CGFloat) -> some View {
-        Circle()
-            .fill(RadialGradient(colors: [color, .clear], center: .center, startRadius: 0, endRadius: diameter * 0.45))
-            .frame(width: diameter, height: diameter)
-            .offset(x: core * x, y: core * y)
-            .blendMode(.screen)
-    }
-
-    private static func neuralPath(_ signal: (CGPoint, CGPoint, CGPoint, Double, Double), scale: CGFloat) -> Path {
-        func point(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x * scale, y: p.y * scale) }
-        var path = Path()
-        path.move(to: point(CGPoint(x: 50, y: 50)))
-        path.addCurve(to: point(signal.0), control1: point(signal.1), control2: point(signal.2))
-        return path
     }
 }
 
@@ -280,39 +89,73 @@ struct IconBadge: View {
     }
 }
 
-// MARK: - Module card
+// MARK: - Lists
 
-/// Hub card: icon, title, two short lines and a status dot.
-struct ModuleCard: View {
+/// Instrument list row: icon tile, title, optional detail and value, chevron.
+struct ListRow: View {
     let title: String
     let symbol: String
-    let summary: CardSummary
+    var detail: String? = nil
+    var value: String? = nil
 
     var body: some View {
-        HStack(spacing: 10) {
-            IconBadge(symbol: symbol)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(JV.font(14, .semibold))
-                    .foregroundStyle(JV.textPrimary)
-                Text(summary.line1).font(JV.font(12)).foregroundStyle(JV.textSecondary)
-                if !summary.line2.isEmpty {
-                    Text(summary.line2).font(JV.font(12)).foregroundStyle(JV.textSecondary)
+        HStack(spacing: 12) {
+            IconBadge(symbol: symbol, size: 32)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(JV.font(15, .medium)).foregroundStyle(JV.textPrimary)
+                if let detail, !detail.isEmpty {
+                    Text(verbatim: detail).font(JV.font(13)).foregroundStyle(JV.textSecondary)
                 }
             }
-            .lineLimit(2)
-            .minimumScaleFactor(0.85)
-            Spacer(minLength: 0)
-            StatusDot(tone: summary.tone, size: 7)
+            Spacer(minLength: 8)
+            if let value {
+                Text(verbatim: value).font(JV.font(13)).foregroundStyle(JV.textSecondary).multilineTextAlignment(.trailing)
+            }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(JV.textSecondary)
+                .accessibilityHidden(true)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+        .padding(.vertical, 8)
+        .frame(minHeight: 52)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Bordered list of pushed pages, one row per route.
+struct RouteList: View {
+    let routes: [HubRoute]
+    var detail: (HubRoute) -> String? = { _ in nil }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(routes.enumerated()), id: \.element) { index, route in
+                if index > 0 { ListDivider() }
+                NavigationLink(value: route) { ListRow(title: route.title, symbol: route.symbol, detail: detail(route)) }
+                    .buttonStyle(.plain)
+            }
+        }
         .jvCard(padding: 0)
-        .contentShape(RoundedRectangle(cornerRadius: JV.Radius.lg, style: .continuous))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel([title, summary.line1, summary.line2].filter { !$0.isEmpty }.joined(separator: ", "))
-        .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// Hairline between list rows, inset past the icon tile.
+struct ListDivider: View {
+    var body: some View { Rectangle().fill(JV.separator).frame(height: 1).padding(.leading, 56) }
+}
+
+/// Titled group of an Instrument page (I-Settings sections).
+struct ListSection<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Eyebrow(text: title).padding(.horizontal, 4)
+            content
+        }
     }
 }
 
@@ -652,8 +495,8 @@ struct NodeScaffold<Content: View>: View {
 }
 
 extension View {
-    /// Navigation bar with a sentence-case title and subtitle and the
-    /// profile/settings button.
+    /// Navigation bar with a sentence-case title and subtitle. Settings is a
+    /// tab, so pages carry no profile button.
     func jarvisNavigationBar(title: String, subtitle: String) -> some View {
         navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
@@ -673,12 +516,11 @@ extension View {
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.isHeader)
                 }
-                ToolbarItem(placement: .topBarTrailing) { ProfileButton() }
             }
     }
 }
 
-/// Opens Settings (connection, voice, security, models).
+/// Opens Settings from the enrollment screen (connection, voice, security).
 struct ProfileButton: View {
     var body: some View {
         NavigationLink(value: HubRoute.settings) {
@@ -688,16 +530,5 @@ struct ProfileButton: View {
                 .frame(width: 44, height: 44)
         }
         .accessibilityLabel("Profile and settings")
-    }
-}
-
-private extension Color {
-    /// sRGB colour from a 0xRRGGBB literal (the orb's fixed palette).
-    init(hex: UInt32, opacity: Double = 1) {
-        self.init(.sRGB,
-                  red: Double((hex >> 16) & 0xFF) / 255,
-                  green: Double((hex >> 8) & 0xFF) / 255,
-                  blue: Double(hex & 0xFF) / 255,
-                  opacity: opacity)
     }
 }

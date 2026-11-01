@@ -184,13 +184,6 @@ func conversationsCard(_ updatedAt: [String], now: Date) -> CardSummary {
                        line2: last.isEmpty ? "" : "Last: \(last)", tone: .ok)
 }
 
-func agentsCard(_ source: Availability<Int>) -> CardSummary {
-    summarize(source) { count in
-        CardSummary(line1: plural(count, "agent"), line2: count > 0 ? "Configured on Core" : "None configured",
-                    tone: count > 0 ? .ok : .idle)
-    }
-}
-
 func tasksCard(sessions: Availability<[CodingSession]>, pending: Availability<[PendingAction]>) -> CardSummary {
     summarize(sessions) { list in
         let active = list.filter { $0.state == "active" }.count
@@ -201,34 +194,7 @@ func tasksCard(sessions: Availability<[CodingSession]>, pending: Availability<[P
     }
 }
 
-func integrationsCard(_ source: Availability<[HomeNodeRegistry.Software]>) -> CardSummary {
-    summarize(source) { software in
-        let present = software.filter(\.present).count
-        let missing = software.count - present
-        return CardSummary(line1: "\(present) of \(software.count) present",
-                           line2: missing > 0 ? "\(missing) missing" : "All present", tone: missing > 0 ? .warn : .ok)
-    }
-}
-
-func contextCard(_ source: Availability<[LinkedDevice]>) -> CardSummary {
-    summarize(source) { devices in
-        CardSummary(line1: plural(devices.count, "device") + " linked", line2: "Modes not yet available",
-                    tone: devices.isEmpty ? .idle : .ok)
-    }
-}
-
-func healthCard(online: Bool?, registry: Availability<HomeNodeRegistry>) -> CardSummary {
-    guard let online else { return CardSummary(line1: "Checking…", line2: "", tone: .idle) }
-    guard online else { return CardSummary(line1: "Core unreachable", line2: "Check the Home Node", tone: .error) }
-    guard let value = registry.value else { return CardSummary(line1: "Core ready", line2: "", tone: .ok) }
-    guard let live = value.liveHost else {
-        return CardSummary(line1: "Core ready", line2: "Live vitals need newer Core", tone: .ok)
-    }
-    let cpu = live.cpuPercent.map { " · CPU \(Int($0.rounded()))%" } ?? ""
-    return CardSummary(line1: "Up \(formatUptime(live.uptimeSeconds))", line2: "Core ready\(cpu)", tone: .ok)
-}
-
-/// Text of the status pill under the orb.
+/// Status line of the Home header.
 func statusPill(mood: Mood, online: Bool?) -> (label: String, hint: String, tone: Tone) {
     guard let online else { return ("Connecting", "Reaching your Home Node…", .idle) }
     guard online else { return ("Offline", "Home Node unreachable", .error) }
@@ -236,6 +202,77 @@ func statusPill(mood: Mood, online: Bool?) -> (label: String, hint: String, tone
     case .thinking: return ("Thinking", "Working on your request…", .ok)
     case .listening: return ("Listening", "Speak now…", .ok)
     case .idle: return ("Ready", "Type to begin", .ok)
+    }
+}
+
+// MARK: - Shell
+
+/// The four iPhone tabs (canvas N-Structure); Android uses the same four.
+enum AppTab: String, CaseIterable, Hashable {
+    case jarvis, trading, activity, settings
+
+    var title: String {
+        switch self {
+        case .jarvis: "Jarvis"
+        case .trading: "Trading"
+        case .activity: "Activiteit"
+        case .settings: "Instellingen"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .jarvis: "bubble.left"
+        case .trading: "chart.line.uptrend.xyaxis"
+        case .activity: "checkmark.shield"
+        case .settings: "slider.horizontal.3"
+        }
+    }
+
+    /// The route this tab's root screen is itself, shown without a push.
+    var root: HubRoute? {
+        switch self {
+        case .settings: .settings
+        // Activiteit lists pairing requests first.
+        case .activity: .pairingApprovals
+        case .jarvis, .trading: nil
+        }
+    }
+
+    /// Routes the root screen links to; each opens as a pushed page. The root
+    /// screens draw their rows from this list.
+    var links: [HubRoute] {
+        switch self {
+        case .jarvis: [.chat, .voice, .conversations, .memory]
+        case .trading: []
+        case .activity: [.tasks, .agents]
+        case .settings: [.health, .healthUsage, .integrations, .models, .context]
+        }
+    }
+}
+
+/// Where a route (deep link) opens: its tab and the pages pushed there.
+func tabDestination(_ route: HubRoute) -> (tab: AppTab, path: [HubRoute]) {
+    switch route {
+    case .settings: (.settings, [])
+    case .pairingApprovals: (.activity, [])
+    case .chat, .voice, .conversations, .memory: (.jarvis, [route])
+    case .tasks, .agents: (.activity, [route])
+    case .health, .healthUsage, .integrations, .models, .context: (.settings, [route])
+    }
+}
+
+/// I-Approve: Approve stays off until the end of the details has been on
+/// screen once. `endY` is the top of the end marker in the scroll view's
+/// visible coordinates, `viewport` the visible height. Once reached it stays
+/// reached for this review; a new review starts closed.
+struct ReviewGate: Equatable {
+    private(set) var reachedEnd = false
+
+    mutating func observe(endY: CGFloat, viewport: CGFloat) {
+        // Before the first layout pass sizes are zero; never open on that.
+        guard viewport > 0, endY.isFinite, viewport.isFinite else { return }
+        if endY <= viewport { reachedEnd = true }
     }
 }
 

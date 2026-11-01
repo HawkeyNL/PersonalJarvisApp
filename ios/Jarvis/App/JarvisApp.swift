@@ -41,3 +41,21 @@ func lockTransition(for phase: ScenePhase) -> LockTransition {
     @unknown default: .lock
     }
 }
+
+extension View {
+    /// The privacy cover for a sheet: sheets present above the root overlay,
+    /// so each one covers itself the same way while the scene is not active.
+    func privacyCover() -> some View { modifier(PrivacyCover()) }
+}
+
+struct PrivacyCover: ViewModifier {
+    @Environment(\.scenePhase) private var scenePhase
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            if scenePhase != .active {
+                JV.bgPage.ignoresSafeArea().accessibilityLabel("Jarvis locked")
+            }
+        }
+    }
+}
