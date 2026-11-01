@@ -126,7 +126,7 @@ onMounted(refreshHoldings);
         <button type="submit" class="btn btn-primary">Add</button>
       </form>
 
-      <p v-if="hError" class="muted err">{{ hError }}</p>
+      <p v-if="hError" class="err">{{ hError }}</p>
       <p v-if="loading" class="muted">Loading…</p>
 
       <div v-else-if="holdings.length" class="holdings">

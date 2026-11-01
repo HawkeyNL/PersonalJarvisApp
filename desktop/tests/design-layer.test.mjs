@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 
 const read = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
@@ -14,8 +15,12 @@ function rules(css) {
   }));
 }
 
+const srcDir = new URL("../src/", import.meta.url).pathname;
+const sources = readdirSync(srcDir, { recursive: true }).filter((f) => /\.(css|vue)$/.test(f));
+
 test("desktop no longer ships or references Exo 2 or Rajdhani", () => {
-  for (const [name, css] of Object.entries(sheets)) assert.doesNotMatch(css, /exo|rajdhani/i, name);
+  assert.ok(sources.length > 10);
+  for (const f of sources) assert.doesNotMatch(readFileSync(join(srcDir, f), "utf8"), /\b(exo 2|exo2|rajdhani)\b/i, f);
   const fonts = readdirSync(new URL("../src/assets/fonts/", import.meta.url));
   assert.ok(fonts.includes("OFL.txt"));
   assert.deepEqual(fonts.filter((f) => /exo|rajdhani/i.test(f)), []);
@@ -24,9 +29,13 @@ test("desktop no longer ships or references Exo 2 or Rajdhani", () => {
 test("bare button rules stay neutral: no global fill", () => {
   for (const [name, css] of Object.entries(sheets)) {
     for (const { selectors, body } of rules(css)) {
-      if (!selectors.some((s) => /^button(:[\w-]+)*$/.test(s))) continue;
-      const bg = body.match(/background(?:-color)?\s*:\s*([^;]+)/)?.[1].trim();
-      assert.ok(!bg || /^(transparent|none)$/.test(bg), `${name}: ${selectors.join(", ")} sets background ${bg}`);
+      // Any selector whose subject is a bare button (pseudo-classes allowed): button, button:hover:not(...), .app button, :where(button).
+      const bare = (s) => /(^|[\s>+~(])button(:[\w-]+(\([^)]*\))?)*\)?$/.test(s.replace(/^:where\((.*)\)$/, "$1"));
+      if (!selectors.some(bare)) continue;
+      for (const [, value] of body.matchAll(/background(?:-color|-image)?\s*:\s*([^;]+)/g)) {
+        const bg = value.replace(/!important/, "").trim();
+        assert.ok(/^(transparent|none)$/.test(bg), `${name}: ${selectors.join(", ")} sets background ${bg}`);
+      }
       assert.doesNotMatch(body, /--accent-solid|--text-on-accent/, `${name}: ${selectors.join(", ")}`);
     }
   }

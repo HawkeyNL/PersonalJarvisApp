@@ -51,7 +51,7 @@ h3 { font-size: 15px; line-height: 1.4; font-weight: 600; }
 .btn:disabled, .btn[aria-disabled="true"] {
   background: var(--bg-sunken); color: var(--text-disabled); box-shadow: none; border-color: transparent; cursor: not-allowed;
 }
-/* Busy: keeps its colour, shows a .spinner and ignores further presses. */
+/* Busy: keeps its colour and shows a .spinner. Blocks pointer presses only; the handler must ignore keyboard repeats. */
 .btn[aria-busy="true"] { pointer-events: none; }
 @media (prefers-reduced-motion: no-preference) {
   .btn:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]):active { transform: scale(0.96); }
@@ -65,6 +65,7 @@ h3 { font-size: 15px; line-height: 1.4; font-weight: 600; }
   .btn-quiet:not(:disabled):hover { background: var(--bg-selected); }
   .tbl tbody tr:hover { background: var(--bg-hover); }
   .seg button:not([aria-pressed="true"]):not([aria-selected="true"]):hover { color: var(--text-primary); }
+  .toast .btn-ghost:not(:disabled):hover { background: transparent; text-decoration: underline; }
 }
 
 /* Segmented control: sunken track, raised pressed segment. */
@@ -74,9 +75,12 @@ h3 { font-size: 15px; line-height: 1.4; font-weight: 600; }
   color: var(--text-secondary); font: 500 14px var(--font-sans); cursor: pointer;
   transition: background-color var(--d-hover) ease, color var(--d-hover) ease;
 }
+/* Accent text marks the selected segment; the raised surface alone is under 3:1. */
 .seg button[aria-pressed="true"], .seg button[aria-selected="true"] {
-  background: var(--bg-surface); color: var(--text-primary); box-shadow: var(--shadow-border);
+  background: var(--bg-surface); color: var(--accent-text); box-shadow: var(--shadow-border);
 }
+/* Inset ring: the track clips an outset one when it scrolls. */
+.seg button:focus-visible { outline-offset: -2px; }
 
 /* Badges: colour plus label, never colour alone. */
 .badge {
@@ -125,11 +129,14 @@ textarea.input { padding: 10px 12px; min-height: 88px; resize: vertical; line-he
 input.switch {
   appearance: none; -webkit-appearance: none; width: 40px; min-width: 0; height: 24px; padding: 0; border: 0;
   border-radius: var(--r-pill); background: var(--border-strong); position: relative; cursor: pointer; flex-shrink: 0; margin: 0;
-  transition: background-color var(--d-pop) var(--ease-out);
 }
 input.switch::after {
   content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: var(--r-pill);
-  background: var(--text-on-accent); box-shadow: var(--shadow-border); transition: transform var(--d-pop) var(--ease-out);
+  background: var(--text-on-accent); box-shadow: var(--shadow-border);
+}
+@media (prefers-reduced-motion: no-preference) {
+  input.switch { transition: background-color var(--d-pop) var(--ease-out); }
+  input.switch::after { transition: transform var(--d-pop) var(--ease-out); }
 }
 input.switch:checked { background: var(--accent-solid); }
 input.switch:checked::after { transform: translateX(16px); }

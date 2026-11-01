@@ -4,10 +4,15 @@ Tarball: https://registry.npmjs.org/@ibm/plex/-/plex-6.4.1.tgz
   sha512 (npm integrity) fnsipQywHt3zWvsnlyYKMikcVI7E2fEwpiPnIHFqlbByXVfQfANAAeJk1IV4mNnxhppUIDlhU0TzwYwL++Rn2g==
 
   IBMPlexSans-Regular-Latin1.woff2   IBM Plex Sans 400
+    sha256 b5ad7bd39f996144915f0ad9849a90183b27d8c28ad97ed98af5b1bebc51f6b1
   IBMPlexSans-Medium-Latin1.woff2    IBM Plex Sans 500
+    sha256 b5610af04d0d4b5a14a621d96d974b993e945a065db1a8861918f69ef9321934
   IBMPlexSans-SemiBold-Latin1.woff2  IBM Plex Sans 600
+    sha256 fff0ab3a88b0b4aa0b693e4f0201359a15183b08e3fa5696d1918d8f0ade8ad5
   IBMPlexMono-Regular-Latin1.woff2   IBM Plex Mono 400
+    sha256 10d3c7fa7eaf48e78db24f317b64f008a75e00f63a68bb3c2afc6ef51e58674f
   IBMPlexMono-Medium-Latin1.woff2    IBM Plex Mono 500
+    sha256 5a04b514a778c1ae60bf8a8cfd512597f298f4e51eeecbbb4d87bf21c7b932ba
 
 Both families are licensed under the SIL Open Font License, Version 1.1.
 The license as shipped with the fonts follows.

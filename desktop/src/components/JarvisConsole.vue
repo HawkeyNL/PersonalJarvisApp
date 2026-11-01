@@ -721,6 +721,9 @@ onMounted(async () => {
   color: var(--text-on-accent);
   border: none;
 }
+.ic.send:hover:not(:disabled) {
+  background: var(--accent-solid-hover);
+}
 .ic :deep(svg) {
   width: 17px;
   height: 17px;
