@@ -104,7 +104,7 @@ fun UnlockRequests(service: UnlockApprovalService) {
         }
     }
     // A request that left the list (decided, expired or a failed poll) never reopens its sheet by itself.
-    LaunchedEffect(requests) {
+    LaunchedEffect(requests, busy) {
         if (busy == null && requests.none { it.id == open }) {
             open = null
             picking = null
@@ -113,7 +113,7 @@ fun UnlockRequests(service: UnlockApprovalService) {
     if (requests.isEmpty() && error == null) return
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // While the sheet is open it shows the error itself.
-        if (open == null) error?.let { ErrorText(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+        if (requests.none { it.id == open }) error?.let { ErrorText(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
         if (requests.isNotEmpty()) {
             ListSection(null) {
                 requests.forEachIndexed { i, item ->
