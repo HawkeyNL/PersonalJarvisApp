@@ -192,7 +192,7 @@ struct HubView: View {
                         .font(JV.font(15, .semibold)).foregroundStyle(JV.textPrimary)
                     Spacer()
                     Button { model.dismissAppUpdate() } label: {
-                        Image(systemName: "xmark").frame(minWidth: 44, minHeight: 44)
+                        Image(systemName: "xmark").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
                     }
                     .foregroundStyle(JV.textSecondary)
                     .accessibilityLabel("Dismiss update notice")
@@ -202,7 +202,7 @@ struct HubView: View {
                     HStack(spacing: 8) { updateLinks(update) }
                     VStack(alignment: .leading, spacing: 8) { updateLinks(update) }
                 }
-                .buttonStyle(JVButtonStyle(kind: .secondary, size: .small))
+                .buttonStyle(JVButtonStyle(kind: .secondary))
             }
             .jvCard(padding: 12)
         }

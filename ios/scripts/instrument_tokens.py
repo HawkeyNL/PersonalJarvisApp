@@ -48,8 +48,11 @@ def oklch_to_srgb(l, c, h):
 
 
 def tokens(text):
+    found = TOKEN.findall(text)
+    if len(found) != text.count(": oklch("):
+        raise SystemExit("an oklch() token is not in the 'oklch(L C H [/ A])' form this script reads")
     result = {}
-    for name, l, c, h, alpha in TOKEN.findall(text):
+    for name, l, c, h, alpha in found:
         r, g, b = oklch_to_srgb(float(l), float(c), float(h))
         result[name] = (r << 24) | (g << 16) | (b << 8) | round(float(alpha or 1) * 255)
     return result
@@ -77,6 +80,8 @@ def generate():
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] not in ([], ["--check"]):
+        raise SystemExit(__doc__)
     generated = generate()
     if sys.argv[1:] == ["--check"]:
         if generated not in open(SWIFT, encoding="utf-8").read():

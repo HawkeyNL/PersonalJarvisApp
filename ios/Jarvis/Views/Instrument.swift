@@ -247,7 +247,8 @@ extension View {
 
 /// Instrument button: primary, secondary, quiet or danger at 40 (regular),
 /// 48 (large) or 32 (small) points; heights grow with Dynamic Type. A
-/// destructive role draws secondary and quiet labels in the danger colour. Pressing
+/// destructive role makes primary draw as danger and secondary and quiet labels
+/// use the danger colour. Pressing
 /// scales to 0.96 over 150 ms ease-out; with Reduce Motion it dims instead.
 struct JVButtonStyle: ButtonStyle {
     enum Kind { case primary, secondary, quiet, danger }
@@ -275,9 +276,14 @@ struct JVButtonStyle: ButtonStyle {
             }
         }
 
+        /// A destructive primary button is a danger button.
+        private var effectiveKind: Kind {
+            kind == .primary && configuration.role == .destructive ? .danger : kind
+        }
+
         private var foreground: Color {
             guard isEnabled else { return JV.textDisabled }
-            switch kind {
+            switch effectiveKind {
             case .primary, .danger: return JV.textOnAccent
             case .secondary: return configuration.role == .destructive ? JV.dangerText : JV.textPrimary
             case .quiet: return configuration.role == .destructive ? JV.dangerText : JV.accentText
@@ -287,7 +293,7 @@ struct JVButtonStyle: ButtonStyle {
         private var background: Color {
             guard isEnabled else { return JV.bgSunken }
             let pressed = configuration.isPressed
-            switch kind {
+            switch effectiveKind {
             case .primary: return pressed ? JV.accentSolidHover : JV.accentSolid
             case .danger: return pressed ? JV.dangerSolidHover : JV.dangerSolid
             case .secondary: return pressed ? JV.bgHover : JV.bgSurface
@@ -306,8 +312,9 @@ struct JVButtonStyle: ButtonStyle {
                 .padding(.vertical, 6)
                 .frame(minHeight: metrics.height)
                 .background(background, in: shape)
+                // Secondary and disabled buttons keep a visible outline on a surface card.
                 .overlay {
-                    if kind == .secondary && isEnabled { shape.strokeBorder(JV.shadowRing, lineWidth: 1) }
+                    if kind == .secondary || !isEnabled { shape.strokeBorder(JV.border, lineWidth: 1) }
                 }
                 .contentShape(shape)
                 .scaleEffect(pressed && !reduceMotion ? 0.96 : 1)

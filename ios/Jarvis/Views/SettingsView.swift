@@ -54,8 +54,8 @@ private struct HomeNodeSettingsView: View {
         switch model.connectionState {
         case .unconfigured: Label("Not configured", systemImage: "circle")
         case .checking: Label("Checking", systemImage: "clock")
-        case .reachable: Label("Reachable", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-        case let .unreachable(message): Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        case .reachable: Label("Reachable", systemImage: "checkmark.circle.fill").foregroundStyle(JV.positiveText)
+        case let .unreachable(message): Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(JV.negativeText)
         }
     }
 }
