@@ -79,7 +79,7 @@ onBeforeUnmount(() => clearTimeout(noticeTimer));
 
 <template>
   <PageShell :title="title" :subtitle="subtitle">
-    <section ref="listCard" class="card tight" tabindex="-1">
+    <section ref="listCard" class="card tight" tabindex="-1" aria-label="Linked devices">
       <p v-if="devices.state === 'loading'" class="state t-sm t-2" role="status">Loading devices…</p>
       <div v-else-if="devices.state !== 'ok'" class="empty" role="status">
         <h2>Devices could not load</h2>
@@ -87,7 +87,7 @@ onBeforeUnmount(() => clearTimeout(noticeTimer));
       </div>
       <div v-else-if="!rows.length" class="empty"><h2>No devices linked yet</h2></div>
       <div v-else class="scroll">
-        <table class="tbl" aria-label="Linked devices">
+        <table class="tbl">
           <thead><tr><th scope="col">Device</th><th scope="col">Platform</th><th scope="col">Linked</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
           <tbody>
             <tr v-for="row in rows" :key="row.id">
