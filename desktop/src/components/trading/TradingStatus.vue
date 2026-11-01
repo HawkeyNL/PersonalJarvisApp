@@ -19,7 +19,7 @@ const emit = defineEmits<{ retry: [] }>();
       <p class="title">{{ notConnectedText(state.reason).title }}</p>
       <p v-if="!compact" class="detail">{{ notConnectedText(state.reason).detail }}</p>
       <p class="actions">
-        <RouterLink v-if="state.reason !== 'unreachable'" to="/trading/ibkr" class="ghost-btn sm">Gateway status</RouterLink>
+        <RouterLink v-if="state.reason !== 'unreachable'" to="/trading/ibkr" class="ghost-btn sm">IBKR status</RouterLink>
         <button type="button" class="ghost-btn sm" @click="emit('retry')">Try again</button>
       </p>
     </div>

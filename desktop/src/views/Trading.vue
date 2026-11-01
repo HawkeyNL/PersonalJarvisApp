@@ -7,7 +7,9 @@ import {
   deleteHolding,
   type Holding,
 } from "../portfolio";
-import { ibkrStatus, ibkrPositions, type IbkrPosition } from "../ibkr";
+import { asOfText, formatDecimal, formatMoney, formatPrice, ibkrLinkState, readPortfolio, type Portfolio } from "../trading";
+import { tradingApi, useTradingRead } from "../tradingApi";
+import TradingStatus from "../components/trading/TradingStatus.vue";
 import JvBackdrop from "../components/jv/JvBackdrop.vue";
 import JvTopBar from "../components/jv/JvTopBar.vue";
 
@@ -26,11 +28,15 @@ const avgCost = ref("");
 const hError = ref<string | null>(null);
 const loading = ref(true);
 
-// IBKR
-const ibStatus = ref<"checking" | "connected" | "disconnected">("checking");
-const ibHint = ref<string | null>(null);
-const account = ref<string | null>(null);
-const positions = ref<IbkrPosition[]>([]);
+// IBKR: the link state is read from Core's portfolio (GET /v1/trading/portfolio).
+const { state: ibkr, reload: refreshIbkr } = useTradingRead<Portfolio>({
+  live: tradingApi.portfolio,
+  fixture: (f, set) => f.portfolioFixture(set),
+  read: readPortfolio,
+  isEmpty: (p) => p.positions.length === 0,
+});
+const ibLink = computed(() => ibkrLinkState(ibkr.value));
+const ibDot = computed(() => ({ ok: "dot-ok", idle: "dot-todo", warn: "dot-err", error: "dot-err" })[ibLink.value[0]]);
 
 async function refreshHoldings() {
   loading.value = true;
@@ -72,31 +78,7 @@ async function remove(id: string) {
   }
 }
 
-async function refreshIbkr() {
-  ibStatus.value = "checking";
-  ibHint.value = null;
-  positions.value = [];
-  try {
-    const s = await ibkrStatus();
-    if (s.reachable && s.authenticated) {
-      ibStatus.value = "connected";
-      const p = await ibkrPositions();
-      account.value = p.account;
-      positions.value = p.positions;
-    } else {
-      ibStatus.value = "disconnected";
-      ibHint.value = "IBKR gateway not connected. Start the Client Portal Gateway and log in.";
-    }
-  } catch (e) {
-    ibStatus.value = "disconnected";
-    ibHint.value = String(e);
-  }
-}
-
-onMounted(() => {
-  refreshHoldings();
-  refreshIbkr();
-});
+onMounted(refreshHoldings);
 </script>
 
 <template>
@@ -126,10 +108,7 @@ onMounted(() => {
       </div>
       <div class="tile glass">
         <span class="t-k">IBKR</span>
-        <span class="t-v small">
-          <span class="dot" :class="ibStatus === 'connected' ? 'dot-ok' : ibStatus === 'disconnected' ? 'dot-err' : 'dot-todo'"></span>
-          {{ ibStatus === "connected" ? "connected" : ibStatus === "disconnected" ? "offline" : "…" }}
-        </span>
+        <span class="t-v small"><span class="dot" :class="ibDot"></span>{{ ibLink[1] }}</span>
       </div>
     </div>
 
@@ -171,32 +150,25 @@ onMounted(() => {
     <!-- IBKR -->
     <div v-show="seg === 'ibkr'" class="panel glass">
       <div class="ib-head">
-        <div class="badge">
-          <span class="dot" :class="ibStatus === 'connected' ? 'dot-ok' : ibStatus === 'disconnected' ? 'dot-err' : 'dot-todo'"></span>
-          {{
-            ibStatus === "connected"
-              ? `connected — account ${account}`
-              : ibStatus === "disconnected"
-                ? "not connected"
-                : "checking…"
-          }}
-        </div>
-        <button class="ghost" @click="refreshIbkr">Reconnect</button>
+        <div class="badge"><span class="dot" :class="ibDot"></span>{{ ibLink[1] }}</div>
+        <button class="ghost" @click="refreshIbkr">Refresh</button>
       </div>
 
       <p class="muted sub">
-        Read-only through the Client Portal Gateway (paper or live). You log in
-        with SSO + 2FA in the gateway; Jarvis only reads.
+        Read-only through Core's IBKR connection; Jarvis only reads, it never places orders.
       </p>
-      <p v-if="ibHint" class="muted">{{ ibHint }}</p>
 
-      <ul v-if="positions.length" class="holding-list" style="margin-top: 14px">
-        <li v-for="p in positions" :key="p.conid" class="holding-head">
-          <span class="sym">{{ p.symbol }}</span>
-          <span class="muted">{{ p.position }} @ {{ p.mkt_price }} {{ p.currency }}</span>
-          <span class="cost mono">{{ p.mkt_value }}</span>
-        </li>
-      </ul>
+      <TradingStatus :state="ibkr" what="the IBKR portfolio" @retry="refreshIbkr" v-slot="{ data, empty }">
+        <p class="muted">Last sync {{ asOfText(data.as_of) }}.</p>
+        <p v-if="empty" class="muted">No open positions in your IBKR account.</p>
+        <ul v-else class="holding-list" style="margin-top: 14px">
+          <li v-for="p in data.positions" :key="p.conid" class="holding-head">
+            <span class="sym">{{ p.symbol }}</span>
+            <span class="muted">{{ formatDecimal(p.quantity, { maxPlaces: 8 }) }} @ {{ formatPrice(p.last_price, p.currency) }}</span>
+            <span class="cost mono">{{ formatMoney(p.market_value, data.base_currency) }}</span>
+          </li>
+        </ul>
+      </TradingStatus>
     </div>
   </section>
   </div>

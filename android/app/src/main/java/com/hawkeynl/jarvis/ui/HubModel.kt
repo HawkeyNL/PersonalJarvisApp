@@ -6,7 +6,7 @@ import com.hawkeynl.jarvis.network.Availability
 import com.hawkeynl.jarvis.network.CodingSession
 import com.hawkeynl.jarvis.network.ConnectionState
 import com.hawkeynl.jarvis.network.DiskStatus
-import com.hawkeynl.jarvis.network.IbkrStatus
+import com.hawkeynl.jarvis.network.IbkrPortfolio
 import com.hawkeynl.jarvis.network.LoadFailure
 import com.hawkeynl.jarvis.network.Registry
 import com.hawkeynl.jarvis.network.ServiceStatus
@@ -58,6 +58,7 @@ fun failureText(reason: LoadFailure, forbidden: String = "Turned off in Core."):
     LoadFailure.SIGNIN -> "Sign in again."
     LoadFailure.FORBIDDEN -> forbidden
     LoadFailure.NETWORK -> "Check the connection to your Home Node."
+    LoadFailure.UNAVAILABLE -> "Core cannot provide this right now. Try again later."
     LoadFailure.FAILED -> "Core returned an error. Try again later."
 }
 
@@ -116,6 +117,7 @@ private fun hint(reason: LoadFailure) = when (reason) {
     LoadFailure.SIGNIN -> "Sign in again"
     LoadFailure.FORBIDDEN -> "Turned off in Core"
     LoadFailure.NETWORK -> "Check the connection"
+    LoadFailure.UNAVAILABLE -> "Not available now"
     LoadFailure.FAILED -> "Core error"
 }
 
@@ -222,13 +224,23 @@ fun outcomeTone(outcome: String): Tone = when (outcome) {
 
 // --- Integrations -------------------------------------------------------------------
 
-/** Tone and label of the IBKR gateway link. */
-fun ibkrState(status: IbkrStatus): Pair<Tone, String> = when {
-    !status.reachable -> Tone.WARN to "Gateway unreachable"
-    !status.authenticated -> Tone.WARN to "Not logged in"
-    status.connected == false -> Tone.WARN to "Logged in, not connected"
-    else -> Tone.OK to "Connected"
-}
+/** Core's last IBKR sync is older than this: still connected, but say so. */
+private const val IBKR_STALE_AFTER_MS = 10 * MINUTE
+
+/** Tone and label of the IBKR link, from GET /v1/trading/portfolio: a
+ *  portfolio means connected, 503 means not connected or not synced yet. */
+fun ibkrState(source: Availability<IbkrPortfolio>, now: Long): Pair<Tone, String> =
+    if (source == Availability.Failed(LoadFailure.UNAVAILABLE)) {
+        Tone.WARN to "Not connected"
+    } else {
+        statusOf(source) { p ->
+            val at = parseInstant(p.as_of)
+            if (at == null || now - at > IBKR_STALE_AFTER_MS) Tone.WARN to "Connected, sync is old" else Tone.OK to "Connected"
+        }
+    }
+
+const val IBKR_NOT_SYNCED = "Core has no IBKR data yet: the IBKR connection is not set up, the first sync has not finished, " +
+    "or Core cannot reach IBKR right now. Check the IBKR broker on your Home Node, then refresh."
 
 /** "3 of 9" style count of items with a truthy flag. */
 fun <T> countOf(list: List<T>, flag: (T) -> Boolean): String = "${list.count(flag)} of ${list.size}"

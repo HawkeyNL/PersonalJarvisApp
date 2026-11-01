@@ -6,12 +6,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import com.hawkeynl.jarvis.network.Availability
+import com.hawkeynl.jarvis.network.LoadFailure
 import com.hawkeynl.jarvis.network.valueOrNull
 
 private val INTEGRATION_DETAILS = mapOf(
     "brains" to "The brains Core found on your Home Node. Ready means it is set up, not that it is in use.",
     "models" to "Allowing a model lets Jarvis choose it; it never selects a model for a running request. Change access under System Health.",
-    "ibkr" to "Gateway status for Interactive Brokers. Jarvis only reads; it never places orders.",
+    "ibkr" to "Core's read-only link to Interactive Brokers. Jarvis only reads; it never places orders.",
     "codex" to "Core does not report the Codex broker status to the app yet.",
     "github" to "Core does not report a GitHub connection to the app yet.",
     "sandbox" to "Core does not report OpenSandbox status to the app yet.",
@@ -20,7 +22,7 @@ private val INTEGRATION_DETAILS = mapOf(
 private val COST = mapOf("plan" to "Subscription", "metered" to "Pay per use", "local" to "Local", "cheap" to "Cheap", "mid" to "Mid", "pricey" to "Pricey")
 
 /** Integrations: the brains, model catalog and host tools Core probed, the
- *  owner model policy and the IBKR gateway. Codex, GitHub and OpenSandbox are
+ *  owner model policy and the IBKR link. Codex, GitHub and OpenSandbox are
  *  not reported by Core yet. */
 @Composable
 fun IntegrationsScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRefresh: () -> Unit) {
@@ -34,7 +36,7 @@ fun IntegrationsScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit,
 
     val b = statusOf(data.registry) { (if (brains.any { it.available }) Tone.OK else Tone.IDLE) to "${countOf(brains) { it.available }} ready" }
     val m = statusOf(data.models) { (if (allowed.isEmpty()) Tone.IDLE else Tone.OK) to "${allowed.size} allowed" }
-    val i = statusOf(data.ibkr) { ibkrState(it) }
+    val i = ibkrState(data.ibkr, data.loadedAt)
     val items = listOf(
         NodeItem("brains", "Brains", "AI brains", JvIcon.SPARK, b.first, b.second, "Who does the thinking, and how it is paid"),
         NodeItem("models", "Models", "Models", JvIcon.LAYERS, m.first, m.second, "Which models Jarvis may use"),
@@ -123,16 +125,20 @@ fun IntegrationsScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit,
                         }
                     }
                 }
-                "ibkr" -> Loaded(data.ibkr, "IBKR", JvIcon.TREND, "Checking the gateway…") { s ->
-                    TileGrid(
-                        "Gateway",
-                        listOf(
-                            TileData(JvIcon.API, "Gateway", if (s.reachable) "Reachable" else "Unreachable"),
-                            TileData(JvIcon.KEY, "Session", if (s.authenticated) "Logged in" else "Not logged in"),
-                            TileData(JvIcon.LINK, "Connection", when (s.connected) { null -> "Not reported"; true -> "Connected"; false -> "Not connected" }),
-                            TileData(JvIcon.SHIELD, "Access", "Read-only"),
-                        ),
-                    )
+                "ibkr" -> if (data.ibkr == Availability.Failed(LoadFailure.UNAVAILABLE)) {
+                    Unavailable("IBKR", JvIcon.TREND, kind = UnavailableKind.ERROR, detail = IBKR_NOT_SYNCED)
+                } else {
+                    Loaded(data.ibkr, "IBKR", JvIcon.TREND, "Checking the IBKR link…") { p ->
+                        TileGrid(
+                            "IBKR link",
+                            listOf(
+                                TileData(JvIcon.LINK, "Connection", i.second),
+                                TileData(JvIcon.CLOCK, "Last sync", relativeTime(p.as_of, data.loadedAt).ifEmpty { "—" }),
+                                TileData(JvIcon.TREND, "Positions", p.positions.size.toString()),
+                                TileData(JvIcon.SHIELD, "Access", "Read-only"),
+                            ),
+                        )
+                    }
                 }
                 else -> Unavailable(current.title, current.icon, detail = INTEGRATION_DETAILS[current.id])
             }

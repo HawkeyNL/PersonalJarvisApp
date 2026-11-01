@@ -24,6 +24,7 @@ final class HubModelTests: XCTestCase {
         XCTAssertEqual(state(JarvisAPIError.rejected(status: 405, message: nil)), "unsupported")
         XCTAssertEqual(state(JarvisAPIError.rejected(status: 403, message: nil)), "forbidden")
         XCTAssertEqual(state(JarvisAPIError.rejected(status: 500, message: nil)), "failed")
+        XCTAssertEqual(state(JarvisAPIError.rejected(status: 503, message: nil)), "unavailable")
         XCTAssertEqual(state(JarvisAPIError.unauthorized), "signin")
         XCTAssertEqual(state(JarvisAPIError.unreachable), "network")
         XCTAssertEqual(state(JarvisAPIError.timedOut), "network")
@@ -137,9 +138,27 @@ final class HubModelTests: XCTestCase {
         XCTAssertEqual(diskState(response.disks[0]).0, .error)
         XCTAssertEqual(diskState(response.disks[0]).1, "90% used · 100.0 GiB free of 1000.0 GiB")
         XCTAssertEqual(diskState(response.disks[1]).1, "Unknown")
-        XCTAssertEqual(ibkrState(IbkrStatus(reachable: true, authenticated: true, connected: nil)).1, "Connected")
-        XCTAssertEqual(ibkrState(IbkrStatus(reachable: true, authenticated: true, connected: false)).0, .warn)
-        XCTAssertEqual(ibkrState(IbkrStatus(reachable: false, authenticated: false, connected: nil)).1, "Gateway unreachable")
+    }
+
+    func testIbkrLinkStateComesFromThePortfolioRead() throws {
+        let now = try XCTUnwrap(parseCoreDate("2026-11-01T12:00:00Z"))
+        let synced = try decode(IbkrPortfolio.self, """
+        {"source":"IBKR","as_of":"2026-11-01T11:55:00Z","base_currency":"EUR","net_liquidation":"1.00","cash":"1.00",
+         "positions":[{"conid":1,"symbol":"VWRL"},{"conid":2,"symbol":"AAPL"}]}
+        """)
+        XCTAssertEqual(synced.positions.count, 2)
+        XCTAssertEqual(ibkrState(.ok(synced), now: now).0, .ok)
+        XCTAssertEqual(ibkrState(.ok(synced), now: now).1, "Connected")
+        let old = try decode(IbkrPortfolio.self, #"{"as_of":"2026-11-01T11:00:00Z","positions":[]}"#)
+        XCTAssertEqual(ibkrState(.ok(old), now: now).0, .warn)
+        XCTAssertEqual(ibkrState(.ok(old), now: now).1, "Connected, sync is old")
+        XCTAssertEqual(ibkrState(.error(.unavailable), now: now).0, .warn)
+        XCTAssertEqual(ibkrState(.error(.unavailable), now: now).1, "Not connected")
+        XCTAssertEqual(ibkrState(.error(.failed), now: now).0, .warn)
+        XCTAssertEqual(ibkrState(.error(.failed), now: now).1, "Unavailable")
+        XCTAssertEqual(ibkrState(.unsupported, now: now).0, .idle)
+        XCTAssertEqual(ibkrState(.unsupported, now: now).1, "Requires newer Core")
+        XCTAssertFalse(ibkrNotSynced.localizedCaseInsensitiveContains("gateway"))
     }
 
     func testRegistryStillDecodesWithoutNewerFields() throws {

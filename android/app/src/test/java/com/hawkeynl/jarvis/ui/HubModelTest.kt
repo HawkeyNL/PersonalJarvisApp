@@ -6,7 +6,7 @@ import com.hawkeynl.jarvis.network.Availability
 import com.hawkeynl.jarvis.network.CodingSession
 import com.hawkeynl.jarvis.network.ConnectionState
 import com.hawkeynl.jarvis.network.DiskStatus
-import com.hawkeynl.jarvis.network.IbkrStatus
+import com.hawkeynl.jarvis.network.IbkrPortfolio
 import com.hawkeynl.jarvis.network.LiveHost
 import com.hawkeynl.jarvis.network.LoadFailure
 import com.hawkeynl.jarvis.network.Registry
@@ -15,6 +15,7 @@ import com.hawkeynl.jarvis.network.SoftwareItem
 import com.hawkeynl.jarvis.network.UnreachableReason
 import java.time.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -99,14 +100,25 @@ class HubModelTest {
     }
 
     @Test
+    fun `IBKR link state comes from the portfolio read`() {
+        val synced = IbkrPortfolio(as_of = "2026-10-04T11:55:00Z")
+        assertEquals(Tone.OK to "Connected", ibkrState(Availability.Ok(synced), now))
+        assertEquals(Tone.WARN to "Connected, sync is old", ibkrState(Availability.Ok(IbkrPortfolio(as_of = "2026-10-04T11:00:00Z")), now))
+        assertEquals(Tone.WARN to "Connected, sync is old", ibkrState(Availability.Ok(IbkrPortfolio(as_of = "not a date")), now))
+        assertEquals(Tone.WARN to "Not connected", ibkrState(Availability.Failed(LoadFailure.UNAVAILABLE), now))
+        assertEquals(Tone.WARN to "Unavailable", ibkrState(Availability.Failed(LoadFailure.FAILED), now))
+        assertEquals(Tone.IDLE to "Requires newer Core", ibkrState(Availability.Unsupported, now))
+        assertEquals(Tone.IDLE to "Loading…", ibkrState(Availability.Loading, now))
+        assertFalse(IBKR_NOT_SYNCED.contains("gateway", ignoreCase = true))
+    }
+
+    @Test
     fun `node page state mapping`() {
         assertEquals(Tone.WARN to "Paused", sessionState("suspended"))
         assertEquals(Tone.IDLE to "weird", sessionState("weird"))
         val (open, finished) = splitSessions(listOf(CodingSession("a", state = "completed"), CodingSession("b", state = "suspended")))
         assertEquals(listOf("b"), open.map { it.id })
         assertEquals(listOf("a"), finished.map { it.id })
-        assertEquals(Tone.WARN to "Not logged in", ibkrState(IbkrStatus(reachable = true)))
-        assertEquals(Tone.OK to "Connected", ibkrState(IbkrStatus(reachable = true, authenticated = true)))
         assertEquals(Tone.IDLE to "Not measured yet", agentStatus(null, AGENT_USAGE_NOT_INSTRUMENTED))
         assertEquals(Tone.OK to "1 request this month", agentStatus(AgentUsage(requests = 1), null))
         assertEquals(Tone.ERROR to "1 failed", servicesSummary(listOf(ServiceStatus(state = "active"), ServiceStatus(state = "failed"))))

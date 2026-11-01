@@ -420,7 +420,8 @@ struct IntegrationsPage: View {
     let navigate: (HubRoute) -> Void
     @State private var registry: Availability<HomeNodeRegistry> = .loading
     @State private var policy: Availability<ModelPolicySnapshot> = .loading
-    @State private var ibkr: Availability<IbkrStatus> = .loading
+    @State private var ibkr: Availability<IbkrPortfolio> = .loading
+    @State private var loadedAt = Date()
     @State private var selected = "brains"
     @State private var sub = "overview"
 
@@ -433,14 +434,14 @@ struct IntegrationsPage: View {
         let allowedCount = allowed.count
         let b = sourceStatus(registry) { _ in (ready > 0 ? Tone.ok : Tone.idle, "\(ready) of \(total) ready") }
         let m = sourceStatus(policy) { _ in (allowedCount == 0 ? Tone.idle : Tone.ok, "\(allowedCount) allowed") }
-        let i = sourceStatus(ibkr, ok: ibkrState)
+        let i = ibkrState(ibkr, now: loadedAt)
         return [
             NodeItem(id: "brains", label: "Brains", title: "AI brains", icon: "sparkles",
                      detail: "The brains Core found on your Home Node. Ready means it is set up, not that it is in use.", tone: b.0, status: b.1),
             NodeItem(id: "models", label: "Models", title: "Models", icon: "square.stack.3d.up",
                      detail: "Allowing a model lets Jarvis choose it; it never selects a model for a running request.", tone: m.0, status: m.1),
             NodeItem(id: "ibkr", label: "IBKR", title: "Interactive Brokers", icon: "chart.line.uptrend.xyaxis",
-                     detail: "Gateway status for Interactive Brokers. Jarvis only reads; it never places orders.", tone: i.0, status: i.1),
+                     detail: "Core's read-only link to Interactive Brokers. Jarvis only reads; it never places orders.", tone: i.0, status: i.1),
             .planned("codex", "Codex", "Codex", icon: "terminal", detail: "Core does not report the Codex broker status to the app yet."),
             .planned("github", "GitHub", "GitHub", icon: "arrow.triangle.branch", detail: "Core does not report a GitHub connection to the app yet."),
             .planned("sandbox", "Sandbox", "OpenSandbox", icon: "shippingbox", detail: "Core does not report OpenSandbox status to the app yet."),
@@ -477,13 +478,15 @@ struct IntegrationsPage: View {
                     }, emptyText: "No models are allowed.")
                 case "ibkr":
                     NodePanel(item: current)
-                    if let state = UnavailableState.forSource(ibkr, title: "Interactive Brokers", symbol: "chart.line.uptrend.xyaxis") { state }
-                    if let status = ibkr.value {
+                    if case .error(.unavailable) = ibkr {
+                        UnavailableState(title: "Interactive Brokers", kind: .error, detail: ibkrNotSynced, symbol: "chart.line.uptrend.xyaxis")
+                    } else if let state = UnavailableState.forSource(ibkr, title: "Interactive Brokers", symbol: "chart.line.uptrend.xyaxis") { state }
+                    if let portfolio = ibkr.value {
                         TileGrid(tiles: [
-                            TileData(label: "Gateway", value: status.reachable ? "Reachable" : "Unreachable", symbol: "network"),
-                            TileData(label: "Session", value: status.authenticated ? "Logged in" : "Not logged in", symbol: "key"),
-                            TileData(label: "Connection", value: status.connected.map { $0 ? "Connected" : "Not connected" } ?? "Not reported",
-                                     symbol: "link"),
+                            TileData(label: "Connection", value: current.status, symbol: "link"),
+                            TileData(label: "Last sync", value: relativeTime(portfolio.asOf, now: loadedAt).isEmpty ? "—" : relativeTime(portfolio.asOf, now: loadedAt),
+                                     symbol: "clock"),
+                            TileData(label: "Positions", value: String(portfolio.positions.count), symbol: "chart.line.uptrend.xyaxis"),
                             TileData(label: "Orders", value: "Read-only", symbol: "lock"),
                         ])
                     }
@@ -501,12 +504,13 @@ struct IntegrationsPage: View {
     private func load() async {
         async let registry = model.coreRead("/v1/system/registry", as: HomeNodeRegistry.self)
         async let policy = model.coreRead("/v1/system/models", as: ModelPolicySnapshot.self)
-        async let ibkr = model.coreRead("/v1/broker/ibkr/status", as: IbkrStatus.self)
+        async let ibkr = model.coreRead("/v1/trading/portfolio", as: IbkrPortfolio.self)
         let results = (await registry, await policy, await ibkr)
         guard !Task.isCancelled else { return }
         self.registry = results.0
         self.policy = results.1
         self.ibkr = results.2
+        loadedAt = Date()
     }
 }
 

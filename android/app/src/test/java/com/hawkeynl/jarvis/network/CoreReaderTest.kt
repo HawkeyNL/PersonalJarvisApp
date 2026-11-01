@@ -44,6 +44,7 @@ class CoreReaderTest {
             HttpStatusCode.MethodNotAllowed to Availability.Unsupported,
             HttpStatusCode.Unauthorized to Availability.Failed(LoadFailure.SIGNIN),
             HttpStatusCode.Forbidden to Availability.Failed(LoadFailure.FORBIDDEN),
+            HttpStatusCode.ServiceUnavailable to Availability.Failed(LoadFailure.UNAVAILABLE),
             HttpStatusCode.InternalServerError to Availability.Failed(LoadFailure.FAILED),
         )
         for ((status, availability) in expected) {

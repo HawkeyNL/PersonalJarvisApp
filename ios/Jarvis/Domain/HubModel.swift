@@ -10,7 +10,8 @@ enum Tone: Equatable { case ok, idle, warn, error }
 enum Mood: Equatable { case idle, listening, thinking }
 
 /// Why an optional Core read failed.
-enum LoadFailure: Equatable { case signin, forbidden, network, failed }
+/// `unavailable`: Core answered 503, it cannot serve this right now (e.g. IBKR not connected yet).
+enum LoadFailure: Equatable { case signin, forbidden, network, unavailable, failed }
 
 /// Result of an optional Core read. `unsupported` means the route does not
 /// exist on this Core (older version) and is shown as "Requires newer Core".
@@ -26,14 +27,15 @@ enum Availability<Value> {
     }
 
     /// 404/405 is an older Core, 401 a session to renew, 403 a feature Core
-    /// refuses; only a request without an answer is a connection problem.
+    /// refuses, 503 something Core cannot serve right now; only a request
+    /// without an answer is a connection problem.
     init(error: Error) {
         switch error as? JarvisAPIError {
         case .unauthorized?: self = .error(.signin)
         case .unreachable?, .timedOut?: self = .error(.network)
         case let .rejected(status, _)?:
             if status == 404 || status == 405 { self = .unsupported }
-            else { self = .error(status == 403 ? .forbidden : .failed) }
+            else { self = .error(status == 403 ? .forbidden : status == 503 ? .unavailable : .failed) }
         default: self = .error(.failed)
         }
     }
@@ -54,6 +56,7 @@ func failureText(_ reason: LoadFailure, forbidden: String = "Turned off in Core.
     case .signin: "Sign in again from Settings."
     case .forbidden: forbidden
     case .network: "Check the connection to your Home Node."
+    case .unavailable: "Core cannot provide this right now. Try again later."
     case .failed: "Core returned an error. Try again later."
     }
 }
@@ -168,6 +171,7 @@ private func cardHint(_ reason: LoadFailure) -> String {
     case .signin: "Sign in again"
     case .forbidden: "Turned off in Core"
     case .network: "Check the connection"
+    case .unavailable: "Not available now"
     case .failed: "Core error"
     }
 }
@@ -274,12 +278,23 @@ func isSafePathSegment(_ text: String) -> Bool {
 
 // MARK: - Integrations
 
-/// Tone and label of the IBKR gateway link.
-func ibkrState(_ status: IbkrStatus) -> (Tone, String) {
-    if !status.reachable { return (.warn, "Gateway unreachable") }
-    if !status.authenticated { return (.warn, "Not logged in") }
-    return status.connected == false ? (.warn, "Logged in, not connected") : (.ok, "Connected")
+/// Core's last IBKR sync is older than this: still connected, but say so.
+let ibkrStaleAfter: TimeInterval = 10 * 60
+
+/// Tone and label of the IBKR link, from GET /v1/trading/portfolio: a
+/// portfolio means connected, 503 means not connected or not synced yet.
+func ibkrState(_ source: Availability<IbkrPortfolio>, now: Date) -> (Tone, String) {
+    if case .error(.unavailable) = source { return (.warn, "Not connected") }
+    return sourceStatus(source) { portfolio in
+        guard let at = parseCoreDate(portfolio.asOf), now.timeIntervalSince(at) <= ibkrStaleAfter else {
+            return (.warn, "Connected, sync is old")
+        }
+        return (.ok, "Connected")
+    }
 }
+
+let ibkrNotSynced = "Core has no IBKR data yet: the IBKR connection is not set up, the first sync has not finished, "
+    + "or Core cannot reach IBKR right now. Check the IBKR broker on your Home Node, then refresh."
 
 func costLabel(_ cost: String) -> String {
     switch cost {
