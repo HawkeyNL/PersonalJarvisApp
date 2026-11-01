@@ -41,16 +41,18 @@ struct RootView: View {
                         }
                     }
                 }
-                // Owner pages must not stay mounted after logout, reset or a 401.
-                .onChange(of: model.isAuthenticated) { _, authenticated in
-                    if authenticated {
-                        openPendingLink()
-                    } else {
-                        paths = [:]
-                        tab = .jarvis
-                    }
-                }
                 .onChange(of: pendingLink, initial: true) { _, _ in openPendingLink() }
+            }
+        }
+        // Owner pages must not stay mounted after logout, reset or a 401, also
+        // when that happens while locked.
+        .onChange(of: model.isAuthenticated) { _, authenticated in
+            if authenticated {
+                openPendingLink()
+            } else {
+                paths = [:]
+                enrollmentPath = []
+                tab = .jarvis
             }
         }
         .onOpenURL { url in pendingLink = deepLinkRoute(url) }
@@ -71,6 +73,32 @@ struct RootView: View {
     }
 }
 
+/// The one sheet the shell shows at a time. SwiftUI cannot present two, so
+/// agent approvals and unlock requests share this presenter.
+enum ShellSheet: Identifiable {
+    case unlock(UnlockRequestItem)
+    case agent(PendingAction, decided: () async -> Void)
+
+    var id: String {
+        switch self {
+        case let .unlock(item): "unlock-\(item.id)"
+        case let .agent(item, _): "agent-\(item.pending_id)"
+        }
+    }
+}
+
+private struct OpenAgentApprovalKey: EnvironmentKey {
+    static let defaultValue: (PendingAction, @escaping () async -> Void) -> Void = { _, _ in }
+}
+
+extension EnvironmentValues {
+    /// Opens the agent approval sheet; `decided` runs after a decision.
+    var openAgentApproval: (PendingAction, @escaping () async -> Void) -> Void {
+        get { self[OpenAgentApprovalKey.self] }
+        set { self[OpenAgentApprovalKey.self] = newValue }
+    }
+}
+
 /// The signed-in app: four tabs, each with its own navigation stack. Unlock
 /// requests are polled here (foreground only) and open as a sheet over any tab.
 struct MainTabs: View {
@@ -79,7 +107,7 @@ struct MainTabs: View {
     @Binding var paths: [AppTab: [HubRoute]]
     @Environment(\.scenePhase) private var scenePhase
     @State private var unlocks: [UnlockRequestItem] = []
-    @State private var unlockSheet: UnlockRequestItem?
+    @State private var sheet: ShellSheet?
     /// Requests already offered as a sheet; a dismissed one stays on Activiteit.
     @State private var offered: Set<UUID> = []
 
@@ -96,14 +124,16 @@ struct MainTabs: View {
                 .tag(item)
             }
         }
-        .sheet(item: $unlockSheet) { item in
-            UnlockSheet(model: model, item: item) { id in unlocks.removeAll { $0.id == id } }
+        .environment(\.openAgentApproval, openAgentApproval)
+        .sheet(item: $sheet, onDismiss: offerUnlock) { current in
+            switch current {
+            case let .unlock(item):
+                UnlockSheet(model: model, item: item) { id in unlocks.removeAll { $0.id == id } }
+            case let .agent(item, decided):
+                AgentApprovalSheet(model: model, item: item, time: relativeTime(item.created_at, now: Date()), decided: decided)
+            }
         }
-        .onChange(of: unlocks) { _, list in
-            guard unlockSheet == nil, let next = list.first(where: { !offered.contains($0.id) }) else { return }
-            offered.insert(next.id)
-            unlockSheet = next
-        }
+        .onChange(of: unlocks) { _, _ in offerUnlock() }
         .task(id: scenePhase == .active) {
             guard scenePhase == .active else { unlocks = []; return }
             while !Task.isCancelled {
@@ -116,6 +146,17 @@ struct MainTabs: View {
         }
     }
 
+    private func openAgentApproval(_ item: PendingAction, decided: @escaping () async -> Void) {
+        if sheet == nil { sheet = .agent(item, decided: decided) }
+    }
+
+    /// Shows the next request not offered yet, only while no other sheet is up.
+    private func offerUnlock() {
+        guard sheet == nil, let next = unlocks.first(where: { !offered.contains($0.id) }) else { return }
+        offered.insert(next.id)
+        sheet = .unlock(next)
+    }
+
     private func path(_ item: AppTab) -> Binding<[HubRoute]> {
         Binding(get: { paths[item] ?? [] }, set: { paths[item] = $0 })
     }
@@ -124,7 +165,7 @@ struct MainTabs: View {
         switch item {
         case .jarvis: HomeView(model: model, unlocks: unlocks) { tab = .activity }
         case .trading: TradingPage(model: model)
-        case .activity: ActivityView(model: model, unlocks: unlocks) { unlockSheet = $0 }
+        case .activity: ActivityView(model: model, unlocks: unlocks) { item in if sheet == nil { sheet = .unlock(item) } }
         case .settings: SettingsView(model: model, inTabs: true)
         }
     }

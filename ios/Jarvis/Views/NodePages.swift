@@ -202,7 +202,7 @@ struct TasksPage: View {
     @State private var selected = "active"
     @State private var sub = "overview"
     @State private var now = Date()
-    @State private var reviewing: PendingAction?
+    @Environment(\.openAgentApproval) private var openAgentApproval
 
     private var split: (open: [CodingSession], finished: [CodingSession]) { splitSessions(sessions.value ?? []) }
     private var waiting: [PendingAction] { pending.value ?? [] }
@@ -254,7 +254,9 @@ struct TasksPage: View {
                         ActivityList(rows: [], emptyText: "Nothing is waiting for you.")
                     }
                     ForEach(waiting) { action in
-                        PendingActionRow(item: action, time: relativeTime(action.created_at, now: now)) { reviewing = action }
+                        PendingActionRow(item: action, time: relativeTime(action.created_at, now: now)) {
+                            openAgentApproval(action) { await load() }
+                        }
                     }
                 case "completed":
                     ChipRow(chips: [ChipRow.Chip(id: "overview", label: "Sessions", symbol: "chevron.left.forwardslash.chevron.right"),
@@ -276,9 +278,6 @@ struct TasksPage: View {
         .onChange(of: selected) { _, _ in sub = "overview" }
         .refreshable { await load() }
         .task { await load() }
-        .sheet(item: $reviewing) { action in
-            AgentApprovalSheet(model: model, item: action, time: relativeTime(action.created_at, now: now)) { await load() }
-        }
     }
 
     private var lastUpdate: String {
@@ -823,8 +822,8 @@ struct PairingRequestsSection: View {
     var refresh = 0
     /// Activiteit shows its own empty state instead of this one.
     var showsEmpty = true
-    /// Number of waiting requests, for the owner's empty state.
-    var count: Binding<Int>? = nil
+    /// Number of waiting requests once loaded, for the owner's empty state.
+    var count: Binding<Int?>? = nil
     @State private var requests: Availability<[PairingApprovalItem]> = .loading
     @State private var biometrics = BiometricLock.biometricsAvailable
     @State private var busy: UUID?
@@ -845,7 +844,7 @@ struct PairingRequestsSection: View {
                 ForEach(list) { item in card(item) }
             }
         }
-        .onChange(of: requests.value?.count ?? 0, initial: true) { _, value in if let count { count.wrappedValue = value } }
+        .onChange(of: requests.value?.count, initial: true) { _, value in if let count { count.wrappedValue = value } }
         // List reads share Core's five-per-minute pairing budget per IP with
         // candidates creating requests, so pull-to-refresh is throttled.
         .onChange(of: refresh) { _, _ in
@@ -856,6 +855,11 @@ struct PairingRequestsSection: View {
         }
         .task {
             while !Task.isCancelled {
+                // This section sits on a tab root, so the task restarts on every tab
+                // switch and pop: keep reads at least 20 s apart (shared pairing budget).
+                let wait = 20 - Date().timeIntervalSince(lastLoad)
+                if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+                guard !Task.isCancelled else { break }
                 await load()
                 try? await Task.sleep(for: .seconds(30))
             }
@@ -905,10 +909,10 @@ struct PairingRequestsSection: View {
             if biometrics {
                 HStack(spacing: 10) {
                     Button("Deny", role: .destructive) { Task { await decide(item, approve: false) } }
-                        .buttonStyle(JVButtonStyle(kind: .secondary))
+                        .buttonStyle(JVButtonStyle(kind: .secondary, size: .large))
                     Spacer()
                     Button(busy == item.id ? "Verifying…" : "Approve") { Task { await decide(item, approve: true) } }
-                        .buttonStyle(JVButtonStyle())
+                        .buttonStyle(JVButtonStyle(size: .large))
                         .disabled(fingerprint == nil)
                 }
                 .disabled(busy != nil)

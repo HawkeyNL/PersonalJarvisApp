@@ -12,10 +12,10 @@ struct ActivityView: View {
     @State private var pending: Availability<[PendingAction]> = .loading
     @State private var sessions: Availability<[CodingSession]> = .loading
     @State private var audit: Availability<[AgentAuditEntry]> = .loading
-    @State private var pairingCount = 0
+    @State private var pairingCount: Int?
     @State private var refresh = 0
-    @State private var reviewing: PendingAction?
     @State private var now = Date()
+    @Environment(\.openAgentApproval) private var openAgentApproval
 
     var body: some View {
         ScrollView {
@@ -27,7 +27,9 @@ struct ActivityView: View {
                     if let state = UnavailableState.forSource(pending, title: "Agent approvals", symbol: "exclamationmark.triangle",
                                                               forbidden: "Agent actions are turned off in Core.") { state }
                     ForEach(pending.value ?? []) { action in
-                        PendingActionRow(item: action, time: relativeTime(action.created_at, now: now)) { reviewing = action }
+                        PendingActionRow(item: action, time: relativeTime(action.created_at, now: now)) {
+                            openAgentApproval(action) { await load() }
+                        }
                     }
                     PairingRequestsSection(model: model, refresh: refresh, showsEmpty: false, count: $pairingCount)
                     if unlocks.isEmpty && pending.value?.isEmpty == true && pairingCount == 0 {
@@ -37,8 +39,10 @@ struct ActivityView: View {
                 ListSection(title: "History") {
                     if let state = UnavailableState.forSource(audit, title: "Agent history", symbol: "shield",
                                                               forbidden: "Agent actions are turned off in Core.") { state }
-                    ActivityList(rows: Array(auditRows(audit.value ?? [], now: now).prefix(10)),
-                                 emptyText: "Core recorded no agent actions yet.")
+                    if let entries = audit.value {
+                        ActivityList(rows: Array(auditRows(entries, now: now).prefix(10)),
+                                     emptyText: "Core recorded no agent actions yet.")
+                    }
                 }
                 ListSection(title: "More") {
                     RouteList(routes: AppTab.activity.links) { route in
@@ -60,9 +64,6 @@ struct ActivityView: View {
                 await load()
                 try? await Task.sleep(for: .seconds(30))
             }
-        }
-        .sheet(item: $reviewing) { action in
-            AgentApprovalSheet(model: model, item: action, time: relativeTime(action.created_at, now: now)) { await load() }
         }
     }
 
@@ -197,6 +198,12 @@ struct AgentApprovalSheet: View {
                 VStack(alignment: .leading, spacing: 14) {
                     header
                     details
+                    if approvable {
+                        Text("You can only approve what you have seen in full. Approving asks for Face ID or Touch ID.")
+                            .font(JV.font(12, relativeTo: .caption))
+                            .foregroundStyle(JV.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     // The gate opens once this marker has been inside the visible area.
                     Text("End of details")
                         .font(JV.font(12, relativeTo: .caption))
@@ -223,6 +230,9 @@ struct AgentApprovalSheet: View {
                 gate.observe(endY: endY, viewport: viewport)
             }
             actions
+        }
+        .onChange(of: gate.reachedEnd) { _, reached in
+            if reached { AccessibilityNotification.Announcement("Approve is available").post() }
         }
         .background(JV.bgSurface)
         .presentationBackground(JV.bgSurface)
@@ -299,14 +309,9 @@ struct AgentApprovalSheet: View {
             }
             .buttonStyle(JVButtonStyle(kind: .secondary, size: .large))
             .disabled(busy)
-            if approvable {
-                Text("You can only approve what you have seen in full. Approving asks for Face ID or Touch ID.")
-                    .font(JV.font(12, relativeTo: .caption))
-                    .foregroundStyle(JV.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
+        // The bar must leave room to read the details at the largest text sizes.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
         .background(JV.bgSurface)
