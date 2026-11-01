@@ -38,10 +38,12 @@ struct BiometricLock {
             case .appCancel, .systemCancel, .userCancel, .userFallback: return (.cancelled, nil)
             case .biometryLockout: return (.unavailable(Self.biometricsLocked), nil)
             case .biometryNotAvailable, .biometryNotEnrolled: return (.unavailable(Self.biometricsRequired), nil)
-            default: return (.denied, nil)
+            // Only a face or finger that did not match counts as denied (sign-in retries it).
+            case .authenticationFailed: return (.denied, nil)
+            default: return (.cancelled, nil)
             }
         } catch {
-            return (.denied, nil)
+            return (.cancelled, nil)
         }
     }
 

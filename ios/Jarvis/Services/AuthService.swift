@@ -41,6 +41,7 @@ enum AuthServiceOutcome: Equatable {
 
 actor AuthService {
     private var approvalRunning = false
+    private var renewal: Task<AuthServiceOutcome, Error>?
     private let api: JarvisAPIClient
     private let identity: DeviceIdentityStore
     private let credentials: SecureCredentialStore
@@ -74,7 +75,13 @@ actor AuthService {
         if let deviceId = try await credentials.deviceId() {
             let status: AccountStatus = try await api.get("/v1/auth/account/status")
             if status.passwordRequired && password == nil {
-                return renew ? try await renewWithoutPassword(deviceId: deviceId) : .needsPassword
+                guard renew else { return .needsPassword }
+                // A restore that starts while one is renewing shares its prompt and result.
+                if let renewal { return try await renewal.value }
+                let task = Task { try await renewWithoutPassword(deviceId: deviceId) }
+                renewal = task
+                defer { renewal = nil }
+                return try await task.value
             }
             try await login(deviceId: deviceId, password: password)
             return .authenticated

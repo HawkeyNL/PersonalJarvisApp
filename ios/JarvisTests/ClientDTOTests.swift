@@ -461,7 +461,7 @@ final class DeviceLoginRecoveryTests: XCTestCase {
 final class FaceIDRenewalTests: XCTestCase {
     private let accounts = ["device-ed25519-seed-v2", "device-ed25519-public-v2", "registered-device-id-v1", "authenticated-session-v1"]
 
-    private func fixture(host: String, prompts: [LocalUnlockResult])
+    private func fixture(host: String, prompts: [LocalUnlockResult], promptDelay: UInt64 = 0)
         async throws -> (AuthService, SecureCredentialStore, RenewalPrompts, FixtureSecureStorage) {
         let store = FixtureSecureStorage()
         let credentials = SecureCredentialStore(keychain: store)
@@ -473,7 +473,10 @@ final class FaceIDRenewalTests: XCTestCase {
         let api = JarvisAPIClient(baseURL: URL(string: "https://\(host)")!, session: URLSession(configuration: config))
         let queue = RenewalPrompts(prompts)
         let auth = AuthService(api: api, identity: identity, credentials: credentials,
-                               authenticateBiometric: { _ in store.prompt(await queue.next()) })
+                               authenticateBiometric: { _ in
+            if promptDelay > 0 { try? await Task.sleep(nanoseconds: promptDelay) }
+            return store.prompt(await queue.next())
+        })
         RenewalProtocol.reset()
         return (auth, credentials, queue, store)
     }
@@ -554,6 +557,36 @@ final class FaceIDRenewalTests: XCTestCase {
         }
     }
 
+    func testRenewalErrorsOtherThanRefusalFailClosed() async throws {
+        for (host, expected) in [("revoked.example.com", DeviceLoginError.deviceRejected.localizedDescription),
+                                 ("broken.example.com", nil)] {
+            let (auth, credentials, _, store) = try await fixture(host: host, prompts: [.unlocked])
+            defer { cleanup(store) }
+            do {
+                let outcome = try await auth.restore()
+                XCTFail("\(host) must not become \(outcome)")
+            } catch {
+                if let expected { XCTAssertEqual(error.localizedDescription, expected) }
+                XCTAssertNotEqual((error as? DeviceLoginError), .loginRejected)
+            }
+            let session = try await credentials.session()
+            XCTAssertNil(session)
+        }
+    }
+
+    func testConcurrentRestoresShareOneFaceIDPrompt() async throws {
+        // The slow prompt keeps the first renewal open while the second restore arrives.
+        let (auth, _, prompts, store) = try await fixture(host: "anchored.example.com", prompts: [.unlocked],
+                                                          promptDelay: 500_000_000)
+        defer { cleanup(store) }
+        async let first = auth.restore()
+        async let second = auth.restore()
+        let outcomes = try await [first, second]
+        XCTAssertEqual(outcomes, [.authenticated, .authenticated])
+        let count = await prompts.count
+        XCTAssertEqual(count, 1)
+    }
+
     func testJustPairedDeviceAsksForPasswordWithoutPrompt() async throws {
         let (auth, _, prompts, store) = try await fixture(host: "anchored.example.com", prompts: [.unlocked])
         defer { cleanup(store) }
@@ -587,7 +620,10 @@ private final class RenewalProtocol: URLProtocol {
         switch request.url!.path {
         case "/v1/auth/account/status":
             body = #"{"protocol":1,"password_required":true,"bootstrap_required":false}"#
+        case "/v1/auth/me":
+            body = #"{"user_id":"00000000-0000-0000-0000-000000000003","device_id":"00000000-0000-0000-0000-000000000004"}"#
         case "/v1/auth/challenge":
+            if request.url!.host!.hasPrefix("revoked.") { status = 401 }
             body = "{\"challenge_id\":\"00000000-0000-0000-0000-000000000001\",\"nonce\":\"\(String(repeating: "00", count: 32))\"}"
         case "/v1/auth/login":
             var data = request.httpBody ?? Data()
@@ -602,7 +638,8 @@ private final class RenewalProtocol: URLProtocol {
             }
             let login = (try? JSONSerialization.jsonObject(with: data)) as? [String: String] ?? [:]
             Self.lock.withLock { Self.logins.append(login) }
-            if login["password"] == nil && !request.url!.host!.hasPrefix("anchored.") { status = 401 }
+            if request.url!.host!.hasPrefix("broken.") { status = 500 }
+            else if login["password"] == nil && !request.url!.host!.hasPrefix("anchored.") { status = 401 }
             body = #"{"token":"fixture-session-only","expires_at":4102444800}"#
         default:
             XCTFail("Unexpected auth request")

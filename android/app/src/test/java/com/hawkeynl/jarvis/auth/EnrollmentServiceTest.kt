@@ -157,7 +157,7 @@ class EnrollmentServiceTest {
     }
 
     @Test
-    fun `cancelled or locked out biometrics keep their message during renewal`() = runTest {
+    fun `cancelled biometrics keep their message during renewal`() = runTest {
         val api = FakeApi().apply { account = AccountStatus(1, true, false) }
         val sessions = SessionRepository(InMemorySecureValueStore())
         sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
@@ -165,6 +165,21 @@ class EnrollmentServiceTest {
         val result = EnrollmentService(api, identity, sessions).login(endpoint)
         assertEquals(EnrollmentOutcome.InvalidResponse(SigningCancelledException().message.orEmpty()), result)
         assertEquals(null, api.loginRequest)
+    }
+
+    @Test
+    fun `renewal errors other than a refused login fail closed`() = runTest {
+        for (revoked in listOf(true, false)) {
+            val api = FakeApi().apply {
+                account = AccountStatus(1, true, false)
+                if (revoked) rejectChallenge = true else loginFailure = ApiResult.HttpError(429, "slow down")
+            }
+            val sessions = SessionRepository(InMemorySecureValueStore())
+            sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
+            val result = EnrollmentService(api, FakeIdentity(), sessions).login(endpoint)
+            assertEquals(if (revoked) 401 else 429, (result as EnrollmentOutcome.Rejected).status)
+            assertEquals("fixture-session-not-a-secret", sessions.session().token)
+        }
     }
 
     @Test
@@ -227,6 +242,7 @@ private class FakeApi : JarvisApi {
     var loginRequest: LoginRequest? = null
     /** Core has a 30-day password anchor for this device, so a login without a password succeeds. */
     var anchored = true
+    var loginFailure: ApiResult<LoginResponse>? = null
 
     override suspend fun ready(endpoint: HomeNodeEndpoint) = ApiResult.Success(HealthResponse("ready"))
     override suspend fun createPairing(endpoint: HomeNodeEndpoint, request: PairingCreateRequest): ApiResult<PairingTicket> {
@@ -239,6 +255,7 @@ private class FakeApi : JarvisApi {
         if (rejectChallenge) ApiResult.Unauthorized else ApiResult.Success(ChallengeResponse(CHALLENGE_ID, "02".repeat(32)))
     override suspend fun login(endpoint: HomeNodeEndpoint, request: LoginRequest): ApiResult<LoginResponse> {
         loginRequest = request
+        loginFailure?.let { return it }
         if (request.password == null && !anchored) return ApiResult.Unauthorized
         return ApiResult.Success(LoginResponse("token", 900))
     }
