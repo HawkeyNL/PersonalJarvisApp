@@ -7,7 +7,7 @@ import {
   deleteHolding,
   type Holding,
 } from "../portfolio";
-import { asOfText, formatDecimal, formatMoney, formatPrice, ibkrLinkState, readPortfolio, type Portfolio } from "../trading";
+import { asOfText, formatDecimal, formatMoney, formatPrice, ibkrLinkState, readPortfolio, skippedText, type Portfolio } from "../trading";
 import { tradingApi, useTradingRead } from "../tradingApi";
 import TradingStatus from "../components/trading/TradingStatus.vue";
 import JvBackdrop from "../components/jv/JvBackdrop.vue";
@@ -160,6 +160,7 @@ onMounted(refreshHoldings);
 
       <TradingStatus :state="ibkr" what="the IBKR portfolio" @retry="refreshIbkr" v-slot="{ data, empty }">
         <p class="muted">Last sync {{ asOfText(data.as_of) }}.</p>
+        <p v-if="skippedText(data)" class="muted" role="note">{{ skippedText(data) }}</p>
         <p v-if="empty" class="muted">No open positions in your IBKR account.</p>
         <ul v-else class="holding-list" style="margin-top: 14px">
           <li v-for="p in data.positions" :key="p.conid" class="holding-head">

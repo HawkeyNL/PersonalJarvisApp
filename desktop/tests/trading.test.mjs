@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   STALE_AFTER_MS, ageText, changePercent, chartNumber, dataState, decimalSign, errorText, failureState, formatDecimal, formatMoney, ibkrLinkState,
   LIMITS, changeRatio, formatPercent, formatPrice, movingAverage, notConnectedText, onTarget, parseConid, readBars, readHistory,
-  readPortfolio, signTone, sourceLabel,
+  readPortfolio, signTone, skippedText, sourceLabel,
 } from "../src/trading.ts";
 import { barsFixture, historyFixture, portfolioFixture } from "../src/tradingFixtures.ts";
 
@@ -186,6 +186,38 @@ test("portfolio guard checks required fields and element shapes", () => {
   for (const x of bad) assert.equal(readPortfolio(x), null, JSON.stringify(x)?.slice(0, 80));
   // Delay may be absent; the label then says so.
   assert.ok(readPortfolio({ ...portfolio, delay_minutes: undefined }));
+});
+
+test("positions Core left out are guarded and named", () => {
+  const portfolio = portfolioFixture("demo");
+  // An older Core sends neither field.
+  assert.equal(skippedText(readPortfolio(portfolio)), null);
+  const skipped = { ...portfolio, skipped_count: 2, skipped_positions: [{ symbol: "AAPL", currency: "USD" }, { symbol: "NOCUR" }] };
+  assert.equal(skippedText(readPortfolio(skipped)), "2 positions not shown (not in EUR): AAPL (USD), NOCUR (no currency)");
+  const one = { ...portfolio, skipped_count: 1, skipped_positions: [{ symbol: "AAPL", currency: "USD" }] };
+  assert.equal(skippedText(readPortfolio(one)), "1 position not shown (not in EUR): AAPL (USD)");
+  const many = { ...portfolio, skipped_count: 60, skipped_positions: Array(LIMITS.skipped).fill({ symbol: "A", currency: "USD" }) };
+  assert.match(skippedText(readPortfolio(many)), /^60 positions not shown .* and 10 more$/);
+  assert.ok(readPortfolio(portfolioFixture("worst")).skipped_positions.length > 0);
+  const bad = [
+    { ...portfolio, skipped_count: 1 },
+    { ...portfolio, skipped_positions: [{ symbol: "A" }] },
+    { ...skipped, skipped_count: 0, skipped_positions: [] },
+    { ...skipped, skipped_count: "2" },
+    { ...skipped, skipped_count: 1.5 },
+    { ...skipped, skipped_count: LIMITS.positions + 1 },
+    { ...skipped, skipped_count: 1 },
+    { ...skipped, skipped_positions: [] },
+    { ...skipped, skipped_positions: "AAPL" },
+    { ...skipped, skipped_positions: [null] },
+    { ...skipped, skipped_positions: [{ symbol: "" }] },
+    { ...skipped, skipped_positions: [{ symbol: "X".repeat(33) }] },
+    { ...skipped, skipped_positions: [{ symbol: 7 }] },
+    { ...skipped, skipped_positions: [{ symbol: "A", currency: "usd" }] },
+    { ...skipped, skipped_positions: [{ symbol: "A", currency: null }] },
+    { ...many, skipped_positions: Array(LIMITS.skipped + 1).fill({ symbol: "A" }) },
+  ];
+  for (const x of bad) assert.equal(readPortfolio(x), null, JSON.stringify(x).slice(-120));
 });
 
 test("bars guard drops bars without finite prices and rejects bad shapes", () => {
