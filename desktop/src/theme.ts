@@ -42,3 +42,13 @@ export function initTheme(env: Env = window): void {
   paint(env);
   env.matchMedia(DARK_QUERY).addEventListener("change", () => paint(env));
 }
+
+export type ThemeCard = { id: ThemeChoice; label: string; preview: Theme; checked: boolean };
+
+/** The Settings radio cards: each previews the theme it resolves to, so System
+ *  shows (and names) what the OS currently picks. */
+export function themeCards(choice: ThemeChoice, prefersDark: boolean): ThemeCard[] {
+  const now = resolveTheme("system", prefersDark);
+  const labels: Record<ThemeChoice, string> = { light: "Light", dark: "Dark", system: `System (now ${now})` };
+  return THEMES.map((id) => ({ id, label: labels[id], preview: resolveTheme(id, prefersDark), checked: id === choice }));
+}
