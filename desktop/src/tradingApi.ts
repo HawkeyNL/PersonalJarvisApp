@@ -24,14 +24,16 @@ export const tradingApi = {
 // ---- dev-only data switch (DevDataToggle) -------------------------------
 
 export const DATA_SETS = ["live", "demo", "worst", "empty", "stale", "offline", "loading"] as const;
-export type DataSet = (typeof DATA_SETS)[number];
+/** The memecoin page also previews the trader's off and paused states. */
+export const MEME_DATA_SETS = [...DATA_SETS, "disabled", "paused"] as const;
+export type DataSet = (typeof MEME_DATA_SETS)[number];
 export type FixtureSet = Exclude<DataSet, "live">;
 
 const DEV_KEY = "jarvis.dev.tradingData";
 function savedSet(): DataSet {
   try {
     const saved = sessionStorage.getItem(DEV_KEY);
-    return DATA_SETS.find((set) => set === saved) ?? "live";
+    return MEME_DATA_SETS.find((set) => set === saved) ?? "live";
   } catch {
     return "live";
   }
@@ -62,6 +64,8 @@ export function useTradingRead<T extends Freshness>(opts: {
 }): { state: Ref<TradingState<T>>; reload: () => Promise<void> } {
   const state = ref({ kind: "loading" }) as Ref<TradingState<T>>;
   let seq = 0;
+  // Dev only: a memecoin-only set (off, paused) means nothing here.
+  if (!(DATA_SETS as readonly string[]).includes(devDataSet.value)) setDevDataSet("live");
 
   async function fetchRaw(): Promise<unknown> {
     const set = devDataSet.value;

@@ -47,7 +47,7 @@ export const NAV: NavSection[] = [
 
 export type View =
   | "home" | "conversations" | "agents" | "integrations" | "health" | "memory"
-  | "trading" | "desk" | "stocks" | "stock" | "positions" | "tasks" | "context" | "settings" | "soon";
+  | "trading" | "desk" | "stocks" | "stock" | "positions" | "memecoin" | "tasks" | "context" | "settings" | "soon";
 
 /** One screen: its path, the view that renders it and the sidebar entry it highlights. */
 export type Page = { path: string; name: string; view: View; nav?: string; props?: Record<string, string> };
@@ -72,7 +72,8 @@ export const PAGES: Page[] = [
   // Manual holdings and the gateway status: one older view, tab driven by the path.
   { path: "/trading/holdings", name: "trading-holdings", view: "trading", nav: "dashboard" },
   { path: "/trading/ibkr", name: "trading-ibkr", view: "trading", nav: "dashboard" },
-  soon("memecoin", "The memecoin pot is not built yet."),
+  // The memecoin PAPER trader (/v1/trading/meme/*); a simulation, no wallet.
+  { path: "/trading/memecoin", name: "memecoin", view: "memecoin", nav: "memecoin" },
   soon("futures", "Futures through IBKR come later."),
   soon("autonomy", "Setting what Jarvis may do per pot is not built yet."),
 
