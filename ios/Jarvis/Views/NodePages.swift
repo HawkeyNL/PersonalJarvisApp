@@ -840,6 +840,13 @@ struct PairingRequestsSection: View {
                 UnavailableState(title: "Biometrics required", kind: .error, detail: BiometricLock.biometricsRequired, symbol: "faceid")
             }
             if let state = UnavailableState.forSource(requests, title: "Pairing requests", symbol: "person.badge.key") { state }
+            // Reads are spaced 30 s apart, so the first one on a page can take a moment.
+            if case .loading = requests {
+                ProgressView("Loading pairing requests\u{2026}")
+                    .font(JV.font(13))
+                    .foregroundStyle(JV.textSecondary)
+                    .frame(maxWidth: .infinity)
+            }
             if let decisionError {
                 Text(verbatim: decisionError).font(JV.font(13)).foregroundStyle(JV.dangerText)
             }

@@ -402,8 +402,8 @@ struct UnlockSheet: View {
                 .foregroundStyle(JV.textPrimary)
                 .accessibilityAddTraits(.isHeader)
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                Text(verbatim: unlockSubtitle(item, now: context.date) + " · expires in "
-                     + pairingCountdown(item.created_at + unlockDisplayLifetime, now: context.date))
+                let left = pairingCountdown(item.created_at + unlockDisplayLifetime, now: context.date)
+                Text(verbatim: unlockSubtitle(item, now: context.date) + (left == "Expired" ? " · expired" : " · expires in \(left)"))
                     .font(JV.number(13))
                     .foregroundStyle(JV.textSecondary)
             }
