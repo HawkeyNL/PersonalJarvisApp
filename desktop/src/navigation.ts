@@ -85,7 +85,7 @@ export const PAGES: Page[] = [
 
   { path: "/settings", name: "settings", view: "settings", nav: "settings" },
   { path: "/devices", name: "devices", view: "context", nav: "devices",
-    props: { title: "DEVICES", subtitle: "THE APPS LINKED TO JARVIS" } },
+    props: { title: "Devices", subtitle: "The apps linked to Jarvis" } },
 
   // Reached from the hub; not in the sidebar.
   { path: "/agents", name: "agents", view: "agents" },

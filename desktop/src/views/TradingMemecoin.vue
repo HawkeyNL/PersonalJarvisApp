@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
-import JvBackdrop from "../components/jv/JvBackdrop.vue";
-import JvTopBar from "../components/jv/JvTopBar.vue";
+import PageShell from "../components/PageShell.vue";
 import DevDataToggle from "../components/trading/DevDataToggle.vue";
 import "../components/trading/trading.css";
 import { ageText, asOfText, formatDecimal, formatPrice, signTone } from "../trading";
@@ -100,28 +99,19 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
 </script>
 
 <template>
-  <div class="td-page">
-    <JvBackdrop glow-y="20%" horizon="80px" />
-    <JvTopBar variant="node" title="MEMECOIN" subtitle="PAPER · NO REAL MONEY" />
-    <section class="td-wrap">
-      <header class="td-head">
-        <div>
-          <p class="td-crumb"><RouterLink to="/trading">Trading</RouterLink></p>
-          <div class="mc-title">
-            <h1>Memecoin</h1>
-            <span class="td-badge outline">Paper</span>
-            <span v-if="status" class="td-badge" :class="status.tone">{{ status.label }}</span>
-          </div>
-          <p class="td-sub">Solana · a simulation on read-only market data. It has no wallet and cannot buy or sell anything.</p>
-        </div>
-        <div class="mc-actions">
-          <button type="button" class="ghost-btn sm" @click="refresh">Refresh</button>
-          <button
-            v-if="canPause" ref="pauseBtn" type="button" class="ghost-btn sm"
-            :aria-expanded="pauseStep !== 'idle'" aria-controls="mc-pause" :disabled="pauseStep === 'sending'" @click="askPause"
-          >Pause paper entries</button>
-        </div>
-      </header>
+  <PageShell class="td-page" title="Memecoin" subtitle="Solana · a simulation on read-only market data. It has no wallet and cannot buy or sell anything.">
+    <template #crumb><p class="td-crumb"><RouterLink to="/trading">Trading</RouterLink></p></template>
+    <template #badges>
+      <span class="td-badge outline">Paper</span>
+      <span v-if="status" class="td-badge" :class="status.tone">{{ status.label }}</span>
+    </template>
+    <template #actions>
+      <button type="button" class="ghost-btn sm" @click="refresh">Refresh</button>
+      <button
+        v-if="canPause" ref="pauseBtn" type="button" class="ghost-btn sm"
+        :aria-expanded="pauseStep !== 'idle'" aria-controls="mc-pause" :disabled="pauseStep === 'sending'" @click="askPause"
+      >Pause paper entries</button>
+    </template>
 
       <p class="mc-paper" role="note">
         <strong>Paper — no real money.</strong>
@@ -349,13 +339,11 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
           </table>
         </div>
       </section>
-    </section>
     <DevDataToggle :sets="MEME_DATA_SETS" />
-  </div>
+  </PageShell>
 </template>
 
 <style scoped>
-.mc-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .mc-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .mc-paper {
   margin: 0; padding: 12px 16px; border-radius: var(--r-12); background: var(--accent-subtle); color: var(--text-primary);

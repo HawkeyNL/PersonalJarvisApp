@@ -90,8 +90,12 @@ test("the shell renders navigation only in app mode and the router uses the guar
   const lock = await readFile(new URL("../src/lock.ts", import.meta.url), "utf8");
   assert.match(lock, /lockDecided\.value \? currentShellMode\.value : "signin"/);
   assert.match(app, /previous === "app"/);
-  const topBar = await readFile(new URL("../src/components/jv/JvTopBar.vue", import.meta.url), "utf8");
-  assert.match(topBar, /<RouterLink v-if="shownShellMode === 'app'" to="\/settings" class="profile"/);
+  // Core status and the update link live in the sidebar, which only app mode renders.
+  const sidebar = await readFile(new URL("../src/components/AppSidebar.vue", import.meta.url), "utf8");
+  assert.match(sidebar, /<RouterLink v-if="updateLabel" v-slot="\{ href, navigate \}" to="\/settings" custom>/);
+  // Home is the screen shown before sign-in: it has no Settings link.
+  const home = await readFile(new URL("../src/views/Home.vue", import.meta.url), "utf8");
+  assert.doesNotMatch(home, /to="'?\/settings/);
   const router = await readFile(new URL("../src/router/index.ts", import.meta.url), "utf8");
   assert.match(router, /router\.beforeEach\(shellGuard\(/);
 });

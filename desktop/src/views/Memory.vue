@@ -21,7 +21,7 @@ const current = computed(() => items.find((item) => item.id === selected.value)!
 </script>
 
 <template>
-  <NodePage v-model="selected" title="MEMORY" subtitle="WHAT JARVIS KNOWS ABOUT YOUR WORLD" :items="items">
+  <NodePage v-model="selected" title="Memory" subtitle="What Jarvis knows about your world" :items="items">
     <JvPanel :icon="current.icon" :title="current.title" tone="idle" :status="current.status" :description="current.description">
       <JvUnavailable :title="current.title" :icon="current.icon"
         detail="Jarvis keeps your conversations, but your Core does not have a browsable memory store yet. Nothing is shown until it does." />

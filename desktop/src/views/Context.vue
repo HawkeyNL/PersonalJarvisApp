@@ -36,7 +36,7 @@ const items = computed<NodeItem[]>(() => [
     tone: deviceSummary.value.tone, status: deviceSummary.value.lines[0] },
 ]);
 // /devices passes its own heading; the hub's Context card uses the default.
-const { title = "CONTEXT", subtitle = "WHAT JARVIS PAYS ATTENTION TO" } = defineProps<{ title?: string; subtitle?: string }>();
+const { title = "Context", subtitle = "What Jarvis pays attention to" } = defineProps<{ title?: string; subtitle?: string }>();
 const selected = ref("devices");
 const current = computed(() => items.value.find((item) => item.id === selected.value)!);
 

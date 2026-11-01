@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import NavIcon, { type IconName } from "../NavIcon.vue";
-import JvBackdrop from "./JvBackdrop.vue";
-import JvTopBar from "./JvTopBar.vue";
+import PageShell from "../PageShell.vue";
 import JvOrb from "./JvOrb.vue";
 import JvStatusDot from "./JvStatusDot.vue";
 import type { Mood, Tone } from "../../hubModel";
@@ -24,9 +23,7 @@ const scale = useFitScale(room, stage, () => 1.6);
 </script>
 
 <template>
-  <div class="node-page">
-    <JvBackdrop glow-y="27%" horizon="101px" />
-    <JvTopBar variant="node" :title="title" :subtitle="subtitle" />
+  <PageShell class="node-page" :title="title" :subtitle="subtitle">
 
     <div ref="room" class="stage-room" :style="{ '--fit': scale }">
       <div ref="stage" class="stage">
@@ -67,15 +64,14 @@ const scale = useFitScale(room, stage, () => 1.6);
     <div class="detail">
       <slot />
     </div>
-  </div>
+  </PageShell>
 </template>
 
 <style scoped>
-.node-page { position: relative; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
-.node-page > :not(.jv-backdrop) { position: relative; z-index: 1; }
+.node-page { height: 100%; overflow: hidden; }
 
 /* The stage keeps its design coordinates and is scaled into this room. */
-.stage-room { flex: none; height: clamp(240px, 37vh, 600px); margin-top: 10px; }
+.stage-room { position: relative; flex: none; height: clamp(240px, 37vh, 600px); }
 .stage { position: absolute; left: 50%; top: 50%; width: 981px; height: 363px; transform: translate(-50%, -50%) scale(var(--fit, 1)); }
 .wires { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .a20 { stroke: rgba(var(--accent-rgb), 0.2); }
@@ -116,7 +112,7 @@ const scale = useFitScale(room, stage, () => 1.6);
 
 .detail {
   flex: 1; min-height: 0; display: flex; flex-direction: column;
-  width: min(max(1148px, 62vw), calc(100% - 48px)); margin: 14px auto 20px;
+  width: min(max(1148px, 62vw), 100%); margin: 0 auto;
 }
 /* The panel shrinks to the space left; its body scrolls (see JvPanel). */
 .detail > :deep(*) { flex: 0 1 auto; min-height: 0; }
@@ -131,6 +127,6 @@ const scale = useFitScale(room, stage, () => 1.6);
   .icon :deep(svg) { width: 22px; height: 22px; }
   .name { font-size: 14px; }
   .desc { display: none; }
-  .detail { width: auto; margin: 14px 16px 16px; }
+  .detail { width: auto; margin: 0; }
 }
 </style>

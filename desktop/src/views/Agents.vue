@@ -65,7 +65,7 @@ const empty = computed(() => {
 </script>
 
 <template>
-  <NodePage v-model="selected" title="AGENTS" subtitle="YOUR PERSONAL AI SYSTEM" :items="items">
+  <NodePage v-model="selected" title="Agents" subtitle="Your personal AI system" :items="items">
     <JvPanel v-if="agent && current" :icon="current.icon" :title="agent.name" :tone="current.tone" :status="current.status"
       :description="agent.description" :quote="agent.group ? `Group: ${agent.group}` : undefined">
       <template v-if="isTrader(agent)" #action>

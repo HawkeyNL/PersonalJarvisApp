@@ -5,8 +5,6 @@ import { currentAuthStatus, currentShellMode, login, clearSession, listDevices, 
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
 import { shownShellMode } from "../lock";
 import JarvisConsole from "../components/JarvisConsole.vue";
-import JvBackdrop from "../components/jv/JvBackdrop.vue";
-import JvTopBar from "../components/jv/JvTopBar.vue";
 import JvCommandBar from "../components/jv/JvCommandBar.vue";
 import JvOrb from "../components/jv/JvOrb.vue";
 import JvModuleCard from "../components/jv/JvModuleCard.vue";
@@ -16,7 +14,7 @@ import { accountFailure } from "../accountFailure";
 import { thinking } from "../assistant";
 import { conversations, loadConversations } from "../conversations";
 import { wakePulse } from "../voicewake";
-import { agentCount, loadOptional } from "../coreStatus";
+import { agentCount, loadOptional, useCoreStatus } from "../coreStatus";
 import { createSerialPoller } from "../serialPoller";
 import { useAppStore } from "../stores/app";
 import { useFitScale } from "../fitScale";
@@ -205,6 +203,8 @@ const online = computed(() => (backend.value === "ok" ? true : backend.value ===
 const pick = <T, K extends keyof T>(source: Availability<T>, key: K): Availability<T[K]> =>
   source.state === "ok" ? { state: "ok", value: source.value[key] } : source;
 
+// Re-reads the agent count on every hub visit (the top bar used to).
+useCoreStatus();
 type Card = { key: string; to: string; icon: IconName; title: string; summary: CardSummary };
 const cards = computed<Card[]>(() => [
   { key: "chat", to: "/conversations", icon: "chat", title: "Conversations", summary: conversationsCard(conversationsState.value, now.value) },
@@ -287,11 +287,10 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="hub" :class="{ compact }">
-    <JvBackdrop glow-y="43%" horizon="max(64px, 9vh)" />
-
-    <JvTopBar variant="hub">
-      <JvCommandBar :disabled="auth !== 'in'" @open="openConsole()" @mic="openConsole(true)" />
-    </JvTopBar>
+    <header class="pagehead hub-head">
+      <h1>Jarvis</h1>
+      <JvCommandBar class="hub-command" :disabled="auth !== 'in'" @open="openConsole()" @mic="openConsole(true)" />
+    </header>
 
     <!-- Onboarding / sign-in take over the centre until the device is ready. -->
     <div v-if="backend === 'unconfigured' || changingOrigin || (accountMode && backend === 'ok')" class="gate">
@@ -442,6 +441,10 @@ onBeforeUnmount(() => {
 <style scoped>
 .hub { position: relative; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
 .body, .gate { position: relative; z-index: 1; }
+/* Canvas page head (.pagehead); the hub keeps its own full-height stage below. */
+.hub-head { position: relative; z-index: 5; align-items: center; padding: 28px 36px 0; }
+.hub-head h1 { margin: 0; }
+.hub-command { width: min(584px, 44vw); }
 .tagline { z-index: 1; }
 
 /* --- Desktop stage (export coordinates, offset by 199/125) --- */
@@ -535,6 +538,10 @@ onBeforeUnmount(() => {
 .motto .bar { width: 36px; height: 2px; margin-left: -0.5em; background: var(--border-strong); }
 .tagline-foot { justify-self: end; text-align: right; font-size: 11px; letter-spacing: 0.28em; line-height: 15px; color: var(--text-4); }
 @media (max-width: 1299px) { .tagline { display: none; } }
+@media (max-width: 1099px), (max-height: 759px) {
+  .hub-head { padding: 16px 16px 0; }
+  .hub-command { flex: 1 1 280px; width: auto; }
+}
 
 /* --- Compact hub --- */
 .compact .body { margin: 0; }

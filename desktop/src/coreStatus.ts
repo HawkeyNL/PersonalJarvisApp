@@ -1,7 +1,7 @@
-// Shared, lightweight Core status for the top bar on every page: readiness
+// Shared, lightweight Core status for the sidebar footer and the hub: readiness
 // (public /readyz) and the agent count (owner-only /v1/agents, which older Cores
-// do not have). Polling runs only while a top bar is mounted and the window is
-// visible.
+// do not have). Polling runs only while a component using it is mounted and
+// the window is visible.
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { getJson, getJsonAuth } from "./api";
 import { currentAuthStatus } from "./auth";
@@ -43,14 +43,15 @@ async function refresh(): Promise<void> {
 const poller = createSerialPoller(refresh, 15_000);
 let users = 0;
 
-/** Keep the shared status fresh while the calling component is mounted. */
-export function useCoreStatus(): void {
+/** Keep the shared status fresh while the calling component is mounted.
+ *  `agents: false` polls readiness only (the sidebar shows no agent count). */
+export function useCoreStatus({ agents = true }: { agents?: boolean } = {}): void {
   onMounted(() => {
     users++;
     poller.start();
     // Re-check the agent list on every page visit; an unsupported Core is final
     // until the app restarts (it has to be upgraded first).
-    if (agentCount.value.state !== "unsupported") void refreshAgents();
+    if (agents && agentCount.value.state !== "unsupported") void refreshAgents();
   });
   onBeforeUnmount(() => {
     users--;
