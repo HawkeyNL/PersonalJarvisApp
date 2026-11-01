@@ -18,7 +18,7 @@ test("rows map name, platform, linked time, status and this device", () => {
   assert.deepEqual([p.platform, p.icon, p.linked, p.isThis], ["iOS", "phone", "1d ago", false]);
   assert.equal(w.linked, "");
   assert.equal(platformLabel("plan9"), "plan9");
-  assert.equal(deviceRows([{ ...win, status: "revoked" }], null, true, NOW)[0].status, "revoked");
+  assert.equal(deviceRows([{ ...win, status: "revoked" }], null, true, NOW)[0].status, "Revoked");
 });
 
 test("only a Mac with a known own id revokes, never itself or an inactive device", () => {
@@ -55,4 +55,10 @@ test("the Devices view keeps the existing calls and a named revoke dialog", () =
   assert.match(view, /<h2 id="revoke-title">Revoke \{\{ confirming\.name \}\}\?<\/h2>/);
   assert.match(view, /class="btn btn-secondary" autofocus/);
   assert.doesNotMatch(view, /NodePage/);
+});
+
+test("unlink and revoke ignore a second click while one is in flight", () => {
+  const read = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
+  assert.match(read("views/Settings.vue"), /async function doUnlink\(\) \{\n  if \(unlinking\.value\) return;/);
+  assert.match(read("views/Context.vue"), /if \(!device \|\| revoking\.value\) return;/);
 });

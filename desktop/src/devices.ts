@@ -43,7 +43,7 @@ export function deviceRows(devices: Device[], thisDevice: string | null, signer:
       icon: d.platform === "ios" || d.platform === "android" ? "phone" : "monitor",
       linked: typeof d.created_at === "number" ? relativeTime(new Date(d.created_at * 1000).toISOString(), now) : "",
       active,
-      status: active ? "Active" : d.status,
+      status: active ? "Active" : d.status.charAt(0).toUpperCase() + d.status.slice(1),
       isThis,
       canRevoke: signer && thisDevice !== null && active && !isThis && !lastApprover,
       lastApprover,

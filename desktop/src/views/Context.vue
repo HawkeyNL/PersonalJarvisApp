@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import PageShell from "../components/PageShell.vue";
 import NavIcon from "../components/NavIcon.vue";
 import { loadOptional, coreOnline } from "../coreStatus";
@@ -28,6 +28,7 @@ onMounted(async () => {
 
 // Revoke: a native modal dialog (focus trap, Esc, inert page); Cancel has focus first.
 const dialog = ref<HTMLDialogElement | null>(null);
+const listCard = ref<HTMLElement | null>(null);
 const confirming = ref<DeviceRow | null>(null);
 const revoking = ref(false);
 const revokeError = ref("");
@@ -55,6 +56,9 @@ async function confirmRevoke() {
       devices.value = { state: "ok", value: { devices: devices.value.value.devices.filter((d) => d.id !== device.id) } };
     }
     confirming.value = null;
+    // The row and its Revoke button are gone: land focus on the list, not <body>.
+    await nextTick();
+    listCard.value?.focus();
     clearTimeout(noticeTimer);
     notice.value = `${device.name} revoked. Its sessions have ended.`;
     noticeTimer = setTimeout(() => { notice.value = ""; }, 5000);
@@ -75,13 +79,13 @@ onBeforeUnmount(() => clearTimeout(noticeTimer));
 
 <template>
   <PageShell :title="title" :subtitle="subtitle">
-    <section class="card tight" aria-label="Linked devices">
+    <section ref="listCard" class="card tight" tabindex="-1">
       <p v-if="devices.state === 'loading'" class="state t-sm t-2" role="status">Loading devices…</p>
       <div v-else-if="devices.state !== 'ok'" class="empty" role="status">
-        <h3>Devices could not load</h3>
+        <h2>Devices could not load</h2>
         <p class="t-sm">{{ devices.state === "unsupported" ? "This needs a newer Core." : failureText(devices.reason) }}</p>
       </div>
-      <div v-else-if="!rows.length" class="empty"><h3>No devices linked yet</h3></div>
+      <div v-else-if="!rows.length" class="empty"><h2>No devices linked yet</h2></div>
       <div v-else class="scroll">
         <table class="tbl" aria-label="Linked devices">
           <thead><tr><th scope="col">Device</th><th scope="col">Platform</th><th scope="col">Linked</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
@@ -165,6 +169,11 @@ onBeforeUnmount(() => clearTimeout(noticeTimer));
 
 <style scoped>
 .card.tight { padding: 4px 8px; }
+.card.tight:focus { outline: none; }
+.card.tight:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.empty h2 { font-size: 15px; color: var(--text-primary); }
+/* styles.css .dot (9px) loads after components.css; badge dots stay 6px as on the canvas. */
+.badge .dot { width: 6px; height: 6px; }
 .state { margin: 0; padding: 16px 12px; }
 .empty p { margin: 0; }
 .scroll { overflow-x: auto; }

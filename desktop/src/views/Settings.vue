@@ -93,6 +93,7 @@ function onUnlinkCancel(event: Event) {
 }
 
 async function doUnlink() {
+  if (unlinking.value) return;
   unlinking.value = true;
   unlinkMessage.value = null;
   const deviceId = session.value?.device_id;
@@ -238,7 +239,7 @@ onMounted(async () => {
                 class="switch"
                 :checked="lockEnabled || lockMode === 'password'"
                 :disabled="!lockAvailable"
-                @change="setLockEnabled(($event.target as HTMLInputElement).checked)"
+                @change="setLockEnabled(($event.target as HTMLInputElement).checked); flashSaved()"
               />
             </label>
             <p v-if="lockMode === 'password'" class="t-sm t-2">
@@ -278,7 +279,7 @@ onMounted(async () => {
               id="settings-mic"
               class="input"
               :value="selectedMic"
-              @change="setMic(($event.target as HTMLSelectElement).value)"
+              @change="setMic(($event.target as HTMLSelectElement).value); flashSaved()"
             >
               <option value="">System default</option>
               <option v-for="m in mics" :key="m.deviceId" :value="m.deviceId">{{ m.label }}</option>
@@ -325,7 +326,7 @@ onMounted(async () => {
               class="switch"
               :checked="wakeEnabled"
               :disabled="!wakeReady"
-              @change="setWakeEnabled(($event.target as HTMLInputElement).checked)"
+              @change="setWakeEnabled(($event.target as HTMLInputElement).checked); flashSaved()"
             />
           </label>
           <p class="t-sm" :class="wakeError ? 'errc' : 't-2'">
@@ -400,17 +401,17 @@ onMounted(async () => {
     </div>
 
     <!-- Destructive-action confirmation. -->
-    <dialog ref="unlinkDialog" class="dialog" aria-labelledby="unlink-title"
+    <dialog ref="unlinkDialog" class="dialog" aria-labelledby="unlink-title" aria-describedby="unlink-body"
       @cancel="onUnlinkCancel" @close="confirmUnlink = false">
       <template v-if="confirmUnlink">
         <h2 id="unlink-title">Unlink this device?</h2>
-        <p v-if="signer" class="t-sm t-2">
+        <p v-if="signer" id="unlink-body" class="t-sm t-2">
           This revokes the device on the server after Touch ID and erases its
           device key here. You then have to pair (enroll) this device again to
           sign in. Your data on the server stays.
         </p>
         <template v-else>
-          <p class="t-sm t-2">
+          <p id="unlink-body" class="t-sm t-2">
             This signs the device out and erases its device key here. You then
             have to pair (enroll) this device again to sign in. Your data on the
             server stays.
@@ -479,6 +480,8 @@ select.input { padding-right: 8px; }
 .errc { color: var(--danger-text); }
 
 .dialog h2 { margin: 0; }
+/* styles.css .dot (9px) loads after components.css; badge dots stay 6px as on the canvas. */
+.badge .dot { width: 6px; height: 6px; }
 .dialog pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; font-size: 12px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 </style>
