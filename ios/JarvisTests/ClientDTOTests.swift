@@ -558,8 +558,9 @@ final class FaceIDRenewalTests: XCTestCase {
     }
 
     func testRenewalErrorsOtherThanRefusalFailClosed() async throws {
-        for (host, expected) in [("revoked.example.com", DeviceLoginError.deviceRejected.localizedDescription),
-                                 ("broken.example.com", nil)] {
+        let cases: [(host: String, expected: String?)] = [
+            ("revoked.example.com", DeviceLoginError.deviceRejected.localizedDescription), ("broken.example.com", nil)]
+        for (host, expected) in cases {
             let (auth, credentials, _, store) = try await fixture(host: host, prompts: [.unlocked])
             defer { cleanup(store) }
             do {
