@@ -33,7 +33,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.KSerializer
 
-/** Everything the hub and node pages read from Core; each source loads on its own. */
+/** Everything the tab roots and node pages read from Core; each source loads on its own. */
 data class CoreData(
     val agents: Availability<AgentsResponse> = Availability.Loading,
     val devices: Availability<DevicesResponse> = Availability.Loading,
@@ -55,7 +55,7 @@ data class CoreData(
 )
 
 /**
- * Read-only Core data for the hub and node pages. Pages ask for a refresh when
+ * Read-only Core data for the tab roots and node pages. Pages ask for a refresh when
  * they open; [clear] drops all data and cancels running reads when the app
  * locks or signs out.
  */
@@ -64,6 +64,7 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
     val state: StateFlow<CoreData> = _state.asStateFlow()
     private var scope = childScope()
     private var inFlight = mutableSetOf<String>()
+    private var pairingReadAt: Long? = null
 
     private fun childScope() = CoroutineScope(viewModelScope.coroutineContext + SupervisorJob(viewModelScope.coroutineContext[Job]))
 
@@ -90,13 +91,27 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
     private val systemAudit = source("/v1/system/audit", SystemAuditResponse.serializer()) { copy(systemAudit = it) }
     private val pairing = source("/v1/auth/pairing/requests", PairingRequestList.serializer()) { copy(pairing = it) }
 
-    fun refreshHub() = refresh("hub", agents, devices, pending, sessions, registry)
+    fun refreshHome() = refresh("home", pending, ibkr)
+    fun refreshTrading() = refresh("trading", ibkr)
+    fun refreshActivity() = refresh("activity", pending, sessions, agentAudit, agents)
+    fun refreshSettings() = refresh("settings", registry, devices)
     fun refreshAgents() = refresh("agents", agents)
     fun refreshTasks() = refresh("tasks", sessions, pending, agentAudit)
     fun refreshIntegrations() = refresh("integrations", registry, models, ibkr)
     fun refreshHealth() = refresh("health", registry, usage, services, systemAudit)
     fun refreshContext() = refresh("context", devices)
-    fun refreshPairing() = refresh("pairing", pairing)
+
+    fun refreshPairing() {
+        pairingReadAt = System.nanoTime()
+        refresh("pairing", pairing)
+    }
+
+    /** For the tab roots: at most one pairing-list read per 30 seconds, since list reads
+     *  share Core's five-per-minute pairing budget with candidates creating requests. */
+    fun refreshPairingIfStale() {
+        val last = pairingReadAt
+        if (last == null || System.nanoTime() - last >= PAIRING_READ_GAP_NANOS) refreshPairing()
+    }
 
     /** Drop a decided request locally: list reads share Core's five-per-minute
      *  pairing budget with candidates creating requests. */
@@ -144,10 +159,13 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
         scope.cancel()
         scope = childScope()
         inFlight = mutableSetOf()
+        pairingReadAt = null
         _state.value = CoreData()
     }
 
     companion object {
+        private const val PAIRING_READ_GAP_NANOS = 30_000_000_000L
+
         fun factory(container: AppContainer): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")

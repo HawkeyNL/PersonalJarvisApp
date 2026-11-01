@@ -9,7 +9,7 @@ class RootTest {
     private val endpoint = (HomeNodeEndpoint.parse("https://jarvis.example.test") as EndpointValidation.Valid).endpoint
 
     @Test
-    fun `no dock before a Home Node is set and a session exists`() {
+    fun `no tabs before a Home Node is set and a session exists`() {
         assertEquals(Root.ONBOARDING, rootFor(JarvisUiState()))
         assertEquals(Root.ONBOARDING, rootFor(JarvisUiState(authenticated = true)))
         assertEquals(Root.ONBOARDING, rootFor(JarvisUiState(endpoint = endpoint)))
@@ -21,5 +21,15 @@ class RootTest {
     fun `the lock screen wins over everything`() {
         assertEquals(Root.LOCK, rootFor(JarvisUiState(locked = true)))
         assertEquals(Root.LOCK, rootFor(JarvisUiState(locked = true, endpoint = endpoint, authenticated = true)))
+    }
+
+    @Test
+    fun `a deep-linked screen waits for unlock and sign-in`() {
+        for (screen in Screen.entries) {
+            assertEquals(Root.ONBOARDING, rootFor(JarvisUiState(screen = screen)))
+            assertEquals(Root.ONBOARDING, rootFor(JarvisUiState(screen = screen, endpoint = endpoint)))
+            assertEquals(Root.LOCK, rootFor(JarvisUiState(screen = screen, locked = true, endpoint = endpoint, authenticated = true)))
+            assertEquals(Root.SHELL, rootFor(JarvisUiState(screen = screen, endpoint = endpoint, authenticated = true)))
+        }
     }
 }

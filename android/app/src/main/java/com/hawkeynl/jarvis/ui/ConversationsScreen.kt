@@ -30,7 +30,7 @@ private val CONVERSATION_DETAILS = mapOf(
 /** Conversations: the real thread list from Core (search, open). Channels,
  *  summaries, action items and linked memories need Core support first. */
 @Composable
-fun ConversationsScreen(state: JarvisUiState, actions: JarvisViewModel, mood: Mood) {
+fun ConversationsScreen(state: JarvisUiState, actions: JarvisViewModel) {
     LaunchedEffect(Unit) { actions.refreshConversations() }
     var selected by rememberSaveable { mutableStateOf("all") }
     var sub by rememberSaveable { mutableStateOf("overview") }
@@ -59,7 +59,7 @@ fun ConversationsScreen(state: JarvisUiState, actions: JarvisViewModel, mood: Mo
 
     NodePage(
         "Conversations", "Everything you and Jarvis discussed", items, selected,
-        { selected = it; sub = "overview" }, actions::navigate, mood,
+        { selected = it; sub = "overview" }, { actions.navigate(backOf(Screen.CONVERSATIONS)) },
     ) {
         Panel(
             current.icon, current.title, current.tone, current.status,

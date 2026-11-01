@@ -18,7 +18,7 @@ import java.time.ZoneId
 /** Context: only the linked devices are real today. Modes, sources and the
  *  schedule need Core support that does not exist yet. */
 @Composable
-fun ContextScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRefresh: () -> Unit, onRevoke: (String) -> Unit) {
+fun ContextScreen(data: CoreData, onNavigate: (Screen) -> Unit, onRefresh: () -> Unit, onRevoke: (String) -> Unit) {
     LaunchedEffect(Unit) { onRefresh() }
     val (deviceTone, deviceStatus) = statusOf(data.devices) {
         (if (it.devices.isEmpty()) Tone.IDLE else Tone.OK) to "${it.devices.size} linked"
@@ -35,7 +35,7 @@ fun ContextScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRe
     var confirming by remember { mutableStateOf<LinkedDevice?>(null) }
     val current = items.first { it.id == selected }
 
-    NodePage("Context", "What Jarvis pays attention to", items, selected, { selected = it }, onNavigate, mood) {
+    NodePage("Context", "What Jarvis pays attention to", items, selected, { selected = it }, { onNavigate(backOf(Screen.CONTEXT)) }) {
         Panel(current.icon, current.title, current.tone, current.status, description = current.description) {
             if (current.id != "devices") {
                 Unavailable(

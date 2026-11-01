@@ -88,14 +88,14 @@ fun ErrorText(text: String, modifier: Modifier = Modifier) {
     Text(text, modifier, color = JvTheme.colors.dangerText, style = MaterialTheme.typography.bodySmall)
 }
 
-/** Round icon button (back, profile, satellites). */
+/** Round icon button (back, send). */
 @Composable
 fun CircleIconButton(
     icon: JvIcon,
     contentDescription: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    size: Dp = 44.dp,
+    size: Dp = 48.dp,
     selected: Boolean = false,
     tint: Color = JvTheme.colors.accentText,
     background: Color = JvTheme.colors.bgSurface,
@@ -120,11 +120,6 @@ fun CircleIconButton(
     }
 }
 
-@Composable
-fun ProfileButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    CircleIconButton(JvIcon.USER, "Settings", onClick, modifier, tint = JvTheme.colors.textPrimary)
-}
-
 /** Primary full-width button. Disabled it keeps a readable label ("Verifying…") and an outline. */
 @Composable
 fun ActionButton(
@@ -134,6 +129,7 @@ fun ActionButton(
     enabled: Boolean = true,
     arrow: Boolean = false,
     style: TextStyle = MaterialTheme.typography.labelLarge,
+    maxLines: Int = Int.MAX_VALUE,
 ) {
     val c = JvTheme.colors
     val content = if (enabled) c.textOnAccent else c.textSecondary
@@ -150,7 +146,7 @@ fun ActionButton(
         horizontalArrangement = Arrangement.spacedBy(JvSpace.sm, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text, color = content, style = style)
+        Text(text, color = content, style = style, maxLines = maxLines, softWrap = maxLines != 1)
         if (arrow) JvIconView(JvIcon.ARROW_RIGHT, tint = content, size = 16.dp)
     }
 }
@@ -162,7 +158,7 @@ fun GhostButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier
     val shape = JvShapes.md
     Box(
         modifier
-            .heightIn(min = 44.dp)
+            .heightIn(min = 48.dp)
             .pressScale(enabled = enabled)
             .then(
                 when {
@@ -200,7 +196,7 @@ fun ChipRow(items: List<ChipItem>, selected: String, onSelect: (String) -> Unit,
             val on = item.id == selected
             Row(
                 Modifier
-                    .heightIn(min = 44.dp)
+                    .heightIn(min = 48.dp)
                     .pressScale()
                     .then(
                         when {
@@ -224,40 +220,6 @@ fun ChipRow(items: List<ChipItem>, selected: String, onSelect: (String) -> Unit,
                 )
             }
         }
-    }
-}
-
-/** A hub module card: icon, name and two lines of live summary. */
-@Composable
-fun ModuleCard(icon: JvIcon, title: String, summary: CardSummary, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val c = JvTheme.colors
-    val description = listOf(title, summary.line1, summary.line2).filter { it.isNotEmpty() }.joinToString(", ")
-    Box(
-        modifier
-            .heightIn(min = 72.dp)
-            .pressScale()
-            .shadowBorder(JvShapes.lg)
-            .clip(JvShapes.lg)
-            .background(c.bgSurface)
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics(mergeDescendants = true) { contentDescription = description },
-    ) {
-        Row(Modifier.padding(start = JvSpace.md, end = 18.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(40.dp).clip(JvShapes.md).background(c.accentSubtle), contentAlignment = Alignment.Center) {
-                JvIconView(icon, tint = c.accentText, size = 18.dp)
-            }
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                for (line in listOf(summary.line1, summary.line2).filter { it.isNotEmpty() }) {
-                    Text(
-                        line, Modifier.padding(top = JvSpace.xxs), color = c.textSecondary,
-                        style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        }
-        StatusDot(summary.tone, size = 6.dp, modifier = Modifier.align(Alignment.TopEnd).padding(top = JvSpace.md, end = JvSpace.md))
     }
 }
 
@@ -484,5 +446,57 @@ fun PageTitle(title: String, subtitle: String, modifier: Modifier = Modifier) {
             subtitle, Modifier.padding(top = JvSpace.xxs), color = JvTheme.colors.textSecondary,
             style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
         )
+    }
+}
+
+/** Large left-aligned title of a tab root, with an optional line under it. */
+@Composable
+fun TabTitle(title: String, subtitle: String? = null, modifier: Modifier = Modifier) {
+    Column(modifier.padding(horizontal = JvSpace.xs), verticalArrangement = Arrangement.spacedBy(JvSpace.xxs)) {
+        Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineLarge)
+        subtitle?.let { Text(it, color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.bodySmall) }
+    }
+}
+
+/** An Instrument list: optional section label above one rounded surface of rows. */
+@Composable
+fun ListSection(title: String?, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+        title?.let { SectionLabel(it, Modifier.padding(horizontal = JvSpace.xs)) }
+        Column(Modifier.fillMaxWidth().shadowBorder(JvShapes.lg).clip(JvShapes.lg).background(JvTheme.colors.bgSurface)) { content() }
+    }
+}
+
+/** Hairline between two rows of a [ListSection]. */
+@Composable
+fun ListDivider() {
+    Box(Modifier.fillMaxWidth().height(1.dp).background(JvTheme.colors.separator))
+}
+
+/** One tappable row of a [ListSection]: icon tile, title, detail line, status dot and chevron.
+ *  The dot only repeats what [detail] says; TalkBack reads title and detail as one button. */
+@Composable
+fun NavRow(icon: JvIcon, title: String, detail: String, onClick: () -> Unit, tone: Tone? = null) {
+    val c = JvTheme.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = JvSpace.md, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(32.dp).clip(JvShapes.md).background(c.accentSubtle), contentAlignment = Alignment.Center) {
+            JvIconView(icon, tint = c.accentText, size = 18.dp)
+        }
+        Spacer(Modifier.width(JvSpace.md))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (detail.isNotEmpty()) {
+                Text(detail, color = c.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        tone?.let { StatusDot(it, modifier = Modifier.padding(horizontal = JvSpace.sm)) }
+        JvIconView(JvIcon.ARROW_RIGHT, tint = c.textSecondary, size = 16.dp)
     }
 }

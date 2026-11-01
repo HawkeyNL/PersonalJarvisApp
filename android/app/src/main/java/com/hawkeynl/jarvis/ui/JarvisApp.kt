@@ -5,12 +5,18 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -28,7 +34,7 @@ import com.hawkeynl.jarvis.security.PairingApprovalService
 import com.hawkeynl.jarvis.security.AgentApprovalService
 import com.hawkeynl.jarvis.security.UnlockApprovalService
 
-/** What the root shows. The shell, with its dock, needs an unlocked app, a
+/** What the root shows. The shell, with its tabs, needs an unlocked app, a
  *  Home Node and a signed-in session; anything else gets onboarding. */
 internal enum class Root { LOCK, ONBOARDING, SHELL }
 
@@ -101,8 +107,7 @@ private fun AuthenticatedShell(
 ) {
     val data by core.state.collectAsStateWithLifecycle()
     val screen = state.screen
-    BackHandler(enabled = screen != Screen.HUB) { actions.navigate(Screen.HUB) }
-    val mood = if (state.busy) Mood.THINKING else Mood.IDLE
+    BackHandler(enabled = screen != Screen.HUB) { actions.navigate(backOf(screen)) }
     val navigate = actions::navigate
     Column(Modifier.fillMaxSize()) {
         ConnectionBanner(state.connection, actions::checkConnection)
@@ -110,24 +115,60 @@ private fun AuthenticatedShell(
         unlockApprovals?.let { UnlockRequests(it) }
         Box(Modifier.weight(1f)) {
             when (screen) {
-                Screen.HUB -> HubScreen(state, data, mood, navigate, core::refreshHub)
+                Screen.HUB -> HomeScreen(state, data, navigate) { core.refreshHome(); core.refreshPairingIfStale() }
+                Screen.TRADING -> TradingScreen(data, core::refreshTrading)
+                Screen.ACTIVITY -> ActivityScreen(data, navigate, { core.refreshActivity(); core.refreshPairingIfStale() }, agentApprovals)
+                Screen.SETTINGS -> SettingsScreen(state, actions, data, onInstallUpdate, core::refreshSettings)
                 Screen.CHAT -> ChatScreen(state, actions)
-                Screen.SETTINGS -> SettingsScreen(state, actions, onInstallUpdate)
-                Screen.CONVERSATIONS -> ConversationsScreen(state, actions, mood)
-                Screen.AGENTS -> AgentsScreen(data, mood, navigate, core::refreshAgents)
-                Screen.TASKS -> TasksScreen(data, mood, navigate, core::refreshTasks, agentApprovals)
-                Screen.INTEGRATIONS -> IntegrationsScreen(data, mood, navigate, core::refreshIntegrations)
+                Screen.CONVERSATIONS -> ConversationsScreen(state, actions)
+                Screen.AGENTS -> AgentsScreen(data, navigate, core::refreshAgents)
+                Screen.TASKS -> TasksScreen(data, navigate, core::refreshTasks, agentApprovals)
+                Screen.INTEGRATIONS -> IntegrationsScreen(data, navigate, core::refreshIntegrations)
                 Screen.HEALTH -> key(state.healthNode) {
-                    HealthScreen(state, data, mood, navigate, core::refreshHealth, actions::checkConnection, modelControls, state.healthNode)
+                    HealthScreen(state, data, navigate, core::refreshHealth, actions::checkConnection, modelControls, state.healthNode)
                 }
-                Screen.MEMORY -> MemoryScreen(mood, navigate)
-                Screen.CONTEXT -> ContextScreen(data, mood, navigate, core::refreshContext) { id ->
+                Screen.MEMORY -> MemoryScreen(navigate)
+                Screen.CONTEXT -> ContextScreen(data, navigate, core::refreshContext) { id ->
                     core.revokeDevice(id) { actions.state.value.let { !it.locked && it.authenticated } }
                 }
                 Screen.PAIRING_APPROVALS -> PairingApprovalsScreen(data, navigate, core::refreshPairing, core::dropPairing, pairingApprovals)
             }
         }
-        if (screen != Screen.CHAT && screen != Screen.SETTINGS) Dock(screen, navigate)
+        // Chat keeps the whole height for the conversation and its composer.
+        if (screen != Screen.CHAT) TabBar(tabOf(screen)) { navigate(it.root) }
+    }
+}
+
+/** The four tabs (Material3 NavigationBar). Picking a tab opens its root, also when one
+ *  of its pushed screens is showing. */
+@Composable
+private fun TabBar(current: Tab, onSelect: (Tab) -> Unit) {
+    val c = JvTheme.colors
+    Column {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(c.separator))
+        NavigationBar(containerColor = c.bgSurface, contentColor = c.textSecondary, tonalElevation = 0.dp, windowInsets = WindowInsets(0)) {
+            for (tab in Tab.entries) {
+                val (icon, label) = when (tab) {
+                    Tab.JARVIS -> JvIcon.CHAT to "Jarvis"
+                    Tab.TRADING -> JvIcon.TREND to "Trading"
+                    Tab.ACTIVITY -> JvIcon.SHIELD to "Activity"
+                    Tab.SETTINGS -> JvIcon.GEAR to "Settings"
+                }
+                NavigationBarItem(
+                    selected = tab == current,
+                    onClick = { onSelect(tab) },
+                    icon = { JvIconView(icon, size = 22.dp, tint = LocalContentColor.current) },
+                    label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = c.accentText,
+                        selectedTextColor = c.accentText,
+                        indicatorColor = c.accentSubtle,
+                        unselectedIconColor = c.textSecondary,
+                        unselectedTextColor = c.textSecondary,
+                    ),
+                )
+            }
+        }
     }
 }
 
@@ -166,7 +207,7 @@ private fun ConnectionBanner(connection: ConnectionState, retry: () -> Unit) {
 @Composable
 internal fun ScreenHeader(title: String, onBack: () -> Unit, trailing: (@Composable () -> Unit)? = null) {
     Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-        CircleIconButton(JvIcon.ARROW_LEFT, "Back to Core", onBack, Modifier.align(Alignment.CenterStart))
+        CircleIconButton(JvIcon.ARROW_LEFT, "Back", onBack, Modifier.align(Alignment.CenterStart))
         Text(
             title,
             Modifier.align(Alignment.Center).padding(horizontal = 56.dp),

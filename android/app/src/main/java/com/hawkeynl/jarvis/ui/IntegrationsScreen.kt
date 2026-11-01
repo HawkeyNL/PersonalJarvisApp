@@ -1,11 +1,21 @@
 package com.hawkeynl.jarvis.ui
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.hawkeynl.jarvis.network.Availability
 import com.hawkeynl.jarvis.network.LoadFailure
 import com.hawkeynl.jarvis.network.valueOrNull
@@ -25,7 +35,7 @@ private val COST = mapOf("plan" to "Subscription", "metered" to "Pay per use", "
  *  owner model policy and the IBKR link. Codex, GitHub and OpenSandbox are
  *  not reported by Core yet. */
 @Composable
-fun IntegrationsScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRefresh: () -> Unit) {
+fun IntegrationsScreen(data: CoreData, onNavigate: (Screen) -> Unit, onRefresh: () -> Unit) {
     LaunchedEffect(Unit) { onRefresh() }
     val registry = data.registry.valueOrNull
     val brains = registry?.brains.orEmpty()
@@ -49,7 +59,7 @@ fun IntegrationsScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit,
     var sub by rememberSaveable { mutableStateOf("overview") }
     val current = items.first { it.id == selected }
 
-    NodePage("Integrations", "The systems Jarvis can reach", items, selected, { selected = it; sub = "overview" }, onNavigate, mood) {
+    NodePage("Integrations", "The systems Jarvis can reach", items, selected, { selected = it; sub = "overview" }, { onNavigate(backOf(Screen.INTEGRATIONS)) }) {
         Panel(
             current.icon, current.title, current.tone, current.status,
             description = INTEGRATION_DETAILS[current.id],
@@ -125,24 +135,51 @@ fun IntegrationsScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit,
                         }
                     }
                 }
-                "ibkr" -> if (data.ibkr == Availability.Failed(LoadFailure.UNAVAILABLE)) {
-                    Unavailable("IBKR", JvIcon.TREND, kind = UnavailableKind.ERROR, detail = IBKR_NOT_SYNCED)
-                } else {
-                    Loaded(data.ibkr, "IBKR", JvIcon.TREND, "Checking the IBKR link…") { p ->
-                        TileGrid(
-                            "IBKR link",
-                            listOf(
-                                TileData(JvIcon.LINK, "Connection", i.second),
-                                TileData(JvIcon.CLOCK, "Last sync", relativeTime(p.as_of, data.loadedAt).ifEmpty { "—" }),
-                                TileData(JvIcon.TREND, "Positions", p.positions.size.toString()),
-                                TileData(JvIcon.SHIELD, "Access", "Read-only"),
-                            ),
-                        )
-                    }
-                }
+                "ibkr" -> IbkrDetails(data)
                 else -> Unavailable(current.title, current.icon, detail = INTEGRATION_DETAILS[current.id])
             }
         }
+    }
+}
+
+/** The IBKR link from GET /v1/trading/portfolio, on Integrations and the Trading tab. */
+@Composable
+fun IbkrDetails(data: CoreData) {
+    if (data.ibkr == Availability.Failed(LoadFailure.UNAVAILABLE)) {
+        Unavailable("IBKR", JvIcon.TREND, kind = UnavailableKind.ERROR, detail = IBKR_NOT_SYNCED)
+        return
+    }
+    Loaded(data.ibkr, "IBKR", JvIcon.TREND, "Checking the IBKR link…") { p ->
+        TileGrid(
+            "IBKR link",
+            listOf(
+                TileData(JvIcon.LINK, "Connection", ibkrState(data.ibkr, data.loadedAt).second),
+                TileData(JvIcon.CLOCK, "Last sync", relativeTime(p.as_of, data.loadedAt).ifEmpty { "—" }),
+                TileData(JvIcon.TREND, "Positions", p.positions.size.toString()),
+                TileData(JvIcon.SHIELD, "Access", "Read-only"),
+            ),
+        )
+    }
+}
+
+/** The Trading tab: the read-only IBKR link Core reports today. Dashboards, proposals
+ *  and orders are not built yet, so the tab says so instead of showing sample data. */
+@Composable
+fun TradingScreen(data: CoreData, onRefresh: () -> Unit) {
+    LaunchedEffect(Unit) { onRefresh() }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TabTitle("Trading", "Your read-only link to Interactive Brokers", Modifier.weight(1f))
+            GhostButton("Refresh", onRefresh)
+        }
+        IbkrDetails(data)
+        Unavailable(
+            "Dashboard and proposals", JvIcon.TREND,
+            detail = "Coming soon: totals per pot, trade proposals to approve and orders. Today Jarvis only reads from IBKR; it never places orders.",
+        )
     }
 }
 

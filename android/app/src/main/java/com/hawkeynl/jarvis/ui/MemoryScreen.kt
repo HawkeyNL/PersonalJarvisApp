@@ -18,10 +18,10 @@ private val MEMORY_ITEMS = listOf(
 /** Memory: Core keeps conversations but has no browsable memory store yet,
  *  so every category says so plainly; no sample data. */
 @Composable
-fun MemoryScreen(mood: Mood, onNavigate: (Screen) -> Unit) {
+fun MemoryScreen(onNavigate: (Screen) -> Unit) {
     var selected by rememberSaveable { mutableStateOf("people") }
     val current = MEMORY_ITEMS.first { it.id == selected }
-    NodePage("Memory", "What Jarvis knows about your world", MEMORY_ITEMS, selected, { selected = it }, onNavigate, mood) {
+    NodePage("Memory", "What Jarvis knows about your world", MEMORY_ITEMS, selected, { selected = it }, { onNavigate(backOf(Screen.MEMORY)) }) {
         Panel(current.icon, current.title, Tone.IDLE, current.status, description = current.description) {
             Unavailable(
                 current.title, current.icon,
