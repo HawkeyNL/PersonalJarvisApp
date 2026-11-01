@@ -3,6 +3,7 @@ import { onMounted, onBeforeUnmount } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAppStore } from "./stores/app";
 import AppLock from "./components/AppLock.vue";
+import AppSidebar from "./components/AppSidebar.vue";
 import UnlockApprovals from "./components/UnlockApprovals.vue";
 import PairingApprovals from "./components/PairingApprovals.vue";
 import { locked, initLock, noteActivity } from "./lock";
@@ -60,9 +61,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app">
-    <main class="content">
-      <RouterView />
-    </main>
+    <div class="shell">
+      <AppSidebar />
+      <main class="content">
+        <RouterView />
+      </main>
+    </div>
 
     <!-- Other devices' unlock and pairing requests; a Mac approves them. -->
     <UnlockApprovals />
@@ -71,3 +75,8 @@ onBeforeUnmount(() => {
     <AppLock v-if="locked" />
   </div>
 </template>
+
+<style scoped>
+.shell { flex: 1; min-height: 0; display: flex; }
+.shell > .content { min-width: 0; }
+</style>

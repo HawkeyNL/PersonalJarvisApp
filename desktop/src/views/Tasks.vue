@@ -58,7 +58,11 @@ const items = computed<NodeItem[]>(() => {
     planned("goals", "Goals", "Goals", "goal", "Bigger outcomes split into tasks"),
   ];
 });
-const selected = ref("active");
+// `node` opens a node directly: /approvals opens "waiting", /runs the default.
+// Both routes share this instance, so follow the prop when it changes.
+const props = defineProps<{ node?: string }>();
+const selected = ref(props.node ?? "active");
+watch(() => props.node, (node) => { selected.value = node ?? "active"; });
 const sub = ref("overview");
 watch(selected, () => { sub.value = "overview"; });
 const current = computed(() => items.value.find((item) => item.id === selected.value)!);
