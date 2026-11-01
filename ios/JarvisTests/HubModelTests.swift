@@ -215,7 +215,7 @@ final class HubModelTests: XCTestCase {
     }
 
     func testEveryRouteIsReachableFromATab() {
-        XCTAssertEqual(AppTab.allCases.map(\.title), ["Jarvis", "Trading", "Activiteit", "Instellingen"])
+        XCTAssertEqual(AppTab.allCases.map(\.title), ["Jarvis", "Trading", "Activity", "Settings"])
         XCTAssertEqual(HubRoute.allCases.count, 13)
         for route in HubRoute.allCases {
             let destination = tabDestination(route)

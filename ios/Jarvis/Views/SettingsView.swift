@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Instellingen (I-Settings). On the enrollment screen (`inTabs` false) it shows
+/// Settings tab (I-Settings). On the enrollment screen (`inTabs` false) it shows
 /// only what works before sign-in, as before.
 struct SettingsView: View {
     @ObservedObject var model: JarvisAppModel

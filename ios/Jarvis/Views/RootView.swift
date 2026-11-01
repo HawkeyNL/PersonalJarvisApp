@@ -108,7 +108,7 @@ struct MainTabs: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var unlocks: [UnlockRequestItem] = []
     @State private var sheet: ShellSheet?
-    /// Requests already offered as a sheet; a dismissed one stays on Activiteit.
+    /// Requests already offered as a sheet; a dismissed one stays on Activity.
     @State private var offered: Set<UUID> = []
 
     var body: some View {

@@ -1,8 +1,8 @@
 import SwiftUI
 
-// Activiteit tab and the approval sheets (canvas I-Activity, I-Approve, I-Unlock).
+// Activity tab and the approval sheets (canvas I-Activity, I-Approve, I-Unlock).
 
-/// Activiteit: everything waiting on the owner first (unlock requests, agent
+/// Activity: everything waiting on the owner first (unlock requests, agent
 /// approvals, pairing requests), then agent history and the Tasks and Agents
 /// pages. Agent approvals and unlock requests open as sheets.
 struct ActivityView: View {
@@ -150,6 +150,10 @@ struct UnlockRow: View {
         .accessibilityHint("Opens the request to approve or deny.")
     }
 }
+
+/// Display only, as on Android: Core does not send an expiry, it decides it.
+/// Nothing here gates a decision.
+let unlockDisplayLifetime: Int64 = 120
 
 private func unlockSubtitle(_ item: UnlockRequestItem, now: Date) -> String {
     let asked = relativeTime(Date(timeIntervalSince1970: TimeInterval(item.created_at)), now: now)
@@ -346,9 +350,8 @@ struct AgentApprovalSheet: View {
 
 /// Another device of this account asks to be unlocked. Approve first asks the
 /// owner to pick the number the other device shows (a wrong pick denies);
-/// approving and "Dit ben ik niet" (deny) then need Face ID / Touch ID. Each
-/// step re-reads the request by id. Core sends no expiry for unlock requests,
-/// so there is no countdown.
+/// approving and "This wasn't me" (deny) then need Face ID / Touch ID. Each
+/// step re-reads the request by id. The countdown is display only.
 struct UnlockSheet: View {
     @ObservedObject var model: JarvisAppModel
     let item: UnlockRequestItem
@@ -398,9 +401,12 @@ struct UnlockSheet: View {
                 .font(JV.font(24, .semibold, relativeTo: .title2))
                 .foregroundStyle(JV.textPrimary)
                 .accessibilityAddTraits(.isHeader)
-            Text(verbatim: unlockSubtitle(item, now: Date()))
-                .font(JV.font(13))
-                .foregroundStyle(JV.textSecondary)
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(verbatim: unlockSubtitle(item, now: context.date) + " · expires in "
+                     + pairingCountdown(item.created_at + unlockDisplayLifetime, now: context.date))
+                    .font(JV.number(13))
+                    .foregroundStyle(JV.textSecondary)
+            }
         }
         .multilineTextAlignment(.center)
         .fixedSize(horizontal: false, vertical: true)
@@ -443,7 +449,7 @@ struct UnlockSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         Button(role: .destructive) { Task { await deny() } } label: {
-            Text("Dit ben ik niet").frame(maxWidth: .infinity)
+            Text("This wasn't me").frame(maxWidth: .infinity)
         }
         .buttonStyle(JVButtonStyle(kind: .quiet, size: .large))
         .disabled(busy)

@@ -207,7 +207,7 @@ func statusPill(mood: Mood, online: Bool?) -> (label: String, hint: String, tone
 
 // MARK: - Shell
 
-/// The four iPhone tabs (canvas N-Structure); Android uses the same four.
+/// The four iPhone tabs (canvas N-Structure), labelled and ordered as on Android.
 enum AppTab: String, CaseIterable, Hashable {
     case jarvis, trading, activity, settings
 
@@ -215,8 +215,8 @@ enum AppTab: String, CaseIterable, Hashable {
         switch self {
         case .jarvis: "Jarvis"
         case .trading: "Trading"
-        case .activity: "Activiteit"
-        case .settings: "Instellingen"
+        case .activity: "Activity"
+        case .settings: "Settings"
         }
     }
 
@@ -233,7 +233,7 @@ enum AppTab: String, CaseIterable, Hashable {
     var root: HubRoute? {
         switch self {
         case .settings: .settings
-        // Activiteit lists pairing requests first.
+        // Activity lists pairing requests first.
         case .activity: .pairingApprovals
         case .jarvis, .trading: nil
         }

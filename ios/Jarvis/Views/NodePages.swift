@@ -813,14 +813,14 @@ struct PairingApprovalsPage: View {
     }
 }
 
-/// Pending pairing requests, on their page and on Activiteit. Approve and Deny
+/// Pending pairing requests, on their page and on Activity. Approve and Deny
 /// need Face ID / Touch ID (never the passcode). The fingerprint is computed
 /// here from the key the approval signs; candidate details are unverified
 /// hints shown as plain text. `refresh` changes on pull-to-refresh.
 struct PairingRequestsSection: View {
     @ObservedObject var model: JarvisAppModel
     var refresh = 0
-    /// Activiteit shows its own empty state instead of this one.
+    /// Activity shows its own empty state instead of this one.
     var showsEmpty = true
     /// Number of waiting requests once loaded, for the owner's empty state.
     var count: Binding<Int?>? = nil
@@ -828,7 +828,11 @@ struct PairingRequestsSection: View {
     @State private var biometrics = BiometricLock.biometricsAvailable
     @State private var busy: UUID?
     @State private var decisionError: String?
-    @State private var lastLoad = Date.distantPast
+    /// Shared by every instance (Activity and the page): list reads share Core's
+    /// five-per-minute pairing budget per IP with candidates creating requests,
+    /// so all reads stay at least 30 s apart, as on Android.
+    private static var lastRead = Date.distantPast
+    private static let minInterval: TimeInterval = 30
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -845,23 +849,21 @@ struct PairingRequestsSection: View {
             }
         }
         .onChange(of: requests.value?.count, initial: true) { _, value in if let count { count.wrappedValue = value } }
-        // List reads share Core's five-per-minute pairing budget per IP with
-        // candidates creating requests, so pull-to-refresh is throttled.
         .onChange(of: refresh) { _, _ in
-            if Date().timeIntervalSince(lastLoad) >= 20 { Task { await load() } }
+            if Date().timeIntervalSince(Self.lastRead) >= Self.minInterval { Task { await load() } }
         }
         .onReceive(NotificationCenter.default.publisher(for: .jarvisApprovalPushed)) { _ in
-            if Date().timeIntervalSince(lastLoad) >= 20 { Task { await load() } }
+            if Date().timeIntervalSince(Self.lastRead) >= Self.minInterval { Task { await load() } }
         }
+        // Restarts on every tab switch and pop; the shared clock keeps the pace.
         .task {
             while !Task.isCancelled {
-                // This section sits on a tab root, so the task restarts on every tab
-                // switch and pop: keep reads at least 20 s apart (shared pairing budget).
-                let wait = 20 - Date().timeIntervalSince(lastLoad)
-                if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
-                guard !Task.isCancelled else { break }
+                let wait = Self.minInterval - Date().timeIntervalSince(Self.lastRead)
+                if wait > 0 {
+                    try? await Task.sleep(for: .seconds(wait))
+                    continue
+                }
                 await load()
-                try? await Task.sleep(for: .seconds(30))
             }
         }
     }
@@ -951,9 +953,10 @@ struct PairingRequestsSection: View {
     }
 
     private func load() async {
+        // Claimed before the read, so a second instance does not read in parallel.
+        Self.lastRead = Date()
         let result = await model.coreRead("/v1/auth/pairing/requests", as: PairingApprovalList.self)
         guard !Task.isCancelled else { return }
-        lastLoad = Date()
         requests = result.map(\.requests)
         biometrics = BiometricLock.biometricsAvailable
     }

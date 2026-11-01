@@ -144,7 +144,7 @@ struct HomeView: View {
     }
 
     /// Unlock requests and agent approvals; pairing requests are read on
-    /// Activiteit only (they share Core's pairing rate budget).
+    /// Activity only (they share Core's pairing rate budget).
     @ViewBuilder private var waitingCard: some View {
         let actions = pending.value ?? []
         let lines = unlocks.map { "\"\(PairingFingerprint.displayName($0.device_name, max: 40))\" asks to unlock Jarvis" }
@@ -176,7 +176,7 @@ struct HomeView: View {
             }
             .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
-            .accessibilityHint("Opens Activiteit")
+            .accessibilityHint("Opens Activity")
         }
     }
 
