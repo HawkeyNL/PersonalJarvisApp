@@ -572,6 +572,10 @@ async fn auth_login(
     {
         return Err("account password is invalid".to_string());
     }
+    // Windows always signs in with the account password (no Windows Hello).
+    if cfg!(target_os = "windows") && password.as_deref().is_none_or(str::is_empty) {
+        return Err("account password is required".to_string());
+    }
     let (origin, device_id, epoch) = {
         let guard = auth_storage()?;
         let metadata = load_metadata(&app)?;
