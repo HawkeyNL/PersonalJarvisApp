@@ -3,13 +3,16 @@
 // The private key and signing live in Rust (Tauri commands); this module only
 // orchestrates the HTTP flow (enroll -> challenge -> login) and reads back the
 // non-secret session state. The private key and bearer token never enter JS.
+import { computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { chatSession } from "./chatSession";
-import { homeNodeOrigin } from "./homeNode";
+import { homeNodeConfig, homeNodeOrigin } from "./homeNode";
 import { getJson, getJsonAuth, getJsonWithHeaders, postAuth, postJson, postJsonAuth, postJsonWithHeaders } from "./api";
 import { initPlatformCapabilities } from "./platform";
+import { lockModeFor } from "./lockPolicy";
 import { scheduleAutomaticUpdateCheck } from "./updates";
 import { groupFingerprint, keyFingerprint } from "./pairingFingerprint";
+import { latestWins, shellMode } from "./shellMode";
 
 export type AuthStatus = {
   device_id: string | null;
@@ -24,8 +27,25 @@ export type DeviceItem = {
   status: string;
 };
 
-export function currentAuthStatus(): Promise<AuthStatus> {
-  return invoke<AuthStatus>("auth_status");
+// The last session state read from native code; null until read or unreadable.
+// Reads can resolve out of order: only a newer read or sign-out overrides.
+const signedIn = ref<boolean | null>(null);
+const signedInWrites = latestWins<boolean | null>((value) => { signedIn.value = value; });
+const markSignedOut = () => signedInWrites.apply(signedInWrites.begin(), false);
+/** Setup, sign-in or the full app; drives the sidebar and the router guard. */
+export const currentShellMode = computed(() =>
+  shellMode({ configured: homeNodeConfig.value.configured, authenticated: signedIn.value }));
+
+export async function currentAuthStatus(): Promise<AuthStatus> {
+  const seq = signedInWrites.begin();
+  try {
+    const status = await invoke<AuthStatus>("auth_status");
+    signedInWrites.apply(seq, status.authenticated);
+    return status;
+  } catch (error) {
+    signedInWrites.apply(seq, null); // unreadable: fail closed
+    throw error;
+  }
 }
 
 const PAIRING_WAIT_KEY = "jarvis.pairing.wait";
@@ -49,7 +69,10 @@ export async function login(enrolledDeviceId?: string, password?: string, boundO
   if (currentOrigin !== expectedOrigin) throw new Error("Home Node changed; sign in again");
   const account = await accountStatus();
   if (account.bootstrap_required) throw new AccountActivationRequired();
-  if (account.password_required && !password && !sessionStorage.getItem(PAIRING_WAIT_KEY)) throw new AccountPasswordRequired();
+  // Windows always signs in with the account password, whatever Core reports.
+  const passwordRequired = account.password_required
+    || lockModeFor((await initPlatformCapabilities()).platform) === "password";
+  if (passwordRequired && !password && !sessionStorage.getItem(PAIRING_WAIT_KEY)) throw new AccountPasswordRequired();
   const publicKey = await invoke<string>("auth_public_key");
   const info = await invoke<{ platform: string; name: string }>("device_info");
 
@@ -86,7 +109,7 @@ export async function login(enrolledDeviceId?: string, password?: string, boundO
     }
   }
 
-  if (account.password_required && !password) throw new AccountPasswordRequired();
+  if (passwordRequired && !password) throw new AccountPasswordRequired();
   // Challenge, signature and login run natively; the signature never reaches JS.
   await invoke("auth_login", { password, expectedOrigin });
   sessionStorage.removeItem(PAIRING_WAIT_KEY);
@@ -120,6 +143,7 @@ export async function clearSession(): Promise<void> {
   chatSession.invalidate();
   await invoke("realtime_stop").catch(()=>{});
   await invoke("auth_logout");
+  markSignedOut();
 }
 
 export async function logout(): Promise<void> {
@@ -135,6 +159,7 @@ export async function logout(): Promise<void> {
     }
   }
   await invoke("auth_logout");
+  markSignedOut();
 }
 
 // Account administration (macOS only): Core creates the request, native code
@@ -178,6 +203,7 @@ export async function deregisterDevice(): Promise<void> {
     await logout();
   }
   await invoke("auth_reset");
+  markSignedOut();
 }
 
 export async function listDevices(): Promise<DeviceItem[]> {

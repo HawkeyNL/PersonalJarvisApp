@@ -22,6 +22,15 @@ func deepLinkRoute(_ url: URL) -> HubRoute? {
     }
 }
 
+/// What the root shows. The hub, and every route behind it, needs an unlocked
+/// app, a reachable Home Node and a signed-in session; anything else enrolls.
+enum RootScreen: Equatable { case lock, enrollment, hub }
+
+func rootScreen(lock: AppLockState, connection: ConnectionState, authenticated: Bool) -> RootScreen {
+    if lock != .unlocked { return .lock }
+    return connection == .reachable && authenticated ? .hub : .enrollment
+}
+
 /// Core hub: the orb with its seven modules and a two-column card grid.
 /// Every number comes from Core; a route an older Core lacks says so.
 struct HubView: View {

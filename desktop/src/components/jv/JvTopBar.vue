@@ -4,6 +4,7 @@ import NavIcon from "../NavIcon.vue";
 import JvStatusDot from "./JvStatusDot.vue";
 import { agentCount, coreOnline, useCoreStatus } from "../../coreStatus";
 import { availableAppVersion, updateState } from "../../updates";
+import { shownShellMode } from "../../lock";
 
 // Hub variant: brand on the left, a centre slot (the command bar).
 // Node variant: "Back to Core" on the left, the page title in the centre.
@@ -54,12 +55,15 @@ const core = computed(() =>
 
     <div class="right">
       <div class="cluster">
-        <RouterLink v-if="updateState === 'available'" to="/settings" class="update">
-          Update v{{ availableAppVersion }}
-        </RouterLink>
-        <RouterLink v-else-if="updateState === 'ready_to_restart'" to="/settings" class="update">
-          Restart pending
-        </RouterLink>
+        <!-- Settings and updates are app pages: out of reach before sign-in. -->
+        <template v-if="shownShellMode === 'app'">
+          <RouterLink v-if="updateState === 'available'" to="/settings" class="update">
+            Update v{{ availableAppVersion }}
+          </RouterLink>
+          <RouterLink v-else-if="updateState === 'ready_to_restart'" to="/settings" class="update">
+            Restart pending
+          </RouterLink>
+        </template>
         <JvStatusDot :tone="core.tone" :label="core.label" class="core" />
         <template v-if="agentCount.state === 'ok'">
           <span class="sep" aria-hidden="true"></span>
@@ -68,7 +72,7 @@ const core = computed(() =>
         <span class="sep" aria-hidden="true"></span>
         <span class="item"><NavIcon name="clock" /><time>{{ clock }}</time></span>
       </div>
-      <RouterLink to="/settings" class="profile" aria-label="Settings">
+      <RouterLink v-if="shownShellMode === 'app'" to="/settings" class="profile" aria-label="Settings">
         <NavIcon name="user" />
         <span class="pdot" aria-hidden="true"></span>
       </RouterLink>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { biometricUnlock, unlocking, lockError, signOutFromLock } from "../lock";
+import { biometricUnlock, lockMode, unlocking, lockError, signOutFromLock } from "../lock";
 
 // Locking only shows this screen. The OS prompt starts when the owner presses
 // a button, so an idle lock never pops a dialog over other apps.
@@ -13,16 +13,23 @@ import { biometricUnlock, unlocking, lockError, signOutFromLock } from "../lock"
         <span class="glyph">J</span>
       </div>
       <h1>Jarvis is locked</h1>
-      <p class="sub">
-        Unlock with Touch ID, Windows Hello or your computer password.
-      </p>
+      <!-- Windows: the session is ending; the sign-in screen asks for the account password. -->
+      <template v-if="lockMode === 'password'">
+        <p class="sub">Sign in again with your account password.</p>
+        <button class="primary" :disabled="unlocking" @click="signOutFromLock">
+          {{ unlocking ? "Signing out…" : "Sign in" }}
+        </button>
+      </template>
+      <template v-else>
+        <p class="sub">Unlock with Touch ID or your computer password.</p>
 
-      <button class="primary" :disabled="unlocking" @click="biometricUnlock">
-        {{ unlocking ? "Verifying…" : "Unlock" }}
-      </button>
+        <button class="primary" :disabled="unlocking" @click="biometricUnlock">
+          {{ unlocking ? "Verifying…" : "Unlock" }}
+        </button>
 
-      <button class="ghost" :disabled="unlocking" @click="signOutFromLock">Sign out instead</button>
-      <p class="hint">Signing in again needs your account password.</p>
+        <button class="ghost" :disabled="unlocking" @click="signOutFromLock">Sign out instead</button>
+        <p class="hint">Signing in again needs your account password.</p>
+      </template>
 
       <p v-if="lockError" class="err">{{ lockError }}</p>
     </div>

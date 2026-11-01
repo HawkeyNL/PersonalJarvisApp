@@ -572,6 +572,10 @@ async fn auth_login(
     {
         return Err("account password is invalid".to_string());
     }
+    // Windows always signs in with the account password (no Windows Hello).
+    if cfg!(target_os = "windows") && password.as_deref().is_none_or(str::is_empty) {
+        return Err("account password is required".to_string());
+    }
     let (origin, device_id, epoch) = {
         let guard = auth_storage()?;
         let metadata = load_metadata(&app)?;
@@ -859,6 +863,11 @@ fn revoke_model_authorization() -> Result<(), String> {
 }
 
 fn authenticate_owner(reason: &str, allow_password: bool) -> Result<(), String> {
+    // Windows Hello stays off: its prompt did not receive keyboard input and
+    // input could stay broken after it. Windows uses the account password.
+    if cfg!(target_os = "windows") {
+        return Err("Windows Hello is not used; sign in with your account password".into());
+    }
     use std::sync::mpsc;
     use std::time::Duration;
 

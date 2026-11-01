@@ -49,6 +49,15 @@ class PrivateRegistryTests(unittest.TestCase):
             if case == 'annotation': doc['layers'][0]['annotations']['io.deis.oras.content.unpack'] = 'true'
             with self.subTest(case=case), self.assertRaises(ValueError): self.validate(doc, names)
 
+    def test_part_tag_uses_newest_attempt_of_the_same_run(self):
+        tags = ['build-7-1-linux', 'build-7-1-macos', 'build-7-2-macos', 'build-8-3-ios', 'app-v0.1.0']
+        self.assertEqual(registry.part_tag(tags, '7', '2', 'macos'), 'build-7-2-macos')
+        self.assertEqual(registry.part_tag(tags, '7', '2', 'linux'), 'build-7-1-linux')
+        self.assertEqual(registry.part_tag(tags, '7', '1', 'macos'), 'build-7-1-macos')
+        for target, attempt in (('ios', '3'), ('windows', '2')):
+            with self.subTest(target=target), self.assertRaises(ValueError):
+                registry.part_tag(tags, '7', attempt, target)
+
     def test_inventory_checks_types_and_exact_files(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

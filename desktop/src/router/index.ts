@@ -16,6 +16,9 @@ import Agents from "../views/Agents.vue";
 import Memory from "../views/Memory.vue";
 import ComingSoon from "../views/ComingSoon.vue";
 import { buildRoutes } from "../navigation";
+import { currentAuthStatus } from "../auth";
+import { loadHomeNodeConfig } from "../homeNode";
+import { shellGuard } from "../shellMode";
 
 // Paths, sidebar mapping and redirects live in navigation.ts.
 export const router = createRouter({
@@ -25,3 +28,9 @@ export const router = createRouter({
     memory: Memory, trading: Trading, desk: TradingDesk, stocks: TradingStocks, stock: TradingStock, positions: TradingPositions, memecoin: TradingMemecoin, tasks: Tasks, context: Context, settings: Settings, soon: ComingSoon,
   }),
 });
+
+// No app page, deep link or reload lands past the setup and sign-in screen.
+router.beforeEach(shellGuard(async () => ({
+  configured: (await loadHomeNodeConfig()).configured,
+  authenticated: (await currentAuthStatus()).authenticated,
+})));

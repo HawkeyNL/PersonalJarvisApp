@@ -145,6 +145,18 @@ def push(oras: list[str], tag: str, directory: Path, expected: set[str], revisio
     return digest
 
 
+def part_tag(tags: list[str], run_id: str, attempt: str, target: str) -> str:
+    # A rerun of only the failed jobs gets a new attempt number, while the
+    # other platforms stay pushed under the attempt that built them. Use the
+    # newest attempt of this same run that holds the target; the pull still
+    # checks revision, names and digests.
+    for number in range(int(attempt), 0, -1):
+        tag = f'build-{run_id}-{number}-{target}'
+        if tag in tags:
+            return tag
+    raise ValueError(f'no {target} build in this release run')
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('operation', choices=('push-part', 'pull-parts', 'publish'))
@@ -166,10 +178,12 @@ def main() -> None:
             push(oras, f'{prefix}-{args.target}', directory, names(args.version, args.target), revision, BUILD_TYPE, args.version)
         elif args.operation == 'pull-parts':
             directory.mkdir()
+            tags = run(oras + ['repo', 'tags', IMAGE]).decode().splitlines()
             for target in ('linux', 'windows', 'macos', 'android', 'ios'):
                 with tempfile.TemporaryDirectory(prefix='jarvis-part-') as temporary:
                     part = Path(temporary) / 'assets'
-                    pull(oras, f'{IMAGE}:{prefix}-{target}', part, names(args.version, target), revision, BUILD_TYPE)
+                    tag = part_tag(tags, run_id, attempt, target)
+                    pull(oras, f'{IMAGE}:{tag}', part, names(args.version, target), revision, BUILD_TYPE)
                     for path in part.iterdir():
                         shutil.copyfile(path, directory / path.name)
             inventory(directory, expected_assets(args.version))
