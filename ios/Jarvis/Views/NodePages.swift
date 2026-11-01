@@ -202,6 +202,7 @@ struct TasksPage: View {
     @State private var selected = "active"
     @State private var sub = "overview"
     @State private var now = Date()
+    @Environment(\.openAgentApproval) private var openAgentApproval
 
     private var split: (open: [CodingSession], finished: [CodingSession]) { splitSessions(sessions.value ?? []) }
     private var waiting: [PendingAction] { pending.value ?? [] }
@@ -253,8 +254,9 @@ struct TasksPage: View {
                         ActivityList(rows: [], emptyText: "Nothing is waiting for you.")
                     }
                     ForEach(waiting) { action in
-                        AgentActionCard(model: model, item: action, review: AgentReview.of(action),
-                                        time: relativeTime(action.created_at, now: now)) { await load() }
+                        PendingActionRow(item: action, time: relativeTime(action.created_at, now: now)) {
+                            openAgentApproval(action) { await load() }
+                        }
                     }
                 case "completed":
                     ChipRow(chips: [ChipRow.Chip(id: "overview", label: "Sessions", symbol: "chevron.left.forwardslash.chevron.right"),
@@ -266,7 +268,7 @@ struct TasksPage: View {
                     } else {
                         if let state = UnavailableState.forSource(audit, title: "Agent history", symbol: "shield",
                                                                   forbidden: "Agent actions are turned off in Core.") { state }
-                        ActivityList(rows: auditRows, emptyText: "Core recorded no agent actions yet.")
+                        ActivityList(rows: auditRows(audit.value ?? [], now: now), emptyText: "Core recorded no agent actions yet.")
                     }
                 default:
                     UnavailableState(title: current.title, detail: current.detail, symbol: current.icon)
@@ -294,14 +296,6 @@ struct TasksPage: View {
         }
     }
 
-    private var auditRows: [ActivityRow] {
-        (audit.value ?? []).enumerated().map { index, entry in
-            ActivityRow(id: "\(entry.ts)-\(index)", symbol: "shield", title: entry.action,
-                        detail: [entry.risk, entry.note].compactMap { $0 }.joined(separator: " · "),
-                        time: relativeTime(entry.ts, now: now), tone: outcomeTone(entry.outcome), toneLabel: entry.outcome)
-        }
-    }
-
     private func load() async {
         async let sessions = model.coreRead("/v1/coding/sessions", as: CodingSessionList.self)
         async let pending = model.coreRead("/v1/agent/pending", as: PendingActionList.self)
@@ -315,98 +309,12 @@ struct TasksPage: View {
     }
 }
 
-/// One pending agent action, shown in full from the JSON whose hash the approval signs.
-/// Anything this app cannot parse exactly is shown raw (escaped) and can only be denied.
-/// Approve and Deny each need Face ID / Touch ID and re-read the action by id.
-struct AgentActionCard: View {
-    @ObservedObject var model: JarvisAppModel
-    let item: PendingAction
-    let review: AgentReview
-    let time: String
-    let decided: () async -> Void
-    @State private var busy = false
-    @State private var decisionError: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(verbatim: title).font(JV.font(15, .semibold)).foregroundStyle(JV.textPrimary)
-                Spacer()
-                Text(verbatim: time).font(JV.number(13)).foregroundStyle(JV.textSecondary)
-            }
-            switch review {
-            case let .approvable(.writeFile(path, content), _):
-                field("Path", AgentReview.asciiPath(path))
-                // Whether the file existed is Home Node state, not part of what is signed.
-                if let state = item.preview?.split(separator: "\n", omittingEmptySubsequences: false).first, !state.isEmpty {
-                    Text(verbatim: "When proposed (not signed): " + AgentReview.visible(String(state), keepNewlines: false))
-                        .font(JV.font(13)).foregroundStyle(JV.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                field("Content \u{00B7} \(content.utf8.count) bytes", AgentReview.visible(content))
-            case let .refused(reason, raw):
-                Text(verbatim: reason).font(JV.font(13)).foregroundStyle(JV.negativeText)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let raw { field("Raw action", AgentReview.visible(raw)) }
-            }
-            if let decisionError {
-                Text(verbatim: decisionError).font(JV.font(13)).foregroundStyle(JV.dangerText)
-            }
-            HStack(spacing: 10) {
-                Button(busy ? "Verifying\u{2026}" : "Deny", role: .destructive) { Task { await decide(approve: false) } }
-                    .buttonStyle(JVButtonStyle(kind: .secondary))
-                Spacer()
-                if case .approvable = review {
-                    Button("Approve") { Task { await decide(approve: true) } }
-                        .buttonStyle(JVButtonStyle())
-                }
-            }
-            .disabled(busy)
-        }
-        .jvCard(padding: 12, border: JV.negativeSolid)
-    }
-
-    private var title: String {
-        switch review {
-        case .approvable(.writeFile, _): "Write a file"
-        case .refused: PairingFingerprint.displayName(item.action, max: 40)
-        }
-    }
-
-    private func field(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Eyebrow(text: label)
-            // Strictly left-to-right: each line isolated at display time only.
-            Text(verbatim: AgentReview.ltrLines(value))
-                .environment(\.layoutDirection, .leftToRight)
-                .multilineTextAlignment(.leading)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(JV.textPrimary)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(8)
-                .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
-        }
-    }
-
-    private func decide(approve: Bool) async {
-        guard !busy else { return }
-        busy = true
-        decisionError = nil
-        do {
-            if approve {
-                guard case let .approvable(_, sha256) = review else { busy = false; return }
-                try await model.approveAgentAction(item.pending_id, shownSha256: sha256)
-            } else {
-                try await model.denyAgentAction(item.pending_id)
-            }
-            busy = false
-            await decided()
-        } catch {
-            // Server text is shown sanitised and bounded.
-            decisionError = PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "The decision could not be completed.", max: 160)
-            busy = false
-        }
+/// Agent history rows from Core's audit log.
+func auditRows(_ entries: [AgentAuditEntry], now: Date) -> [ActivityRow] {
+    entries.enumerated().map { index, entry in
+        ActivityRow(id: "\(entry.ts)-\(index)", symbol: "shield", title: entry.action,
+                    detail: [entry.risk, entry.note].compactMap { $0 }.joined(separator: " · "),
+                    time: relativeTime(entry.ts, now: now), tone: outcomeTone(entry.outcome), toneLabel: entry.outcome)
     }
 }
 
@@ -431,14 +339,12 @@ struct IntegrationsPage: View {
         let allowedCount = allowed.count
         let b = sourceStatus(registry) { _ in (ready > 0 ? Tone.ok : Tone.idle, "\(ready) of \(total) ready") }
         let m = sourceStatus(policy) { _ in (allowedCount == 0 ? Tone.idle : Tone.ok, "\(allowedCount) allowed") }
-        let i = ibkrState(ibkr, now: loadedAt)
         return [
             NodeItem(id: "brains", label: "Brains", title: "AI brains", icon: "sparkles",
                      detail: "The brains Core found on your Home Node. Ready means it is set up, not that it is in use.", tone: b.0, status: b.1),
             NodeItem(id: "models", label: "Models", title: "Models", icon: "square.stack.3d.up",
                      detail: "Allowing a model lets Jarvis choose it; it never selects a model for a running request.", tone: m.0, status: m.1),
-            NodeItem(id: "ibkr", label: "IBKR", title: "Interactive Brokers", icon: "chart.line.uptrend.xyaxis",
-                     detail: "Core's read-only link to Interactive Brokers. Jarvis only reads; it never places orders.", tone: i.0, status: i.1),
+            ibkrItem(ibkr, now: loadedAt),
             .planned("codex", "Codex", "Codex", icon: "terminal", detail: "Core does not report the Codex broker status to the app yet."),
             .planned("github", "GitHub", "GitHub", icon: "arrow.triangle.branch", detail: "Core does not report a GitHub connection to the app yet."),
             .planned("sandbox", "Sandbox", "OpenSandbox", icon: "shippingbox", detail: "Core does not report OpenSandbox status to the app yet."),
@@ -474,19 +380,7 @@ struct IntegrationsPage: View {
                         ActivityRow(id: $0.id, symbol: "square.stack.3d.up", title: $0.model, detail: $0.provider, tone: .ok, toneLabel: "Allowed")
                     }, emptyText: "No models are allowed.")
                 case "ibkr":
-                    NodePanel(item: current)
-                    if case .error(.unavailable) = ibkr {
-                        UnavailableState(title: "Interactive Brokers", kind: .error, detail: ibkrNotSynced, symbol: "chart.line.uptrend.xyaxis")
-                    } else if let state = UnavailableState.forSource(ibkr, title: "Interactive Brokers", symbol: "chart.line.uptrend.xyaxis") { state }
-                    if let portfolio = ibkr.value {
-                        TileGrid(tiles: [
-                            TileData(label: "Connection", value: current.status, symbol: "link"),
-                            TileData(label: "Last sync", value: relativeTime(portfolio.asOf, now: loadedAt).isEmpty ? "—" : relativeTime(portfolio.asOf, now: loadedAt),
-                                     symbol: "clock"),
-                            TileData(label: "Positions", value: String(portfolio.positions.count), symbol: "chart.line.uptrend.xyaxis"),
-                            TileData(label: "Orders", value: "Read-only", symbol: "lock"),
-                        ])
-                    }
+                    IbkrPanel(source: ibkr, loadedAt: loadedAt)
                 default:
                     NodePanel(item: current)
                     UnavailableState(title: current.title, detail: current.detail, symbol: current.icon)
@@ -507,6 +401,70 @@ struct IntegrationsPage: View {
         self.registry = results.0
         self.policy = results.1
         self.ibkr = results.2
+        loadedAt = Date()
+    }
+}
+
+func ibkrItem(_ source: Availability<IbkrPortfolio>, now: Date) -> NodeItem {
+    let state = ibkrState(source, now: now)
+    return NodeItem(id: "ibkr", label: "IBKR", title: "Interactive Brokers", icon: "chart.line.uptrend.xyaxis",
+                    detail: "Core's read-only link to Interactive Brokers. Jarvis only reads; it never places orders.",
+                    tone: state.0, status: state.1)
+}
+
+/// IBKR link state from Core's read-only portfolio read (Integrations and Trading).
+struct IbkrPanel: View {
+    let source: Availability<IbkrPortfolio>
+    let loadedAt: Date
+
+    var body: some View {
+        let item = ibkrItem(source, now: loadedAt)
+        NodePanel(item: item)
+        if case .error(.unavailable) = source {
+            UnavailableState(title: "Interactive Brokers", kind: .error, detail: ibkrNotSynced, symbol: "chart.line.uptrend.xyaxis")
+        } else if let state = UnavailableState.forSource(source, title: "Interactive Brokers", symbol: "chart.line.uptrend.xyaxis") { state }
+        if let portfolio = source.value {
+            let synced = relativeTime(portfolio.asOf, now: loadedAt)
+            TileGrid(tiles: [
+                TileData(label: "Connection", value: item.status, symbol: "link"),
+                TileData(label: "Last sync", value: synced.isEmpty ? "—" : synced, symbol: "clock"),
+                TileData(label: "Positions", value: String(portfolio.positions.count), symbol: "chart.line.uptrend.xyaxis"),
+                TileData(label: "Orders", value: "Read-only", symbol: "lock"),
+            ])
+        }
+    }
+}
+
+// MARK: - Trading
+
+/// Trading tab. The iPhone app only has Core's read-only IBKR link so far;
+/// the dashboard, pots and proposals of the design are not built yet.
+struct TradingPage: View {
+    @ObservedObject var model: JarvisAppModel
+    @State private var ibkr: Availability<IbkrPortfolio> = .loading
+    @State private var loadedAt = Date()
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                IbkrPanel(source: ibkr, loadedAt: loadedAt)
+                UnavailableState(title: "Trading dashboard",
+                                 detail: "Pots, proposals and mandates are coming to the iPhone app. Nothing here can place an order.",
+                                 symbol: "chart.line.uptrend.xyaxis")
+            }
+            .padding(16)
+        }
+        .background(JV.bgPage)
+        .navigationTitle(AppTab.trading.title)
+        .toolbarBackground(JV.bgPage, for: .navigationBar)
+        .refreshable { await load() }
+        .task { await load() }
+    }
+
+    private func load() async {
+        let result = await model.coreRead("/v1/trading/portfolio", as: IbkrPortfolio.self)
+        guard !Task.isCancelled else { return }
+        ibkr = result
         loadedAt = Date()
     }
 }
@@ -839,46 +797,80 @@ struct ContextPage: View {
 
 // MARK: - Pairing approvals
 
-/// Pending new-device pairing requests. Approve and Deny need Face ID / Touch ID
-/// (never the passcode). The fingerprint is computed here from the key the
-/// approval signs; candidate details are unverified hints shown as plain text.
+/// Pending new-device pairing requests (Context › Devices).
 struct PairingApprovalsPage: View {
     @ObservedObject var model: JarvisAppModel
+    @State private var refresh = 0
+
+    var body: some View {
+        ScrollView {
+            PairingRequestsSection(model: model, refresh: refresh)
+                .padding(16)
+        }
+        .background(JV.bgPage)
+        .jarvisNavigationBar(title: "Pairing requests", subtitle: "New devices waiting for you")
+        .refreshable { refresh += 1 }
+    }
+}
+
+/// Pending pairing requests, on their page and on Activity. Approve and Deny
+/// need Face ID / Touch ID (never the passcode). The fingerprint is computed
+/// here from the key the approval signs; candidate details are unverified
+/// hints shown as plain text. `refresh` changes on pull-to-refresh.
+struct PairingRequestsSection: View {
+    @ObservedObject var model: JarvisAppModel
+    var refresh = 0
+    /// Activity shows its own empty state instead of this one.
+    var showsEmpty = true
+    /// Number of waiting requests once loaded, for the owner's empty state.
+    var count: Binding<Int?>? = nil
     @State private var requests: Availability<[PairingApprovalItem]> = .loading
     @State private var biometrics = BiometricLock.biometricsAvailable
     @State private var busy: UUID?
     @State private var decisionError: String?
-    @State private var lastLoad = Date.distantPast
+    /// Shared by every instance (Activity and the page): list reads share Core's
+    /// five-per-minute pairing budget per IP with candidates creating requests,
+    /// so all reads stay at least 30 s apart, as on Android.
+    private static var lastRead = Date.distantPast
+    private static let minInterval: TimeInterval = 30
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if !biometrics {
-                    UnavailableState(title: "Biometrics required", kind: .error, detail: BiometricLock.biometricsRequired, symbol: "faceid")
-                }
-                if let state = UnavailableState.forSource(requests, title: "Pairing requests", symbol: "person.badge.key") { state }
-                if let decisionError {
-                    Text(verbatim: decisionError).font(JV.font(13)).foregroundStyle(JV.dangerText)
-                }
-                if let list = requests.value {
-                    if list.isEmpty { ActivityList(rows: [], emptyText: "No devices are waiting for approval.") }
-                    ForEach(list) { item in card(item) }
-                }
+        VStack(alignment: .leading, spacing: 14) {
+            if !biometrics {
+                UnavailableState(title: "Biometrics required", kind: .error, detail: BiometricLock.biometricsRequired, symbol: "faceid")
             }
-            .padding(16)
+            if let state = UnavailableState.forSource(requests, title: "Pairing requests", symbol: "person.badge.key") { state }
+            // Reads are spaced 30 s apart, so the first one on a page can take a moment.
+            if case .loading = requests {
+                ProgressView("Loading pairing requests\u{2026}")
+                    .font(JV.font(13))
+                    .foregroundStyle(JV.textSecondary)
+                    .frame(maxWidth: .infinity)
+            }
+            if let decisionError {
+                Text(verbatim: decisionError).font(JV.font(13)).foregroundStyle(JV.dangerText)
+            }
+            if let list = requests.value {
+                if list.isEmpty && showsEmpty { ActivityList(rows: [], emptyText: "No devices are waiting for approval.") }
+                ForEach(list) { item in card(item) }
+            }
         }
-        .background(JV.bgPage)
-        .jarvisNavigationBar(title: "Pairing requests", subtitle: "New devices waiting for you")
-        // List reads share Core's five-per-minute pairing budget per IP with
-        // candidates creating requests, so pull-to-refresh is throttled.
-        .refreshable { if Date().timeIntervalSince(lastLoad) >= 20 { await load() } }
+        .onChange(of: requests.value?.count, initial: true) { _, value in if let count { count.wrappedValue = value } }
+        .onChange(of: refresh) { _, _ in
+            if Date().timeIntervalSince(Self.lastRead) >= Self.minInterval { Task { await load() } }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .jarvisApprovalPushed)) { _ in
-            if Date().timeIntervalSince(lastLoad) >= 20 { Task { await load() } }
+            if Date().timeIntervalSince(Self.lastRead) >= Self.minInterval { Task { await load() } }
         }
+        // Restarts on every tab switch and pop; the shared clock keeps the pace.
         .task {
             while !Task.isCancelled {
+                let wait = Self.minInterval - Date().timeIntervalSince(Self.lastRead)
+                if wait > 0 {
+                    try? await Task.sleep(for: .seconds(wait))
+                    continue
+                }
                 await load()
-                try? await Task.sleep(for: .seconds(30))
             }
         }
     }
@@ -926,10 +918,10 @@ struct PairingApprovalsPage: View {
             if biometrics {
                 HStack(spacing: 10) {
                     Button("Deny", role: .destructive) { Task { await decide(item, approve: false) } }
-                        .buttonStyle(JVButtonStyle(kind: .secondary))
+                        .buttonStyle(JVButtonStyle(kind: .secondary, size: .large))
                     Spacer()
                     Button(busy == item.id ? "Verifying…" : "Approve") { Task { await decide(item, approve: true) } }
-                        .buttonStyle(JVButtonStyle())
+                        .buttonStyle(JVButtonStyle(size: .large))
                         .disabled(fingerprint == nil)
                 }
                 .disabled(busy != nil)
@@ -968,9 +960,10 @@ struct PairingApprovalsPage: View {
     }
 
     private func load() async {
+        // Claimed before the read, so a second instance does not read in parallel.
+        Self.lastRead = Date()
         let result = await model.coreRead("/v1/auth/pairing/requests", as: PairingApprovalList.self)
         guard !Task.isCancelled else { return }
-        lastLoad = Date()
         requests = result.map(\.requests)
         biometrics = BiometricLock.biometricsAvailable
     }
@@ -998,109 +991,5 @@ struct VoicePage: View {
         }
         .background(JV.bgPage)
         .jarvisNavigationBar(title: "Voice", subtitle: "Talk to Jarvis")
-    }
-}
-
-// MARK: - Unlock requests
-
-/// Other devices of this account asking to be unlocked. Approve first asks the owner to pick
-/// the number the other device shows (a wrong pick denies); Approve and Deny then need
-/// Face ID / Touch ID. Each step re-reads the request by id. Polls only in the foreground.
-struct UnlockRequestsBanner: View {
-    @ObservedObject var model: JarvisAppModel
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var requests: [UnlockRequestItem] = []
-    @State private var busy: UUID?
-    @State private var picking: (id: UUID, choices: [Int])?
-    @State private var decisionError: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let decisionError {
-                Text(verbatim: decisionError).font(JV.font(13)).foregroundStyle(JV.dangerText)
-            }
-            ForEach(requests) { item in card(item) }
-        }
-        .padding(.horizontal, 16)
-        .task(id: scenePhase == .active) {
-            guard scenePhase == .active else { requests = []; return }
-            while !Task.isCancelled {
-                let result = await model.pendingUnlocks()
-                guard !Task.isCancelled else { break }
-                requests = result ?? []
-                // An answer with requests or an error returns at once: never spin.
-                try? await Task.sleep(for: .seconds(result == nil || !requests.isEmpty ? 10 : 2))
-            }
-        }
-    }
-
-    private func card(_ item: UnlockRequestItem) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Unlock request").font(JV.font(15, .semibold)).foregroundStyle(JV.textPrimary)
-            Text(verbatim: "\"\(PairingFingerprint.displayName(item.device_name, max: 40))\" (\(PairingFingerprint.displayName(item.platform, max: 16))) asks to unlock Jarvis. Approve only if you just asked on that device.")
-                .font(JV.font(13))
-                .foregroundStyle(JV.textPrimary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let picking, picking.id == item.id {
-                Text("Pick the number shown on that device. A wrong number denies the request.")
-                    .font(JV.font(13))
-                    .foregroundStyle(JV.textPrimary)
-                HStack(spacing: 10) {
-                    ForEach(picking.choices, id: \.self) { choice in
-                        Button(UnlockCode.display(choice)) { Task { await pick(item, choice) } }
-                            .buttonStyle(.bordered)
-                            .font(.system(size: 22, weight: .bold, design: .monospaced))
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .disabled(busy != nil)
-            }
-            HStack(spacing: 10) {
-                Button("Deny", role: .destructive) { Task { await decide(item, approve: false) } }
-                    .buttonStyle(JVButtonStyle(kind: .secondary))
-                Spacer()
-                if picking?.id != item.id {
-                    Button(busy == item.id ? "Verifying…" : "Approve") { Task { await decide(item, approve: true) } }
-                        .buttonStyle(JVButtonStyle())
-                }
-            }
-            .disabled(busy != nil)
-        }
-        .jvCard(padding: 12, border: JV.negativeSolid)
-    }
-
-    private func decide(_ item: UnlockRequestItem, approve: Bool) async {
-        guard busy == nil else { return }
-        busy = item.id
-        decisionError = nil
-        picking = nil
-        do {
-            if approve {
-                let choices = try await model.unlockChoices(item.id)
-                picking = (item.id, choices)
-            } else {
-                try await model.denyUnlock(item.id)
-                requests.removeAll { $0.id == item.id }
-            }
-        } catch {
-            // Server text is shown sanitised and bounded.
-            decisionError = PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "The decision could not be completed.", max: 160)
-        }
-        busy = nil
-    }
-
-    private func pick(_ item: UnlockRequestItem, _ choice: Int) async {
-        guard busy == nil, picking?.id == item.id else { return }
-        busy = item.id
-        picking = nil
-        decisionError = nil
-        do {
-            try await model.approveUnlock(item.id, choice: choice)
-            requests.removeAll { $0.id == item.id }
-        } catch {
-            if error is UnlockWrongNumber { requests.removeAll { $0.id == item.id } }
-            decisionError = PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "The decision could not be completed.", max: 160)
-        }
-        busy = nil
     }
 }
