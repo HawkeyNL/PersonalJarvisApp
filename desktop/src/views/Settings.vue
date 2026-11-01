@@ -6,8 +6,8 @@ import JvTopBar from "../components/jv/JvTopBar.vue";
 import { THEMES, currentTheme, setTheme, type ThemeChoice } from "../theme";
 import { currentAuthStatus, deregisterDevice, type AuthStatus } from "../auth";
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
-import { lockEnabled, lockAvailable, setLockEnabled, initLock } from "../lock";
-import { platformCapabilities } from "../platform";
+import { lockEnabled, lockAvailable, lockMode, setLockEnabled } from "../lock";
+import { initPlatformCapabilities, platformCapabilities } from "../platform";
 import {
   voiceSupported,
   enrolled,
@@ -106,7 +106,7 @@ onMounted(async () => {
   const homeNode = await loadHomeNodeConfig();
   homeNodeOriginInput.value = homeNode.origin ?? "";
   await loadUpdateStatus();
-  await initLock(); // resolves lockAvailable for the lock toggle
+  await initPlatformCapabilities(); // resolves lockAvailable for the lock toggle
   await refreshVoiceStatus();
   await listMics();
 });
@@ -197,9 +197,8 @@ onMounted(async () => {
         <span class="tl">
           <span class="tt">Lock on open</span>
           <span class="td">
-            When Jarvis opens and after 15 minutes without input: Touch ID,
-            Windows Hello or your computer password. It hides the app; it signs
-            nothing.
+            When Jarvis opens and after 15 minutes without input: Touch ID or
+            your computer password. It hides the app; it signs nothing.
           </span>
         </span>
         <input
@@ -210,7 +209,11 @@ onMounted(async () => {
         />
         <span class="sw"></span>
       </label>
-      <p v-if="!lockAvailable" class="muted small">
+      <p v-if="lockMode === 'password'" class="muted small">
+        On Windows, Jarvis signs out when it opens and after 15 minutes without
+        input. Signing in again needs your account password.
+      </p>
+      <p v-else-if="!lockAvailable" class="muted small">
         This computer has no local unlock prompt, so the app lock is off.
       </p>
     </div>

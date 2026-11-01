@@ -77,7 +77,7 @@ onBeforeUnmount(() => {
     <!-- Other devices' unlock and pairing requests; a Mac approves them. -->
     <UnlockApprovals />
     <PairingApprovals />
-    <!-- Full-screen biometric gate on desktop when the lock is enabled. -->
+    <!-- Full-screen lock: Touch ID on macOS; on Windows the session ends and sign-in needs the account password. -->
     <AppLock v-if="locked" />
   </div>
 </template>

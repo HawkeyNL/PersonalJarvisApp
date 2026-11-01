@@ -120,6 +120,8 @@ test("approvals are signed natively by id and every signature needs Touch ID", a
     'authenticate_owner("Unlock Jarvis", allow_password)',
     "authenticate_owner(reason: &str, allow_password: bool)",
   ]);
+  // Windows never opens Windows Hello: the OS prompt is refused before it starts.
+  assert.match(native, /fn authenticate_owner\([^)]*\)[^{]*\{(?:\s*\/\/[^\n]*)*\s*if cfg!\(target_os = "windows"\) \{\s*return Err\(/);
   // Every signing path refuses off macOS and asks for Touch ID on it.
   for (const [file, source] of [["approvals.rs", approvals], ["model_control.rs", models]]) {
     assert.match(source, /model_authorization::touch_id\(cfg!\(target_os = "macos"\), [\w:]+, \|\| \{\s*authenticate_owner\(&\w+, false\)/, file);

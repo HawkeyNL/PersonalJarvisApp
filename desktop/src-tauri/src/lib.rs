@@ -859,6 +859,11 @@ fn revoke_model_authorization() -> Result<(), String> {
 }
 
 fn authenticate_owner(reason: &str, allow_password: bool) -> Result<(), String> {
+    // Windows Hello stays off: its prompt did not receive keyboard input and
+    // input could stay broken after it. Windows uses the account password.
+    if cfg!(target_os = "windows") {
+        return Err("Windows Hello is not used; sign in with your account password".into());
+    }
     use std::sync::mpsc;
     use std::time::Duration;
 
