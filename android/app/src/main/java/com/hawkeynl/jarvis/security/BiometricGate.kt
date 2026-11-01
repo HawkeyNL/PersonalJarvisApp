@@ -23,6 +23,20 @@ sealed interface BiometricResult {
     data object Failed : BiometricResult
 }
 
+/** Keeps a prompt open after a rejected finger or face until [maxFailures] rejections,
+ *  then settles on [BiometricResult.Failed]. Any other result settles at once. */
+class PromptAttempts(private val maxFailures: Int = Int.MAX_VALUE) {
+    private var failures = 0
+    private var settled = false
+
+    /** The result to hand back now, or null while the prompt stays open or after it settled. */
+    fun settle(result: BiometricResult): BiometricResult? {
+        if (settled || (result == BiometricResult.Failed && ++failures < maxFailures)) return null
+        settled = true
+        return result
+    }
+}
+
 class BiometricGate {
     fun availability(activity: FragmentActivity): BiometricAvailability =
         when (BiometricManager.from(activity).canAuthenticate(AUTHENTICATORS)) {

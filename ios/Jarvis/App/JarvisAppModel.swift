@@ -305,7 +305,7 @@ final class JarvisAppModel: ObservableObject {
             if activationCode != nil {
                 // Bootstrap may have succeeded before login failed. Restore a
                 // saved device binding instead of attempting bootstrap twice.
-                let recovery = try? await auth.restore()
+                let recovery = try? await auth.restore(renew: false)
                 guard presentation.accepts(generation) else { return }
                 applyActivationFailure(error, recovery: recovery)
                 if recovery == .authenticated { await restoreAuthentication() }

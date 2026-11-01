@@ -9,6 +9,7 @@ import com.hawkeynl.jarvis.network.LoginRequest
 import com.hawkeynl.jarvis.network.PairingCreateRequest
 import com.hawkeynl.jarvis.network.PairingTicket
 import com.hawkeynl.jarvis.network.UnreachableReason
+import com.hawkeynl.jarvis.security.BiometricNotRecognisedException
 import com.hawkeynl.jarvis.security.DeviceIdentity
 import com.hawkeynl.jarvis.security.DeviceKeyInvalidatedException
 import com.hawkeynl.jarvis.security.DeviceSigningException
@@ -135,7 +136,8 @@ class EnrollmentService(
                         ?: return EnrollmentOutcome.InvalidResponse("Approved request is missing device_id.")
                     sessions.saveDeviceId(deviceId)
                     sessions.clearPairingTicket()
-                    login(endpoint, deviceId)
+                    // No password sign-in yet on a just-paired device: ask for it without a prompt.
+                    login(endpoint, deviceId, renew = false)
                 }
                 "denied" -> {
                     sessions.clearPairingTicket()
@@ -151,11 +153,18 @@ class EnrollmentService(
         }
     }
 
-    private suspend fun login(endpoint: HomeNodeEndpoint, deviceId: String, password: String? = null): EnrollmentOutcome {
-        when (val status = api.accountStatus(endpoint)) {
-            is ApiResult.Success -> if (status.value.password_required && password == null) return EnrollmentOutcome.PasswordRequired
+    /** Without a password and with [renew], signs in with biometrics and the device key
+     *  alone. Core accepts that within 30 days of the last password sign-in and answers
+     *  401 otherwise (older Core always does); both 401 and [SIGN_IN_ATTEMPTS] rejected
+     *  fingers or faces lead to the password screen, which still needs the device key. */
+    private suspend fun login(
+        endpoint: HomeNodeEndpoint, deviceId: String, password: String? = null, renew: Boolean = true,
+    ): EnrollmentOutcome {
+        val renewing = when (val status = api.accountStatus(endpoint)) {
+            is ApiResult.Success -> status.value.password_required && password == null
             else -> return status.toEnrollmentFailure()
         }
+        if (renewing && !renew) return EnrollmentOutcome.PasswordRequired
         val challenge = when (val result = api.challenge(endpoint, ChallengeRequest(deviceId))) {
             is ApiResult.Success -> result.value
             ApiResult.Unauthorized -> return EnrollmentOutcome.Rejected(401,
@@ -166,9 +175,11 @@ class EnrollmentService(
             return EnrollmentOutcome.InvalidResponse("Login challenge has an invalid nonce.")
         }
         val signature = try {
-            identity.sign(LoginMessage(challenge.challenge_id, deviceId, challenge.nonce), "Sign in to Jarvis")
+            identity.sign(LoginMessage(challenge.challenge_id, deviceId, challenge.nonce), SIGN_IN_REASON)
         } catch (cancelled: CancellationException) {
             throw cancelled
+        } catch (_: BiometricNotRecognisedException) {
+            return EnrollmentOutcome.PasswordRequired
         } catch (_: DeviceKeyInvalidatedException) {
             // Erasing is the user's decision; this may be a background sign-in.
             return EnrollmentOutcome.DeviceKeyLost
@@ -185,10 +196,15 @@ class EnrollmentService(
                 sessions.saveLogin(deviceId, result.value.token, result.value.expires_at)
                 EnrollmentOutcome.Authenticated(result.value.expires_at)
             }
-            ApiResult.Unauthorized -> EnrollmentOutcome.Rejected(401,
+            ApiResult.Unauthorized -> if (renewing) EnrollmentOutcome.PasswordRequired else EnrollmentOutcome.Rejected(401,
                 "Password/device signature refused. Check your password and original device identity. No settings or keys were erased.")
             else -> result.toEnrollmentFailure()
         }
+    }
+
+    companion object {
+        const val SIGN_IN_REASON = "Sign in to Jarvis"
+        const val SIGN_IN_ATTEMPTS = 3
     }
 }
 
