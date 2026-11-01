@@ -1,43 +1,7 @@
 import SwiftUI
 
-// Building blocks of the Jarvis design language (desktop components/jv/*).
-
-// MARK: - Backdrop
-
-/// Dark sky with a soft glow behind the orb, a few stars and the horizon arc.
-struct JarvisBackdrop: View {
-    private static let stars: [(x: CGFloat, y: CGFloat, size: CGFloat, opacity: Double)] = [
-        (0.07, 0.14, 3, 0.8), (0.90, 0.11, 2, 0.6), (0.10, 0.42, 2, 0.5), (0.93, 0.38, 3, 0.7),
-        (0.05, 0.69, 2, 0.5), (0.95, 0.63, 2, 0.5), (0.15, 0.97, 3, 0.6), (0.85, 0.89, 2, 0.5),
-    ]
-
-    var body: some View {
-        GeometryReader { proxy in
-            let size = proxy.size
-            ZStack {
-                JarvisTheme.background
-                RadialGradient(colors: [Color(red: 20 / 255.0, green: 150 / 255.0, blue: 95 / 255.0).opacity(0.28), .clear],
-                               center: UnitPoint(x: 0.5, y: 0.22), startRadius: 0, endRadius: 330)
-                Canvas { context, canvas in
-                    for star in Self.stars {
-                        let rect = CGRect(x: star.x * canvas.width, y: star.y * canvas.height, width: star.size, height: star.size)
-                        context.fill(Path(ellipseIn: rect), with: .color(Color(hex: 0x9BFFD6).opacity(star.opacity)))
-                    }
-                }
-                Ellipse()
-                    .fill(RadialGradient(colors: [Color(red: 20 / 255.0, green: 120 / 255.0, blue: 80 / 255.0).opacity(0.5),
-                                                  Color(hex: 0x04160F), Color(hex: 0x010A07)],
-                                         center: .top, startRadius: 0, endRadius: 320))
-                    .overlay(Ellipse().stroke(Color(red: 110 / 255.0, green: 1, blue: 200 / 255.0).opacity(0.55), lineWidth: 2))
-                    .shadow(color: JarvisTheme.accent.opacity(0.35), radius: 20)
-                    .frame(width: size.width * 2.3, height: 500)
-                    .position(x: size.width / 2, y: size.height + 190)
-            }
-        }
-        .ignoresSafeArea()
-        .accessibilityHidden(true)
-    }
-}
+// Building blocks of the Jarvis design language (desktop components/jv/*),
+// drawn with the Instrument tokens (Instrument.swift).
 
 // MARK: - Orb
 
@@ -66,6 +30,8 @@ private struct OrbFrame: View {
     let time: Double
     let showsLabel: Bool
 
+    /// The orb keeps its own mint palette in both appearances.
+    private static let accent = Color(hex: 0x2EE6A2)
     private static let mint = Color(red: 150 / 255.0, green: 1, blue: 210 / 255.0)
     private static let spark = Color(hex: 0xB8FFDF)
     // Sparkle positions as fractions of their ring box, plus size and phase.
@@ -113,7 +79,7 @@ private struct OrbFrame: View {
     }
 
     var body: some View {
-        let accent = JarvisTheme.accent
+        let accent = Self.accent
         let breathe = wave(6)
         let core = size * 0.87
         let morph = sin(time / 14 * 2 * .pi) * 0.015
@@ -150,13 +116,12 @@ private struct OrbFrame: View {
                 .scaleEffect(beat())
             if showsLabel {
                 VStack(spacing: 7) {
-                    Text("JARVIS")
-                        .font(JarvisFont.display(size * 0.088))
-                        .tracking(size * 0.035)
-                        .foregroundStyle(JarvisTheme.text1)
+                    Text("Jarvis")
+                        .font(JV.font(size * 0.1, .semibold))
+                        .foregroundStyle(Color.white)
                         .shadow(color: Color(red: 0, green: 30 / 255.0, blue: 20 / 255.0).opacity(0.85), radius: 6)
                     Rectangle()
-                        .fill(JarvisTheme.text1.opacity(0.85))
+                        .fill(Color.white.opacity(0.85))
                         .frame(width: size * 0.18, height: 2)
                 }
             }
@@ -173,7 +138,7 @@ private struct OrbFrame: View {
                 Circle()
                     .fill(Self.spark)
                     .frame(width: spark.2, height: spark.2)
-                    .shadow(color: JarvisTheme.accent, radius: spark.2 > 2 ? 3 : 0)
+                    .shadow(color: Self.accent, radius: spark.2 > 2 ? 3 : 0)
                     .opacity(0.2 + 0.8 * wave(3.2, spark.3))
                     .position(x: spark.0 * box, y: spark.1 * box)
             }
@@ -240,7 +205,7 @@ private struct OrbFrame: View {
         }
         .frame(width: core, height: core)
         .clipShape(Circle())
-        .shadow(color: JarvisTheme.accent.opacity(0.55), radius: 30)
+        .shadow(color: Self.accent.opacity(0.55), radius: 30)
     }
 
     private func blob(color: Color, diameter: CGFloat, x: CGFloat, y: CGFloat, core: CGFloat) -> some View {
@@ -270,7 +235,6 @@ struct StatusDot: View {
         Circle()
             .fill(tone.color)
             .frame(width: size, height: size)
-            .shadow(color: tone == .idle ? .clear : tone.color.opacity(0.6), radius: 4)
             .accessibilityHidden(true)
     }
 }
@@ -283,26 +247,25 @@ struct StatusLabel: View {
     var body: some View {
         HStack(spacing: 6) {
             StatusDot(tone: tone)
-            Text(text).font(JarvisFont.body(12)).foregroundStyle(tone.labelColor)
+            Text(text).font(JV.font(13)).foregroundStyle(tone.color)
         }
         .accessibilityElement(children: .combine)
     }
 }
 
-/// Uppercase section label ("YOUR SYSTEM").
+/// Sentence-case section label ("Your system").
 struct Eyebrow: View {
     let text: String
 
     var body: some View {
-        Text(text.uppercased())
-            .font(JarvisFont.body(10))
-            .tracking(3)
-            .foregroundStyle(JarvisTheme.text6)
+        Text(text)
+            .font(JV.font(13, .medium))
+            .foregroundStyle(JV.textSecondary)
             .accessibilityAddTraits(.isHeader)
     }
 }
 
-/// Round icon badge with an accent ring.
+/// Accent icon tile.
 struct IconBadge: View {
     let symbol: String
     var size: CGFloat = 40
@@ -310,9 +273,9 @@ struct IconBadge: View {
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: size * 0.42, weight: .regular))
-            .foregroundStyle(JarvisTheme.accent)
+            .foregroundStyle(JV.accentText)
             .frame(width: size, height: size)
-            .overlay(Circle().stroke(JarvisTheme.accent.opacity(0.6), lineWidth: 1.5))
+            .background(JV.accentSubtle, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
             .accessibilityHidden(true)
     }
 }
@@ -330,15 +293,14 @@ struct ModuleCard: View {
             IconBadge(symbol: symbol)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(JarvisFont.body(12.5, 600))
-                    .tracking(0.75)
-                    .foregroundStyle(JarvisTheme.text1)
-                Text(summary.line1).font(JarvisFont.body(11)).foregroundStyle(JarvisTheme.text5)
+                    .font(JV.font(14, .semibold))
+                    .foregroundStyle(JV.textPrimary)
+                Text(summary.line1).font(JV.font(12)).foregroundStyle(JV.textSecondary)
                 if !summary.line2.isEmpty {
-                    Text(summary.line2).font(JarvisFont.body(11)).foregroundStyle(JarvisTheme.text6)
+                    Text(summary.line2).font(JV.font(12)).foregroundStyle(JV.textSecondary)
                 }
             }
-            .lineLimit(1)
+            .lineLimit(2)
             .minimumScaleFactor(0.85)
             Spacer(minLength: 0)
             StatusDot(tone: summary.tone, size: 7)
@@ -346,9 +308,8 @@ struct ModuleCard: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
-        .background(JarvisTheme.card, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(JarvisTheme.accent.opacity(0.35), lineWidth: 1))
-        .contentShape(RoundedRectangle(cornerRadius: 16))
+        .jvCard(padding: 0)
+        .contentShape(RoundedRectangle(cornerRadius: JV.Radius.lg, style: .continuous))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([title, summary.line1, summary.line2].filter { !$0.isEmpty }.joined(separator: ", "))
         .accessibilityAddTraits(.isButton)
@@ -373,25 +334,22 @@ struct NodePanel<Accessory: View>: View {
                 IconBadge(symbol: item.icon, size: 52)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.title)
-                        .font(JarvisFont.body(17, 500))
-                        .foregroundStyle(JarvisTheme.text1)
+                        .font(JV.font(18, .semibold, relativeTo: .title3))
+                        .foregroundStyle(JV.textPrimary)
                         .accessibilityAddTraits(.isHeader)
                     StatusLabel(tone: item.tone, text: item.status)
                 }
             }
             Text(item.detail)
-                .font(JarvisFont.body(13.5))
-                .foregroundStyle(JarvisTheme.text3)
+                .font(JV.font(15))
+                .foregroundStyle(JV.textSecondary)
                 .lineSpacing(3)
                 .padding(.top, 12)
                 .fixedSize(horizontal: false, vertical: true)
             accessory
         }
-        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(JarvisTheme.panelFill, in: RoundedRectangle(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).stroke(JarvisTheme.accent.opacity(0.55), lineWidth: 1.5))
-        .shadow(color: JarvisTheme.accent.opacity(0.16), radius: 12)
+        .jvCard(padding: 16)
     }
 }
 
@@ -408,16 +366,12 @@ struct PanelButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Text(title).font(JarvisFont.body(13.5, 500))
+                Text(title)
                 Image(systemName: symbol).font(.system(size: 13, weight: .semibold))
             }
-            .foregroundStyle(JarvisTheme.text1)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .background(JarvisTheme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(JarvisTheme.accent.opacity(0.55), lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 12))
+            .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(JVButtonStyle(kind: .quiet, size: .large))
         .padding(.top, 14)
     }
 }
@@ -439,21 +393,20 @@ struct TileGrid: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Image(systemName: tile.symbol)
                         .font(.system(size: 15))
-                        .foregroundStyle(JarvisTheme.accent)
+                        .foregroundStyle(JV.accentText)
                         .accessibilityHidden(true)
                     Text(tile.value)
-                        .font(JarvisFont.body(15, 500))
-                        .foregroundStyle(JarvisTheme.text1)
+                        .font(JV.number(17, .semibold))
+                        .foregroundStyle(JV.textPrimary)
                         .lineLimit(2)
                         .minimumScaleFactor(0.8)
                     Text(tile.label)
-                        .font(JarvisFont.body(11))
-                        .foregroundStyle(JarvisTheme.text6)
+                        .font(JV.font(13))
+                        .foregroundStyle(JV.textSecondary)
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
-                .background(JarvisTheme.tile, in: RoundedRectangle(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).stroke(JarvisTheme.accent.opacity(0.3), lineWidth: 1))
+                .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
                 .accessibilityElement(children: .combine)
             }
         }
@@ -477,26 +430,25 @@ struct ActivityRowView: View {
         HStack(spacing: 12) {
             Image(systemName: row.symbol)
                 .font(.system(size: 15))
-                .foregroundStyle(JarvisTheme.text2)
+                .foregroundStyle(JV.textSecondary)
                 .frame(width: 36, height: 36)
-                .background(Color(red: 6 / 255.0, green: 30 / 255.0, blue: 24 / 255.0).opacity(0.9), in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(JarvisTheme.accent.opacity(0.2), lineWidth: 1))
+                .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(row.title)
-                    .font(JarvisFont.body(12.5, 500))
-                    .foregroundStyle(JarvisTheme.text1)
+                    .font(JV.font(15, .medium))
+                    .foregroundStyle(JV.textPrimary)
                     .lineLimit(1)
                 if let detail = row.detail, !detail.isEmpty {
                     Text(detail)
-                        .font(JarvisFont.body(11))
-                        .foregroundStyle(JarvisTheme.text6)
+                        .font(JV.font(13))
+                        .foregroundStyle(JV.textSecondary)
                         .lineLimit(2)
                 }
             }
             Spacer(minLength: 4)
             if let time = row.time, !time.isEmpty {
-                Text(time).font(JarvisFont.body(11)).foregroundStyle(JarvisTheme.text6)
+                Text(time).font(JV.number(13)).foregroundStyle(JV.textSecondary)
             }
             StatusDot(tone: row.tone)
         }
@@ -518,12 +470,12 @@ struct ActivityList: View {
         VStack(spacing: 0) {
             if rows.isEmpty {
                 Text(emptyText)
-                    .font(JarvisFont.body(12.5))
-                    .foregroundStyle(JarvisTheme.text5)
+                    .font(JV.font(15))
+                    .foregroundStyle(JV.textSecondary)
                     .frame(maxWidth: .infinity, minHeight: 58)
             }
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                if index > 0 { Divider().overlay(JarvisTheme.accent.opacity(0.16)) }
+                if index > 0 { Divider().overlay(JV.separator) }
                 if let onSelect {
                     Button { onSelect(row) } label: { ActivityRowView(row: row).contentShape(Rectangle()) }
                         .buttonStyle(.plain)
@@ -532,8 +484,7 @@ struct ActivityList: View {
                 }
             }
         }
-        .background(JarvisTheme.tile.opacity(0.75), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(JarvisTheme.accent.opacity(0.3), lineWidth: 1))
+        .jvCard(padding: 0)
     }
 }
 
@@ -552,20 +503,19 @@ struct UnavailableState: View {
         HStack(alignment: .top, spacing: 16) {
             Image(systemName: symbol)
                 .font(.system(size: 17))
-                .foregroundStyle(JarvisTheme.text5)
+                .foregroundStyle(JV.textSecondary)
                 .frame(width: 40, height: 40)
-                .overlay(Circle().stroke(JarvisTheme.accent.opacity(0.3), lineWidth: 1.5))
+                .background(JV.bgSunken, in: Circle())
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(JarvisFont.body(13, 500)).foregroundStyle(JarvisTheme.text1)
-                Text(kindLabel.uppercased())
-                    .font(JarvisFont.body(11))
-                    .tracking(2.2)
-                    .foregroundStyle(JarvisTheme.text5)
+                Text(title).font(JV.font(15, .semibold)).foregroundStyle(JV.textPrimary)
+                Text(kindLabel)
+                    .font(JV.font(13, .medium))
+                    .foregroundStyle(JV.textSecondary)
                 if let detail {
                     Text(detail)
-                        .font(JarvisFont.body(12))
-                        .foregroundStyle(JarvisTheme.text4)
+                        .font(JV.font(13))
+                        .foregroundStyle(JV.textSecondary)
                         .lineSpacing(3)
                         .padding(.top, 4)
                         .fixedSize(horizontal: false, vertical: true)
@@ -575,8 +525,9 @@ struct UnavailableState: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 16)
-        .background(JarvisTheme.tile.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(JarvisTheme.accent.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+        .background(JV.bgSurface, in: RoundedRectangle(cornerRadius: JV.Radius.lg, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: JV.Radius.lg, style: .continuous)
+            .strokeBorder(JV.border, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
         .accessibilityElement(children: .combine)
     }
 
@@ -641,16 +592,16 @@ struct ChipRow: View {
                     Button { selection = chip.id } label: {
                         HStack(spacing: 7) {
                             Image(systemName: chip.symbol).font(.system(size: compact ? 12 : 14))
-                            Text(chip.label).font(JarvisFont.body(compact ? 12 : 13, selected ? 500 : 400))
+                            Text(chip.label).font(JV.font(compact ? 13 : 14, .medium))
                         }
-                        .foregroundStyle(selected ? JarvisTheme.text1 : JarvisTheme.text4)
+                        .foregroundStyle(selected ? JV.accentText : JV.textSecondary)
                         .padding(.horizontal, compact ? 12 : 14)
                         .frame(minHeight: compact ? 36 : 40)
-                        .background(selected ? JarvisTheme.accent.opacity(compact ? 0.1 : 0.14) : (compact ? Color.clear : JarvisTheme.control),
-                                    in: RoundedRectangle(cornerRadius: compact ? 10 : 20))
-                        .overlay(RoundedRectangle(cornerRadius: compact ? 10 : 20)
-                            .stroke(selected ? JarvisTheme.accent : JarvisTheme.accent.opacity(compact ? 0.2 : 0.3), lineWidth: selected ? 1.5 : 1))
-                        .contentShape(RoundedRectangle(cornerRadius: compact ? 10 : 20))
+                        .background(selected ? JV.bgSelected : (compact ? Color.clear : JV.bgSunken),
+                                    in: RoundedRectangle(cornerRadius: compact ? JV.Radius.md : JV.Radius.xl, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: compact ? JV.Radius.md : JV.Radius.xl, style: .continuous)
+                            .strokeBorder(selected ? JV.accentBorder : (compact ? JV.border : Color.clear), lineWidth: 1))
+                        .contentShape(RoundedRectangle(cornerRadius: compact ? JV.Radius.md : JV.Radius.xl, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(chip.label)
@@ -666,63 +617,57 @@ struct ChipRow: View {
     }
 }
 
-/// Shared layout of every node page: small orb, satellite selector and the
-/// page's own content for the selected satellite.
+/// Shared layout of every node page: satellite selector and the page's own
+/// content for the selected satellite.
 struct NodeScaffold<Content: View>: View {
     let title: String
     let subtitle: String
     let items: [NodeItem]
     @Binding var selection: String
-    let mood: Mood
     let content: Content
 
-    init(title: String, subtitle: String, items: [NodeItem], selection: Binding<String>, mood: Mood,
+    init(title: String, subtitle: String, items: [NodeItem], selection: Binding<String>,
          @ViewBuilder content: () -> Content) {
         self.title = title
         self.subtitle = subtitle
         self.items = items
         self._selection = selection
-        self.mood = mood
         self.content = content()
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                JarvisOrb(size: 120, mood: mood, showsLabel: false)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 40)
                 ChipRow(chips: items.map { ChipRow.Chip(id: $0.id, label: $0.label, symbol: $0.icon, accessibilityValue: $0.status) },
                         selection: $selection)
                 content
             }
             .padding(.horizontal, 16)
+            .padding(.top, 12)
             .padding(.bottom, 32)
         }
-        .background { JarvisBackdrop() }
+        .background(JV.bgPage)
         .jarvisNavigationBar(title: title, subtitle: subtitle)
     }
 }
 
 extension View {
-    /// Dark navigation bar with the page title in the display face and the
+    /// Navigation bar with a sentence-case title and subtitle and the
     /// profile/settings button.
     func jarvisNavigationBar(title: String, subtitle: String) -> some View {
-        navigationTitle(title.capitalized)
+        navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(JarvisTheme.background, for: .navigationBar)
+            .toolbarBackground(JV.bgPage, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    VStack(spacing: 3) {
-                        Text(title.uppercased())
-                            .font(JarvisFont.display(19))
-                            .tracking(6)
-                            .foregroundStyle(JarvisTheme.text1)
-                        Text(subtitle.uppercased())
-                            .font(JarvisFont.body(9))
-                            .tracking(2.4)
-                            .foregroundStyle(JarvisTheme.text5)
+                    VStack(spacing: 1) {
+                        Text(title)
+                            .font(JV.font(17, .semibold, relativeTo: .headline))
+                            .foregroundStyle(JV.textPrimary)
+                        Text(subtitle)
+                            .font(JV.font(12, relativeTo: .caption))
+                            .foregroundStyle(JV.textSecondary)
                     }
                     .lineLimit(1)
                     .accessibilityElement(children: .combine)
@@ -738,11 +683,21 @@ struct ProfileButton: View {
     var body: some View {
         NavigationLink(value: HubRoute.settings) {
             Image(systemName: "person.crop.circle")
-                .font(.system(size: 20))
-                .foregroundStyle(JarvisTheme.text1)
+                .font(.system(size: 22))
+                .foregroundStyle(JV.accentText)
                 .frame(width: 44, height: 44)
-                .overlay(Circle().stroke(JarvisTheme.accent.opacity(0.7), lineWidth: 1.5).padding(2))
         }
         .accessibilityLabel("Profile and settings")
+    }
+}
+
+private extension Color {
+    /// sRGB colour from a 0xRRGGBB literal (the orb's fixed palette).
+    init(hex: UInt32, opacity: Double = 1) {
+        self.init(.sRGB,
+                  red: Double((hex >> 16) & 0xFF) / 255,
+                  green: Double((hex >> 8) & 0xFF) / 255,
+                  blue: Double(hex & 0xFF) / 255,
+                  opacity: opacity)
     }
 }

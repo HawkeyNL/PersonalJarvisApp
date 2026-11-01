@@ -52,7 +52,7 @@ struct ConversationsPage: View {
 
     var body: some View {
         NodeScaffold(title: "Conversations", subtitle: "Everything you and Jarvis said", items: items,
-                     selection: $selected, mood: model.mood) {
+                     selection: $selected) {
             if let current = items.first(where: { $0.id == selected }) {
                 if selected == "all" || selected == "week" {
                     NodePanel(item: current) {
@@ -75,13 +75,13 @@ struct ConversationsPage: View {
                         ActivityList(rows: Array(rows.prefix(5)), emptyText: "No conversations yet.", onSelect: open)
                     } else {
                         TextField("Search conversations", text: $query)
-                            .font(JarvisFont.body(13))
+                            .font(JV.font(15))
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                            .padding(.horizontal, 14)
+                            .padding(.horizontal, 12)
                             .frame(minHeight: 44)
-                            .background(JarvisTheme.control, in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(JarvisTheme.accent.opacity(0.3), lineWidth: 1))
+                            .background(JV.bgSurface, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous).strokeBorder(JV.borderStrong, lineWidth: 1))
                         ActivityList(rows: rows, emptyText: "No conversations match.", onSelect: open)
                     }
                 } else {
@@ -130,7 +130,7 @@ struct AgentsPage: View {
     }
 
     var body: some View {
-        NodeScaffold(title: "Agents", subtitle: "Your personal AI system", items: items, selection: $selected, mood: model.mood) {
+        NodeScaffold(title: "Agents", subtitle: "Your personal AI system", items: items, selection: $selected) {
             if let state = UnavailableState.forSource(source, title: "Agents", symbol: "person.2", forbidden: "Agents are turned off in Core.") {
                 state
             } else if let response, response.agents.isEmpty {
@@ -142,8 +142,8 @@ struct AgentsPage: View {
                 NodePanel(item: current) {
                     if isTrader(agent) {
                         Text("Trading opens in the desktop app.")
-                            .font(JarvisFont.italic(12))
-                            .foregroundStyle(JarvisTheme.text5)
+                            .font(JV.font(13))
+                            .foregroundStyle(JV.textSecondary)
                             .padding(.top, 6)
                     }
                 }
@@ -228,7 +228,7 @@ struct TasksPage: View {
     }
 
     var body: some View {
-        NodeScaffold(title: "Tasks", subtitle: "What Jarvis is working on", items: items, selection: $selected, mood: model.mood) {
+        NodeScaffold(title: "Tasks", subtitle: "What Jarvis is working on", items: items, selection: $selected) {
             if let current = items.first(where: { $0.id == selected }) {
                 NodePanel(item: current)
                 switch selected {
@@ -246,8 +246,8 @@ struct TasksPage: View {
                     if let state = UnavailableState.forSource(pending, title: "Approvals", symbol: "exclamationmark.triangle",
                                                               forbidden: "Agent actions are turned off in Core.") { state }
                     Text("Read the whole action first. Approving signs exactly what is shown with this iPhone's device key; anything this app cannot show in full can only be denied here.")
-                        .font(JarvisFont.body(12))
-                        .foregroundStyle(JarvisTheme.text5)
+                        .font(JV.font(13))
+                        .foregroundStyle(JV.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                     if waiting.isEmpty {
                         ActivityList(rows: [], emptyText: "Nothing is waiting for you.")
@@ -330,9 +330,9 @@ struct AgentActionCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(verbatim: title).font(JarvisFont.body(14, 600)).foregroundStyle(JarvisTheme.text1)
+                Text(verbatim: title).font(JV.font(15, .semibold)).foregroundStyle(JV.textPrimary)
                 Spacer()
-                Text(verbatim: time).font(JarvisFont.body(11)).foregroundStyle(JarvisTheme.text5)
+                Text(verbatim: time).font(JV.number(13)).foregroundStyle(JV.textSecondary)
             }
             switch review {
             case let .approvable(.writeFile(path, content), _):
@@ -340,33 +340,30 @@ struct AgentActionCard: View {
                 // Whether the file existed is Home Node state, not part of what is signed.
                 if let state = item.preview?.split(separator: "\n", omittingEmptySubsequences: false).first, !state.isEmpty {
                     Text(verbatim: "When proposed (not signed): " + AgentReview.visible(String(state), keepNewlines: false))
-                        .font(JarvisFont.body(12)).foregroundStyle(JarvisTheme.text5)
+                        .font(JV.font(13)).foregroundStyle(JV.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 field("Content \u{00B7} \(content.utf8.count) bytes", AgentReview.visible(content))
             case let .refused(reason, raw):
-                Text(verbatim: reason).font(JarvisFont.body(12)).foregroundStyle(JarvisTheme.warn)
+                Text(verbatim: reason).font(JV.font(13)).foregroundStyle(JV.negativeText)
                     .fixedSize(horizontal: false, vertical: true)
                 if let raw { field("Raw action", AgentReview.visible(raw)) }
             }
             if let decisionError {
-                Text(verbatim: decisionError).font(JarvisFont.body(12)).foregroundStyle(JarvisTheme.danger)
+                Text(verbatim: decisionError).font(JV.font(13)).foregroundStyle(JV.dangerText)
             }
             HStack(spacing: 10) {
                 Button(busy ? "Verifying\u{2026}" : "Deny", role: .destructive) { Task { await decide(approve: false) } }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(JVButtonStyle(kind: .secondary))
                 Spacer()
                 if case .approvable = review {
                     Button("Approve") { Task { await decide(approve: true) } }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(JVButtonStyle())
                 }
             }
-            .font(JarvisFont.body(13, 500))
             .disabled(busy)
         }
-        .padding(12)
-        .background(JarvisTheme.tile, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(JarvisTheme.warn.opacity(0.4), lineWidth: 1))
+        .jvCard(padding: 12, border: JV.negativeSolid)
     }
 
     private var title: String {
@@ -384,11 +381,11 @@ struct AgentActionCard: View {
                 .environment(\.layoutDirection, .leftToRight)
                 .multilineTextAlignment(.leading)
                 .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(JarvisTheme.text1)
+                .foregroundStyle(JV.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
-                .background(JarvisTheme.tile, in: RoundedRectangle(cornerRadius: 10))
+                .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
         }
     }
 
@@ -449,7 +446,7 @@ struct IntegrationsPage: View {
     }
 
     var body: some View {
-        NodeScaffold(title: "Integrations", subtitle: "Brains, models and tools", items: items, selection: $selected, mood: model.mood) {
+        NodeScaffold(title: "Integrations", subtitle: "Brains, models and tools", items: items, selection: $selected) {
             if let current = items.first(where: { $0.id == selected }) {
                 switch selected {
                 case "brains":
@@ -573,7 +570,7 @@ struct HealthPage: View {
     }
 
     var body: some View {
-        NodeScaffold(title: "System Health", subtitle: "Core, Home Node and usage", items: items, selection: $selected, mood: model.mood) {
+        NodeScaffold(title: "System health", subtitle: "Core, Home Node and usage", items: items, selection: $selected) {
             if let current = items.first(where: { $0.id == selected }) {
                 switch selected {
                 case "core":
@@ -721,7 +718,7 @@ struct MemoryPage: View {
     ]
 
     var body: some View {
-        NodeScaffold(title: "Memory", subtitle: "What Jarvis remembers", items: Self.items, selection: $selected, mood: model.mood) {
+        NodeScaffold(title: "Memory", subtitle: "What Jarvis remembers", items: Self.items, selection: $selected) {
             if let current = Self.items.first(where: { $0.id == selected }) {
                 NodePanel(item: current)
                 UnavailableState(title: current.title,
@@ -757,7 +754,7 @@ struct ContextPage: View {
     }
 
     var body: some View {
-        NodeScaffold(title: "Context", subtitle: "Where and how Jarvis helps", items: items, selection: $selected, mood: model.mood) {
+        NodeScaffold(title: "Context", subtitle: "Where and how Jarvis helps", items: items, selection: $selected) {
             if let current = items.first(where: { $0.id == selected }) {
                 NodePanel(item: current)
                 if selected == "devices" {
@@ -772,7 +769,7 @@ struct ContextPage: View {
                         ])
                         NavigationLink(value: HubRoute.pairingApprovals) {
                             Label("Pairing requests", systemImage: "person.badge.key")
-                                .font(JarvisFont.body(14, 500))
+                                .font(JV.font(15, .medium))
                         }
                         Eyebrow(text: "Linked devices")
                         ActivityList(rows: list.map { device in
@@ -792,13 +789,13 @@ struct ContextPage: View {
                                     Label {
                                         Text(verbatim: revoking == device.id ? "Revoking…" : "Revoke \(PairingFingerprint.displayName(device.name, max: 40))")
                                     } icon: { Image(systemName: "xmark.circle") }
-                                        .font(JarvisFont.body(14, 500))
+                                        .font(JV.font(15, .medium))
                                 }
                                 .disabled(revoking != nil)
                             }
                         }
                         if let revokeError {
-                            Text(verbatim: revokeError).font(JarvisFont.body(12)).foregroundStyle(JarvisTheme.danger)
+                            Text(verbatim: revokeError).font(JV.font(13)).foregroundStyle(JV.dangerText)
                         }
                     }
                 } else {
@@ -861,7 +858,7 @@ struct PairingApprovalsPage: View {
                 }
                 if let state = UnavailableState.forSource(requests, title: "Pairing requests", symbol: "person.badge.key") { state }
                 if let decisionError {
-                    Text(verbatim: decisionError).font(JarvisFont.body(12)).foregroundStyle(JarvisTheme.danger)
+                    Text(verbatim: decisionError).font(JV.font(13)).foregroundStyle(JV.dangerText)
                 }
                 if let list = requests.value {
                     if list.isEmpty { ActivityList(rows: [], emptyText: "No devices are waiting for approval.") }
@@ -870,7 +867,7 @@ struct PairingApprovalsPage: View {
             }
             .padding(16)
         }
-        .background { JarvisBackdrop() }
+        .background(JV.bgPage)
         .jarvisNavigationBar(title: "Pairing requests", subtitle: "New devices waiting for you")
         // List reads share Core's five-per-minute pairing budget per IP with
         // candidates creating requests, so pull-to-refresh is throttled.
@@ -891,14 +888,14 @@ struct PairingApprovalsPage: View {
         let fingerprint = try? checked.get()
         return VStack(alignment: .leading, spacing: 8) {
             Text(verbatim: PairingFingerprint.displayName(item.device_name, max: 128))
-                .font(JarvisFont.body(15, 600))
-                .foregroundStyle(JarvisTheme.text1)
+                .font(JV.font(15, .semibold))
+                .foregroundStyle(JV.textPrimary)
             VStack(alignment: .leading, spacing: 4) {
                 detail("Platform", PairingFingerprint.displayName(item.platform, max: 32))
                 if let warning = PairingFingerprint.approverWarning(platform: item.platform) {
                     Text(verbatim: warning)
-                        .font(JarvisFont.body(12, 500))
-                        .foregroundStyle(JarvisTheme.warn)
+                        .font(JV.font(13, .medium))
+                        .foregroundStyle(JV.negativeText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 detail("Model", PairingFingerprint.displayName(item.model))
@@ -915,44 +912,41 @@ struct PairingApprovalsPage: View {
             case let .success(value):
                 Text(verbatim: PairingFingerprint.grouped(value))
                     .font(.system(.footnote, design: .monospaced))
-                    .foregroundStyle(JarvisTheme.text2)
+                    .foregroundStyle(JV.textPrimary)
                     .textSelection(.enabled)
                 Text("Compare it with the fingerprint the new device shows. Model, version, IP address and user agent are unverified hints.")
-                    .font(JarvisFont.body(12))
-                    .foregroundStyle(JarvisTheme.text5)
+                    .font(JV.font(13))
+                    .foregroundStyle(JV.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             case let .failure(error):
                 Text(verbatim: (error as? LocalizedError)?.errorDescription ?? "Invalid fingerprint.")
-                    .font(JarvisFont.body(12))
-                    .foregroundStyle(JarvisTheme.danger)
+                    .font(JV.font(13))
+                    .foregroundStyle(JV.dangerText)
             }
             if biometrics {
                 HStack(spacing: 10) {
                     Button("Deny", role: .destructive) { Task { await decide(item, approve: false) } }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(JVButtonStyle(kind: .secondary))
                     Spacer()
                     Button(busy == item.id ? "Verifying…" : "Approve") { Task { await decide(item, approve: true) } }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(JVButtonStyle())
                         .disabled(fingerprint == nil)
                 }
-                .font(JarvisFont.body(13, 500))
                 .disabled(busy != nil)
             }
         }
-        .padding(12)
-        .background(JarvisTheme.tile, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(JarvisTheme.warn.opacity(0.4), lineWidth: 1))
+        .jvCard(padding: 12, border: JV.negativeSolid)
     }
 
     private func detail(_ label: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(label)
-                .font(JarvisFont.body(12))
-                .foregroundStyle(JarvisTheme.text5)
+                .font(JV.font(13))
+                .foregroundStyle(JV.textSecondary)
                 .frame(width: 96, alignment: .leading)
             Text(verbatim: value)
-                .font(JarvisFont.body(13))
-                .foregroundStyle(JarvisTheme.text2)
+                .font(JV.font(13))
+                .foregroundStyle(JV.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -1002,7 +996,7 @@ struct VoicePage: View {
             }
             .padding(16)
         }
-        .background { JarvisBackdrop() }
+        .background(JV.bgPage)
         .jarvisNavigationBar(title: "Voice", subtitle: "Talk to Jarvis")
     }
 }
@@ -1023,7 +1017,7 @@ struct UnlockRequestsBanner: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let decisionError {
-                Text(verbatim: decisionError).font(JarvisFont.body(12)).foregroundStyle(JarvisTheme.danger)
+                Text(verbatim: decisionError).font(JV.font(13)).foregroundStyle(JV.dangerText)
             }
             ForEach(requests) { item in card(item) }
         }
@@ -1042,15 +1036,15 @@ struct UnlockRequestsBanner: View {
 
     private func card(_ item: UnlockRequestItem) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Unlock request").font(JarvisFont.body(14, 600)).foregroundStyle(JarvisTheme.text1)
+            Text("Unlock request").font(JV.font(15, .semibold)).foregroundStyle(JV.textPrimary)
             Text(verbatim: "\"\(PairingFingerprint.displayName(item.device_name, max: 40))\" (\(PairingFingerprint.displayName(item.platform, max: 16))) asks to unlock Jarvis. Approve only if you just asked on that device.")
-                .font(JarvisFont.body(12))
-                .foregroundStyle(JarvisTheme.text2)
+                .font(JV.font(13))
+                .foregroundStyle(JV.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             if let picking, picking.id == item.id {
                 Text("Pick the number shown on that device. A wrong number denies the request.")
-                    .font(JarvisFont.body(12))
-                    .foregroundStyle(JarvisTheme.text2)
+                    .font(JV.font(13))
+                    .foregroundStyle(JV.textPrimary)
                 HStack(spacing: 10) {
                     ForEach(picking.choices, id: \.self) { choice in
                         Button(UnlockCode.display(choice)) { Task { await pick(item, choice) } }
@@ -1063,19 +1057,16 @@ struct UnlockRequestsBanner: View {
             }
             HStack(spacing: 10) {
                 Button("Deny", role: .destructive) { Task { await decide(item, approve: false) } }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(JVButtonStyle(kind: .secondary))
                 Spacer()
                 if picking?.id != item.id {
                     Button(busy == item.id ? "Verifying…" : "Approve") { Task { await decide(item, approve: true) } }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(JVButtonStyle())
                 }
             }
-            .font(JarvisFont.body(13, 500))
             .disabled(busy != nil)
         }
-        .padding(12)
-        .background(JarvisTheme.tile, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(JarvisTheme.warn.opacity(0.4), lineWidth: 1))
+        .jvCard(padding: 12, border: JV.negativeSolid)
     }
 
     private func decide(_ item: UnlockRequestItem, approve: Bool) async {

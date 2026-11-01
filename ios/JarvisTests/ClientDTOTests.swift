@@ -845,12 +845,17 @@ final class EnrollmentInputTests: XCTestCase {
 
     @MainActor
     func testBrandAccentAndBundledIconArePresent() throws {
+        // The accent asset matches the accent-text token in both appearances.
         let accent = try XCTUnwrap(UIColor(named: "AccentColor"))
-        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
-        XCTAssertTrue(accent.getRed(&red, green: &green, blue: &blue, alpha: &alpha))
-        XCTAssertEqual(red, 46 / 255.0, accuracy: 0.001)
-        XCTAssertEqual(green, 230 / 255.0, accuracy: 0.001)
-        XCTAssertEqual(blue, 162 / 255.0, accuracy: 0.001)
+        for (style, rgba) in [(UIUserInterfaceStyle.light, JV.Token.accentText.rgba.light),
+                              (.dark, JV.Token.accentText.rgba.dark)] {
+            let color = accent.resolvedColor(with: UITraitCollection(userInterfaceStyle: style))
+            var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+            XCTAssertTrue(color.getRed(&red, green: &green, blue: &blue, alpha: &alpha))
+            XCTAssertEqual(red, CGFloat((rgba >> 24) & 0xFF) / 255, accuracy: 0.002)
+            XCTAssertEqual(green, CGFloat((rgba >> 16) & 0xFF) / 255, accuracy: 0.002)
+            XCTAssertEqual(blue, CGFloat((rgba >> 8) & 0xFF) / 255, accuracy: 0.002)
+        }
         let icons = try XCTUnwrap(Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any])
         let primary = try XCTUnwrap(icons["CFBundlePrimaryIcon"] as? [String: Any])
         XCTAssertEqual(primary["CFBundleIconName"] as? String, "AppIcon")

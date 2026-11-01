@@ -2,9 +2,16 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var model: JarvisAppModel
+    @AppStorage(Appearance.storageKey) private var appearance = Appearance.system
 
     var body: some View {
         List {
+            Section("Appearance") {
+                Picker("Appearance", selection: $appearance) {
+                    ForEach(Appearance.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+            }
             Section("Home Node") {
                 NavigationLink { HomeNodeSettingsView(model: model) } label: { Label("Connection", systemImage: "network") }
                 if model.isAuthenticated {
@@ -141,7 +148,7 @@ private struct PasswordChangeView: View {
             } footer: {
                 Text("Confirmed with Face ID or Touch ID. Every device is signed out after the change; sign in again with the new password.")
             }
-            if let error { Section { Text(verbatim: error).foregroundStyle(JarvisTheme.danger) } }
+            if let error { Section { Text(verbatim: error).foregroundStyle(JV.dangerText) } }
             Section {
                 Button(busy ? "Verifying…" : "Change password") { Task { await change() } }
                     .disabled(busy || current.isEmpty || new.isEmpty)
@@ -197,7 +204,7 @@ private struct PasswordResetView: View {
                 } footer: {
                     Text("Confirmed with Face ID or Touch ID, then by the owner as root on the Home Node. Nothing changes until then.")
                 }
-                if let error { Section { Text(verbatim: error).foregroundStyle(JarvisTheme.danger) } }
+                if let error { Section { Text(verbatim: error).foregroundStyle(JV.dangerText) } }
                 Section {
                     Button(busy ? "Verifying…" : "Reset password") { Task { await reset() } }
                         .disabled(busy || new.isEmpty)
@@ -292,8 +299,8 @@ private struct ResourcesSettingsView: View {
 private extension View {
     func settingsBackground() -> some View {
         scrollContentBackground(.hidden)
-            .background(JarvisTheme.background)
-            .toolbarBackground(JarvisTheme.background, for: .navigationBar)
+            .background(JV.bgPage)
+            .toolbarBackground(JV.bgPage, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
     }
 }

@@ -39,10 +39,11 @@
 	<string>Jarvis connects to your Home Node on the local network.</string>
 	<key>UIAppFonts</key>
 	<array>
-		<string>Exo2-Variable.ttf</string>
-		<string>Exo2-Italic-Variable.ttf</string>
-		<string>Rajdhani-Medium.ttf</string>
-		<string>Rajdhani-SemiBold.ttf</string>
+		<string>IBMPlexSans-Regular.ttf</string>
+		<string>IBMPlexSans-Medium.ttf</string>
+		<string>IBMPlexSans-SemiBold.ttf</string>
+		<string>IBMPlexMono-Regular.ttf</string>
+		<string>IBMPlexMono-Medium.ttf</string>
 	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>

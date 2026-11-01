@@ -16,7 +16,7 @@ struct RootView: View {
             if screen == .lock {
                 LockView(model: model)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(JarvisTheme.background)
+                    .background(JV.bgPage)
                     .ignoresSafeArea()
             } else {
                 NavigationStack(path: $path) {
@@ -29,7 +29,7 @@ struct RootView: View {
                             EnrollmentView(model: model)
                                 .navigationTitle("Jarvis")
                                 .navigationBarTitleDisplayMode(.inline)
-                                .toolbarBackground(JarvisTheme.background, for: .navigationBar)
+                                .toolbarBackground(JV.bgPage, for: .navigationBar)
                                 .toolbarBackground(.visible, for: .navigationBar)
                                 .toolbar { ToolbarItem(placement: .topBarTrailing) { ProfileButton() } }
                         }

@@ -58,7 +58,7 @@ struct HubView: View {
         Module(route: .conversations, title: "Conversations", symbol: "bubble.left", offset: CGSize(width: 0, height: -124)),
         Module(route: .memory, title: "Memory", symbol: "brain", offset: CGSize(width: 98, height: -76)),
         Module(route: .integrations, title: "Integrations", symbol: "powerplug", offset: CGSize(width: 120, height: 30)),
-        Module(route: .health, title: "System Health", symbol: "waveform.path.ecg", offset: CGSize(width: 62, height: 107)),
+        Module(route: .health, title: "System health", symbol: "waveform.path.ecg", offset: CGSize(width: 62, height: 107)),
         Module(route: .context, title: "Context", symbol: "folder", offset: CGSize(width: -62, height: 107)),
         Module(route: .tasks, title: "Tasks", symbol: "checkmark.circle", offset: CGSize(width: -120, height: 30)),
         Module(route: .agents, title: "Agents", symbol: "person.2", offset: CGSize(width: -98, height: -76)),
@@ -93,7 +93,7 @@ struct HubView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 32)
         }
-        .background { JarvisBackdrop() }
+        .background(JV.bgPage)
         .toolbar(.hidden, for: .navigationBar)
         .refreshable { await load() }
         .task(id: scenePhase) {
@@ -108,20 +108,13 @@ struct HubView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Circle()
-                .strokeBorder(JarvisTheme.accent, lineWidth: 3)
-                .frame(width: 28, height: 28)
-                .shadow(color: JarvisTheme.accent.opacity(0.7), radius: 6)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("JARVIS")
-                    .font(JarvisFont.display(18, semibold: false))
-                    .tracking(7.5)
-                    .foregroundStyle(Color(hex: 0xEAF7F1))
-                Text("YOUR SECOND MIND")
-                    .font(JarvisFont.body(9))
-                    .tracking(3)
-                    .foregroundStyle(JarvisTheme.text6)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Jarvis")
+                    .font(JV.font(28, .semibold, relativeTo: .largeTitle))
+                    .foregroundStyle(JV.textPrimary)
+                Text("Your second mind")
+                    .font(JV.font(13, relativeTo: .subheadline))
+                    .foregroundStyle(JV.textSecondary)
             }
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
@@ -139,12 +132,11 @@ struct HubView: View {
                 HStack(spacing: 14) {
                     Image(systemName: "waveform")
                         .font(.system(size: 18))
-                        .foregroundStyle(JarvisTheme.accent)
+                        .foregroundStyle(JV.accentText)
                         .accessibilityHidden(true)
                     Text("Ask Jarvis anything…")
-                        .font(JarvisFont.body(13))
-                        .tracking(1.8)
-                        .foregroundStyle(JarvisTheme.text6)
+                        .font(JV.font(15))
+                        .foregroundStyle(JV.textSecondary)
                     Spacer(minLength: 0)
                 }
                 .padding(.leading, 16)
@@ -155,35 +147,32 @@ struct HubView: View {
             NavigationLink(value: HubRoute.voice) {
                 Image(systemName: "mic")
                     .font(.system(size: 17))
-                    .foregroundStyle(JarvisTheme.accent)
+                    .foregroundStyle(JV.accentText)
                     .frame(width: 48, height: 48)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("Voice")
         }
         .buttonStyle(.plain)
-        .frame(height: 48)
-        .background(Color(red: 8 / 255.0, green: 26 / 255.0, blue: 22 / 255.0).opacity(0.7), in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(red: 160 / 255.0, green: 1, blue: 215 / 255.0).opacity(0.16), lineWidth: 1))
+        .frame(minHeight: 48)
+        .jvCard(padding: 0)
     }
 
     private var orbCluster: some View {
         ZStack {
-            Circle().stroke(Color(red: 150 / 255.0, green: 1, blue: 210 / 255.0).opacity(0.5), lineWidth: 1.3)
+            Circle().stroke(JV.border, lineWidth: 1)
                 .frame(width: 248, height: 248)
-            Circle().stroke(JarvisTheme.accent.opacity(0.18), lineWidth: 1)
-                .frame(width: 268, height: 268)
-            Circle().stroke(JarvisTheme.accent.opacity(0.2), style: StrokeStyle(lineWidth: 1, dash: [1, 6]))
+            Circle().stroke(JV.borderSubtle, style: StrokeStyle(lineWidth: 1, dash: [1, 6]))
                 .frame(width: 316, height: 316)
             JarvisOrb(size: 182, mood: model.mood)
             ForEach(Self.modules, id: \.title) { module in
                 NavigationLink(value: module.route) {
                     Image(systemName: module.symbol)
                         .font(.system(size: 18))
-                        .foregroundStyle(JarvisTheme.accent)
+                        .foregroundStyle(JV.accentText)
                         .frame(width: 46, height: 46)
-                        .background(Color(red: 3 / 255.0, green: 24 / 255.0, blue: 19 / 255.0).opacity(0.95), in: Circle())
-                        .overlay(Circle().stroke(JarvisTheme.accent.opacity(0.6), lineWidth: 1.5))
+                        .background(JV.bgSurface, in: Circle())
+                        .overlay(Circle().strokeBorder(JV.accentBorder, lineWidth: 1))
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
@@ -200,42 +189,45 @@ struct HubView: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("Jarvis \(update.version) is available")
-                        .font(JarvisFont.body(13, 600)).foregroundStyle(JarvisTheme.text5)
+                        .font(JV.font(15, .semibold)).foregroundStyle(JV.textPrimary)
                     Spacer()
-                    Button { model.dismissAppUpdate() } label: { Image(systemName: "xmark") }
-                        .accessibilityLabel("Dismiss update notice")
+                    Button { model.dismissAppUpdate() } label: {
+                        Image(systemName: "xmark").frame(minWidth: 44, minHeight: 44)
+                    }
+                    .foregroundStyle(JV.textSecondary)
+                    .accessibilityLabel("Dismiss update notice")
                 }
-                HStack(spacing: 8) {
-                    Button("Open in AltStore") { openURL(update.altstoreURL) }
-                    Button("Open in SideStore") { openURL(update.sidestoreURL) }
-                    Button("Downloads page") { openURL(update.downloadsURL) }
+                // One row when it fits, stacked otherwise (narrow width, large text).
+                ViewThatFits {
+                    HStack(spacing: 8) { updateLinks(update) }
+                    VStack(alignment: .leading, spacing: 8) { updateLinks(update) }
                 }
-                .font(JarvisFont.body(11, 600))
-                .buttonStyle(.bordered)
+                .buttonStyle(JVButtonStyle(kind: .secondary, size: .small))
             }
-            .padding(12)
-            .background(Color(red: 6 / 255.0, green: 22 / 255.0, blue: 18 / 255.0).opacity(0.75), in: RoundedRectangle(cornerRadius: 14))
+            .jvCard(padding: 12)
         }
+    }
+
+    @ViewBuilder private func updateLinks(_ update: IOSUpdateNotice) -> some View {
+        Button("Open in AltStore") { openURL(update.altstoreURL) }
+        Button("Open in SideStore") { openURL(update.sidestoreURL) }
+        Button("Downloads page") { openURL(update.downloadsURL) }
     }
 
     private var pill: some View {
         let status = statusPill(mood: model.mood, online: online)
         return HStack(spacing: 14) {
             StatusDot(tone: status.tone)
-                .frame(width: 26, height: 26)
-                .overlay(Circle().stroke(status.tone.color.opacity(0.6), lineWidth: 1.5))
             Text(status.label)
-                .font(JarvisFont.body(13, 600))
-                .tracking(1)
-                .foregroundStyle(status.tone.labelColor)
-            Rectangle().fill(Color(red: 160 / 255.0, green: 1, blue: 215 / 255.0).opacity(0.3)).frame(width: 1, height: 16)
-            Text(status.hint).font(JarvisFont.body(11)).foregroundStyle(JarvisTheme.text5)
+                .font(JV.font(14, .medium))
+                .foregroundStyle(status.tone.color)
+            Rectangle().fill(JV.separator).frame(width: 1, height: 16)
+            Text(status.hint).font(JV.font(13)).foregroundStyle(JV.textSecondary)
         }
-        .padding(.leading, 10)
-        .padding(.trailing, 18)
-        .frame(height: 44)
-        .background(Color(red: 6 / 255.0, green: 22 / 255.0, blue: 18 / 255.0).opacity(0.75), in: Capsule())
-        .overlay(Capsule().stroke(Color(red: 160 / 255.0, green: 1, blue: 215 / 255.0).opacity(0.16), lineWidth: 1))
+        .padding(.horizontal, 16)
+        .frame(minHeight: 44)
+        .background(JV.bgSurface, in: Capsule())
+        .overlay(Capsule().strokeBorder(JV.shadowRing, lineWidth: 1))
         .accessibilityElement(children: .combine)
     }
 

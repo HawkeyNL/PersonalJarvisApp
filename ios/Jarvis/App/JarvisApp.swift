@@ -5,17 +5,18 @@ struct JarvisApp: App {
     @UIApplicationDelegateAdaptor(JarvisAppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model = JarvisAppModel()
+    @AppStorage(Appearance.storageKey) private var appearance = Appearance.system
 
     var body: some Scene {
         WindowGroup {
             RootView(model: model)
                 .overlay {
                     if scenePhase != .active {
-                        JarvisTheme.background.ignoresSafeArea().accessibilityLabel("Jarvis locked")
+                        JV.bgPage.ignoresSafeArea().accessibilityLabel("Jarvis locked")
                     }
                 }
-                .tint(JarvisTheme.accent)
-                .preferredColorScheme(.dark)
+                .tint(JV.accentText)
+                .onChange(of: appearance, initial: true) { _, value in Appearance.apply(value) }
                 .task { await model.start() }
         }
         .onChange(of: scenePhase) { _, phase in
