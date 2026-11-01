@@ -423,7 +423,8 @@ const isDividend = (d: unknown) =>
 const isDeposit = (m: unknown) =>
   m === undefined || m === null || (isObj(m) && isStr(m.amount) && isStr(m.next_date) && Number.isInteger(m.day_of_month));
 const isSkipped = (s: unknown) =>
-  isObj(s) && isStr(s.symbol) && s.symbol.length >= 1 && s.symbol.length <= 32
+  // Core counts code points, not UTF-16 units.
+  isObj(s) && isStr(s.symbol) && [...s.symbol].length >= 1 && [...s.symbol].length <= 32
   && (s.currency === undefined || (isStr(s.currency) && /^[A-Z]{3}$/.test(s.currency)));
 /** Both absent, or a count of 1..positions limit naming 1..min(count, 50). */
 const isSkippedSet = (count: unknown, list: unknown) =>

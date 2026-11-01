@@ -199,6 +199,9 @@ test("positions Core left out are guarded and named", () => {
   const many = { ...portfolio, skipped_count: 60, skipped_positions: Array(LIMITS.skipped).fill({ symbol: "A", currency: "USD" }) };
   assert.match(skippedText(readPortfolio(many)), /^60 positions not shown .* and 10 more$/);
   assert.ok(readPortfolio(portfolioFixture("worst")).skipped_positions.length > 0);
+  // 32 astral characters are 32 code points (Core's bound) but 64 UTF-16 units.
+  const astral = { ...one, skipped_positions: [{ symbol: "\u{1F600}".repeat(32) }] };
+  assert.ok(readPortfolio(astral));
   const bad = [
     { ...portfolio, skipped_count: 1 },
     { ...portfolio, skipped_positions: [{ symbol: "A" }] },
@@ -212,6 +215,7 @@ test("positions Core left out are guarded and named", () => {
     { ...skipped, skipped_positions: [null] },
     { ...skipped, skipped_positions: [{ symbol: "" }] },
     { ...skipped, skipped_positions: [{ symbol: "X".repeat(33) }] },
+    { ...skipped, skipped_positions: [{ symbol: "\u{1F600}".repeat(33) }] },
     { ...skipped, skipped_positions: [{ symbol: 7 }] },
     { ...skipped, skipped_positions: [{ symbol: "A", currency: "usd" }] },
     { ...skipped, skipped_positions: [{ symbol: "A", currency: null }] },
