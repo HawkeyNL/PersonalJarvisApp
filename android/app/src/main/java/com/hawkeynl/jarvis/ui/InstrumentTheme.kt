@@ -179,10 +179,12 @@ object JvTheme {
         @Composable @ReadOnlyComposable get() = LocalJvColors.current
 }
 
-/** Material3 roles filled from the same tokens, so stock components match. */
+/** Material3 roles filled from the same tokens, so stock components match. In dark mode
+ *  primary and error are the light text tokens, as Material does: stock text buttons and
+ *  focused field labels draw in primary on raised surfaces and need AA contrast there. */
 internal fun JvColors.toColorScheme(): ColorScheme = (if (isDark) darkColorScheme() else lightColorScheme()).copy(
-    primary = accentSolid,
-    onPrimary = textOnAccent,
+    primary = if (isDark) accentText else accentSolid,
+    onPrimary = if (isDark) textInverse else textOnAccent,
     primaryContainer = accentSubtle,
     onPrimaryContainer = accentText,
     inversePrimary = accentText,
@@ -203,8 +205,8 @@ internal fun JvColors.toColorScheme(): ColorScheme = (if (isDark) darkColorSchem
     surfaceTint = bgSurface, // equal to surface: tonal elevation adds no tint
     inverseSurface = textPrimary,
     inverseOnSurface = textInverse,
-    error = dangerSolid,
-    onError = textOnAccent,
+    error = if (isDark) dangerText else dangerSolid,
+    onError = if (isDark) textInverse else textOnAccent,
     errorContainer = dangerSubtle,
     onErrorContainer = dangerText,
     outline = borderStrong,
@@ -214,7 +216,7 @@ internal fun JvColors.toColorScheme(): ColorScheme = (if (isDark) darkColorSchem
     surfaceDim = bgSunken,
     surfaceContainerLowest = bgSurface,
     surfaceContainerLow = bgSurface,
-    surfaceContainer = bgSurface,
+    surfaceContainer = bgRaised, // menus: must stand out from panels in dark mode
     surfaceContainerHigh = bgRaised,
     surfaceContainerHighest = bgRaised,
 )

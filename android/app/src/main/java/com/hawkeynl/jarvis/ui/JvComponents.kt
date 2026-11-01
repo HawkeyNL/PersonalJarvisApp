@@ -33,6 +33,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -124,16 +125,24 @@ fun ProfileButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     CircleIconButton(JvIcon.USER, "Settings", onClick, modifier, tint = JvTheme.colors.textPrimary)
 }
 
-/** Primary full-width button. */
+/** Primary full-width button. Disabled it keeps a readable label ("Verifying…") and an outline. */
 @Composable
-fun ActionButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, arrow: Boolean = false) {
+fun ActionButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    arrow: Boolean = false,
+    style: TextStyle = MaterialTheme.typography.labelLarge,
+) {
     val c = JvTheme.colors
-    val content = if (enabled) c.textOnAccent else c.textDisabled
+    val content = if (enabled) c.textOnAccent else c.textSecondary
     Row(
         modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
             .pressScale(enabled = enabled)
+            .then(if (enabled) Modifier else Modifier.border(1.dp, c.border, JvShapes.md))
             .clip(JvShapes.md)
             .background(if (enabled) c.accentSolid else c.bgSunken)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
@@ -141,7 +150,7 @@ fun ActionButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifie
         horizontalArrangement = Arrangement.spacedBy(JvSpace.sm, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text, color = content, style = MaterialTheme.typography.labelLarge)
+        Text(text, color = content, style = style)
         if (arrow) JvIconView(JvIcon.ARROW_RIGHT, tint = content, size = 16.dp)
     }
 }
@@ -191,9 +200,15 @@ fun ChipRow(items: List<ChipItem>, selected: String, onSelect: (String) -> Unit,
             val on = item.id == selected
             Row(
                 Modifier
-                    .height(if (small) 40.dp else 44.dp)
+                    .heightIn(min = 44.dp)
                     .pressScale()
-                    .then(if (on || small) Modifier else Modifier.shadowBorder(shape))
+                    .then(
+                        when {
+                            on -> Modifier.border(1.dp, c.accentSolid, shape)
+                            small -> Modifier
+                            else -> Modifier.shadowBorder(shape)
+                        },
+                    )
                     .clip(shape)
                     .background(if (on) c.bgSelected else if (small) Color.Transparent else c.bgSurface)
                     .selectable(selected = on, role = Role.Tab, onClick = { onSelect(item.id) })

@@ -1,6 +1,7 @@
 package com.hawkeynl.jarvis.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -77,7 +79,10 @@ internal fun SettingsScreen(
                 }
                 Column {
                     Text("Speech rate: ${state.voiceRate}× (next fragments)", style = MaterialTheme.typography.bodyMedium)
-                    Slider(value = state.voiceRate, onValueChange = actions::setVoiceRate, valueRange = 0.5f..2f, steps = 5)
+                    Slider(
+                        value = state.voiceRate, onValueChange = actions::setVoiceRate, valueRange = 0.5f..2f, steps = 5,
+                        colors = SliderDefaults.colors(inactiveTrackColor = JvTheme.colors.borderStrong),
+                    )
                 }
                 Box {
                     ActionButton(
@@ -126,7 +131,7 @@ private fun ThemeChooser(mode: ThemeMode, onChange: (ThemeMode) -> Unit) {
                     Modifier
                         .weight(1f)
                         .heightIn(min = 44.dp)
-                        .then(if (on) Modifier.shadowBorder(JvShapes.sm) else Modifier)
+                        .then(if (on) Modifier.border(1.dp, c.accentSolid, JvShapes.sm) else Modifier)
                         .clip(JvShapes.sm)
                         .background(if (on) c.bgSurface else Color.Transparent)
                         .selectable(selected = on, role = Role.RadioButton, onClick = { onChange(option) }),
