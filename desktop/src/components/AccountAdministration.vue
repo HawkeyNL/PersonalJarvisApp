@@ -61,22 +61,22 @@ onBeforeUnmount(() => { currentPassword.value = ""; newPassword.value = ""; });
         <label>New account password
           <input v-model="newPassword" type="password" autocomplete="new-password" minlength="15" maxlength="1024" required />
         </label>
-        <button :disabled="busy">Set and sign password</button>
+        <button class="btn btn-primary" :disabled="busy">Set and sign password</button>
       </form>
     </template>
     <p v-else>Change the account password or revoke a device on a Mac with Touch ID. On the Home Node, <code>sudo jarvis devices revoke &lt;id&gt;</code> also revokes a device.</p>
     <h3>Trusted devices</h3>
-    <button :disabled="busy" @click="refresh">Refresh</button>
+    <button class="btn btn-secondary btn-sm" :disabled="busy" @click="refresh">Refresh</button>
     <ul>
       <li v-for="device in devices" :key="device.id">
         <span>{{ device.name }} · {{ device.platform }} · {{ device.status }} · <code>{{ device.id }}</code></span>
-        <button v-if="signer && device.status === 'active'" :disabled="busy" @click="confirmation = device">Revoke…</button>
+        <button v-if="signer && device.status === 'active'" class="btn btn-secondary btn-sm" :disabled="busy" @click="confirmation = device">Revoke…</button>
       </li>
     </ul>
     <div v-if="signer && confirmation" role="alertdialog" aria-label="Revoke device">
       <p>Revoke {{ confirmation.name }}? This ends that device's sessions.</p>
-      <button :disabled="busy" @click="confirmation = null">Cancel</button>
-      <button :disabled="busy" @click="confirmRevoke">Confirm with Touch ID</button>
+      <button class="btn btn-secondary" :disabled="busy" @click="confirmation = null">Cancel</button>
+      <button class="btn btn-danger" :disabled="busy" @click="confirmRevoke">Confirm with Touch ID</button>
     </div>
     <p v-if="message" role="status">{{ message }}</p>
   </section>

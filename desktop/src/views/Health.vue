@@ -440,7 +440,7 @@ onUnmounted(() => {
           the Core and <code>Jarvis.md</code> stay manual, changed only by you.
         </p>
         <div class="sd-actions">
-          <button v-if="!adviceBusy" type="button" class="primary-btn" @click="askSelfImprove">Ask for proposals</button>
+          <button v-if="!adviceBusy" type="button" class="btn btn-primary" @click="askSelfImprove">Ask for proposals</button>
           <template v-else>
             <span class="thinking">Jarvis is thinking<span class="dots"><span></span><span></span><span></span></span></span>
             <span class="sd-elapsed">{{ elapsedLabel }}</span>
@@ -509,19 +509,17 @@ onUnmounted(() => {
 .charts > div { min-width: 0; }
 .lists { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
-.ghost-btn, .primary-btn, .link-btn { font: inherit; font-size: var(--fs-13); font-weight: 400; cursor: pointer; }
+.ghost-btn, .link-btn { font: inherit; font-size: var(--fs-13); font-weight: 400; cursor: pointer; }
 .ghost-btn {
   height: 40px; padding: 0 20px; border-radius: var(--r-10); border: 1px solid rgba(var(--accent-rgb), 0.5);
   background: var(--bg-surface); color: var(--text-1);
 }
 .ghost-btn:hover { filter: none; border-color: var(--accent); }
 .ghost-btn:disabled { opacity: 0.5; cursor: default; }
-.primary-btn { height: 40px; padding: 0 20px; border-radius: var(--r-10); background: var(--accent-solid); color: var(--text-on-accent); font-weight: 600; }
 .link-btn { background: transparent; border: none; padding: 0; color: var(--text-2); font-size: 12px; }
 
 .models { min-width: 0; }
 .models :deep(input), .models :deep(select) { background: var(--field-bg); border: 1px solid var(--line-a30); color: var(--text-1); border-radius: var(--r-8); }
-.models :deep(button) { background: var(--bg-surface); color: var(--text-1); border: 1px solid rgba(var(--accent-rgb), 0.5); font-weight: 400; }
 .models :deep(li) { border-bottom-color: var(--line-a18); }
 
 .improve { display: flex; flex-direction: column; gap: 10px; max-width: 900px; }

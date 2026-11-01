@@ -61,7 +61,7 @@ onMounted(reload);
         <option value="enabled">Allowed</option>
         <option value="disabled">Blocked</option>
       </select>
-      <button :disabled="busy" @click="reload">Refresh</button>
+      <button class="btn btn-secondary" :disabled="busy" @click="reload">Refresh</button>
     </div>
     <p role="status">{{ notice }}</p>
     <p v-if="policy && !mutable">Model control is unavailable on this Core, or the active policy differs. Use the trusted CLI to repair it.</p>
@@ -69,22 +69,22 @@ onMounted(reload);
       <li v-for="model in rows" :key="model.provider + '/' + model.model">
         <div><strong>{{ model.model }}</strong><small>{{ model.provider }}<template v-if="model.route"> · route {{ model.route }}</template></small></div>
         <span class="access-badge" :class="model.enabled ? 'access-enabled' : 'access-disabled'">{{ model.enabled ? "Allowed" : "Blocked" }}</span>
-        <button :disabled="busy || !mutable || !signer" @click="selected = model">{{ model.enabled ? "Disable" : "Enable" }}</button>
+        <button class="btn btn-secondary btn-sm" :disabled="busy || !mutable || !signer" @click="selected = model">{{ model.enabled ? "Disable" : "Enable" }}</button>
       </li>
     </ul>
     <p v-if="policy && !matches.length">No models match this search or filter.</p>
     <div class="model-toolbar">
-      <button :disabled="page === 0 || busy" @click="page--">Previous</button>
+      <button class="btn btn-secondary" :disabled="page === 0 || busy" @click="page--">Previous</button>
       <span>{{ page + 1 }} / {{ Math.max(1, Math.ceil(matches.length / 25)) }}</span>
-      <button :disabled="(page + 1) * 25 >= matches.length || busy" @click="page++">Next</button>
+      <button class="btn btn-secondary" :disabled="(page + 1) * 25 >= matches.length || busy" @click="page++">Next</button>
     </div>
     <div v-if="selected" class="model-confirm" role="dialog" aria-modal="true" aria-label="Confirm model change" @keydown.esc="selected = null">
       <div>
         <h3>{{ selected.enabled ? "Revoke model access?" : "Allow model access?" }}</h3>
         <p>{{ selected.provider }} / {{ selected.model }}</p>
         <p>This changes the shared Home Node policy for all devices. It does not pick an active model for running requests, and those are not cancelled.</p>
-        <button autofocus @click="selected = null">Cancel</button>
-        <button @click="confirm">Confirm change</button>
+        <button class="btn btn-secondary" autofocus @click="selected = null">Cancel</button>
+        <button class="btn btn-primary" @click="confirm">Confirm change</button>
       </div>
     </div>
   </section>
@@ -106,5 +106,4 @@ small { display: block; color: var(--text-secondary); }
 .access-disabled { color: var(--text-secondary); border-color: var(--border-strong); background: var(--bg-sunken); }
 .model-confirm { position: fixed; inset: 0; z-index: 100; background: var(--bg-scrim); display: grid; place-items: center; padding: 20px; }
 .model-confirm > div { max-width: 520px; background: var(--bg-raised); border: 1px solid var(--border); padding: 24px; border-radius: 12px; }
-button { padding: 8px 12px; }
 </style>

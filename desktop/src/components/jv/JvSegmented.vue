@@ -20,7 +20,7 @@ function onKey(event: KeyboardEvent, index: number) {
 </script>
 
 <template>
-  <div class="jv-seg sub" role="tablist" :aria-label="label">
+  <div class="jv-seg seg" role="tablist" :aria-label="label">
     <button
       v-for="(item, i) in items"
       :key="item.id"
@@ -30,7 +30,6 @@ function onKey(event: KeyboardEvent, index: number) {
       :aria-selected="item.id === modelValue"
       :aria-controls="controls"
       :tabindex="item.id === modelValue ? 0 : -1"
-      :class="{ on: item.id === modelValue }"
       @click="emit('update:modelValue', item.id)"
       @keydown="onKey($event, i)"
     >
@@ -41,29 +40,16 @@ function onKey(event: KeyboardEvent, index: number) {
 </template>
 
 <style scoped>
+/* Look comes from the global .seg (components.css); this only lays it out. */
 .jv-seg { display: flex; align-items: stretch; min-width: 0; }
 button {
-  flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 12px;
-  background: transparent; border: 1.5px solid transparent; color: var(--text-3);
-  font: inherit; font-weight: 400; letter-spacing: 0.03em; cursor: pointer; white-space: nowrap;
+  flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap;
 }
-button:hover { filter: none; color: var(--text-0); }
-button :deep(svg) { flex: none; color: var(--text-secondary); }
-button.on { color: var(--text-primary); font-weight: 500; border-color: var(--accent); }
-button.on :deep(svg) { color: var(--accent); }
+button :deep(svg) { flex: none; width: 18px; height: 18px; }
 button span { overflow: hidden; text-overflow: ellipsis; }
-
-.sub {
-  height: 40px; box-sizing: border-box; border: 1px solid var(--line-a30); border-radius: var(--r-12);
-  background: var(--bg-surface);
-}
-.sub button { font-size: var(--fs-13); border-radius: var(--r-12); }
-.sub button + button { border-left: 1px solid var(--line-a18); }
-.sub button.on { background: rgba(var(--accent-rgb), 0.1); border: 1.5px solid var(--accent); box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.35); }
-.sub button :deep(svg) { width: 18px; height: 18px; }
 
 @media (max-width: 1099px), (max-height: 759px) {
   .jv-seg { overflow-x: auto; scrollbar-width: none; }
-  button { flex: 1 0 auto; padding: 0 12px; gap: 8px; }
+  button { flex: 1 0 auto; }
 }
 </style>

@@ -26,8 +26,8 @@ const signer = computed(() => platformCapabilities.value.supportsBiometricSignin
       </dl>
       <small>{{ signer ? "Approving asks for Touch ID." : "Approve from your phone or a Mac with Touch ID." }} Compare the fingerprint with the one the new device shows. Model, version, IP and user agent are unverified hints.</small>
       <div>
-        <button v-if="signer" :disabled="!request.verified_fingerprint" @click="approvePairing(request)">Approve</button>
-        <button @click="denyPairing(request)">Deny</button>
+        <button v-if="signer" class="btn btn-primary" :disabled="!request.verified_fingerprint" @click="approvePairing(request)">Approve</button>
+        <button class="btn btn-secondary" @click="denyPairing(request)">Deny</button>
       </div>
     </section>
     <small v-if="pairingError" class="error">{{ pairingError }}</small>

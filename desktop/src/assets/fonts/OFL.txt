@@ -1,17 +1,27 @@
-Bundled fonts (latin subsets, WOFF2, as served by Google Fonts):
+Bundled fonts (Latin1 subsets, WOFF2), unmodified from the official IBM Plex
+release on npm: @ibm/plex 6.4.1, files under IBM-Plex-*/fonts/split/woff2/.
+Tarball: https://registry.npmjs.org/@ibm/plex/-/plex-6.4.1.tgz
+  sha512 (npm integrity) fnsipQywHt3zWvsnlyYKMikcVI7E2fEwpiPnIHFqlbByXVfQfANAAeJk1IV4mNnxhppUIDlhU0TzwYwL++Rn2g==
 
-  exo2-latin-variable.woff2         Exo 2 (variable, upright)
-  exo2-latin-italic-variable.woff2  Exo 2 (variable, italic)
-    Copyright 2013 The Exo 2 Project Authors (https://github.com/NDISCOVER/Exo-2.0)
+  IBMPlexSans-Regular-Latin1.woff2   IBM Plex Sans 400
+    sha256 b5ad7bd39f996144915f0ad9849a90183b27d8c28ad97ed98af5b1bebc51f6b1
+  IBMPlexSans-Medium-Latin1.woff2    IBM Plex Sans 500
+    sha256 b5610af04d0d4b5a14a621d96d974b993e945a065db1a8861918f69ef9321934
+  IBMPlexSans-SemiBold-Latin1.woff2  IBM Plex Sans 600
+    sha256 fff0ab3a88b0b4aa0b693e4f0201359a15183b08e3fa5696d1918d8f0ade8ad5
+  IBMPlexMono-Regular-Latin1.woff2   IBM Plex Mono 400
+    sha256 10d3c7fa7eaf48e78db24f317b64f008a75e00f63a68bb3c2afc6ef51e58674f
+  IBMPlexMono-Medium-Latin1.woff2    IBM Plex Mono 500
+    sha256 5a04b514a778c1ae60bf8a8cfd512597f298f4e51eeecbbb4d87bf21c7b932ba
 
-  rajdhani-latin-500.woff2          Rajdhani Medium
-  rajdhani-latin-600.woff2          Rajdhani SemiBold
-    Copyright 2014 Indian Type Foundry (info@indiantypefoundry.com)
+Both families are licensed under the SIL Open Font License, Version 1.1.
+The license as shipped with the fonts follows.
 
-Both font families are licensed under the SIL Open Font License, Version 1.1.
+Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
-https://openfontlicense.org
-
+http://scripts.sil.org/OFL
 
 -----------------------------------------------------------
 SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
@@ -26,7 +36,7 @@ with others.
 
 The OFL allows the licensed fonts to be used, studied, modified and
 redistributed freely as long as they are not sold by themselves. The
-fonts, including any derivative works, can be bundled, embedded,
+fonts, including any derivative works, can be bundled, embedded, 
 redistributed and/or sold with any software provided that any reserved
 names are not used by derivative works. The fonts and derivatives,
 however, cannot be released under any other type of license. The
@@ -73,7 +83,7 @@ Name(s) unless explicit written permission is granted by the corresponding
 Copyright Holder. This restriction only applies to the primary font name as
 presented to the users.
 
-4) The name(s) of the Copyright Holder(s) and the Author(s) of the Font
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
 Software shall not be used to promote, endorse or advertise any
 Modified Version, except to acknowledge the contribution(s) of the
 Copyright Holder(s) and the Author(s) or with their explicit written

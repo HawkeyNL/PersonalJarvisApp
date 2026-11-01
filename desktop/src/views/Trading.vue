@@ -98,15 +98,15 @@ onMounted(refreshHoldings);
 
     <!-- summary tiles -->
     <div class="tiles">
-      <div class="tile glass">
+      <div class="kpi glass">
         <span class="t-k">POSITIONS</span>
         <span class="t-v">{{ holdings.length }}</span>
       </div>
-      <div class="tile glass">
+      <div class="kpi glass">
         <span class="t-k">COST BASIS</span>
         <span class="t-v mono">{{ total }}</span>
       </div>
-      <div class="tile glass">
+      <div class="kpi glass">
         <span class="t-k">IBKR</span>
         <span class="t-v small"><span class="dot" :class="ibDot"></span>{{ ibLink[1] }}</span>
       </div>
@@ -123,10 +123,10 @@ onMounted(refreshHoldings);
         <input v-model="symbol" placeholder="Symbol (AAPL)" aria-label="Symbol" />
         <input v-model="quantity" placeholder="Quantity" inputmode="decimal" aria-label="Quantity" />
         <input v-model="avgCost" placeholder="Avg. cost" inputmode="decimal" aria-label="Average cost" />
-        <button type="submit">Add</button>
+        <button type="submit" class="btn btn-primary">Add</button>
       </form>
 
-      <p v-if="hError" class="muted err">{{ hError }}</p>
+      <p v-if="hError" class="err">{{ hError }}</p>
       <p v-if="loading" class="muted">Loading…</p>
 
       <div v-else-if="holdings.length" class="holdings">
@@ -188,7 +188,7 @@ onMounted(refreshHoldings);
 }
 
 .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
-.tile {
+.kpi {
   border-radius: 12px; padding: 12px 14px;
   display: flex; flex-direction: column; gap: 6px;
 }

@@ -7,7 +7,7 @@ import { biometricUnlock, lockMode, unlocking, lockError, signOutFromLock } from
 
 <template>
   <div class="lock">
-    <div class="card">
+    <div class="lock-card">
       <div class="mark">
         <span class="ring"></span>
         <span class="glyph">J</span>
@@ -48,7 +48,7 @@ import { biometricUnlock, lockMode, unlocking, lockError, signOutFromLock } from
   backdrop-filter: blur(26px) saturate(1.2);
   -webkit-backdrop-filter: blur(26px) saturate(1.2);
 }
-.card {
+.lock-card {
   width: min(360px, 92vw);
   display: flex;
   flex-direction: column;

@@ -62,7 +62,7 @@ const nodes = [
     </div>
 
     <div class="membrane outer"></div>
-    <div class="membrane main"></div>
+    <div class="membrane mid"></div>
     <div class="membrane inner"></div>
 
     <div class="beat">
@@ -122,7 +122,7 @@ const nodes = [
   border-radius: 46% 54% 51% 49% / 52% 45% 55% 48% !important;
   animation: jvSpin 14s ease-in-out infinite;
 }
-.membrane.main {
+.membrane.mid {
   inset: 0;
   border: 1.5px solid var(--accent-border);
   border-radius: 49% 51% 52% 48% / 51% 48% 52% 49% !important;

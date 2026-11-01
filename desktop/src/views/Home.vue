@@ -309,12 +309,12 @@ onBeforeUnmount(() => {
           placeholder="https://jarvis.home.example"
           required
         />
-        <button type="submit" :disabled="configBusy">
+        <button type="submit" class="btn btn-primary" :disabled="configBusy">
           {{ configBusy ? "Connecting…" : "Connect and pair" }}
         </button>
         <p v-if="configError" class="config-error" role="alert">{{ configError }}</p>
         <p class="setup-hint">Plain HTTP on localhost is only allowed in a development build.</p>
-        <button v-if="changingOrigin" type="button" @click="cancelOriginChange">Cancel</button>
+        <button v-if="changingOrigin" type="button" class="btn btn-secondary" @click="cancelOriginChange">Cancel</button>
       </form>
       <form v-else-if="accountMode && backend === 'ok'" class="connection-setup" @submit.prevent="submitAccount">
         <h2>{{ accountMode === "activate" ? "Activate your first device" : "Sign in to Jarvis" }}</h2>
@@ -324,11 +324,11 @@ onBeforeUnmount(() => {
         <label for="account-password">Account password</label>
         <div class="password-input">
           <input id="account-password" v-model="password" :type="passwordVisible ? 'text' : 'password'" :autocomplete="accountMode === 'activate' ? 'new-password' : 'current-password'" autocapitalize="off" :spellcheck="false" :minlength="accountMode === 'activate' ? 15 : undefined" maxlength="1024" required />
-          <button type="button" class="password-toggle" :aria-label="passwordVisible ? 'Hide password' : 'Show password'" :aria-pressed="passwordVisible" aria-controls="account-password" @click="passwordVisible = !passwordVisible">
+          <button type="button" class="btn btn-secondary password-toggle" :aria-label="passwordVisible ? 'Hide password' : 'Show password'" :aria-pressed="passwordVisible" aria-controls="account-password" @click="passwordVisible = !passwordVisible">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path v-if="passwordVisible" d="m3 3 18 18"/></svg>
           </button>
         </div>
-        <button type="submit" :disabled="accountBusy">{{ accountBusy ? "Working…" : "Continue" }}</button>
+        <button type="submit" class="btn btn-primary" :disabled="accountBusy">{{ accountBusy ? "Working…" : "Continue" }}</button>
         <p v-if="accountError" class="config-error" role="alert">{{ accountError }}</p>
       </form>
     </div>
@@ -411,7 +411,7 @@ onBeforeUnmount(() => {
           <span>{{ footerHost || "No Home Node set" }}</span>
           <span class="node-state" :class="{ off: online === false }">{{ online ? "ONLINE" : online === false ? "OFFLINE" : "CONNECTING" }}</span>
           <button v-if="shownShellMode !== 'app' && backend !== 'unconfigured' && !changingOrigin" type="button"
-            class="change-origin" @click="changingOrigin = true">Change Home Node</button>
+            class="btn btn-secondary btn-sm change-origin" @click="changingOrigin = true">Change Home Node</button>
         </span>
       </div>
       <div class="motto" aria-hidden="true">“IDEAS COMPOUND HERE”<span class="bar"></span></div>
