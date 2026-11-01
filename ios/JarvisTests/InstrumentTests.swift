@@ -10,7 +10,7 @@ final class InstrumentTests: XCTestCase {
     }
 
     private func expected(_ rgba: UInt32) -> [CGFloat] {
-        [24, 16, 8, 0].map { CGFloat((rgba >> $0) & 0xFF) / 255 }
+        [UInt32(24), 16, 8, 0].map { (shift: UInt32) -> CGFloat in CGFloat((rgba >> shift) & 0xFF) / 255 }
     }
 
     /// Every token resolves to its own light value in light and dark value in dark,
@@ -32,9 +32,14 @@ final class InstrumentTests: XCTestCase {
     }
 
     private func luminance(_ rgba: UInt32) -> Double {
-        let channels = [24, 16, 8].map { Double((rgba >> UInt32($0)) & 0xFF) / 255 }
-            .map { $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
-        return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+        func linear(_ shift: UInt32) -> Double {
+            let value = Double((rgba >> shift) & 0xFF) / 255
+            return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+        let red: Double = 0.2126 * linear(24)
+        let green: Double = 0.7152 * linear(16)
+        let blue: Double = 0.0722 * linear(8)
+        return red + green + blue
     }
 
     private func contrast(_ a: UInt32, _ b: UInt32) -> Double {
