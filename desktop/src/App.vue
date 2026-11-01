@@ -80,7 +80,7 @@ onBeforeUnmount(() => {
   <div class="app">
     <a v-if="mode === 'app'" class="skip" href="#main" @click.prevent="skipToContent">Skip to content</a>
     <p v-if="mode !== 'app' && app.notice" class="notice" role="status">
-      {{ app.notice }} <button type="button" @click="app.notice = null">Dismiss</button>
+      {{ app.notice }} <button type="button" class="btn btn-secondary btn-sm" @click="app.notice = null">Dismiss</button>
     </p>
     <div class="shell">
       <AppSidebar v-if="mode === 'app'" />

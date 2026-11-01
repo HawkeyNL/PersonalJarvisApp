@@ -123,8 +123,8 @@ onMounted(reload);
         <section v-for="tier in TIERS" :key="tier" class="tier" :aria-label="`${TIER_COPY[tier][0]} tier`">
           <header>
             <div><h4>{{ TIER_COPY[tier][0] }}</h4><small>{{ TIER_COPY[tier][1] }}</small></div>
-            <button v-if="!draft.tiers[tier]" type="button" :disabled="!editable" @click="customize(tier)">Customize</button>
-            <button v-else type="button" :disabled="!editable" @click="reset(tier)">Reset to built-in</button>
+            <button v-if="!draft.tiers[tier]" type="button" class="btn btn-secondary btn-sm" :disabled="!editable" @click="customize(tier)">Customize</button>
+            <button v-else type="button" class="btn btn-secondary btn-sm" :disabled="!editable" @click="reset(tier)">Reset to built-in</button>
           </header>
           <p v-if="!draft.tiers[tier]" class="muted small">Built-in order.</p>
           <template v-else>
@@ -133,9 +133,9 @@ onMounted(reload);
                 <span class="pos">{{ i + 1 }}</span>
                 <div class="name"><strong>{{ entry.model }}</strong>
                   <small>{{ entry.provider }} · {{ kind(entry.provider) }}<template v-if="!enabled.has(label(entry))"> · blocked</template></small></div>
-                <button type="button" :disabled="!editable || i === 0" :aria-label="`Move ${label(entry)} up`" @click="move(tier, i, -1)">↑</button>
-                <button type="button" :disabled="!editable || i === draft.tiers[tier]!.chain.length - 1" :aria-label="`Move ${label(entry)} down`" @click="move(tier, i, 1)">↓</button>
-                <button type="button" :disabled="!editable" :aria-label="`Remove ${label(entry)}`" @click="remove(tier, i)">✕</button>
+                <button type="button" class="btn btn-secondary btn-sm" :disabled="!editable || i === 0" :aria-label="`Move ${label(entry)} up`" @click="move(tier, i, -1)">↑</button>
+                <button type="button" class="btn btn-secondary btn-sm" :disabled="!editable || i === draft.tiers[tier]!.chain.length - 1" :aria-label="`Move ${label(entry)} down`" @click="move(tier, i, 1)">↓</button>
+                <button type="button" class="btn btn-secondary btn-sm" :disabled="!editable" :aria-label="`Remove ${label(entry)}`" @click="remove(tier, i)">✕</button>
               </li>
             </ol>
             <p v-if="!draft.tiers[tier]!.chain.length" class="muted small">Add at least one model, or reset to the built-in order.</p>
@@ -147,7 +147,7 @@ onMounted(reload);
                   {{ m.model }} ({{ m.provider }}{{ m.enabled ? "" : ", blocked" }})
                 </option>
               </select>
-              <button type="button" :disabled="!editable || !adding[tier]" @click="add(tier)">Add</button>
+              <button type="button" class="btn btn-secondary" :disabled="!editable || !adding[tier]" @click="add(tier)">Add</button>
             </div>
             <label v-if="meteredAfterSubscription(draft.tiers[tier]!.chain) || draft.tiers[tier]!.metered_after_subscription" class="check">
               <input v-model="draft.tiers[tier]!.metered_after_subscription" type="checkbox" :disabled="!editable" />
@@ -166,9 +166,9 @@ onMounted(reload);
       <p v-if="canApply && issue" class="err" role="alert">{{ issue }}</p>
       <p role="status">{{ notice }}</p>
       <div class="actions">
-        <button type="button" :disabled="busy" @click="reload">Refresh</button>
-        <button type="button" :disabled="!editable || !dirty" @click="discard">Discard changes</button>
-        <button type="button" :disabled="!editable || !canApply || !!issue" @click="confirming = true">Apply routing</button>
+        <button type="button" class="btn btn-secondary" :disabled="busy" @click="reload">Refresh</button>
+        <button type="button" class="btn btn-secondary" :disabled="!editable || !dirty" @click="discard">Discard changes</button>
+        <button type="button" class="btn btn-primary" :disabled="!editable || !canApply || !!issue" @click="confirming = true">Apply routing</button>
       </div>
     </template>
 
@@ -181,8 +181,8 @@ onMounted(reload);
             {{ TIER_COPY[tier][0] }}: {{ draft.tiers[tier] ? draft.tiers[tier]!.chain.map(label).join(" → ") : "built-in order" }}
           </li>
         </ul>
-        <button autofocus @click="confirming = false">Cancel</button>
-        <button @click="confirm">Confirm change</button>
+        <button class="btn btn-secondary" autofocus @click="confirming = false">Cancel</button>
+        <button class="btn btn-primary" @click="confirm">Confirm change</button>
       </div>
     </div>
   </section>
@@ -206,12 +206,10 @@ ol { list-style: none; margin: 0; padding: 0; }
 li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line-a18); }
 .pos { flex: none; width: 22px; color: var(--accent); font-variant-numeric: tabular-nums; }
 .name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-13); }
-li button { flex: none; padding: 4px 8px; }
+li button { flex: none; }
 .add { display: flex; gap: 8px; }
 .add select { flex: 1; min-width: 0; padding: 8px; }
 .actions { display: flex; gap: 12px; flex-wrap: wrap; }
-button { padding: 8px 12px; cursor: pointer; border-radius: var(--r-8); }
-button:disabled { opacity: 0.5; cursor: default; }
 .model-confirm { position: fixed; inset: 0; z-index: 100; background: var(--bg-scrim); display: grid; place-items: center; padding: 20px; }
 .model-confirm > div { max-width: 560px; background: var(--bg-raised); border: 1px solid var(--border); padding: 24px; border-radius: 12px; }
 .model-confirm p, .summary { color: var(--text-4); overflow-wrap: anywhere; }

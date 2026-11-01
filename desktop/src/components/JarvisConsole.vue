@@ -265,12 +265,12 @@ onMounted(async () => {
           >
             <NavIcon :name="voiceEnabled ? 'sound-on' : 'sound-off'" />
           </button>
-          <button v-if="voiceEnabled" type="button" title="Stop current speech" @click="stopSpeaking">Stop speech</button>
+          <button v-if="voiceEnabled" type="button" class="btn btn-secondary btn-sm" title="Stop current speech" @click="stopSpeaking">Stop speech</button>
           <select v-if="voiceEnabled" :value="voiceRate" aria-label="Speech rate for the next fragments"
             @change="setVoiceRate(Number(($event.target as HTMLSelectElement).value))">
             <option v-for="rate in [0.5,0.75,1,1.25,1.5,1.75,2]" :key="rate" :value="rate">{{rate}}×</option>
           </select>
-          <button v-if="voiceEnabled" type="button" @click="refreshLocalVoices">Voices</button>
+          <button v-if="voiceEnabled" type="button" class="btn btn-secondary btn-sm" @click="refreshLocalVoices">Voices</button>
           <select v-if="voiceEnabled" :value="voiceChoice" aria-label="Local voice"
             @change="setVoiceChoice(($event.target as HTMLSelectElement).value)">
             <option value="">System default</option>

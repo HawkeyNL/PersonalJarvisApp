@@ -4,6 +4,7 @@ import App from "./App.vue";
 import { router } from "./router";
 import { initTheme } from "./theme";
 import "./tokens.css";
+import "./components.css";
 import "./styles.css";
 
 initTheme();

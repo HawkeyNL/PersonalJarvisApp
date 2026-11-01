@@ -27,7 +27,7 @@ defineProps<{ title: string; items: ActivityItem[]; empty: string; fullDetail?: 
         <span class="dot" :class="item.tone" role="img" :aria-label="item.toneLabel" :title="item.toneLabel"></span>
       </li>
     </ul>
-    <p v-else class="empty">{{ empty }}</p>
+    <p v-else class="list-empty">{{ empty }}</p>
   </div>
 </template>
 
@@ -59,7 +59,7 @@ li + li { border-top: 1px solid var(--line-a18); }
 .dot.ok { background: var(--accent-solid); box-shadow: var(--glow-sm); }
 .dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
 .dot.error { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
-.empty {
+.list-empty {
   margin: 0; padding: 18px 16px; font-size: var(--fs-12); color: var(--text-4);
   border: 1px dashed var(--line-a30); border-radius: var(--r-12);
 }
