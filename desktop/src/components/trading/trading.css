@@ -78,4 +78,3 @@ a.td-inst .sym { color: var(--accent-text); }
 .td-toggle[aria-pressed="true"] { background: var(--bg-selected); border-color: var(--accent-border); color: var(--text-primary); }
 .td-toggle:disabled { opacity: 0.5; cursor: default; }
 .td-toggle .swatch { width: 14px; border-top: 2px solid currentColor; }
-

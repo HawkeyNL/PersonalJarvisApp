@@ -119,7 +119,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <PageShell class="settings-page" title="Settings" subtitle="This device and your account.">
+  <PageShell class="settings-page" title="Settings" subtitle="This device and your account">
   <section class="settings">
     <nav class="settings-sections" aria-label="Settings sections">
       <button v-for="item in sections" :key="item" :aria-pressed="section === item"

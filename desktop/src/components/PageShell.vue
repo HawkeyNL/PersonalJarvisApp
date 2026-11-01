@@ -15,7 +15,7 @@ defineProps<{ title: string; subtitle?: string }>();
           <slot name="badges" />
         </div>
         <slot name="subtitle">
-          <p v-if="subtitle" class="t-sm t-2">{{ subtitle }}</p>
+          <p v-if="subtitle" class="sub t-sm t-2">{{ subtitle }}</p>
         </slot>
       </div>
       <div v-if="$slots.actions" class="actions"><slot name="actions" /></div>
@@ -25,9 +25,14 @@ defineProps<{ title: string; subtitle?: string }>();
 </template>
 
 <style scoped>
-.head { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.head { min-width: 0; display: flex; flex-direction: column; }
 .title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 h1 { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
-.head :deep(p) { margin: 0; }
+.sub { margin-top: 4px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+</style>
+
+<style>
+/* Zero specificity: slotted paragraphs (crumb, subtitle) keep their own margins. */
+:where(.pagehead > div) p { margin: 0; }
 </style>

@@ -15,7 +15,7 @@ const tip = (label: string, badge?: string) => (badge ? `${label} (${badge})` : 
 
 // Footer: Home Node status, this app's version and a pending update. The
 // sidebar only renders in app mode, so none of this shows before sign-in.
-useCoreStatus();
+useCoreStatus({ agents: false });
 onMounted(() => {
   if (updateState.value === "idle") void loadUpdateStatus(); // local read; no network check
 });
@@ -27,6 +27,10 @@ const core = computed(() =>
       : { tone: "error", label: "Home Node offline" },
 );
 const footLabel = computed(() => (currentAppVersion.value ? `${core.value.label} · v${currentAppVersion.value}` : core.value.label));
+const updateLabel = computed(() =>
+  updateState.value === "available" ? `Update v${availableAppVersion.value}`
+    : updateState.value === "ready_to_restart" ? "Restart pending" : null,
+);
 </script>
 
 <template>
@@ -54,14 +58,15 @@ const footLabel = computed(() => (currentAppVersion.value ? `${core.value.label}
     </template>
 
     <div class="foot">
-      <RouterLink v-if="updateState === 'available'" to="/settings" class="entry update" :title="`Update to v${availableAppVersion}`">
-        <NavIcon name="restart" /><span class="label">Update v{{ availableAppVersion }}</span>
+      <!-- custom: a plain link, so it never takes aria-current from the Settings entry. -->
+      <RouterLink v-if="updateLabel" v-slot="{ href, navigate }" to="/settings" custom>
+        <a :href="href" class="entry update" :title="updateLabel" @click="navigate">
+          <NavIcon name="restart" /><span class="label">{{ updateLabel }}</span>
+        </a>
       </RouterLink>
-      <RouterLink v-else-if="updateState === 'ready_to_restart'" to="/settings" class="entry update" title="Restart pending">
-        <NavIcon name="restart" /><span class="label">Restart pending</span>
-      </RouterLink>
-      <p class="status" role="status" :title="footLabel">
-        <span class="dot" :class="core.tone" aria-hidden="true"></span><span class="label">{{ footLabel }}</span>
+      <p class="status" :title="footLabel">
+        <span class="dot" :class="core.tone" aria-hidden="true"></span>
+        <span class="label"><span role="status">{{ core.label }}</span><template v-if="currentAppVersion"> · v{{ currentAppVersion }}</template></span>
       </p>
     </div>
   </nav>

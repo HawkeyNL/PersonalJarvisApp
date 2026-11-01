@@ -10,7 +10,7 @@ const emit = defineEmits<{ retry: [] }>();
 </script>
 
 <template>
-  <div v-if="state.kind === 'loading'" class="td-skel" :class="{ compact }" role="status">
+  <div v-if="state.kind === 'loading'" class="td-skel" :class="compact ? 'compact' : 'card'" role="status">
     <span class="sr-only">Loading {{ what }}…</span>
     <span class="skel line short" aria-hidden="true"></span>
     <span class="skel big" aria-hidden="true"></span>
