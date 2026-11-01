@@ -106,7 +106,7 @@ async function remove(id: string) {
 </script>
 
 <template>
-  <NodePage v-model="selected" title="CONVERSATIONS" subtitle="EVERYTHING YOU AND JARVIS DISCUSSED" :items="items">
+  <NodePage v-model="selected" title="Conversations" subtitle="Everything you and Jarvis discussed" :items="items">
     <JvPanel :icon="current.icon" :title="current.title" :tone="current.tone" :status="current.status"
       :description="DETAILS[current.id]" :quote="real ? 'Pick up any thread where you left it.' : undefined">
       <template v-if="real" #action>

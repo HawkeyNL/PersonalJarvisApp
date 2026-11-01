@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import JvBackdrop from "../components/jv/JvBackdrop.vue";
-import JvTopBar from "../components/jv/JvTopBar.vue";
+import PageShell from "../components/PageShell.vue";
 import DevDataToggle from "../components/trading/DevDataToggle.vue";
 import TradingStatus from "../components/trading/TradingStatus.vue";
 import "../components/trading/trading.css";
@@ -39,19 +38,13 @@ const day = (iso: string) => {
 </script>
 
 <template>
-  <div class="td-page">
-    <JvBackdrop glow-y="20%" horizon="80px" />
-    <JvTopBar variant="node" title="STOCKS" subtitle="YOUR IBKR HOLDINGS" />
-    <section class="td-wrap">
-      <header class="td-head">
-        <div>
-          <p class="td-crumb"><RouterLink to="/trading">Trading</RouterLink></p>
-          <h1>Stocks</h1>
-          <p v-if="state.kind === 'data' || state.kind === 'stale'" class="td-sub">
-            {{ sourceLabel(state.data) }} · read-only · as of {{ asOfText(state.data.as_of) }}
-          </p>
-        </div>
-      </header>
+  <PageShell class="td-page" title="Stocks">
+    <template #crumb><p class="td-crumb"><RouterLink to="/trading">Trading</RouterLink></p></template>
+    <template #subtitle>
+      <p v-if="state.kind === 'data' || state.kind === 'stale'" class="td-sub">
+        {{ sourceLabel(state.data) }} · read-only · as of {{ asOfText(state.data.as_of) }}
+      </p>
+    </template>
 
       <TradingStatus :state="state" what="your holdings" @retry="reload">
         <template #default="{ data, empty }">
@@ -156,9 +149,8 @@ const day = (iso: string) => {
           </template>
         </template>
       </TradingStatus>
-    </section>
     <DevDataToggle />
-  </div>
+  </PageShell>
 </template>
 
 <style scoped>

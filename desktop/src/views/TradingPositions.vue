@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import JvBackdrop from "../components/jv/JvBackdrop.vue";
-import JvTopBar from "../components/jv/JvTopBar.vue";
+import PageShell from "../components/PageShell.vue";
 import DevDataToggle from "../components/trading/DevDataToggle.vue";
 import TradingStatus from "../components/trading/TradingStatus.vue";
 import "../components/trading/trading.css";
@@ -18,19 +17,13 @@ const { state, reload } = useTradingRead<Portfolio>({
 </script>
 
 <template>
-  <div class="td-page">
-    <JvBackdrop glow-y="20%" horizon="80px" />
-    <JvTopBar variant="node" title="POSITIONS" subtitle="WHAT IS OPEN AT IBKR" />
-    <section class="td-wrap">
-      <header class="td-head">
-        <div>
-          <p class="td-crumb"><RouterLink to="/trading">Trading</RouterLink></p>
-          <h1>Positions</h1>
-          <p v-if="state.kind === 'data' || state.kind === 'stale'" class="td-sub">
-            {{ sourceLabel(state.data) }} · read-only · as of {{ asOfText(state.data.as_of) }}
-          </p>
-        </div>
-      </header>
+  <PageShell class="td-page" title="Positions">
+    <template #crumb><p class="td-crumb"><RouterLink to="/trading">Trading</RouterLink></p></template>
+    <template #subtitle>
+      <p v-if="state.kind === 'data' || state.kind === 'stale'" class="td-sub">
+        {{ sourceLabel(state.data) }} · read-only · as of {{ asOfText(state.data.as_of) }}
+      </p>
+    </template>
 
       <TradingStatus :state="state" what="your positions" @retry="reload">
         <template #default="{ data, empty }">
@@ -72,9 +65,8 @@ const { state, reload } = useTradingRead<Portfolio>({
         <div class="td-card-head"><h2 id="pos-orders">Open orders</h2><span class="td-badge">Not available</span></div>
         <p class="td-note">The IBKR connection is read-only, and Core does not report orders yet. Orders come with trading, behind risk checks and your confirmation.</p>
       </section>
-    </section>
     <DevDataToggle />
-  </div>
+  </PageShell>
 </template>
 
 <style scoped>

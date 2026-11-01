@@ -10,8 +10,11 @@ const emit = defineEmits<{ retry: [] }>();
 </script>
 
 <template>
-  <div v-if="state.kind === 'loading'" class="td-state" :class="{ compact }" role="status">
-    <span class="td-loading" aria-hidden="true"></span>Loading {{ what }}…
+  <div v-if="state.kind === 'loading'" class="td-skel" :class="{ compact }" role="status">
+    <span class="sr-only">Loading {{ what }}…</span>
+    <span class="skel line short" aria-hidden="true"></span>
+    <span class="skel big" aria-hidden="true"></span>
+    <span v-if="!compact" class="skel line" aria-hidden="true"></span>
   </div>
   <div v-else-if="state.kind === 'not-connected'" class="td-state" :class="{ compact }" role="status">
     <span class="icon" aria-hidden="true"><NavIcon name="trend" /></span>
@@ -45,14 +48,15 @@ const emit = defineEmits<{ retry: [] }>();
 }
 .td-state.compact { padding: 12px 14px; }
 .td-state[role="alert"] { align-items: center; justify-content: space-between; }
-.td-loading {
-  flex: none; width: 8px; height: 8px; margin: 5px 10px 0 0; display: inline-block; border-radius: 50%;
-  background: var(--border-strong);
+.td-skel { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; }
+.td-skel.compact { padding: 12px 14px; }
+.skel.line { width: 92%; height: 14px; }
+.skel.line.short { width: 40%; }
+.skel.big { width: 70%; height: 28px; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
-@media (prefers-reduced-motion: no-preference) {
-  .td-loading { animation: td-pulse 1.2s var(--ease-in-out) infinite alternate; }
-}
-@keyframes td-pulse { from { opacity: 1; } to { opacity: 0.3; } }
 .icon {
   flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%;
   border: 1.5px solid var(--border); color: var(--text-secondary);

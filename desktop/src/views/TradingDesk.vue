@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import JvBackdrop from "../components/jv/JvBackdrop.vue";
-import JvTopBar from "../components/jv/JvTopBar.vue";
+import PageShell from "../components/PageShell.vue";
 import JvSegmented from "../components/jv/JvSegmented.vue";
 import DevDataToggle from "../components/trading/DevDataToggle.vue";
 import TradingChart from "../components/trading/TradingChart.vue";
@@ -44,16 +43,7 @@ const changeTone = computed(() => (signTone(rangeRatio.value) === "neg" ? "neg" 
 </script>
 
 <template>
-  <div class="td-page">
-    <JvBackdrop glow-y="20%" horizon="80px" />
-    <JvTopBar variant="node" title="TRADING" subtitle="ALL POTS IN ONE PLACE" />
-    <section class="td-wrap">
-      <header class="td-head">
-        <div>
-          <h1>Trading</h1>
-          <p class="td-sub">All pots in one place. Read-only: this app places no orders.</p>
-        </div>
-      </header>
+  <PageShell class="td-page" title="Trading" subtitle="All pots in one place. Read-only: this app places no orders.">
 
       <TradingStatus :state="portfolio" what="your portfolio" @retry="reloadPortfolio">
         <template #default="{ data, empty }">
@@ -141,7 +131,6 @@ const changeTone = computed(() => (signTone(rangeRatio.value) === "neg" ? "neg" 
         Also here: <RouterLink to="/trading/holdings">manual holdings</RouterLink> and the
         <RouterLink to="/trading/ibkr">IBKR status</RouterLink>.
       </p>
-    </section>
     <DevDataToggle />
-  </div>
+  </PageShell>
 </template>

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted } from "vue";
 import { useRoute } from "vue-router";
 import NavIcon from "./NavIcon.vue";
 import { NAV, ariaCurrent } from "../navigation";
+import { coreOnline, useCoreStatus } from "../coreStatus";
+import { availableAppVersion, currentAppVersion, loadUpdateStatus, updateState } from "../updates";
 
 // Desktop sidebar. The active entry comes from the route's meta.nav, so a
 // sub-path (/trading/ibkr) or a view shared by two entries (Runs, Approvals)
@@ -10,6 +12,21 @@ import { NAV, ariaCurrent } from "../navigation";
 const route = useRoute();
 const current = computed(() => route.meta.nav as string | undefined);
 const tip = (label: string, badge?: string) => (badge ? `${label} (${badge})` : label);
+
+// Footer: Home Node status, this app's version and a pending update. The
+// sidebar only renders in app mode, so none of this shows before sign-in.
+useCoreStatus();
+onMounted(() => {
+  if (updateState.value === "idle") void loadUpdateStatus(); // local read; no network check
+});
+const core = computed(() =>
+  coreOnline.value === null
+    ? { tone: "idle", label: "Connecting…" }
+    : coreOnline.value
+      ? { tone: "ok", label: "Home Node connected" }
+      : { tone: "error", label: "Home Node offline" },
+);
+const footLabel = computed(() => (currentAppVersion.value ? `${core.value.label} · v${currentAppVersion.value}` : core.value.label));
 </script>
 
 <template>
@@ -35,11 +52,23 @@ const tip = (label: string, badge?: string) => (badge ? `${label} (${badge})` : 
         </li>
       </ul>
     </template>
+
+    <div class="foot">
+      <RouterLink v-if="updateState === 'available'" to="/settings" class="entry update" :title="`Update to v${availableAppVersion}`">
+        <NavIcon name="restart" /><span class="label">Update v{{ availableAppVersion }}</span>
+      </RouterLink>
+      <RouterLink v-else-if="updateState === 'ready_to_restart'" to="/settings" class="entry update" title="Restart pending">
+        <NavIcon name="restart" /><span class="label">Restart pending</span>
+      </RouterLink>
+      <p class="status" role="status" :title="footLabel">
+        <span class="dot" :class="core.tone" aria-hidden="true"></span><span class="label">{{ footLabel }}</span>
+      </p>
+    </div>
   </nav>
 </template>
 
 <style scoped>
-/* Above the fixed page backdrop (z-index 0), below every overlay. */
+/* Below every overlay. */
 .sidebar {
   position: relative; z-index: 1; flex: none; width: 232px; overflow-y: auto;
   display: flex; flex-direction: column; padding: 20px 12px;
@@ -75,6 +104,13 @@ a.entry:active { background: var(--bg-selected); }
 }
 a.entry:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 
+.foot { margin-top: auto; padding-top: 12px; display: flex; flex-direction: column; gap: 2px; }
+.update { color: var(--accent-text); font-size: 13px; }
+.status { margin: 0; padding: 12px; display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 1.4; color: var(--text-secondary); }
+.dot { flex: none; width: 8px; height: 8px; border-radius: var(--r-pill); background: var(--text-disabled); }
+.dot.ok { background: var(--positive-solid); }
+.dot.error { background: var(--danger-solid); }
+
 .sr-only {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
   clip: rect(0 0 0 0); white-space: nowrap; border: 0;
@@ -83,7 +119,8 @@ a.entry:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2
 /* Narrow windows: an icon rail. Labels stay for screen readers; the title tooltip names each entry. */
 @media (max-width: 1279px) {
   .sidebar { width: 64px; padding: 16px 8px; }
-  .entry { justify-content: center; padding: 0; }
+  .entry, .status { justify-content: center; padding: 0; }
+  .status { min-height: 40px; }
   .label, .badge, .section {
     position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
     clip: rect(0 0 0 0); white-space: nowrap; border: 0;

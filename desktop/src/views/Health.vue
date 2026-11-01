@@ -305,7 +305,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <NodePage v-model="selected" title="SYSTEM HEALTH" subtitle="THE STATE OF YOUR HOME NODE" :items="items"
+  <NodePage v-model="selected" title="System health" subtitle="The state of your Home Node" :items="items"
     :mood="adviceBusy ? 'thinking' : 'idle'">
     <JvPanel :icon="current.icon" :title="current.title" :tone="current.tone" :status="current.status"
       :description="DETAILS[current.id].description"

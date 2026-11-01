@@ -1,13 +1,7 @@
 /* Shared layout for the trading screens (Dashboard, Stocks, Stock, Positions).
    Instrument tokens only; prefixed td- so nothing leaks into other views. */
-.td-page { position: relative; min-height: 100%; padding-bottom: 96px; }
-.td-wrap {
-  position: relative; z-index: 1; max-width: 1120px; margin: 0 auto; padding: 28px 24px 0;
-  display: flex; flex-direction: column; gap: 20px;
-}
-.td-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; }
-.td-head > div { min-width: 0; }
-.td-head h1 { margin: 0; font-size: 26px; font-weight: 600; color: var(--text-primary); overflow-wrap: anywhere; }
+/* Room below the content for the fixed dev-data toggle. */
+.main.td-page { padding-bottom: 96px; }
 .td-crumb { font-size: var(--fs-13); color: var(--text-secondary); margin-bottom: 4px; }
 .td-crumb a { color: var(--accent-text); text-decoration: none; }
 .td-sub, .td-source { margin: 6px 0 0; font-size: var(--fs-12); color: var(--text-secondary); }
@@ -85,6 +79,3 @@ a.td-inst .sym { color: var(--accent-text); }
 .td-toggle:disabled { opacity: 0.5; cursor: default; }
 .td-toggle .swatch { width: 14px; border-top: 2px solid currentColor; }
 
-@media (max-width: 560px) {
-  .td-wrap { padding: 20px 16px 0; }
-}

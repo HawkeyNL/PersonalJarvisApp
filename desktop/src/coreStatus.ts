@@ -1,6 +1,6 @@
-// Shared, lightweight Core status for the top bar on every page: readiness
+// Shared, lightweight Core status for the sidebar footer and the hub: readiness
 // (public /readyz) and the agent count (owner-only /v1/agents, which older Cores
-// do not have). Polling runs only while a top bar is mounted and the window is
+// do not have). Polling runs only while a user is mounted and the window is
 // visible.
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { getJson, getJsonAuth } from "./api";

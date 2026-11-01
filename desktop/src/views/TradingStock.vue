@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
-import JvBackdrop from "../components/jv/JvBackdrop.vue";
-import JvTopBar from "../components/jv/JvTopBar.vue";
+import PageShell from "../components/PageShell.vue";
 import JvSegmented from "../components/jv/JvSegmented.vue";
 import DevDataToggle from "../components/trading/DevDataToggle.vue";
 import TradingChart from "../components/trading/TradingChart.vue";
@@ -60,21 +59,15 @@ const noteTime = (iso: string) => {
 </script>
 
 <template>
-  <div class="td-page">
-    <JvBackdrop glow-y="20%" horizon="80px" />
-    <JvTopBar variant="node" title="STOCK" :subtitle="data?.symbol ?? ''" />
-    <section class="td-wrap">
-      <header class="td-head">
-        <div>
-          <p class="td-crumb"><RouterLink to="/trading">Trading</RouterLink> / <RouterLink to="/trading/stocks">Stocks</RouterLink></p>
-          <h1>{{ title }}</h1>
-          <p v-if="data" class="td-sub td-mono">{{ data.symbol }}<template v-if="data.exchange"> · {{ data.exchange }}</template></p>
-          <p v-if="data && last" class="price">
-            <span class="td-big">{{ formatPrice(last.c, data.currency) }}</span>
-            <span v-if="changeRaw !== null" class="td-num" :class="`td-${signTone(changeRaw)}`">{{ formatPercent(changeRaw) }} over {{ range }}</span>
-          </p>
-        </div>
-      </header>
+  <PageShell class="td-page" :title="title">
+    <template #crumb><p class="td-crumb"><RouterLink to="/trading">Trading</RouterLink> / <RouterLink to="/trading/stocks">Stocks</RouterLink></p></template>
+    <template #subtitle>
+      <p v-if="data" class="td-sub td-mono">{{ data.symbol }}<template v-if="data.exchange"> · {{ data.exchange }}</template></p>
+      <p v-if="data && last" class="price">
+        <span class="td-big">{{ formatPrice(last.c, data.currency) }}</span>
+        <span v-if="changeRaw !== null" class="td-num" :class="`td-${signTone(changeRaw)}`">{{ formatPercent(changeRaw) }} over {{ range }}</span>
+      </p>
+    </template>
 
       <div class="detail">
         <section class="td-card" aria-label="Price chart">
@@ -135,9 +128,8 @@ const noteTime = (iso: string) => {
           </section>
         </aside>
       </div>
-    </section>
     <DevDataToggle />
-  </div>
+  </PageShell>
 </template>
 
 <style scoped>

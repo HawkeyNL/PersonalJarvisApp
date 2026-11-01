@@ -123,7 +123,7 @@ test("Tasks keeps the route on Approvals only for the waiting node", async () =>
 });
 
 test("Devices names its own heading", () => {
-  assert.equal(PAGES.find(p => p.path === "/devices").props.title, "DEVICES");
+  assert.equal(PAGES.find(p => p.path === "/devices").props.title, "Devices");
 });
 
 test("a stock detail page opens by numeric IBKR conid under Stocks", async () => {

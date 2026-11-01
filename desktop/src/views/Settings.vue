@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from "vue";
 import AccountAdministration from "../components/AccountAdministration.vue";
-import JvBackdrop from "../components/jv/JvBackdrop.vue";
-import JvTopBar from "../components/jv/JvTopBar.vue";
+import PageShell from "../components/PageShell.vue";
 import { THEMES, currentTheme, setTheme, type ThemeChoice } from "../theme";
 import { currentAuthStatus, currentShellMode, deregisterDevice, type AuthStatus } from "../auth";
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
@@ -120,10 +119,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="settings-page">
-  <JvBackdrop glow-y="20%" horizon="80px" />
-  <JvTopBar variant="node" title="SETTINGS" subtitle="THIS DEVICE AND YOUR ACCOUNT" />
-  <section class="view settings">
+  <PageShell class="settings-page" title="Settings" subtitle="This device and your account.">
+  <section class="settings">
     <nav class="settings-sections" aria-label="Settings sections">
       <button v-for="item in sections" :key="item" :aria-pressed="section === item"
         :class="{ selected: section === item }" @click="section = item">{{ item }}</button>
@@ -404,12 +401,11 @@ onMounted(async () => {
       </div>
     </Transition>
   </section>
-  </div>
+  </PageShell>
 </template>
 
 <style scoped>
-.settings-page { position: relative; min-height: 100%; padding-bottom: 96px; }
-.settings-page > .settings { position: relative; z-index: 1; margin: 0 auto; padding: 28px 24px 0; }
+.settings-page { padding-bottom: 96px; }
 .settings { max-width: 1180px; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; align-items: start; overflow-wrap: anywhere; }
 .settings-sections, .full-width, .account-administration { grid-column: 1 / -1; }
 .settings-sections { display: flex; flex-wrap: wrap; gap: 8px; }

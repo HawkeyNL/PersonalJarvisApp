@@ -10,8 +10,7 @@ import {
 import { asOfText, formatDecimal, formatMoney, formatPrice, ibkrLinkState, readPortfolio, skippedText, type Portfolio } from "../trading";
 import { tradingApi, useTradingRead } from "../tradingApi";
 import TradingStatus from "../components/trading/TradingStatus.vue";
-import JvBackdrop from "../components/jv/JvBackdrop.vue";
-import JvTopBar from "../components/jv/JvTopBar.vue";
+import PageShell from "../components/PageShell.vue";
 
 // Sub-tab is driven by the route (/trading/holdings vs /trading/ibkr).
 const route = useRoute();
@@ -82,20 +81,9 @@ onMounted(refreshHoldings);
 </script>
 
 <template>
-  <div class="trading-page">
-  <JvBackdrop glow-y="20%" horizon="80px" />
-  <JvTopBar variant="node" title="TRADING" subtitle="YOUR POSITIONS ON ONE DESK" />
-  <section class="view trading">
-    <header class="desk-top">
-      <div>
-        <h1>Trading</h1>
-        <p class="muted sub">
-          Your positions on one desk: manual, and live through IBKR (read-only).
-          Trading (orders) comes later, with risk checks and confirmation.
-        </p>
-      </div>
-    </header>
-
+  <PageShell class="trading-page" title="Trading"
+    subtitle="Your positions on one desk: manual, and live through IBKR (read-only). Trading (orders) comes later, with risk checks and confirmation.">
+  <section class="trading">
     <!-- summary tiles -->
     <div class="tiles">
       <div class="kpi glass">
@@ -172,13 +160,12 @@ onMounted(refreshHoldings);
       </TradingStatus>
     </div>
   </section>
-  </div>
+  </PageShell>
 </template>
 
 <style scoped>
-.trading-page { position: relative; min-height: 100%; padding-bottom: 96px; }
-.trading { position: relative; z-index: 1; width: auto; max-width: 980px; margin: 0 auto; padding: 28px 24px 0; }
-.desk-top { margin-bottom: 18px; }
+.trading-page { padding-bottom: 96px; }
+.trading { max-width: 980px; }
 .sub { margin: 6px 0 0; font-size: 13px; }
 
 .glass {

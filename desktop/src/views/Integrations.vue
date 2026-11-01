@@ -107,7 +107,7 @@ const catalogRows = computed<ActivityItem[]>(() => catalog.value.map((m) => ({
 </script>
 
 <template>
-  <NodePage v-model="selected" title="INTEGRATIONS" subtitle="THE SYSTEMS JARVIS CAN REACH" :items="items">
+  <NodePage v-model="selected" title="Integrations" subtitle="The systems Jarvis can reach" :items="items">
     <JvPanel :icon="current.icon" :title="current.title" :tone="current.tone" :status="current.status" :description="DETAILS[current.id]"
       :quote="current.id === 'brains' && reg.active_brain ? `Active brain: ${reg.active_brain}` : undefined">
       <template #action>

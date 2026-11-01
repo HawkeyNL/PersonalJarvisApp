@@ -126,7 +126,7 @@ async function decide(id: string, approve: boolean) {
 </script>
 
 <template>
-  <NodePage v-model="selected" title="TASKS" subtitle="WHAT JARVIS IS WORKING ON" :items="items">
+  <NodePage v-model="selected" title="Tasks" subtitle="What Jarvis is working on" :items="items">
     <JvPanel :icon="current.icon" :title="current.title" :tone="current.tone" :status="current.status"
       :description="DETAILS[current.id]" :quote="current.id === 'waiting' ? 'Jarvis proposes, you decide.' : undefined">
       <template v-if="['active', 'waiting', 'completed'].includes(current.id)" #action>
