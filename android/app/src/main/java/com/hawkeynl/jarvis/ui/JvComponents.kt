@@ -1,9 +1,13 @@
 package com.hawkeynl.jarvis.ui
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,26 +15,35 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -84,8 +97,9 @@ fun MutedText(text: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun ErrorText(text: String, modifier: Modifier = Modifier) {
-    Text(text, modifier, color = JvTheme.colors.dangerText, style = MaterialTheme.typography.bodySmall)
+fun ErrorText(text: String, modifier: Modifier = Modifier, live: Boolean = true) {
+    // Announced when it appears or changes, unless [live] is off for text that follows every edit.
+    Text(text, if (live) modifier.semantics { liveRegion = LiveRegionMode.Polite } else modifier, color = JvTheme.colors.dangerText, style = MaterialTheme.typography.bodySmall)
 }
 
 /** Round icon button (back, send). */
@@ -181,48 +195,6 @@ fun GhostButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier
     }
 }
 
-data class ChipItem(val id: String, val label: String, val icon: JvIcon? = null)
-
-/** Horizontally scrolling chips: node selector (large) or sub-tabs (small). */
-@Composable
-fun ChipRow(items: List<ChipItem>, selected: String, onSelect: (String) -> Unit, small: Boolean = false, modifier: Modifier = Modifier) {
-    val c = JvTheme.colors
-    val shape = if (small) JvShapes.md else JvShapes.pill
-    Row(
-        modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = JvSpace.lg, vertical = JvSpace.xxs),
-        horizontalArrangement = Arrangement.spacedBy(JvSpace.sm),
-    ) {
-        for (item in items) {
-            val on = item.id == selected
-            Row(
-                Modifier
-                    .heightIn(min = 48.dp)
-                    .pressScale()
-                    .then(
-                        when {
-                            on -> Modifier.border(1.dp, c.accentSolid, shape)
-                            small -> Modifier
-                            else -> Modifier.shadowBorder(shape)
-                        },
-                    )
-                    .clip(shape)
-                    .background(if (on) c.bgSelected else if (small) Color.Transparent else c.bgSurface)
-                    .selectable(selected = on, role = Role.Tab, onClick = { onSelect(item.id) })
-                    .padding(horizontal = if (small) JvSpace.md else 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                item.icon?.let { JvIconView(it, tint = if (on) c.accentText else c.textSecondary, size = 16.dp) }
-                Text(
-                    item.label,
-                    color = if (on) c.accentText else if (small) c.textSecondary else c.textPrimary,
-                    style = if (small) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
-                )
-            }
-        }
-    }
-}
-
 /** Detail panel of a node page: header with icon, title, status, description,
  *  secondary detail line and optional action, then the body. */
 @Composable
@@ -268,40 +240,6 @@ fun Panel(
     }
 }
 
-data class TileData(val icon: JvIcon, val label: String, val value: String)
-
-/** Two-column grid of vitals under a section label. */
-@Composable
-fun TileGrid(title: String, tiles: List<TileData>, modifier: Modifier = Modifier) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SectionLabel(title)
-        for (row in tiles.chunked(2)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                for (tile in row) Tile(tile, Modifier.weight(1f))
-                if (row.size == 1) Spacer(Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-@Composable
-fun Tile(tile: TileData, modifier: Modifier = Modifier) {
-    val c = JvTheme.colors
-    Column(
-        modifier
-            .heightIn(min = 92.dp)
-            .shadowBorder(JvShapes.lg)
-            .clip(JvShapes.lg)
-            .background(c.bgSurface)
-            .semantics(mergeDescendants = true) {}
-            .padding(JvSpace.md),
-    ) {
-        JvIconView(tile.icon, tint = c.accentText, size = 22.dp)
-        Text(tile.label, Modifier.padding(top = JvSpace.sm), style = MaterialTheme.typography.titleSmall)
-        Text(tile.value, Modifier.padding(top = 3.dp), color = c.textSecondary, style = MaterialTheme.typography.bodySmall.tabular())
-    }
-}
-
 data class ActivityItem(
     val id: String,
     val icon: JvIcon,
@@ -309,77 +247,72 @@ data class ActivityItem(
     val detail: String? = null,
     val time: String? = null,
     val tone: Tone,
+    /** Text of the row's status badge; empty shows no badge. */
     val toneLabel: String,
 )
 
-/** Recent items: icon, title, detail, time, status; optional row actions. */
+/** An Instrument list (`.list` of `.li` rows): icon tile, title, detail, time and a status
+ *  badge. [onRowClick] makes each row one button; [rowActions] adds buttons under a row. */
 @Composable
 fun ActivityList(
     title: String,
     items: List<ActivityItem>,
     empty: String,
     modifier: Modifier = Modifier,
-    fullDetail: Boolean = false,
     action: (@Composable () -> Unit)? = null,
+    onRowClick: ((ActivityItem) -> Unit)? = null,
+    rowClickLabel: String? = null,
     rowActions: (@Composable RowScope.(ActivityItem) -> Unit)? = null,
 ) {
-    val c = JvTheme.colors
-    Column(modifier) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 32.dp).padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 32.dp).padding(horizontal = JvSpace.xs), verticalAlignment = Alignment.CenterVertically) {
             SectionLabel(title, Modifier.weight(1f))
             action?.invoke()
         }
-        if (items.isEmpty()) {
-            Text(
-                empty, Modifier.fillMaxWidth().background(c.bgSunken, JvShapes.md).padding(JvSpace.lg),
-                color = c.textSecondary, style = MaterialTheme.typography.bodySmall,
-            )
-            return@Column
-        }
-        Column(Modifier.fillMaxWidth().shadowBorder(JvShapes.lg).clip(JvShapes.lg).background(c.bgSurface)) {
+        Column(Modifier.fillMaxWidth().shadowBorder(JvShapes.lg).clip(JvShapes.lg).background(JvTheme.colors.bgSurface)) {
+            if (items.isEmpty()) EmptyState(empty, compact = true)
             items.forEachIndexed { index, item ->
-                if (index > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(c.separator))
-                ActivityRow(item, fullDetail, rowActions)
+                if (index > 0) ListDivider()
+                ActivityRow(item, onRowClick, rowClickLabel, rowActions)
             }
         }
     }
 }
 
 @Composable
-private fun ActivityRow(item: ActivityItem, fullDetail: Boolean, rowActions: (@Composable RowScope.(ActivityItem) -> Unit)?) {
+private fun ActivityRow(
+    item: ActivityItem,
+    onClick: ((ActivityItem) -> Unit)?,
+    clickLabel: String?,
+    rowActions: (@Composable RowScope.(ActivityItem) -> Unit)?,
+) {
     val c = JvTheme.colors
-    Column(Modifier.fillMaxWidth().heightIn(min = 58.dp).padding(horizontal = JvSpace.md, vertical = 10.dp)) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .then(if (onClick != null) Modifier.clickable(onClickLabel = clickLabel, role = Role.Button) { onClick(item) } else Modifier)
+            .padding(horizontal = JvSpace.lg, vertical = JvSpace.md),
+    ) {
         Row(Modifier.semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(36.dp).clip(JvShapes.md).background(c.bgSunken), contentAlignment = Alignment.Center) {
-                JvIconView(item.icon, tint = c.textSecondary, size = 18.dp)
-            }
+            IconTile(item.icon)
             Spacer(Modifier.width(JvSpace.md))
             Column(Modifier.weight(1f)) {
-                Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = if (fullDetail) 3 else 1, overflow = TextOverflow.Ellipsis)
-                item.detail?.takeIf { it.isNotEmpty() && !fullDetail }?.let {
-                    Text(
-                        it, Modifier.padding(top = 3.dp), color = c.textSecondary,
-                        style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    )
+                Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                item.detail?.takeIf { it.isNotEmpty() }?.let {
+                    Text(it, color = c.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
             item.time?.takeIf { it.isNotEmpty() }?.let {
                 Text(it, Modifier.padding(start = JvSpace.sm), color = c.textSecondary, style = MaterialTheme.typography.labelSmall.tabular())
             }
-            Spacer(Modifier.width(10.dp))
-            StatusDot(item.tone, size = 8.dp, modifier = Modifier.semantics { contentDescription = item.toneLabel })
-        }
-        if (fullDetail && !item.detail.isNullOrEmpty()) {
-            Text(
-                item.detail,
-                Modifier.padding(top = JvSpace.sm).fillMaxWidth().clip(JvShapes.sm).background(c.bgSunken)
-                    .padding(horizontal = 10.dp, vertical = JvSpace.sm),
-                style = MaterialTheme.typography.bodySmall,
-            )
+            // Capped, so a long label never squeezes the title.
+            if (item.toneLabel.isNotEmpty()) StatusBadge(item.toneLabel, Modifier.padding(start = JvSpace.sm).widthIn(max = 120.dp), item.tone)
         }
         if (rowActions != null) {
+            // No padding of its own: a row without actions stays as tall as its content.
             Row(
-                Modifier.fillMaxWidth().padding(top = JvSpace.sm),
+                Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(JvSpace.sm, Alignment.End),
                 verticalAlignment = Alignment.CenterVertically,
             ) { rowActions(item) }
@@ -387,33 +320,233 @@ private fun ActivityRow(item: ActivityItem, fullDetail: Boolean, rowActions: (@C
     }
 }
 
-enum class UnavailableKind { PLANNED, CORE_UPDATE, ERROR }
-
-/** Honest empty state for what Core does not offer (yet); never sample data. */
+/** 36dp rounded icon tile (`.tile`): neutral, tinted by [tone], or in the accent colour. */
 @Composable
-fun Unavailable(title: String, icon: JvIcon, modifier: Modifier = Modifier, kind: UnavailableKind = UnavailableKind.PLANNED, detail: String? = null) {
+fun IconTile(icon: JvIcon, tone: Tone? = null, accent: Boolean = false) {
+    val c = JvTheme.colors
+    val (bg, fg) = when {
+        accent -> c.accentSubtle to c.accentText
+        tone == null || tone == Tone.IDLE -> c.bgSunken to c.textSecondary
+        else -> toneSubtle(tone) to toneTextColor(tone)
+    }
+    Box(Modifier.size(36.dp).clip(JvShapes.md).background(bg), contentAlignment = Alignment.Center) {
+        JvIconView(icon, tint = fg, size = 18.dp)
+    }
+}
+
+/** Badge background of a status. */
+@Composable
+@ReadOnlyComposable
+fun toneSubtle(tone: Tone): Color = with(JvTheme.colors) {
+    when (tone) {
+        Tone.OK -> positiveSubtle
+        Tone.WARN -> negativeSubtle
+        Tone.ERROR -> dangerSubtle
+        Tone.IDLE -> bgSunken
+    }
+}
+
+/** A status badge (`.badge`): dot and label, so colour never carries the meaning alone. */
+@Composable
+fun StatusBadge(label: String, modifier: Modifier = Modifier, tone: Tone = Tone.IDLE) {
+    val fg = if (tone == Tone.IDLE) JvTheme.colors.textPrimary else toneTextColor(tone)
+    Row(
+        modifier.heightIn(min = 24.dp).clip(JvShapes.pill).background(toneSubtle(tone)).padding(horizontal = JvSpace.sm),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(Modifier.size(6.dp).background(fg, CircleShape))
+        Text(label, color = fg, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** Segmented control (`.seg`) that switches the view of a page; each segment is a tab. */
+@Composable
+fun Segmented(options: List<Pair<String, String>>, selected: String, onSelect: (String) -> Unit, modifier: Modifier = Modifier) {
     val c = JvTheme.colors
     Row(
-        modifier.fillMaxWidth().background(c.bgSunken, JvShapes.md).padding(JvSpace.lg),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        modifier.fillMaxWidth().clip(JvShapes.md).background(c.bgSunken).padding(3.dp).selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(JvSpace.xxs),
     ) {
-        Box(Modifier.size(40.dp).clip(JvShapes.md).background(c.bgSurface), contentAlignment = Alignment.Center) {
-            JvIconView(icon, tint = c.textSecondary, size = 20.dp)
+        for ((id, label) in options) {
+            val on = id == selected
+            Box(
+                Modifier
+                    .weight(1f)
+                    .heightIn(min = 48.dp)
+                    .then(if (on) Modifier.shadowBorder(JvShapes.sm) else Modifier)
+                    .clip(JvShapes.sm)
+                    .background(if (on) c.bgSurface else Color.Transparent)
+                    .selectable(selected = on, role = Role.Tab, onClick = { onSelect(id) })
+                    .padding(horizontal = JvSpace.xs),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label, color = if (on) c.textPrimary else c.textSecondary, style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(
-                when (kind) {
-                    UnavailableKind.CORE_UPDATE -> "Requires newer Core"
-                    UnavailableKind.ERROR -> "Could not load"
-                    UnavailableKind.PLANNED -> "Not yet available"
-                },
-                Modifier.padding(top = 3.dp),
-                color = c.textSecondary,
-                style = MaterialTheme.typography.labelSmall,
-            )
-            detail?.let { Text(it, Modifier.padding(top = JvSpace.sm), color = c.textSecondary, style = MaterialTheme.typography.bodySmall) }
+    }
+}
+
+/** One label and value row of a list (`.li` with the value on the right); a [tone]
+ *  shows the value as a status badge. */
+@Composable
+fun FactRow(label: String, value: String, tone: Tone? = null) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 52.dp).semantics(mergeDescendants = true) {}.padding(horizontal = JvSpace.lg, vertical = JvSpace.md),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(JvSpace.lg),
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+            if (tone != null) {
+                StatusBadge(value, tone = tone)
+            } else {
+                Text(value, color = JvTheme.colors.textSecondary, textAlign = TextAlign.End, style = MaterialTheme.typography.bodyMedium.tabular())
+            }
         }
+    }
+}
+
+/** A [ListSection] of label and value rows. */
+@Composable
+fun Facts(title: String?, facts: List<Pair<String, String>>, modifier: Modifier = Modifier) {
+    ListSection(title, modifier) {
+        facts.forEachIndexed { i, (label, value) ->
+            if (i > 0) ListDivider()
+            FactRow(label, value)
+        }
+    }
+}
+
+/** Empty state (`.empty`): centred title, an optional line, icon tile and action.
+ *  [compact] is the one-line version inside a list. */
+@Composable
+fun EmptyState(
+    title: String,
+    modifier: Modifier = Modifier,
+    body: String? = null,
+    icon: JvIcon? = null,
+    action: Pair<String, () -> Unit>? = null,
+    compact: Boolean = false,
+) {
+    Column(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = JvSpace.xxl, vertical = if (compact) JvSpace.xl else JvSpace.xxxl)
+            .semantics(mergeDescendants = true) {},
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(JvSpace.sm),
+    ) {
+        icon?.let { IconTile(it, accent = true) }
+        Text(
+            title, textAlign = TextAlign.Center,
+            color = if (compact) JvTheme.colors.textSecondary else JvTheme.colors.textPrimary,
+            style = if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.titleMedium,
+        )
+        body?.let { Text(it, color = JvTheme.colors.textSecondary, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall) }
+        action?.let { (label, onClick) -> GhostButton(label, onClick) }
+    }
+}
+
+/** Loading placeholder card (`.skel` bars); it pulses unless animations are off.
+ *  TalkBack reads [label]. */
+@Composable
+fun Skeleton(label: String, modifier: Modifier = Modifier) {
+    val c = JvTheme.colors
+    val pulse = if (rememberReduceMotion()) {
+        null
+    } else {
+        rememberInfiniteTransition("skeleton").animateFloat(
+            1f, 0.55f, infiniteRepeatable(tween(700, easing = JvMotion.easeInOut), RepeatMode.Reverse), "skeleton",
+        )
+    }
+    Column(
+        modifier
+            .fillMaxWidth()
+            .shadowBorder(JvShapes.lg)
+            .clip(JvShapes.lg)
+            .background(c.bgSurface)
+            .clearAndSetSemantics { contentDescription = label }
+            .padding(JvSpace.lg),
+        verticalArrangement = Arrangement.spacedBy(JvSpace.md),
+    ) {
+        SkeletonBar(0.4f, 14.dp, pulse)
+        SkeletonBar(0.7f, 28.dp, pulse)
+        ListDivider()
+        for (width in listOf(1f, 0.92f, 0.85f)) SkeletonBar(width, 14.dp, pulse)
+    }
+}
+
+@Composable
+private fun SkeletonBar(width: Float, height: Dp, pulse: State<Float>?) {
+    Box(
+        Modifier.fillMaxWidth(width).height(height).graphicsLayer { alpha = pulse?.value ?: 1f }
+            .clip(JvShapes.sm).background(JvTheme.colors.bgSunken),
+    )
+}
+
+/** What Core does not offer yet: plain rows with a "Later" badge, never sample data. */
+@Composable
+fun LaterSection(items: List<Triple<JvIcon, String, String>>, note: String? = null) {
+    Column(verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+        ActivityList(
+            "Later",
+            items.map { (icon, title, detail) -> ActivityItem(title, icon, title, detail, tone = Tone.IDLE, toneLabel = "Later") },
+            "",
+        )
+        note?.let { MutedText(it, Modifier.padding(horizontal = JvSpace.xs)) }
+    }
+}
+
+enum class UnavailableKind { PLANNED, CORE_UPDATE, ERROR }
+
+/** Honest state for what Core does not offer (yet) or could not load, as an Instrument card;
+ *  never sample data. An error can offer [onRetry]. Not a live region: several sections
+ *  can fail at once, and only errors caused by an action are announced ([ErrorText]). */
+@Composable
+fun Unavailable(
+    title: String,
+    icon: JvIcon,
+    modifier: Modifier = Modifier,
+    kind: UnavailableKind = UnavailableKind.PLANNED,
+    detail: String? = null,
+    onRetry: (() -> Unit)? = null,
+) {
+    val c = JvTheme.colors
+    val error = kind == UnavailableKind.ERROR
+    Column(
+        modifier
+            .fillMaxWidth()
+            .shadowBorder(JvShapes.lg)
+            .clip(JvShapes.lg)
+            .background(c.bgSurface)
+            .padding(JvSpace.lg),
+        verticalArrangement = Arrangement.spacedBy(JvSpace.md),
+    ) {
+        Row(
+            Modifier.semantics(mergeDescendants = true) {},
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconTile(icon, if (error) Tone.ERROR else null)
+            Spacer(Modifier.width(JvSpace.md))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    when (kind) {
+                        UnavailableKind.CORE_UPDATE -> "Requires newer Core"
+                        UnavailableKind.ERROR -> "Could not load"
+                        UnavailableKind.PLANNED -> "Not yet available"
+                    },
+                    color = if (error) c.dangerText else c.textSecondary,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                detail?.let { Text(it, Modifier.padding(top = JvSpace.xs), color = c.textSecondary, style = MaterialTheme.typography.bodySmall) }
+            }
+        }
+        onRetry?.let { GhostButton("Try again", it) }
     }
 }
 
@@ -427,25 +560,6 @@ fun Wordmark(modifier: Modifier = Modifier) {
             Text("Jarvis", style = MaterialTheme.typography.titleLarge)
             Text("Your second mind", color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.labelSmall)
         }
-    }
-}
-
-/** Centered page title with a one-line explanation under it. */
-@Composable
-fun PageTitle(title: String, subtitle: String, modifier: Modifier = Modifier) {
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            title,
-            Modifier.semantics { heading() },
-            style = MaterialTheme.typography.titleLarge,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
-        Text(
-            subtitle, Modifier.padding(top = JvSpace.xxs), color = JvTheme.colors.textSecondary,
-            style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
-        )
     }
 }
 
@@ -498,5 +612,40 @@ fun NavRow(icon: JvIcon, title: String, detail: String, onClick: () -> Unit, ton
         }
         tone?.let { StatusDot(it, modifier = Modifier.padding(horizontal = JvSpace.sm)) }
         JvIconView(JvIcon.ARROW_RIGHT, tint = c.textSecondary, size = 16.dp)
+    }
+}
+
+/**
+ * Layout of every pushed screen: a back button (with an optional action on the right),
+ * the sentence-case page title and its line, then [content] as Instrument sections.
+ */
+@Composable
+fun PushedPage(
+    title: String,
+    subtitle: String?,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    trailing: (@Composable () -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = JvSpace.lg, end = JvSpace.lg, bottom = JvSpace.xxl),
+        verticalArrangement = Arrangement.spacedBy(JvSpace.xl),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+            BackBar(onBack, trailing)
+            TabTitle(title, subtitle)
+        }
+        content()
+    }
+}
+
+/** Back button on the left and an optional action on the right. */
+@Composable
+private fun BackBar(onBack: () -> Unit, trailing: (@Composable () -> Unit)? = null) {
+    Row(Modifier.fillMaxWidth().padding(top = JvSpace.sm), verticalAlignment = Alignment.CenterVertically) {
+        CircleIconButton(JvIcon.ARROW_LEFT, "Back", onBack)
+        Spacer(Modifier.weight(1f))
+        trailing?.invoke()
     }
 }

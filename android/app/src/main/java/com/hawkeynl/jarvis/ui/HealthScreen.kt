@@ -1,6 +1,7 @@
 package com.hawkeynl.jarvis.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,19 +33,10 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val HEALTH_DETAILS = mapOf(
-    "core" to "The heart of Jarvis on your Home Node — everything else talks through it.",
-    "node" to "The machine Jarvis runs on: hardware inventory, live load and installed tools.",
-    "usage" to "Monthly spend against the hard budget, with token use per backend.",
-    "models" to "Owner-controlled model access. Allowing a model never selects it for a running request.",
-    "services" to "The Jarvis services on your Home Node and the free space on its disks.",
-    "events" to "Sign-ins, pairings and other security events Core recorded.",
-)
-
 private fun tokens(n: Long): String = NumberFormat.getIntegerInstance(Locale.ENGLISH).format(n)
 
-/** System Health: connection, Home Node vitals, usage, model access,
- *  services and security events on the shared node layout. */
+/** System health: Core and Home Node status, services, disks and security events; usage
+ *  against the budget; owner model access. A deep link opens it on Usage ([healthView]). */
 @Composable
 fun HealthScreen(
     state: JarvisUiState,
@@ -56,6 +48,51 @@ fun HealthScreen(
     initialNode: String = "core",
 ) {
     LaunchedEffect(Unit) { onRefresh() }
+    var view by rememberSaveable { mutableStateOf(healthView(initialNode)) }
+    PushedPage(
+        screenTitle(Screen.HEALTH), "The state of your Home Node", { onNavigate(backOf(Screen.HEALTH)) },
+        trailing = { GhostButton("Refresh", onRefresh) },
+    ) {
+        Segmented(listOf("status" to "Status", "usage" to "Usage", "models" to "Models"), view, { view = it })
+        when (view) {
+            "usage" -> Loaded(data.usage, "Usage", JvIcon.TREND, "Loading usage…", onRetry = onRefresh) { usage ->
+                ListSection("Monthly budget") { Box(Modifier.padding(JvSpace.lg)) { Budget(usage) } }
+                Facts(
+                    "This month",
+                    listOf(
+                        "Remaining" to eur(usage.remaining_eur),
+                        "Reserved" to eur(usage.reserved_eur),
+                        "Tokens" to tokens(usage.total_tokens),
+                        "Input / output" to "${tokens(usage.input_tokens)} / ${tokens(usage.output_tokens)}",
+                        "Calls" to tokens(usage.requests),
+                    ),
+                )
+                ActivityList(
+                    "By backend",
+                    usage.by_backend.map {
+                        ActivityItem(it.backend, JvIcon.SPARK, it.backend, "${tokens(it.total_tokens)} tokens", eur(it.spent_eur), Tone.OK, "")
+                    },
+                    "No usage this month.",
+                )
+            }
+            "models" -> if (modelControls != null) {
+                MutedText(
+                    "Owner-controlled model access. Allowing a model never selects it for a running request. Every change asks " +
+                        "Android to confirm it is you and is signed with this device's key.",
+                    Modifier.padding(horizontal = JvSpace.xs),
+                )
+                ModelControls(modelControls)
+                ModelRoutingEditor(modelControls)
+            } else {
+                Unavailable("Models", JvIcon.LAYERS, kind = UnavailableKind.ERROR, detail = "Model controls are not available in this session.")
+            }
+            else -> StatusView(state, data, onRefresh, onCheckConnection)
+        }
+    }
+}
+
+@Composable
+private fun StatusView(state: JarvisUiState, data: CoreData, onRefresh: () -> Unit, onCheckConnection: () -> Unit) {
     val now = System.currentTimeMillis()
     val core = when (state.connection) {
         is ConnectionState.Reachable -> Tone.OK to "Running"
@@ -77,150 +114,101 @@ fun HealthScreen(
     // A nearly full disk outranks "all running".
     val fullDisk = data.services.valueOrNull?.disks.orEmpty().any { diskState(it).first in setOf(Tone.WARN, Tone.ERROR) }
     if (fullDisk && svc.first == Tone.OK) svc = Tone.WARN to "${svc.second} · disk nearly full"
-    val events = statusOf(data.systemAudit) { (if (it.entries.isEmpty()) Tone.IDLE else Tone.OK) to "${it.entries.size} recorded" }
-    val items = listOf(
-        NodeItem("core", "Core", "Jarvis Core", JvIcon.CHIP, core.first, core.second, "The heart of Jarvis"),
-        NodeItem("node", "Home Node", "Home Node", JvIcon.HOME, node.first, node.second, "Hardware, live load and software"),
-        NodeItem("usage", "Usage", "Usage", JvIcon.TREND, spend.first, spend.second, "Spend, budget and tokens this month"),
-        NodeItem("models", "Models", "Models", JvIcon.LAYERS, Tone.IDLE, "Owner policy", "Which models Jarvis may use"),
-        NodeItem("services", "Services", "Services & disk", JvIcon.DISK, svc.first, svc.second, "Service status and disk space"),
-        NodeItem("events", "Events", "Security events", JvIcon.SHIELD, events.first, events.second, "What Core recorded"),
-    )
-    var selected by rememberSaveable { mutableStateOf(initialNode) }
-    var sub by rememberSaveable { mutableStateOf("overview") }
-    val current = items.first { it.id == selected }
     val auditRows = data.systemAudit.valueOrNull?.entries.orEmpty().take(20).mapIndexed { i, e ->
         val good = e.outcome.lowercase(Locale.ROOT) in setOf("ok", "success", "approved", "allowed")
-        ActivityItem("${e.ts}-$i", if (e.event.startsWith("auth")) JvIcon.KEY else JvIcon.SHIELD, e.event, e.outcome, relativeTime(e.ts, now), if (good) Tone.OK else Tone.WARN, e.outcome)
+        ActivityItem("${e.ts}-$i", if (e.event.startsWith("auth")) JvIcon.KEY else JvIcon.SHIELD, e.event, null, relativeTime(e.ts, now), if (good) Tone.OK else Tone.WARN, e.outcome)
+    }
+    var allSoftware by rememberSaveable { mutableStateOf(false) }
+
+    ListSection("Overview") {
+        FactRow("Jarvis Core", core.second, core.first)
+        ListDivider()
+        FactRow("Home Node", node.second, node.first)
+        ListDivider()
+        FactRow("Services and disks", svc.second, svc.first)
+        ListDivider()
+        FactRow("Spend this month", spend.second, spend.first)
     }
 
-    NodePage("System health", "The state of your Home Node", items, selected, { selected = it; sub = "overview" }, { onNavigate(backOf(Screen.HEALTH)) }) {
-        Panel(
-            current.icon, current.title, current.tone, current.status,
-            description = HEALTH_DETAILS[current.id],
-            quote = if (current.id == "core") state.endpoint?.baseUrl ?: "No Home Node configured" else null,
-            action = when (current.id) {
-                "core" -> ({ ActionButton("Check again", onCheckConnection) })
-                "models" -> null
-                else -> ({ ActionButton("Refresh", onRefresh) })
-            },
-        ) {
-            when (current.id) {
-                "core" -> {
-                    val endpoint = state.endpoint
-                    TileGrid(
-                        "Connection",
-                        listOf(
-                            TileData(
-                                JvIcon.CHIP, "Ready · /readyz",
-                                when (val c = state.connection) {
-                                    is ConnectionState.Reachable -> "OK · ${c.status}"
-                                    is ConnectionState.Unreachable -> "Failed · ${c.reason.name.lowercase(Locale.ROOT)}"
-                                    is ConnectionState.Rejected -> "Failed · HTTP ${c.status}"
-                                    ConnectionState.Checking -> "Checking…"
-                                    ConnectionState.NotConfigured -> "Not configured"
-                                },
-                            ),
-                            TileData(JvIcon.API, "Server", endpoint?.baseUrl ?: "Not configured"),
-                            TileData(JvIcon.SHIELD, "Transport", if (endpoint?.baseUrl?.startsWith("https://") == true) "HTTPS" else "HTTP, local network only"),
-                            TileData(JvIcon.KEY, "Sign-in", "Device-bound keys"),
-                        ),
-                    )
-                    Loaded(data.systemAudit, "Recent events", JvIcon.SHIELD, "Loading events…") {
-                        ActivityList("Recent events", auditRows.take(5), "No security events recorded.")
-                    }
-                }
-                "node" -> {
-                    ChipRow(listOf(ChipItem("overview", "Overview", JvIcon.DOC), ChipItem("software", "Software", JvIcon.LAYERS)), sub, { sub = it }, small = true)
-                    Loaded(data.registry, "Home Node", JvIcon.HOME, "Loading resources…") { registry ->
-                        val rows = softwareRows(registry.software)
-                        if (sub == "software") {
-                            ActivityList("Software", rows, "No software reported.")
-                            return@Loaded
-                        }
-                        val live = registry.live_host
-                        val host = registry.host
-                        val tiles = buildList {
-                            if (live != null) {
-                                add(TileData(JvIcon.CHIP, "CPU load", live.cpu_percent?.let { String.format(Locale.ROOT, "%.1f%%", it) } ?: "First sample…"))
-                                add(TileData(JvIcon.LAYERS, "Memory in use", "${gib(live.memory_used_bytes)} / ${gib(live.memory_total_bytes)}"))
-                                add(TileData(JvIcon.HEALTH, "Uptime", formatUptime(live.uptime_seconds)))
-                                add(
-                                    TileData(
-                                        JvIcon.CLOCK, "Last sample",
-                                        DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault()).format(Instant.ofEpochSecond(live.sampled_at)),
-                                    ),
-                                )
-                            }
-                            if (host != null) {
-                                add(TileData(JvIcon.CHIP, "Processor", "${host.cpu} · ${host.cpu_cores} cores"))
-                                add(TileData(JvIcon.MONITOR, "System", "${host.os} · ${host.arch} · ${host.mem_total_gb} GB · ${host.gpu}"))
-                            }
-                        }
-                        if (tiles.isNotEmpty()) TileGrid("Vitals", tiles)
-                        if (live == null) {
-                            Unavailable(
-                                "Live load", JvIcon.HEALTH, kind = UnavailableKind.CORE_UPDATE,
-                                detail = "This Core reports a hardware inventory only, not the current load.",
-                            )
-                        }
-                        ActivityList(
-                            "Software", rows.take(5), "No software reported.",
-                            action = if (rows.size > 5) ({ GhostButton("View all", { sub = "software" }) }) else null,
-                        )
-                    }
-                }
-                "usage" -> Loaded(data.usage, "Usage", JvIcon.TREND, "Loading usage…") { usage ->
-                    Budget(usage)
-                    TileGrid(
-                        "This month",
-                        listOf(
-                            TileData(JvIcon.TREND, "Remaining", eur(usage.remaining_eur)),
-                            TileData(JvIcon.TREND, "Reserved", eur(usage.reserved_eur)),
-                            TileData(JvIcon.LAYERS, "Tokens", tokens(usage.total_tokens)),
-                            TileData(JvIcon.ARROW_RIGHT, "Input / output", "${tokens(usage.input_tokens)} / ${tokens(usage.output_tokens)}"),
-                            TileData(JvIcon.API, "Calls", tokens(usage.requests)),
-                        ),
-                    )
-                    ActivityList(
-                        "By backend",
-                        usage.by_backend.map {
-                            ActivityItem(it.backend, JvIcon.SPARK, it.backend, "${tokens(it.total_tokens)} tokens", eur(it.spent_eur), Tone.OK, "Used this month")
-                        },
-                        "No usage this month.",
-                    )
-                }
-                "models" -> if (modelControls != null) {
-                    MutedText("Every change asks Android to confirm it is you and is signed with this device's key.")
-                    ModelControls(modelControls)
-                    ModelRoutingEditor(modelControls)
-                } else {
-                    Unavailable("Models", JvIcon.LAYERS, kind = UnavailableKind.ERROR, detail = "Model controls are not available in this session.")
-                }
-                "services" -> Loaded(data.services, "Services & disk", JvIcon.DISK, "Loading services…") { response ->
-                    ActivityList(
-                        "Services",
-                        response.services.map {
-                            val (tone, label) = serviceState(it.state)
-                            ActivityItem(it.unit.ifEmpty { it.label }, JvIcon.CHIP, it.label, it.unit, label, tone, label)
-                        },
-                        "No services reported.",
-                    )
-                    ActivityList(
-                        "Disks",
-                        response.disks.mapIndexed { i, disk ->
-                            val (tone, line) = diskState(disk)
-                            ActivityItem("${disk.label}-$i", JvIcon.DISK, disk.label, line, tone = tone, toneLabel = line)
-                        },
-                        "No disks reported.",
-                    )
-                }
-                else -> Loaded(data.systemAudit, "Security events", JvIcon.SHIELD, "Loading events…") {
-                    ActivityList("Security events", auditRows, "No security events recorded.")
-                }
+    val endpoint = state.endpoint
+    Column(verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+        Facts(
+            "Connection",
+            listOf(
+                "Ready check" to when (val c = state.connection) {
+                    is ConnectionState.Reachable -> "OK · ${c.status}"
+                    is ConnectionState.Unreachable -> "Failed · ${c.reason.name.lowercase(Locale.ROOT)}"
+                    is ConnectionState.Rejected -> "Failed · HTTP ${c.status}"
+                    ConnectionState.Checking -> "Checking…"
+                    ConnectionState.NotConfigured -> "Not configured"
+                },
+                "Server" to (endpoint?.baseUrl ?: "Not configured"),
+                "Transport" to if (endpoint?.baseUrl?.startsWith("https://") == true) "HTTPS" else "HTTP, local network only",
+                "Sign-in" to "Device-bound keys",
+            ),
+        )
+        GhostButton("Check again", onCheckConnection, Modifier.fillMaxWidth())
+    }
+
+    Loaded(data.registry, "Home Node", JvIcon.HOME, "Loading resources…", onRetry = onRefresh) { registry ->
+        val live = registry.live_host
+        val host = registry.host
+        val vitals = buildList {
+            if (live != null) {
+                add("CPU load" to (live.cpu_percent?.let { String.format(Locale.ROOT, "%.1f%%", it) } ?: "First sample…"))
+                add("Memory in use" to "${gib(live.memory_used_bytes)} / ${gib(live.memory_total_bytes)}")
+                add("Uptime" to formatUptime(live.uptime_seconds))
+                add("Last sample" to DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault()).format(Instant.ofEpochSecond(live.sampled_at)))
+            }
+            if (host != null) {
+                add("Processor" to "${host.cpu} · ${host.cpu_cores} cores")
+                add("System" to "${host.os} · ${host.arch} · ${host.mem_total_gb} GB · ${host.gpu}")
             }
         }
+        if (vitals.isNotEmpty()) Facts("Home Node", vitals)
+        if (live == null) {
+            Unavailable(
+                "Live load", JvIcon.HEALTH, kind = UnavailableKind.CORE_UPDATE,
+                detail = "This Core reports a hardware inventory only, not the current load.",
+            )
+        }
+        val rows = softwareRows(registry.software)
+        ActivityList(
+            "Software", if (allSoftware) rows else rows.take(5), "No software reported.",
+            action = if (rows.size > 5 && !allSoftware) ({ GhostButton("View all", { allSoftware = true }) }) else null,
+        )
     }
+
+    Loaded(data.services, "Services and disks", JvIcon.DISK, "Loading services…", onRetry = onRefresh) { response ->
+        ActivityList(
+            "Services",
+            response.services.map {
+                val (tone, label) = serviceState(it.state)
+                ActivityItem(it.unit.ifEmpty { it.label }, JvIcon.CHIP, it.label, it.unit, null, tone, label)
+            },
+            "No services reported.",
+        )
+        ActivityList(
+            "Disks",
+            response.disks.mapIndexed { i, disk ->
+                val (tone, line) = diskState(disk)
+                ActivityItem("${disk.label}-$i", JvIcon.DISK, disk.label, line.takeIf { tone != Tone.IDLE }, tone = tone, toneLabel = diskWord(tone))
+            },
+            "No disks reported.",
+        )
+    }
+
+    Loaded(data.systemAudit, "Security events", JvIcon.SHIELD, "Loading events…", onRetry = onRefresh) {
+        ActivityList("Security events", auditRows, "No security events recorded.")
+    }
+}
+
+/** Badge word of a disk state ([diskState] warns at 80% and 90% used). */
+private fun diskWord(tone: Tone): String = when (tone) {
+    Tone.OK -> "OK"
+    Tone.WARN -> "Filling up"
+    Tone.ERROR -> "Nearly full"
+    Tone.IDLE -> "Unknown"
 }
 
 @Composable
@@ -238,7 +226,7 @@ private fun Budget(usage: SystemUsage) {
             )
         }
         Box(
-            Modifier.padding(top = 8.dp).fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(c.bgSunken)
+            Modifier.padding(top = JvSpace.sm).fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(c.bgSunken)
                 .semantics { contentDescription = "${Math.round(fraction * 100)}% of the budget used" },
         ) {
             Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().background(color))

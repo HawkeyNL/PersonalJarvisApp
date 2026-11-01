@@ -27,6 +27,24 @@ fun linksOf(tab: Tab): List<Screen> = when (tab) {
     Tab.SETTINGS -> listOf(Screen.INTEGRATIONS, Screen.HEALTH, Screen.CONTEXT)
 }
 
+/** Sentence-case name of a screen: the page title, and the fallback row for a link a
+ *  tab root has no row for. */
+fun screenTitle(screen: Screen): String = when (screen) {
+    Screen.HUB -> "Jarvis"
+    Screen.TRADING -> "Trading"
+    Screen.ACTIVITY -> "Activity"
+    Screen.SETTINGS -> "Settings"
+    Screen.CHAT -> "Chat"
+    Screen.CONVERSATIONS -> "Conversations"
+    Screen.MEMORY -> "Memory"
+    Screen.PAIRING_APPROVALS -> "Pairing requests"
+    Screen.TASKS -> "Tasks"
+    Screen.AGENTS -> "Agents"
+    Screen.INTEGRATIONS -> "Integrations"
+    Screen.HEALTH -> "System health"
+    Screen.CONTEXT -> "Context and devices"
+}
+
 /** Back from a pushed screen goes to its tab's root, from a tab root to Jarvis. */
 fun backOf(screen: Screen): Screen {
     val root = tabOf(screen).root

@@ -7,6 +7,7 @@ import com.hawkeynl.jarvis.network.CodingSession
 import com.hawkeynl.jarvis.network.ConnectionState
 import com.hawkeynl.jarvis.network.DiskStatus
 import com.hawkeynl.jarvis.network.IbkrPortfolio
+import com.hawkeynl.jarvis.network.LinkedDevice
 import com.hawkeynl.jarvis.network.LoadFailure
 import com.hawkeynl.jarvis.network.Registry
 import com.hawkeynl.jarvis.network.ServiceStatus
@@ -258,6 +259,12 @@ fun agentStatus(usage: AgentUsage?, unavailableReason: String?): Pair<Tone, Stri
 
 // --- Health ---------------------------------------------------------------------------------
 
+/** The System health view a node id opens on (a deep link names "usage"). */
+fun healthView(node: String): String = when (node) {
+    "usage", "models" -> node
+    else -> "status"
+}
+
 /** Tone and label of a systemd unit state as Core reports it. */
 fun serviceState(state: String): Pair<Tone, String> = when (state) {
     "active" -> Tone.OK to "Running"
@@ -289,3 +296,11 @@ fun diskState(disk: DiskStatus): Pair<Tone, String> {
     }
     return tone to "${Math.round(used)}% used · ${gib(free)} free of ${gib(total)}"
 }
+
+// --- Devices ---------------------------------------------------------------------------------
+
+/** True for this phone's own entry; false while its id is unknown. */
+fun isOwnDevice(device: LinkedDevice, own: String?): Boolean = own != null && device.id.equals(own, ignoreCase = true)
+
+/** Revoke is offered only for another active device, and only once this phone's own id is known. */
+fun revocable(device: LinkedDevice, own: String?): Boolean = own != null && device.status == "active" && !isOwnDevice(device, own)

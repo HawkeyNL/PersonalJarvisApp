@@ -1,5 +1,6 @@
 package com.hawkeynl.jarvis.ui
 
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -25,9 +26,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.hawkeynl.jarvis.BuildConfig
 import com.hawkeynl.jarvis.network.ConnectionState
 import com.hawkeynl.jarvis.security.ModelControlService
 import com.hawkeynl.jarvis.security.PairingApprovalService
@@ -204,17 +205,14 @@ private fun ConnectionBanner(connection: ConnectionState, retry: () -> Unit) {
     }
 }
 
+/**
+ * Row for a link from [linksOf] that its tab root has no row for. ShellModelTest keeps the
+ * mapping complete; should one slip through anyway, a debug build fails here so it gets
+ * fixed, and a release build logs it and shows a plain row instead of crashing.
+ */
 @Composable
-internal fun ScreenHeader(title: String, onBack: () -> Unit, trailing: (@Composable () -> Unit)? = null) {
-    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-        CircleIconButton(JvIcon.ARROW_LEFT, "Back", onBack, Modifier.align(Alignment.CenterStart))
-        Text(
-            title,
-            Modifier.align(Alignment.Center).padding(horizontal = 56.dp),
-            style = MaterialTheme.typography.titleMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        trailing?.let { Box(Modifier.align(Alignment.CenterEnd)) { it() } }
-    }
+internal fun MissingLinkRow(tab: Tab, screen: Screen, onNavigate: (Screen) -> Unit) {
+    check(!BuildConfig.DEBUG) { "No ${tab.name} row for $screen" }
+    LaunchedEffect(tab, screen) { Log.w("JarvisShell", "No ${tab.name} row for $screen") }
+    NavRow(JvIcon.ARROW_RIGHT, screenTitle(screen), "", { onNavigate(screen) })
 }

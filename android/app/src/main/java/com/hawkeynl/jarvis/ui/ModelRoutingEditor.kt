@@ -83,7 +83,7 @@ fun ModelRoutingEditor(controller: ModelControlService) {
                     ) { draft = draft.withTier(tier, it) }
                 }
 
-                if (canApply) issue?.let { ErrorText(it) }
+                if (canApply) issue?.let { ErrorText(it, live = false) }
                 if (notice.isNotEmpty()) MutedText(notice)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     GhostButton("Refresh", { reload() }, enabled = !busy)

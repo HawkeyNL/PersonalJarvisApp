@@ -7,6 +7,7 @@ import com.hawkeynl.jarvis.network.CodingSession
 import com.hawkeynl.jarvis.network.ConnectionState
 import com.hawkeynl.jarvis.network.DiskStatus
 import com.hawkeynl.jarvis.network.IbkrPortfolio
+import com.hawkeynl.jarvis.network.LinkedDevice
 import com.hawkeynl.jarvis.network.LiveHost
 import com.hawkeynl.jarvis.network.LoadFailure
 import com.hawkeynl.jarvis.network.Registry
@@ -17,6 +18,7 @@ import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HubModelTest {
@@ -131,5 +133,29 @@ class HubModelTest {
         val week = filterByTitle(rows, " BUDGET ", 7, now, { it.first }, { it.second })
         assertEquals(listOf("Budget plan"), week.map { it.first })
         assertEquals(3, filterByTitle(rows, "", null, now, { it.first }, { it.second }).size)
+    }
+
+    @Test
+    fun `health opens on the view a deep link names, else on status`() {
+        assertEquals("usage", healthView(parseDeepLink("jarvis://health/usage")!!.healthNode))
+        assertEquals("usage", healthView("usage"))
+        assertEquals("models", healthView("models"))
+        for (node in listOf("core", "node", "services", "events", "", "bogus")) assertEquals(node, "status", healthView(node))
+    }
+
+    @Test
+    fun `revoke is never offered for this phone or before its id is known`() {
+        val other = LinkedDevice("AB12", status = "active")
+        val mine = LinkedDevice("cd34", status = "active")
+        assertTrue(revocable(other, "CD34"))
+        assertFalse(revocable(mine, "CD34"))
+        assertTrue(isOwnDevice(mine, "CD34"))
+        assertFalse(isOwnDevice(other, "CD34"))
+        // Own id unknown: nothing is offered and nothing is marked as this device.
+        assertFalse(revocable(other, null))
+        assertFalse(isOwnDevice(mine, null))
+        // Only active devices.
+        assertFalse(revocable(LinkedDevice("ef56", status = "revoked"), "CD34"))
+        assertFalse(revocable(LinkedDevice("ef56"), "CD34"))
     }
 }

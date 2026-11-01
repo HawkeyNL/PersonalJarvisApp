@@ -22,12 +22,12 @@ fun ModelControls(controller: ModelControlService) {
     var selected by remember { mutableStateOf<ModelEntry?>(null) }
     val scope = rememberCoroutineScope()
     suspend fun refresh() { policy = controller.policy() }
-    Button(onClick = { open = true; scope.launch {
+    ActionButton("Manage model access", { open = true; scope.launch {
         busy = true
         try { refresh() } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { notice = "Model policy unreachable"; policy = null }
         finally { busy = false }
-    } }) { Text("Manage model access") }
+    } })
     if (open) AlertDialog(onDismissRequest = { if (!busy) open = false }, title = { Text("Models") },
         text = {
             Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
