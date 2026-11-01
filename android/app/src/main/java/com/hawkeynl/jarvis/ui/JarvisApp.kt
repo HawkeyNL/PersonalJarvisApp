@@ -27,6 +27,16 @@ import com.hawkeynl.jarvis.security.PairingApprovalService
 import com.hawkeynl.jarvis.security.AgentApprovalService
 import com.hawkeynl.jarvis.security.UnlockApprovalService
 
+/** What the root shows. The shell, with its dock, needs an unlocked app, a
+ *  Home Node and a signed-in session; anything else gets onboarding. */
+internal enum class Root { LOCK, ONBOARDING, SHELL }
+
+internal fun rootFor(state: JarvisUiState): Root = when {
+    state.locked -> Root.LOCK
+    state.endpoint == null || !state.authenticated -> Root.ONBOARDING
+    else -> Root.SHELL
+}
+
 @Composable
 fun JarvisApp(
     state: JarvisUiState,
@@ -39,19 +49,20 @@ fun JarvisApp(
     unlockApprovals: UnlockApprovalService? = null,
     agentApprovals: AgentApprovalService? = null,
 ) {
-    val signedIn = !state.locked && state.endpoint != null && state.authenticated
+    val root = rootFor(state)
+    val signedIn = root == Root.SHELL
     // Locking or signing out drops every Core read and cancels running ones.
     LaunchedEffect(signedIn) { if (!signedIn) core.clear() }
     Box(Modifier.fillMaxSize().jvBackdrop()) {
         Box(Modifier.fillMaxSize().safeDrawingPadding()) {
-            when {
-                state.locked -> AppLockScreen(
+            when (root) {
+                Root.LOCK -> AppLockScreen(
                     message = state.biometricMessage,
                     onRetry = onRequestBiometric,
                     onReset = actions::resetDevice,
                 )
-                state.endpoint == null || !state.authenticated -> OnboardingScreen(state, actions)
-                else -> AuthenticatedShell(state, actions, core, onInstallUpdate, modelControls, pairingApprovals, unlockApprovals, agentApprovals)
+                Root.ONBOARDING -> OnboardingScreen(state, actions)
+                Root.SHELL -> AuthenticatedShell(state, actions, core, onInstallUpdate, modelControls, pairingApprovals, unlockApprovals, agentApprovals)
             }
         }
     }

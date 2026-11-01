@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from "vue";
 import { getJson, ApiError } from "../api";
-import { currentAuthStatus, login, clearSession, listDevices, PairingPending, AccountPasswordRequired, AccountActivationRequired, bootstrapFirstDevice, ownKeyFingerprint } from "../auth";
+import { currentAuthStatus, currentShellMode, login, clearSession, listDevices, PairingPending, AccountPasswordRequired, AccountActivationRequired, bootstrapFirstDevice, ownKeyFingerprint } from "../auth";
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
+import { shownShellMode } from "../lock";
 import JarvisConsole from "../components/JarvisConsole.vue";
 import JvBackdrop from "../components/jv/JvBackdrop.vue";
 import JvTopBar from "../components/jv/JvTopBar.vue";
@@ -37,6 +38,14 @@ let authTrying = false;
 const originInput = ref("");
 const configBusy = ref(false);
 const configError = ref<string | null>(null);
+// Before sign-in Settings is out of reach, so a wrong or moved Home Node
+// address is changed here.
+const changingOrigin = ref(false);
+watch(currentShellMode, (mode) => { if (mode === "app") changingOrigin.value = false; });
+function cancelOriginChange() {
+  changingOrigin.value = false;
+  originInput.value = homeNodeConfig.value.origin ?? "";
+}
 const accountMode = ref<"login" | "activate" | null>(null);
 const password = ref("");
 const passwordVisible = ref(false);
@@ -104,6 +113,7 @@ async function saveHomeNode() {
   configError.value = null;
   try {
     await configureHomeNode(originInput.value);
+    changingOrigin.value = false;
     backend.value = "checking";
     await pollBackend();
     startBackendPolling();
@@ -205,8 +215,9 @@ const cards = computed<Card[]>(() => [
   { key: "context", to: "/devices", icon: "context", title: "Context", summary: contextCard(pick(devices.value, "devices")) },
   { key: "health", to: "/health", icon: "health", title: "System Health", summary: healthCard(online.value, registry.value) },
 ]);
-// Before sign-in the owner cards cannot load; say so instead of "Loading…".
-const shownCards = computed(() => cards.value.map((card): Card =>
+// No module links before sign-in: the cards lead into app pages. While a
+// stored session is checked, say so instead of "Loading…".
+const shownCards = computed(() => shownShellMode.value !== "app" ? [] : cards.value.map((card): Card =>
   auth.value === "in" || card.key === "health" || card.key === "memory"
     ? card
     : { ...card, summary: { lines: [auth.value === "checking" ? "Loading…" : "Sign-in required", ""], tone: "idle" } },
@@ -283,9 +294,9 @@ onBeforeUnmount(() => {
     </JvTopBar>
 
     <!-- Onboarding / sign-in take over the centre until the device is ready. -->
-    <div v-if="backend === 'unconfigured' || (accountMode && backend === 'ok')" class="gate">
+    <div v-if="backend === 'unconfigured' || changingOrigin || (accountMode && backend === 'ok')" class="gate">
       <JvOrb class="gate-orb" :size="182" :label="false" />
-      <form v-if="backend === 'unconfigured'" class="connection-setup" @submit.prevent="saveHomeNode">
+      <form v-if="backend === 'unconfigured' || changingOrigin" class="connection-setup" @submit.prevent="saveHomeNode">
         <h2>Connect to your Home Node</h2>
         <p>Enter the HTTPS origin of your Home Node. Jarvis stores only this address locally, never credentials.</p>
         <label for="home-node-origin">Home Node origin</label>
@@ -303,8 +314,9 @@ onBeforeUnmount(() => {
         </button>
         <p v-if="configError" class="config-error" role="alert">{{ configError }}</p>
         <p class="setup-hint">Plain HTTP on localhost is only allowed in a development build.</p>
+        <button v-if="changingOrigin" type="button" @click="cancelOriginChange">Cancel</button>
       </form>
-      <form v-if="accountMode && backend === 'ok'" class="connection-setup" @submit.prevent="submitAccount">
+      <form v-else-if="accountMode && backend === 'ok'" class="connection-setup" @submit.prevent="submitAccount">
         <h2>{{ accountMode === "activate" ? "Activate your first device" : "Sign in to Jarvis" }}</h2>
         <p v-if="accountMode === 'activate'">Use the one-time activation code from your Home Node and choose an account password of at least 15 characters.</p>
         <label v-if="accountMode === 'activate'" for="activation-code">Activation code</label>
@@ -398,6 +410,8 @@ onBeforeUnmount(() => {
         <span class="node-text">
           <span>{{ footerHost || "No Home Node set" }}</span>
           <span class="node-state" :class="{ off: online === false }">{{ online ? "ONLINE" : online === false ? "OFFLINE" : "CONNECTING" }}</span>
+          <button v-if="shownShellMode !== 'app' && backend !== 'unconfigured' && !changingOrigin" type="button"
+            class="change-origin" @click="changingOrigin = true">Change Home Node</button>
         </span>
       </div>
       <div class="motto" aria-hidden="true">“IDEAS COMPOUND HERE”<span class="bar"></span></div>
@@ -516,6 +530,7 @@ onBeforeUnmount(() => {
 .node-text { display: flex; flex-direction: column; font-size: 11px; letter-spacing: 0.16em; line-height: 16px; color: var(--text-2); }
 .node-state { font-size: 11px; font-weight: 600; letter-spacing: 0.22em; color: var(--accent); }
 .node-state.off { color: var(--danger); }
+.change-origin { pointer-events: auto; margin-top: 6px; align-self: flex-start; }
 .motto { display: flex; flex-direction: column; align-items: center; gap: 16px; font-size: 11.5px; letter-spacing: 0.5em; padding-left: 0.5em; color: var(--text-1); }
 .motto .bar { width: 36px; height: 2px; margin-left: -0.5em; background: var(--border-strong); }
 .tagline-foot { justify-self: end; text-align: right; font-size: 11px; letter-spacing: 0.28em; line-height: 15px; color: var(--text-4); }

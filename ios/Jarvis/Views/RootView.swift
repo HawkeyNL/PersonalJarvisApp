@@ -7,9 +7,13 @@ struct RootView: View {
     /// Deep link waiting for unlock and sign-in.
     @State private var pendingLink: HubRoute?
 
+    private var screen: RootScreen {
+        rootScreen(lock: model.lockState, connection: model.connectionState, authenticated: model.isAuthenticated)
+    }
+
     var body: some View {
         Group {
-            if model.lockState != .unlocked {
+            if screen == .lock {
                 LockView(model: model)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(JarvisTheme.background)
@@ -17,7 +21,7 @@ struct RootView: View {
             } else {
                 NavigationStack(path: $path) {
                     Group {
-                        if model.connectionState == .reachable && model.isAuthenticated {
+                        if screen == .hub {
                             HubView(model: model)
                         } else {
                             // Connecting, enrolling or signed out: Settings stays

@@ -7,5 +7,7 @@ export const useAppStore = defineStore("app", () => {
   const tagline = ref("Personal AI operating system");
   /** The chat overlay on the hub (Ctrl/⌘K, command bar, "Hey Jarvis"). */
   const consoleOpen = ref(false);
-  return { name, tagline, consoleOpen };
+  /** A message that must survive the move to the sign-in screen (unlinking). */
+  const notice = ref<string | null>(null);
+  return { name, tagline, consoleOpen, notice };
 });

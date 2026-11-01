@@ -193,4 +193,14 @@ final class HubModelTests: XCTestCase {
         XCTAssertNil(route("jarvis://settings"))
         XCTAssertNil(route("https://approvals/pairing"))
     }
+
+    func testHubNeedsUnlockReachableNodeAndSession() {
+        XCTAssertEqual(rootScreen(lock: .unlocked, connection: .unconfigured, authenticated: false), .enrollment)
+        XCTAssertEqual(rootScreen(lock: .unlocked, connection: .checking, authenticated: true), .enrollment)
+        XCTAssertEqual(rootScreen(lock: .unlocked, connection: .unreachable("offline"), authenticated: true), .enrollment)
+        XCTAssertEqual(rootScreen(lock: .unlocked, connection: .reachable, authenticated: false), .enrollment)
+        XCTAssertEqual(rootScreen(lock: .unlocked, connection: .reachable, authenticated: true), .hub)
+        XCTAssertEqual(rootScreen(lock: .locked, connection: .reachable, authenticated: true), .lock)
+        XCTAssertEqual(rootScreen(lock: .denied, connection: .unconfigured, authenticated: false), .lock)
+    }
 }
