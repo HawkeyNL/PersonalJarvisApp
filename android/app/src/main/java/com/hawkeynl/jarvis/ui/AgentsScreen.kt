@@ -82,7 +82,9 @@ private fun AgentSheet(agent: AgentInfo, usageReason: String?, onClose: () -> Un
     ModalBottomSheet(
         onDismissRequest = onClose,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = c.bgRaised,
+        // The page colour, not bgRaised: the sheet holds surface cards, which would read
+        // as holes on a raised sheet in dark mode.
+        containerColor = c.bgPage,
         contentColor = c.textPrimary,
         scrimColor = c.bgScrim,
     ) {

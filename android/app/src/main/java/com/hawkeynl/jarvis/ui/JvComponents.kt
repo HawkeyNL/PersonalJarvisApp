@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -96,9 +97,9 @@ fun MutedText(text: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun ErrorText(text: String, modifier: Modifier = Modifier) {
-    // Announced when it appears or changes.
-    Text(text, modifier.semantics { liveRegion = LiveRegionMode.Polite }, color = JvTheme.colors.dangerText, style = MaterialTheme.typography.bodySmall)
+fun ErrorText(text: String, modifier: Modifier = Modifier, live: Boolean = true) {
+    // Announced when it appears or changes, unless [live] is off for text that follows every edit.
+    Text(text, if (live) modifier.semantics { liveRegion = LiveRegionMode.Polite } else modifier, color = JvTheme.colors.dangerText, style = MaterialTheme.typography.bodySmall)
 }
 
 /** Round icon button (back, send). */
@@ -305,11 +306,13 @@ private fun ActivityRow(
             item.time?.takeIf { it.isNotEmpty() }?.let {
                 Text(it, Modifier.padding(start = JvSpace.sm), color = c.textSecondary, style = MaterialTheme.typography.labelSmall.tabular())
             }
-            if (item.toneLabel.isNotEmpty()) StatusBadge(item.toneLabel, item.tone, Modifier.padding(start = JvSpace.sm))
+            // Capped, so a long label never squeezes the title.
+            if (item.toneLabel.isNotEmpty()) StatusBadge(item.toneLabel, Modifier.padding(start = JvSpace.sm).widthIn(max = 120.dp), item.tone)
         }
         if (rowActions != null) {
+            // No padding of its own: a row without actions stays as tall as its content.
             Row(
-                Modifier.fillMaxWidth().padding(top = JvSpace.sm),
+                Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(JvSpace.sm, Alignment.End),
                 verticalAlignment = Alignment.CenterVertically,
             ) { rowActions(item) }
@@ -345,7 +348,7 @@ fun toneSubtle(tone: Tone): Color = with(JvTheme.colors) {
 
 /** A status badge (`.badge`): dot and label, so colour never carries the meaning alone. */
 @Composable
-fun StatusBadge(label: String, tone: Tone = Tone.IDLE, modifier: Modifier = Modifier) {
+fun StatusBadge(label: String, modifier: Modifier = Modifier, tone: Tone = Tone.IDLE) {
     val fg = if (tone == Tone.IDLE) JvTheme.colors.textPrimary else toneTextColor(tone)
     Row(
         modifier.heightIn(min = 24.dp).clip(JvShapes.pill).background(toneSubtle(tone)).padding(horizontal = JvSpace.sm),
@@ -399,7 +402,7 @@ fun FactRow(label: String, value: String, tone: Tone? = null) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
             if (tone != null) {
-                StatusBadge(value, tone)
+                StatusBadge(value, tone = tone)
             } else {
                 Text(value, color = JvTheme.colors.textSecondary, textAlign = TextAlign.End, style = MaterialTheme.typography.bodyMedium.tabular())
             }
@@ -501,7 +504,8 @@ fun LaterSection(items: List<Triple<JvIcon, String, String>>, note: String? = nu
 enum class UnavailableKind { PLANNED, CORE_UPDATE, ERROR }
 
 /** Honest state for what Core does not offer (yet) or could not load, as an Instrument card;
- *  never sample data. An error is announced and can offer [onRetry]. */
+ *  never sample data. An error can offer [onRetry]. Not a live region: several sections
+ *  can fail at once, and only errors caused by an action are announced ([ErrorText]). */
 @Composable
 fun Unavailable(
     title: String,
@@ -523,7 +527,7 @@ fun Unavailable(
         verticalArrangement = Arrangement.spacedBy(JvSpace.md),
     ) {
         Row(
-            Modifier.semantics(mergeDescendants = true) { if (error) liveRegion = LiveRegionMode.Polite },
+            Modifier.semantics(mergeDescendants = true) {},
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconTile(icon, if (error) Tone.ERROR else null)

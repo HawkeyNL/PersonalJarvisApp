@@ -113,7 +113,7 @@ private fun PairingRequestCard(
                 PairingApproval.displayName(item.device_name, 128), Modifier.weight(1f).semantics { heading() },
                 style = MaterialTheme.typography.titleMedium,
             )
-            StatusBadge(if (left == "Expired") left else "Expires in $left", if (left == "Expired") Tone.IDLE else Tone.WARN)
+            StatusBadge(if (left == "Expired") left else "Expires in $left", tone = if (left == "Expired") Tone.IDLE else Tone.WARN)
         }
         PairingApproval.approverWarning(item.platform)?.let { Text(it, color = c.negativeText, style = MaterialTheme.typography.bodySmall) }
         Column(verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {

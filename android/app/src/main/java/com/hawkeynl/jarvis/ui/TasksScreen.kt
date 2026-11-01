@@ -67,7 +67,8 @@ fun TasksScreen(data: CoreData, onNavigate: (Screen) -> Unit, onRefresh: () -> U
             }
             "waiting" -> Loaded(data.pending, "Approvals", JvIcon.ALERT, "Loading approvals…", AGENT_OFF, onRefresh) {
                 MutedText(
-                    "Changes an agent proposed. Nothing runs until you approve it. Read the whole action first: approving signs " +
+                    "Jarvis proposes, you decide. Nothing an agent proposed runs until you approve it with this phone's key or on a " +
+                        "trusted desktop. Read the whole action first: approving signs " +
                         "exactly what is shown with this phone's device key; anything this app cannot show in full can only be denied here.",
                     Modifier.padding(horizontal = JvSpace.xs),
                 )

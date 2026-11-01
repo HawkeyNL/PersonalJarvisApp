@@ -55,7 +55,6 @@ fun HealthScreen(
     ) {
         Segmented(listOf("status" to "Status", "usage" to "Usage", "models" to "Models"), view, { view = it })
         when (view) {
-            "status" -> StatusView(state, data, onRefresh, onCheckConnection)
             "usage" -> Loaded(data.usage, "Usage", JvIcon.TREND, "Loading usage…", onRetry = onRefresh) { usage ->
                 ListSection("Monthly budget") { Box(Modifier.padding(JvSpace.lg)) { Budget(usage) } }
                 Facts(
@@ -76,7 +75,7 @@ fun HealthScreen(
                     "No usage this month.",
                 )
             }
-            else -> if (modelControls != null) {
+            "models" -> if (modelControls != null) {
                 MutedText(
                     "Owner-controlled model access. Allowing a model never selects it for a running request. Every change asks " +
                         "Android to confirm it is you and is signed with this device's key.",
@@ -87,6 +86,7 @@ fun HealthScreen(
             } else {
                 Unavailable("Models", JvIcon.LAYERS, kind = UnavailableKind.ERROR, detail = "Model controls are not available in this session.")
             }
+            else -> StatusView(state, data, onRefresh, onCheckConnection)
         }
     }
 }

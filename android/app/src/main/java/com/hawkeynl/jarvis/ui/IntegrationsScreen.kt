@@ -49,7 +49,7 @@ fun IntegrationsScreen(data: CoreData, onNavigate: (Screen) -> Unit, onRefresh: 
         trailing = { GhostButton("Refresh", onRefresh) },
     ) {
         Segmented(listOf("brains" to "Brains", "models" to "Models", "tools" to "Tools", "ibkr" to "IBKR"), view, { view = it })
-        MutedText(INTEGRATION_DETAILS.getValue(view), Modifier.padding(horizontal = JvSpace.xs))
+        INTEGRATION_DETAILS[view]?.let { MutedText(it, Modifier.padding(horizontal = JvSpace.xs)) }
         when (view) {
             "brains" -> Loaded(data.registry, "Registry", JvIcon.SPARK, "Loading registry…", onRetry = onRefresh) { registry ->
                 val brains = registry.brains

@@ -1,5 +1,6 @@
 package com.hawkeynl.jarvis.ui
 
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -9,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import com.hawkeynl.jarvis.network.LinkedDevice
 import com.hawkeynl.jarvis.security.PairingApproval
 import java.time.Instant
@@ -62,18 +64,17 @@ fun ContextScreen(data: CoreData, onNavigate: (Screen) -> Unit, onRefresh: () ->
                         ).joinToString(" · "),
                         null,
                         if (d.status == "active") Tone.OK else Tone.IDLE,
-                        d.status.ifEmpty { "unknown" }.replaceFirstChar { it.uppercase() },
+                        if (isOwnDevice(d, data.ownDevice)) "This device" else d.status.ifEmpty { "unknown" }.replaceFirstChar { it.uppercase() },
                     )
                 },
                 "No devices linked yet.",
                 rowActions = { item ->
                     val device = devices.firstOrNull { it.id == item.id }
-                    if (device != null && isOwnDevice(device, data.ownDevice)) StatusBadge("This device")
                     // Nothing is offered until this phone's own id is known.
                     if (device != null && revocable(device, data.ownDevice)) {
                         GhostButton(
                             if (data.revoking == device.id) "Revoking…" else "Revoke", { confirming = device },
-                            enabled = data.revoking == null, danger = true,
+                            Modifier.padding(top = JvSpace.sm), enabled = data.revoking == null, danger = true,
                         )
                     }
                 },
