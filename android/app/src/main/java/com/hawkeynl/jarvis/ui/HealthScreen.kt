@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -94,7 +95,7 @@ fun HealthScreen(
         ActivityItem("${e.ts}-$i", if (e.event.startsWith("auth")) JvIcon.KEY else JvIcon.SHIELD, e.event, e.outcome, relativeTime(e.ts, now), if (good) Tone.OK else Tone.WARN, e.outcome)
     }
 
-    NodePage("SYSTEM HEALTH", "THE STATE OF YOUR HOME NODE", items, selected, { selected = it; sub = "overview" }, onNavigate, mood) {
+    NodePage("System health", "The state of your Home Node", items, selected, { selected = it; sub = "overview" }, onNavigate, mood) {
         Panel(
             current.icon, current.title, current.tone, current.status,
             description = HEALTH_DETAILS[current.id],
@@ -226,17 +227,19 @@ fun HealthScreen(
 @Composable
 private fun Budget(usage: SystemUsage) {
     val fraction = if (usage.budget_eur > 0) (usage.spent_eur / usage.budget_eur).coerceIn(0.0, 1.0).toFloat() else 0f
-    val color = if (usage.over_budget) Jv.Danger else Jv.Accent
+    val c = JvTheme.colors
+    val color = if (usage.over_budget) c.dangerSolid else c.accentSolid
     Column {
         Row(Modifier.fillMaxWidth()) {
-            Text("Monthly budget", Modifier.weight(1f), style = exo(12.5f, color = Jv.Text2))
+            Text("Monthly budget", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
             Text(
                 "${eur(usage.spent_eur)} / ${eur(usage.budget_eur)}" + if (usage.over_budget) " · cap reached" else "",
-                style = exo(12.5f, color = if (usage.over_budget) Jv.Danger else Jv.Text2),
+                color = if (usage.over_budget) c.dangerText else c.textSecondary,
+                style = MaterialTheme.typography.bodySmall.tabular(),
             )
         }
         Box(
-            Modifier.padding(top = 8.dp).fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).background(Jv.accent(0.12f))
+            Modifier.padding(top = 8.dp).fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(c.bgSunken)
                 .semantics { contentDescription = "${Math.round(fraction * 100)}% of the budget used" },
         ) {
             Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().background(color))

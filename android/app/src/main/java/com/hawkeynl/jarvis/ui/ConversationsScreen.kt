@@ -58,7 +58,7 @@ fun ConversationsScreen(state: JarvisUiState, actions: JarvisViewModel, mood: Mo
     }
 
     NodePage(
-        "CONVERSATIONS", "EVERYTHING YOU AND JARVIS DISCUSSED", items, selected,
+        "Conversations", "Everything you and Jarvis discussed", items, selected,
         { selected = it; sub = "overview" }, actions::navigate, mood,
     ) {
         Panel(

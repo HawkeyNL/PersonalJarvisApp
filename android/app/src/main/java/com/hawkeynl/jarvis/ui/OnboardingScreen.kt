@@ -13,6 +13,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,7 +27,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -71,7 +71,8 @@ internal fun OnboardingScreen(state: JarvisUiState, actions: JarvisViewModel) {
                 JvOrb(150.dp, if (state.busy || state.pairingPending) Mood.THINKING else Mood.IDLE, Modifier.padding(vertical = 40.dp))
                 Text(
                     "Connect this phone to your Home Node and let a trusted device approve the pairing.",
-                    style = exo(13.5f, color = Jv.Text2),
+                    color = JvTheme.colors.textSecondary,
+                    style = MaterialTheme.typography.bodyMedium,
                 )
             }
         }
@@ -101,21 +102,21 @@ internal fun OnboardingScreen(state: JarvisUiState, actions: JarvisViewModel) {
                     },
                 ) {
                     if (state.deviceKeyLost) {
-                        Text(DeviceKeyInvalidatedException().message.orEmpty(), style = exo(13.5f, color = Jv.Text2))
+                        Text(DeviceKeyInvalidatedException().message.orEmpty(), style = MaterialTheme.typography.bodyMedium)
                         GhostButton("Erase this device and pair again", actions::resetDevice, Modifier.fillMaxWidth(), danger = true)
                     } else if (state.pairingPending) {
-                        Text("Waiting for approval from a trusted Jarvis device.", style = exo(13.5f, color = Jv.Text2))
-                        Text("Expires: ${state.pairingExpiresAt?.let(::clockTime) ?: "—"}", style = exo(12f, color = Jv.Text5))
+                        Text("Waiting for approval from a trusted Jarvis device.", style = MaterialTheme.typography.bodyMedium)
+                        Text("Expires: ${state.pairingExpiresAt?.let(::clockTime) ?: "—"}", color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.bodySmall.tabular())
                         state.ownFingerprint?.let { fingerprint ->
-                            Text("Check that the approving device shows this key fingerprint:", style = exo(12f, color = Jv.Text5))
-                            Text(fingerprint, style = exo(13f, color = Jv.Text0).copy(fontFamily = FontFamily.Monospace))
+                            Text("Check that the approving device shows this key fingerprint:", color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.bodySmall)
+                            Text(fingerprint, style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlexMono))
                         }
                         CircularProgressIndicator()
                     } else {
                         if (state.activationRequired) {
                             Text(
                                 "Use the one-time code from your Home Node and choose a password of at least 15 characters.",
-                                style = exo(13.5f, color = Jv.Text2),
+                                style = MaterialTheme.typography.bodyMedium,
                             )
                             OutlinedTextField(
                                 value = activationCode, onValueChange = { activationCode = it.take(256) },

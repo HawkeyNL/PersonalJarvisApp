@@ -49,7 +49,7 @@ fun IntegrationsScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit,
     var sub by rememberSaveable { mutableStateOf("overview") }
     val current = items.first { it.id == selected }
 
-    NodePage("INTEGRATIONS", "THE SYSTEMS JARVIS CAN REACH", items, selected, { selected = it; sub = "overview" }, onNavigate, mood) {
+    NodePage("Integrations", "The systems Jarvis can reach", items, selected, { selected = it; sub = "overview" }, onNavigate, mood) {
         Panel(
             current.icon, current.title, current.tone, current.status,
             description = INTEGRATION_DETAILS[current.id],

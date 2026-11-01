@@ -20,113 +20,71 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
-import androidx.compose.ui.unit.sp
 
-/** Exo 2 text style in the design's scale. */
-fun exo(size: Float, weight: FontWeight = FontWeight.Normal, color: Color = Jv.Text1, spacing: Float = 0f, italic: Boolean = false) =
-    TextStyle(
-        fontFamily = Exo2, fontWeight = weight, fontSize = size.sp, color = color, letterSpacing = spacing.em,
-        fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,
-    )
-
-fun toneColor(tone: Tone): Color = when (tone) {
-    Tone.OK -> Jv.Accent
-    Tone.WARN -> Jv.Warn
-    Tone.ERROR -> Jv.Danger
-    Tone.IDLE -> Jv.Idle
+/** Dot colour of a status. */
+@Composable
+@ReadOnlyComposable
+fun toneColor(tone: Tone): Color = with(JvTheme.colors) {
+    when (tone) {
+        Tone.OK -> positiveSolid
+        Tone.WARN -> negativeSolid
+        Tone.ERROR -> dangerSolid
+        Tone.IDLE -> borderStrong
+    }
 }
 
-private fun toneLabelColor(tone: Tone): Color = if (tone == Tone.IDLE) Jv.IdleLabel else toneColor(tone)
-
-// Stars of the export's backdrop: x as a fraction of the width, y in dp, size, alpha, glow.
-private val STARS = listOf(
-    floatArrayOf(0.07f, 140f, 3f, 0.8f, 1f), floatArrayOf(0.9f, 112f, 2f, 0.6f, 0f), floatArrayOf(0.1f, 420f, 2f, 0.5f, 0f),
-    floatArrayOf(0.93f, 380f, 3f, 0.7f, 1f), floatArrayOf(0.05f, 700f, 2f, 0.5f, 0f), floatArrayOf(0.95f, 640f, 2f, 0.5f, 0f),
-)
-
-/** Page background: Jarvis black, the soft green glow behind the orb, a few
- *  stars and the glowing horizon at the bottom of the screen. */
-fun Modifier.jvBackdrop(glowY: Dp = 260.dp): Modifier = background(Jv.Bg).drawBehind {
-    val w = size.width
-    val glowCenter = Offset(w / 2, glowY.toPx())
-    drawCircle(
-        Brush.radialGradient(0f to Color(20, 150, 95, 71), 0.7f to Color.Transparent, center = glowCenter, radius = 330.dp.toPx()),
-        330.dp.toPx(), glowCenter,
-    )
-    for (s in STARS) {
-        val at = Offset(s[0] * w, s[1].dp.toPx())
-        if (at.y > size.height) continue
-        if (s[4] > 0f) drawCircle(Jv.Accent, s[2].dp.toPx() * 1.8f, at, alpha = 0.25f)
-        drawCircle(Jv.Accent2, s[2].dp.toPx() / 2, at, alpha = s[3])
+/** Text colour of a status label (AA on surfaces). */
+@Composable
+@ReadOnlyComposable
+fun toneTextColor(tone: Tone): Color = with(JvTheme.colors) {
+    when (tone) {
+        Tone.OK -> positiveText
+        Tone.WARN -> negativeText
+        Tone.ERROR -> dangerText
+        Tone.IDLE -> textSecondary
     }
-    // Horizon: a very wide ellipse whose top edge glows just above the bottom.
-    val horizon = Size(w * 2.33f, 500.dp.toPx())
-    val topLeft = Offset((w - horizon.width) / 2, size.height - 96.dp.toPx())
-    drawOval(
-        Brush.radialGradient(
-            0f to Color(20, 120, 80, 128), 0.2f to Color(0xFF04160F), 0.6f to Color(0xFF010A07),
-            center = Offset(w / 2, topLeft.y), radius = horizon.height,
-        ),
-        topLeft, horizon,
-    )
-    drawOval(Jv.Accent.copy(alpha = 0.12f), topLeft - Offset(0f, 6.dp.toPx()), horizon, style = Stroke(12.dp.toPx()))
-    drawOval(Color(110, 255, 200, 140), topLeft, horizon, style = Stroke(2.dp.toPx()))
 }
 
 /** A status dot; the label carries the meaning. */
 @Composable
-fun StatusDot(tone: Tone, label: String? = null, size: Dp = 8.dp, fontSize: Float = 12f, modifier: Modifier = Modifier) {
+fun StatusDot(tone: Tone, label: String? = null, size: Dp = 8.dp, modifier: Modifier = Modifier) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Box(
-            Modifier.size(size).drawBehind {
-                if (tone != Tone.IDLE) drawCircle(toneColor(tone), this.size.minDimension, alpha = 0.25f)
-                drawCircle(toneColor(tone))
-            },
-        )
-        if (label != null) Text(label, style = exo(fontSize, color = toneLabelColor(tone)))
+        Box(Modifier.size(size).background(toneColor(tone), CircleShape))
+        if (label != null) Text(label, color = toneTextColor(tone), style = MaterialTheme.typography.labelSmall)
     }
 }
 
-/** Uppercase section label ("YOUR SYSTEM", "AT A GLANCE"). */
+/** Sentence-case section heading ("Your system", "At a glance"). */
 @Composable
-fun Eyebrow(text: String, modifier: Modifier = Modifier) {
-    Text(text.uppercase(), modifier.semantics { heading() }, style = exo(11f, color = Jv.Text5, spacing = 0.3f))
+fun SectionLabel(text: String, modifier: Modifier = Modifier) {
+    Text(text, modifier.semantics { heading() }, color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.labelMedium)
 }
 
 @Composable
 fun MutedText(text: String, modifier: Modifier = Modifier) {
-    Text(text, modifier, style = exo(12.5f, color = Jv.Text4))
+    Text(text, modifier, color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable
 fun ErrorText(text: String, modifier: Modifier = Modifier) {
-    Text(text, modifier, style = exo(12.5f, color = Jv.Danger))
+    Text(text, modifier, color = JvTheme.colors.dangerText, style = MaterialTheme.typography.bodySmall)
 }
 
 /** Round icon button (back, profile, satellites). */
@@ -138,64 +96,83 @@ fun CircleIconButton(
     modifier: Modifier = Modifier,
     size: Dp = 44.dp,
     selected: Boolean = false,
-    tint: Color = Jv.Accent,
-    background: Color = Jv.Satellite,
+    tint: Color = JvTheme.colors.accentText,
+    background: Color = JvTheme.colors.bgSurface,
     enabled: Boolean = true,
 ) {
+    val c = JvTheme.colors
     Box(
         modifier
             .size(size)
-            .drawBehind { if (selected) drawCircle(Jv.Accent, this.size.minDimension * 0.75f, alpha = 0.18f) }
+            .pressScale(enabled = enabled)
+            .then(if (selected) Modifier.border(2.dp, c.accentSolid, CircleShape) else Modifier.shadowBorder(CircleShape))
             .clip(CircleShape)
-            .background(if (selected) Jv.SatelliteSelected else background)
-            .border(if (selected) 2.dp else 1.5.dp, if (selected) Jv.Accent else Jv.accent(0.6f), CircleShape)
+            .background(if (selected) c.bgSelected else background)
             .clickable(enabled = enabled, onClickLabel = contentDescription, role = Role.Button, onClick = onClick)
-            .semantics { this.contentDescription = contentDescription },
+            .semantics {
+                this.contentDescription = contentDescription
+                if (selected) this.selected = true
+            },
         contentAlignment = Alignment.Center,
     ) {
-        JvIconView(icon, tint = if (selected) Color(0xFFF8FFFB) else tint, size = size * 0.45f)
+        JvIconView(icon, tint = if (!enabled) c.textDisabled else if (selected) c.accentText else tint, size = size * 0.45f)
     }
 }
 
 @Composable
 fun ProfileButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    CircleIconButton(JvIcon.USER, "Settings", onClick, modifier, tint = Jv.Bright, background = Jv.Profile)
+    CircleIconButton(JvIcon.USER, "Settings", onClick, modifier, tint = JvTheme.colors.textPrimary)
 }
 
-/** Full-width call to action inside a panel. */
+/** Primary full-width button. */
 @Composable
 fun ActionButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, arrow: Boolean = false) {
+    val c = JvTheme.colors
+    val content = if (enabled) c.textOnAccent else c.textDisabled
     Row(
         modifier
             .fillMaxWidth()
-            .heightIn(min = 44.dp)
-            .clip(Jv.R12)
-            .background(Jv.accent(0.1f))
-            .border(1.dp, Jv.accent(if (enabled) 0.55f else 0.2f), Jv.R12)
+            .heightIn(min = 48.dp)
+            .pressScale(enabled = enabled)
+            .clip(JvShapes.md)
+            .background(if (enabled) c.accentSolid else c.bgSunken)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(horizontal = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+            .padding(horizontal = JvSpace.lg),
+        horizontalArrangement = Arrangement.spacedBy(JvSpace.sm, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text, style = exo(13.5f, color = if (enabled) Jv.Bright else Jv.Text5, spacing = 0.03f))
-        if (arrow) JvIconView(JvIcon.ARROW_RIGHT, tint = Jv.Accent, size = 16.dp)
+        Text(text, color = content, style = MaterialTheme.typography.labelLarge)
+        if (arrow) JvIconView(JvIcon.ARROW_RIGHT, tint = content, size = 16.dp)
     }
 }
 
-/** Small outlined button for list rows. */
+/** Secondary button; [danger] makes it the quiet destructive variant. */
 @Composable
 fun GhostButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, danger: Boolean = false) {
-    val color = if (danger) Jv.Danger else Jv.Accent
+    val c = JvTheme.colors
+    val shape = JvShapes.md
     Box(
         modifier
-            .heightIn(min = 36.dp)
-            .clip(Jv.R10)
-            .border(1.dp, color.copy(alpha = if (enabled) 0.45f else 0.15f), Jv.R10)
+            .heightIn(min = 44.dp)
+            .pressScale(enabled = enabled)
+            .then(
+                when {
+                    !enabled -> Modifier
+                    danger -> Modifier.border(1.dp, c.dangerText, shape)
+                    else -> Modifier.shadowBorder(shape)
+                },
+            )
+            .clip(shape)
+            .background(if (!enabled) c.bgSunken else if (danger) Color.Transparent else c.bgSurface)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(horizontal = 12.dp),
+            .padding(horizontal = JvSpace.md),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, style = exo(12f, color = if (!enabled) Jv.Text5 else if (danger) Jv.Danger else Jv.Text2))
+        Text(
+            text,
+            color = if (!enabled) c.textDisabled else if (danger) c.dangerText else c.textPrimary,
+            style = MaterialTheme.typography.labelMedium,
+        )
     }
 }
 
@@ -204,26 +181,32 @@ data class ChipItem(val id: String, val label: String, val icon: JvIcon? = null)
 /** Horizontally scrolling chips: node selector (large) or sub-tabs (small). */
 @Composable
 fun ChipRow(items: List<ChipItem>, selected: String, onSelect: (String) -> Unit, small: Boolean = false, modifier: Modifier = Modifier) {
-    val shape = if (small) Jv.R10 else RoundedCornerShape(19.dp)
+    val c = JvTheme.colors
+    val shape = if (small) JvShapes.md else JvShapes.pill
     Row(
-        modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = JvSpace.lg, vertical = JvSpace.xxs),
+        horizontalArrangement = Arrangement.spacedBy(JvSpace.sm),
     ) {
         for (item in items) {
             val on = item.id == selected
             Row(
                 Modifier
-                    .height(if (small) 36.dp else 40.dp)
+                    .height(if (small) 40.dp else 44.dp)
+                    .pressScale()
+                    .then(if (on || small) Modifier else Modifier.shadowBorder(shape))
                     .clip(shape)
-                    .background(if (on) Jv.accent(if (small) 0.1f else 0.14f) else if (small) Color.Transparent else Jv.Chip)
-                    .border(if (on) 1.5.dp else 1.dp, if (on) Jv.Accent else Jv.accent(if (small) 0.2f else 0.3f), shape)
+                    .background(if (on) c.bgSelected else if (small) Color.Transparent else c.bgSurface)
                     .selectable(selected = on, role = Role.Tab, onClick = { onSelect(item.id) })
-                    .padding(horizontal = if (small) 12.dp else 14.dp),
+                    .padding(horizontal = if (small) JvSpace.md else 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                item.icon?.let { JvIconView(it, tint = if (on) Jv.Accent else Jv.Text5, size = 16.dp) }
-                Text(item.label, style = exo(if (small) 12f else 13f, if (on) FontWeight.Medium else FontWeight.Normal, if (on) Color(0xFFF8FFFB) else Jv.Text3))
+                item.icon?.let { JvIconView(it, tint = if (on) c.accentText else c.textSecondary, size = 16.dp) }
+                Text(
+                    item.label,
+                    color = if (on) c.accentText else if (small) c.textSecondary else c.textPrimary,
+                    style = if (small) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
+                )
             }
         }
     }
@@ -232,34 +215,39 @@ fun ChipRow(items: List<ChipItem>, selected: String, onSelect: (String) -> Unit,
 /** A hub module card: icon, name and two lines of live summary. */
 @Composable
 fun ModuleCard(icon: JvIcon, title: String, summary: CardSummary, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val c = JvTheme.colors
     val description = listOf(title, summary.line1, summary.line2).filter { it.isNotEmpty() }.joinToString(", ")
     Box(
         modifier
             .heightIn(min = 72.dp)
-            .clip(Jv.R16)
-            .background(Jv.CardBrush)
-            .border(1.dp, Jv.accent(0.35f), Jv.R16)
+            .pressScale()
+            .shadowBorder(JvShapes.lg)
+            .clip(JvShapes.lg)
+            .background(c.bgSurface)
             .clickable(role = Role.Button, onClick = onClick)
             .semantics(mergeDescendants = true) { contentDescription = description },
     ) {
-        Row(Modifier.padding(start = 12.dp, end = 18.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(40.dp).border(1.5.dp, Jv.accent(0.6f), CircleShape), contentAlignment = Alignment.Center) {
-                JvIconView(icon, size = 18.dp)
+        Row(Modifier.padding(start = JvSpace.md, end = 18.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(40.dp).clip(JvShapes.md).background(c.accentSubtle), contentAlignment = Alignment.Center) {
+                JvIconView(icon, tint = c.accentText, size = 18.dp)
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, style = exo(12.5f, FontWeight.SemiBold, Jv.Bright, 0.06f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 for (line in listOf(summary.line1, summary.line2).filter { it.isNotEmpty() }) {
-                    Text(line, Modifier.padding(top = 2.dp), style = exo(11f, color = Jv.Text5), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        line, Modifier.padding(top = JvSpace.xxs), color = c.textSecondary,
+                        style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }
-        StatusDot(summary.tone, size = 5.dp, modifier = Modifier.align(Alignment.TopEnd).padding(top = 12.dp, end = 12.dp))
+        StatusDot(summary.tone, size = 6.dp, modifier = Modifier.align(Alignment.TopEnd).padding(top = JvSpace.md, end = JvSpace.md))
     }
 }
 
 /** Detail panel of a node page: header with icon, title, status, description,
- *  italic detail line and optional action, then the body. */
+ *  secondary detail line and optional action, then the body. */
 @Composable
 fun Panel(
     icon: JvIcon,
@@ -272,29 +260,30 @@ fun Panel(
     action: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val c = JvTheme.colors
     Column(
         modifier
             .fillMaxWidth()
-            .clip(Jv.R20)
-            .background(Jv.PanelBrush)
-            .border(1.5.dp, Jv.accent(0.55f), Jv.R20)
-            .padding(16.dp),
+            .shadowBorder(JvShapes.lg)
+            .clip(JvShapes.lg)
+            .background(c.bgSurface)
+            .padding(JvSpace.lg),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(52.dp).border(1.5.dp, Jv.accent(0.75f), CircleShape), contentAlignment = Alignment.Center) {
-                JvIconView(icon, size = 24.dp)
+            Box(Modifier.size(44.dp).clip(JvShapes.md).background(c.accentSubtle), contentAlignment = Alignment.Center) {
+                JvIconView(icon, tint = c.accentText, size = 22.dp)
             }
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(JvSpace.md))
             Column(Modifier.weight(1f)) {
-                Text(title, Modifier.semantics { heading() }, style = exo(17f, FontWeight.Medium, Color(0xFFF8FFFB), 0.03f))
-                StatusDot(tone, status, modifier = Modifier.padding(top = 4.dp))
+                Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+                StatusDot(tone, status, modifier = Modifier.padding(top = JvSpace.xs))
             }
         }
         if (description != null || quote != null) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                description?.let { Text(it, style = exo(13.5f, color = Jv.Text2).copy(lineHeight = 19.sp)) }
-                quote?.let { Text(it, style = exo(12f, FontWeight.Light, Jv.Muted, italic = true)) }
+                description?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                quote?.let { Text(it, color = c.textSecondary, style = MaterialTheme.typography.bodySmall) }
             }
         }
         action?.invoke()
@@ -304,11 +293,11 @@ fun Panel(
 
 data class TileData(val icon: JvIcon, val label: String, val value: String)
 
-/** Two-column grid of vitals under an eyebrow. */
+/** Two-column grid of vitals under a section label. */
 @Composable
 fun TileGrid(title: String, tiles: List<TileData>, modifier: Modifier = Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Eyebrow(title)
+        SectionLabel(title)
         for (row in tiles.chunked(2)) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 for (tile in row) Tile(tile, Modifier.weight(1f))
@@ -320,18 +309,19 @@ fun TileGrid(title: String, tiles: List<TileData>, modifier: Modifier = Modifier
 
 @Composable
 fun Tile(tile: TileData, modifier: Modifier = Modifier) {
+    val c = JvTheme.colors
     Column(
         modifier
             .heightIn(min = 92.dp)
-            .clip(Jv.R14)
-            .background(Jv.Tile)
-            .border(1.dp, Jv.accent(0.3f), Jv.R14)
+            .shadowBorder(JvShapes.lg)
+            .clip(JvShapes.lg)
+            .background(c.bgSurface)
             .semantics(mergeDescendants = true) {}
-            .padding(12.dp),
+            .padding(JvSpace.md),
     ) {
-        JvIconView(tile.icon, size = 22.dp)
-        Text(tile.label, Modifier.padding(top = 8.dp), style = exo(12.5f, FontWeight.Medium, Jv.Bright))
-        Text(tile.value, Modifier.padding(top = 3.dp), style = exo(11f, color = Jv.Text5))
+        JvIconView(tile.icon, tint = c.accentText, size = 22.dp)
+        Text(tile.label, Modifier.padding(top = JvSpace.sm), style = MaterialTheme.typography.titleSmall)
+        Text(tile.value, Modifier.padding(top = 3.dp), color = c.textSecondary, style = MaterialTheme.typography.bodySmall.tabular())
     }
 }
 
@@ -356,18 +346,22 @@ fun ActivityList(
     action: (@Composable () -> Unit)? = null,
     rowActions: (@Composable RowScope.(ActivityItem) -> Unit)? = null,
 ) {
+    val c = JvTheme.colors
     Column(modifier) {
         Row(Modifier.fillMaxWidth().heightIn(min = 32.dp).padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Eyebrow(title, Modifier.weight(1f))
+            SectionLabel(title, Modifier.weight(1f))
             action?.invoke()
         }
         if (items.isEmpty()) {
-            Text(empty, Modifier.fillMaxWidth().dashedBorder().padding(16.dp), style = exo(12f, color = Jv.Text4))
+            Text(
+                empty, Modifier.fillMaxWidth().background(c.bgSunken, JvShapes.md).padding(JvSpace.lg),
+                color = c.textSecondary, style = MaterialTheme.typography.bodySmall,
+            )
             return@Column
         }
-        Column(Modifier.fillMaxWidth().clip(Jv.R14).background(Jv.ListBg).border(1.dp, Jv.accent(0.3f), Jv.R14)) {
+        Column(Modifier.fillMaxWidth().shadowBorder(JvShapes.lg).clip(JvShapes.lg).background(c.bgSurface)) {
             items.forEachIndexed { index, item ->
-                if (index > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(Jv.accent(0.16f)))
+                if (index > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(c.separator))
                 ActivityRow(item, fullDetail, rowActions)
             }
         }
@@ -376,34 +370,40 @@ fun ActivityList(
 
 @Composable
 private fun ActivityRow(item: ActivityItem, fullDetail: Boolean, rowActions: (@Composable RowScope.(ActivityItem) -> Unit)?) {
-    Column(Modifier.fillMaxWidth().heightIn(min = 58.dp).padding(horizontal = 12.dp, vertical = 10.dp)) {
+    val c = JvTheme.colors
+    Column(Modifier.fillMaxWidth().heightIn(min = 58.dp).padding(horizontal = JvSpace.md, vertical = 10.dp)) {
         Row(Modifier.semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(36.dp).clip(Jv.R10).background(Jv.IconBox).border(1.dp, Jv.accent(0.2f), Jv.R10),
-                contentAlignment = Alignment.Center,
-            ) { JvIconView(item.icon, tint = Jv.Text1, size = 18.dp) }
-            Spacer(Modifier.width(12.dp))
+            Box(Modifier.size(36.dp).clip(JvShapes.md).background(c.bgSunken), contentAlignment = Alignment.Center) {
+                JvIconView(item.icon, tint = c.textSecondary, size = 18.dp)
+            }
+            Spacer(Modifier.width(JvSpace.md))
             Column(Modifier.weight(1f)) {
-                Text(item.title, style = exo(12.5f, FontWeight.Medium, Jv.Bright), maxLines = if (fullDetail) 3 else 1, overflow = TextOverflow.Ellipsis)
+                Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = if (fullDetail) 3 else 1, overflow = TextOverflow.Ellipsis)
                 item.detail?.takeIf { it.isNotEmpty() && !fullDetail }?.let {
-                    Text(it, Modifier.padding(top = 3.dp), style = exo(11f, color = Jv.Text5), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        it, Modifier.padding(top = 3.dp), color = c.textSecondary,
+                        style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
-            item.time?.takeIf { it.isNotEmpty() }?.let { Text(it, Modifier.padding(start = 8.dp), style = exo(11f, color = Jv.Text5)) }
+            item.time?.takeIf { it.isNotEmpty() }?.let {
+                Text(it, Modifier.padding(start = JvSpace.sm), color = c.textSecondary, style = MaterialTheme.typography.labelSmall.tabular())
+            }
             Spacer(Modifier.width(10.dp))
             StatusDot(item.tone, size = 8.dp, modifier = Modifier.semantics { contentDescription = item.toneLabel })
         }
         if (fullDetail && !item.detail.isNullOrEmpty()) {
             Text(
                 item.detail,
-                Modifier.padding(top = 8.dp).fillMaxWidth().clip(Jv.R8).background(Jv.IconBox).padding(horizontal = 10.dp, vertical = 8.dp),
-                style = exo(11.5f, color = Jv.Text3),
+                Modifier.padding(top = JvSpace.sm).fillMaxWidth().clip(JvShapes.sm).background(c.bgSunken)
+                    .padding(horizontal = 10.dp, vertical = JvSpace.sm),
+                style = MaterialTheme.typography.bodySmall,
             )
         }
         if (rowActions != null) {
             Row(
-                Modifier.fillMaxWidth().padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                Modifier.fillMaxWidth().padding(top = JvSpace.sm),
+                horizontalArrangement = Arrangement.spacedBy(JvSpace.sm, Alignment.End),
                 verticalAlignment = Alignment.CenterVertically,
             ) { rowActions(item) }
         }
@@ -415,68 +415,59 @@ enum class UnavailableKind { PLANNED, CORE_UPDATE, ERROR }
 /** Honest empty state for what Core does not offer (yet); never sample data. */
 @Composable
 fun Unavailable(title: String, icon: JvIcon, modifier: Modifier = Modifier, kind: UnavailableKind = UnavailableKind.PLANNED, detail: String? = null) {
+    val c = JvTheme.colors
     Row(
-        modifier.fillMaxWidth().dashedBorder().background(Color(8, 40, 32, 77), Jv.R12).padding(16.dp),
+        modifier.fillMaxWidth().background(c.bgSunken, JvShapes.md).padding(JvSpace.lg),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Box(Modifier.size(40.dp).border(1.5.dp, Jv.accent(0.3f), CircleShape), contentAlignment = Alignment.Center) {
-            JvIconView(icon, tint = Jv.Text5, size = 20.dp)
+        Box(Modifier.size(40.dp).clip(JvShapes.md).background(c.bgSurface), contentAlignment = Alignment.Center) {
+            JvIconView(icon, tint = c.textSecondary, size = 20.dp)
         }
         Column(Modifier.weight(1f)) {
-            Text(title, style = exo(13f, FontWeight.Medium, Jv.Text1))
+            Text(title, style = MaterialTheme.typography.titleSmall)
             Text(
                 when (kind) {
-                    UnavailableKind.CORE_UPDATE -> "REQUIRES NEWER CORE"
-                    UnavailableKind.ERROR -> "COULD NOT LOAD"
-                    UnavailableKind.PLANNED -> "NOT YET AVAILABLE"
+                    UnavailableKind.CORE_UPDATE -> "Requires newer Core"
+                    UnavailableKind.ERROR -> "Could not load"
+                    UnavailableKind.PLANNED -> "Not yet available"
                 },
                 Modifier.padding(top = 3.dp),
-                style = exo(11f, color = Jv.Text5, spacing = 0.2f),
+                color = c.textSecondary,
+                style = MaterialTheme.typography.labelSmall,
             )
-            detail?.let { Text(it, Modifier.padding(top = 8.dp), style = exo(12f, color = Jv.Text4).copy(lineHeight = 17.sp)) }
+            detail?.let { Text(it, Modifier.padding(top = JvSpace.sm), color = c.textSecondary, style = MaterialTheme.typography.bodySmall) }
         }
     }
 }
 
-private fun Modifier.dashedBorder(): Modifier = drawBehind {
-    val stroke = 1.dp.toPx()
-    drawRoundRect(
-        Jv.accent(0.3f),
-        topLeft = Offset(stroke / 2, stroke / 2),
-        size = Size(size.width - stroke, size.height - stroke),
-        cornerRadius = CornerRadius(12.dp.toPx()),
-        style = Stroke(stroke, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))),
-    )
-}
-
-/** JARVIS wordmark with its ring, as in the hub's top-left corner. */
+/** Jarvis name with its ring, as in the hub's top-left corner. */
 @Composable
 fun Wordmark(modifier: Modifier = Modifier) {
     Row(modifier.semantics(mergeDescendants = true) { contentDescription = "Jarvis" }, verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier.size(28.dp)
-                .drawBehind { drawCircle(Jv.Accent, this.size.minDimension * 0.75f, alpha = 0.15f) }
-                .border(3.dp, Jv.Accent, CircleShape),
-        )
-        Spacer(Modifier.width(12.dp))
+        Box(Modifier.size(24.dp).border(3.dp, JvTheme.colors.accentSolid, CircleShape))
+        Spacer(Modifier.width(10.dp))
         Column {
-            Text("JARVIS", style = TextStyle(fontFamily = Rajdhani, fontWeight = FontWeight.Medium, fontSize = 18.sp, letterSpacing = 0.42.em, color = Color(0xFFEAF7F1)))
-            Text("YOUR SECOND MIND", style = exo(9f, color = Jv.Text5, spacing = 0.3f))
+            Text("Jarvis", style = MaterialTheme.typography.titleLarge)
+            Text("Your second mind", color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.labelSmall)
         }
     }
 }
 
-/** Centered page title (Rajdhani) with an eyebrow subtitle. */
+/** Centered page title with a one-line explanation under it. */
 @Composable
 fun PageTitle(title: String, subtitle: String, modifier: Modifier = Modifier) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             title,
             Modifier.semantics { heading() },
-            style = TextStyle(fontFamily = Rajdhani, fontWeight = FontWeight.SemiBold, fontSize = 19.sp, letterSpacing = 0.3.em, color = Jv.Text0),
+            style = MaterialTheme.typography.titleLarge,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
         )
-        Text(subtitle, Modifier.padding(top = 4.dp), style = exo(9.5f, color = Jv.Muted, spacing = 0.22f), maxLines = 1, textAlign = TextAlign.Center)
+        Text(
+            subtitle, Modifier.padding(top = JvSpace.xxs), color = JvTheme.colors.textSecondary,
+            style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+        )
     }
 }

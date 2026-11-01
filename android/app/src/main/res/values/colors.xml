@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="jarvis_background">#01090A</color>
+    <!-- bg-page, light: oklch(0.985 0.003 255); keep in step with JvLight.bgPage. -->
+    <color name="jarvis_background">#F9FAFC</color>
 </resources>

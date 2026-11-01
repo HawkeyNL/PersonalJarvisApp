@@ -35,7 +35,7 @@ fun ContextScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRe
     var confirming by remember { mutableStateOf<LinkedDevice?>(null) }
     val current = items.first { it.id == selected }
 
-    NodePage("CONTEXT", "WHAT JARVIS PAYS ATTENTION TO", items, selected, { selected = it }, onNavigate, mood) {
+    NodePage("Context", "What Jarvis pays attention to", items, selected, { selected = it }, onNavigate, mood) {
         Panel(current.icon, current.title, current.tone, current.status, description = current.description) {
             if (current.id != "devices") {
                 Unavailable(
@@ -101,7 +101,7 @@ fun ContextScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRe
             },
             dismissButton = { TextButton(onClick = { confirming = null }) { Text("Cancel") } },
             confirmButton = {
-                TextButton(onClick = { confirming = null; onRevoke(device.id) }) { Text("Revoke", color = Jv.Danger) }
+                TextButton(onClick = { confirming = null; onRevoke(device.id) }) { Text("Revoke", color = JvTheme.colors.dangerText) }
             },
         )
     }

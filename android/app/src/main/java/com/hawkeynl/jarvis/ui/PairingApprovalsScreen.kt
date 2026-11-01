@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -20,7 +21,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.hawkeynl.jarvis.network.PairingRequestItem
 import com.hawkeynl.jarvis.security.PairingApproval
@@ -95,15 +95,15 @@ private fun PairingRequestCard(
     val left = PairingApproval.countdown(item.expires_at, now)
     Panel(JvIcon.PHONE, PairingApproval.displayName(item.device_name, 128), Tone.WARN, if (left == "Expired") left else "Expires in $left") {
         Detail("Platform", PairingApproval.displayName(item.platform, 32))
-        PairingApproval.approverWarning(item.platform)?.let { Text(it, style = exo(13f, color = Jv.Warn)) }
+        PairingApproval.approverWarning(item.platform)?.let { Text(it, color = JvTheme.colors.negativeText, style = MaterialTheme.typography.bodySmall) }
         Detail("Model", PairingApproval.displayName(item.model))
         Detail("App version", PairingApproval.displayName(item.app_version, 32))
         Detail("IP address", PairingApproval.displayName(item.ip))
         Detail("User agent", PairingApproval.displayName(item.user_agent, 128))
         Detail("Requested", TIME.format(Instant.ofEpochSecond(item.created_at)))
-        Eyebrow("Key fingerprint")
+        SectionLabel("Key fingerprint")
         if (fingerprint != null) {
-            Text(PairingApproval.grouped(fingerprint), style = exo(13f, color = Jv.Text0).copy(fontFamily = FontFamily.Monospace))
+            Text(PairingApproval.grouped(fingerprint), style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlexMono))
             MutedText("Compare it with the fingerprint the new device shows. Model, version, IP address and user agent are unverified hints.")
         } else {
             ErrorText(checked.exceptionOrNull()?.message ?: "Invalid fingerprint.")
@@ -123,8 +123,8 @@ private fun PairingRequestCard(
 @Composable
 private fun Detail(label: String, value: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(label, Modifier.width(96.dp), style = exo(12f, color = Jv.Text5))
-        Text(value, style = exo(13f, color = Jv.Text1))
+        Text(label, Modifier.width(96.dp), color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.bodySmall)
+        Text(value, style = MaterialTheme.typography.bodySmall)
     }
 }
 

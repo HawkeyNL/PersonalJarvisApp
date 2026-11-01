@@ -11,14 +11,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -32,7 +31,6 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.hawkeynl.jarvis.network.map
 
@@ -73,15 +71,15 @@ fun HubScreen(state: JarvisUiState, data: CoreData, mood: Mood, onNavigate: (Scr
             Spacer(Modifier.weight(1f))
             StatusDot(
                 when (online) { true -> Tone.OK; false -> Tone.ERROR; null -> Tone.IDLE },
-                when (online) { true -> "Core Online"; false -> "Core Offline"; null -> "Connecting" },
-                fontSize = 11f,
+                when (online) { true -> "Core online"; false -> "Core offline"; null -> "Connecting" },
             )
             Spacer(Modifier.width(12.dp))
             ProfileButton({ onNavigate(Screen.SETTINGS) })
         }
         CommandBar { onNavigate(Screen.CHAT) }
 
-        Box(Modifier.fillMaxWidth().height(330.dp).orbRings()) {
+        val rings = JvTheme.colors.border
+        Box(Modifier.fillMaxWidth().height(330.dp).orbRings(rings)) {
             JvOrb(182.dp, mood, Modifier.align(Alignment.Center))
             for ((screen, icon, offset) in HUB_SATELLITES) {
                 CircleIconButton(
@@ -94,7 +92,7 @@ fun HubScreen(state: JarvisUiState, data: CoreData, mood: Mood, onNavigate: (Scr
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             StatusPillView(statusPill(mood, online), Modifier.align(Alignment.CenterHorizontally))
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Eyebrow("Your system")
+                SectionLabel("Your system")
                 for (row in cards.chunked(2)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         for (card in row) {
@@ -110,53 +108,54 @@ fun HubScreen(state: JarvisUiState, data: CoreData, mood: Mood, onNavigate: (Scr
 /** "Ask Jarvis anything…": opens the chat. */
 @Composable
 private fun CommandBar(onClick: () -> Unit) {
+    val c = JvTheme.colors
     Row(
         Modifier
-            .padding(horizontal = 16.dp)
+            .padding(horizontal = JvSpace.lg)
             .fillMaxWidth()
             .height(48.dp)
-            .clip(Jv.R16)
-            .background(Color(8, 26, 22, 179))
-            .border(1.dp, Jv.Line16, Jv.R16)
+            .pressScale()
+            .clip(JvShapes.md)
+            .background(c.bgSurface)
+            .border(1.dp, c.borderStrong, JvShapes.md)
             .clickable(onClickLabel = "Open chat", role = Role.Button, onClick = onClick)
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = JvSpace.lg),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(JvSpace.md),
     ) {
-        JvIconView(JvIcon.WAVE)
-        Text("Ask Jarvis anything…", style = exo(13f, color = Jv.Text5, spacing = 0.14f))
+        JvIconView(JvIcon.WAVE, tint = c.textSecondary)
+        Text("Ask Jarvis anything…", color = c.textSecondary, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
-/** The three rings around the hub orb (export: r 124 / 134 / dotted 158). */
-private fun Modifier.orbRings(): Modifier = drawBehind {
-    drawCircle(Color(150, 255, 210, 128), 124.dp.toPx(), style = Stroke(1.3f.dp.toPx()))
-    drawCircle(Jv.accent(0.18f), 134.dp.toPx(), style = Stroke(1.dp.toPx()))
+/** The three hairline rings around the hub orb (r 124 / 134 / dotted 158). */
+private fun Modifier.orbRings(color: Color): Modifier = drawBehind {
+    drawCircle(color, 124.dp.toPx(), style = Stroke(1.dp.toPx()))
+    drawCircle(color, 134.dp.toPx(), style = Stroke(1.dp.toPx()))
     drawCircle(
-        Jv.accent(0.2f), 158.dp.toPx(),
+        color, 158.dp.toPx(),
         style = Stroke(1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(1.dp.toPx(), 6.dp.toPx()))),
     )
 }
 
 @Composable
 private fun StatusPillView(pill: StatusPill, modifier: Modifier = Modifier) {
-    val shape = RoundedCornerShape(22.dp)
+    val c = JvTheme.colors
+    val shape = JvShapes.pill
     Row(
         modifier
-            .height(44.dp)
+            .heightIn(min = 40.dp)
+            .shadowBorder(shape)
             .clip(shape)
-            .background(Color(6, 22, 18, 191))
-            .border(1.dp, Jv.Line16, shape)
+            .background(c.bgSurface)
             .semantics(mergeDescendants = true) {}
-            .padding(start = 10.dp, end = 18.dp),
+            .padding(horizontal = JvSpace.lg),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Box(Modifier.size(26.dp).border(1.5.dp, Jv.accent(0.6f), CircleShape), contentAlignment = Alignment.Center) {
-            StatusDot(pill.tone)
-        }
-        Text(pill.label, style = exo(13f, FontWeight.SemiBold, toneColor(pill.tone), 0.08f))
-        Box(Modifier.width(1.dp).height(16.dp).background(Jv.accent(0.3f)))
-        Text(pill.hint, style = exo(11f, color = Jv.Text4))
+        StatusDot(pill.tone)
+        Text(pill.label, color = toneTextColor(pill.tone), style = MaterialTheme.typography.labelLarge)
+        Box(Modifier.width(1.dp).height(16.dp).background(c.separator))
+        Text(pill.hint, color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
     }
 }

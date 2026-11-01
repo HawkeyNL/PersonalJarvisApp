@@ -79,7 +79,7 @@ private fun vectorOf(icon: JvIcon): ImageVector =
 fun JvIconView(
     icon: JvIcon,
     modifier: Modifier = Modifier,
-    tint: Color = Jv.Accent,
+    tint: Color = JvTheme.colors.accentText,
     size: Dp = 20.dp,
     contentDescription: String? = null,
 ) {
