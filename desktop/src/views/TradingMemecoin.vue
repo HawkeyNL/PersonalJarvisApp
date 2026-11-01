@@ -114,6 +114,18 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
       >Pause paper entries</button>
     </template>
 
+    <!-- Above every report figure, the paper gate included. -->
+    <div v-if="staleMs !== null" class="td-banner warn" role="status">
+      <span class="t-sm"><strong>The last report is {{ ageText(staleMs) }} old.</strong> Core has not reported since; these figures may be out of date.</span>
+      <button type="button" class="btn btn-secondary btn-sm" @click="refresh">Try again</button>
+    </div>
+    <div v-if="stuck" class="td-banner warn" role="status">
+      <span class="t-sm">
+        <strong>{{ plural(stuck, "paper position is", "paper positions are") }} stuck.</strong>
+        {{ stuck === 1 ? "Its exit failed 10 times and is no longer retried; it keeps its slot." : "Their exits failed 10 times each and are no longer retried; they keep their slots." }}
+        The Core log has the details.
+      </span>
+    </div>
     <div class="td-banner mc-paper" role="note">
       <div class="mc-paper-text">
         <strong class="mc-paper-title">Paper — no real money.</strong>
@@ -161,7 +173,7 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
       </ul>
       <div class="mc-actions">
         <button ref="keepBtn" type="button" class="btn btn-secondary" :disabled="pauseStep === 'sending'" @click="keepRunning">Keep running</button>
-        <button type="button" class="btn btn-primary" :aria-busy="pauseStep === 'sending'" :disabled="pauseStep === 'sending'" @click="confirmPause">
+        <button type="button" class="btn btn-primary" :aria-busy="pauseStep === 'sending'" @click="confirmPause">
           <span v-if="pauseStep === 'sending'" class="spinner" aria-hidden="true"></span>
           {{ pauseStep === "sending" ? "Pausing…" : "Pause entries now" }}
         </button>
@@ -173,7 +185,7 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
       <template v-else><span>{{ pauseNote.message }}</span></template>
     </p>
 
-    <div v-if="overview.kind === 'loading'" class="card td-col" role="status" aria-busy="true">
+    <div v-if="overview.kind === 'loading'" class="card td-col" role="status">
       <span class="sr-only">Loading the paper trader…</span>
       <span class="skel" style="width: 40%; height: 14px" aria-hidden="true"></span>
       <span class="skel" style="width: 70%; height: 28px" aria-hidden="true"></span>
@@ -205,17 +217,6 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
         </template>
       </section>
 
-      <div v-if="staleMs !== null" class="td-banner warn" role="status">
-        <span class="t-sm"><strong>The last report is {{ ageText(staleMs) }} old.</strong> Core has not reported since; these figures may be out of date.</span>
-        <button type="button" class="btn btn-secondary btn-sm" @click="refresh">Try again</button>
-      </div>
-      <div v-if="stuck" class="td-banner warn" role="status">
-        <span class="t-sm">
-          <strong>{{ plural(stuck, "paper position is", "paper positions are") }} stuck.</strong>
-          {{ stuck === 1 ? "Its exit failed 10 times and is no longer retried; it keeps its slot." : "Their exits failed 10 times each and are no longer retried; they keep their slots." }}
-          The Core log has the details.
-        </span>
-      </div>
 
       <template v-if="report">
         <p class="td-note">Strategy version {{ report.strategy_version }} · as of {{ asOfText(report.as_of, now) }} · all amounts in simulated US dollars</p>
@@ -278,8 +279,8 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
             <span class="t-sm t-2">{{ report.open_positions.length ? `${report.open_positions.length} open` : "Nothing open" }}</span>
           </div>
           <p v-if="!report.open_positions.length" class="empty t-sm">No open paper positions.</p>
-          <div v-else class="td-scroll" tabindex="0" role="region" aria-labelledby="mc-open">
-            <table class="tbl">
+          <div v-else class="td-scroll" tabindex="0" role="region" aria-label="Open paper positions table">
+            <table class="tbl" style="min-width: 640px">
               <thead>
                 <tr><th scope="col">Token</th><th scope="col">Opened</th><th scope="col" class="r">Tokens</th><th scope="col" class="r">Cost</th><th scope="col" class="r">Value now</th><th scope="col">Exit</th></tr>
               </thead>
@@ -308,7 +309,7 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
         <h2 id="mc-cand">Candidate decisions</h2>
         <span class="t-sm t-2">newest first</span>
       </div>
-      <div v-if="candidates.kind === 'loading'" class="td-col td-inline" role="status" aria-busy="true">
+      <div v-if="candidates.kind === 'loading'" class="td-col td-inline" role="status">
         <span class="sr-only">Loading decisions…</span>
         <span class="skel" style="width: 100%; height: 14px" aria-hidden="true"></span>
         <span class="skel" style="width: 85%; height: 14px" aria-hidden="true"></span>
@@ -318,8 +319,8 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
         <button type="button" class="btn btn-secondary btn-sm" @click="reloadCandidates">Try again</button>
       </div>
       <p v-else-if="!candidates.data.length" class="empty t-sm">No decisions recorded yet. A decision is recorded when a token's verdict changes.</p>
-      <div v-else class="td-scroll" tabindex="0" role="region" aria-labelledby="mc-cand">
-        <table class="tbl">
+      <div v-else class="td-scroll" tabindex="0" role="region" aria-label="Candidate decisions table">
+        <table class="tbl" style="min-width: 720px">
           <thead>
             <tr><th scope="col">Seen</th><th scope="col">Token</th><th scope="col">Decision</th><th scope="col">Reason</th><th scope="col" class="r">Price</th><th scope="col" class="r">Liquidity</th></tr>
           </thead>
@@ -342,7 +343,7 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
         <h2 id="mc-trades">Recent paper trades</h2>
         <span class="t-sm t-2">closed, newest first</span>
       </div>
-      <div v-if="trades.kind === 'loading'" class="td-col td-inline" role="status" aria-busy="true">
+      <div v-if="trades.kind === 'loading'" class="td-col td-inline" role="status">
         <span class="sr-only">Loading paper trades…</span>
         <span class="skel" style="width: 100%; height: 14px" aria-hidden="true"></span>
         <span class="skel" style="width: 85%; height: 14px" aria-hidden="true"></span>
@@ -352,8 +353,8 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
         <button type="button" class="btn btn-secondary btn-sm" @click="reloadTrades">Try again</button>
       </div>
       <p v-else-if="!trades.data.length" class="empty t-sm">No closed paper trades yet.</p>
-      <div v-else class="td-scroll" tabindex="0" role="region" aria-labelledby="mc-trades">
-        <table class="tbl">
+      <div v-else class="td-scroll" tabindex="0" role="region" aria-label="Paper trades table">
+        <table class="tbl" style="min-width: 720px">
           <thead>
             <tr><th scope="col">Closed</th><th scope="col">Token</th><th scope="col" class="r">Cost</th><th scope="col" class="r">Out</th><th scope="col" class="r">Exit fees</th><th scope="col" class="r">Net</th><th scope="col">Exit</th></tr>
           </thead>

@@ -26,13 +26,16 @@ export type ChartColors = Record<keyof typeof CHART_TOKENS | "fill", string>;
 type Probe = Pick<CanvasRenderingContext2D, "fillStyle" | "clearRect" | "fillRect" | "getImageData">;
 
 /** A CSS colour as rgba(), optionally at another opacity. Returns the value
- *  unchanged when there is no probe or the probe cannot parse it. */
+ *  unchanged when there is no probe or the probe cannot parse it, or
+ *  "transparent" then if another opacity was asked (an opaque fill would hide
+ *  the grid and volume bars). */
 export function toRgba(probe: Probe | null, value: string, alpha?: number): string {
-  if (!probe || !value) return value;
+  const fallback = alpha === undefined ? value : "transparent";
+  if (!probe || !value) return fallback;
   const sentinel = "#010203";
   probe.fillStyle = sentinel;
   probe.fillStyle = value;
-  if (probe.fillStyle === sentinel) return value;
+  if (probe.fillStyle === sentinel) return fallback;
   probe.clearRect(0, 0, 1, 1);
   probe.fillRect(0, 0, 1, 1);
   const [r, g, b, a] = probe.getImageData(0, 0, 1, 1).data;

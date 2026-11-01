@@ -30,6 +30,9 @@ test("a colour the probe cannot parse, or no probe, passes through unchanged", (
   assert.equal(toRgba(fakeProbe(), "color(display-p3 1 0 0)"), "color(display-p3 1 0 0)");
   assert.equal(toRgba(null, "oklch(0.52 0.17 258)"), "oklch(0.52 0.17 258)");
   assert.equal(toRgba(fakeProbe(), ""), "");
+  // A translucent fill that cannot be converted is left out, never drawn opaque.
+  assert.equal(toRgba(fakeProbe(), "color(display-p3 1 0 0)", 0.1), "transparent");
+  assert.equal(toRgba(null, "oklch(0.52 0.17 258)", 0.1), "transparent");
 });
 
 test("every chart role reads its token, and the fill is the translucent chart accent", () => {
@@ -37,7 +40,7 @@ test("every chart role reads its token, and the fill is the translucent chart ac
   const colors = readChartColors((name) => { asked.push(name); return ` value-of(${name}) `; }, null);
   for (const [role, name] of Object.entries(CHART_TOKENS)) assert.equal(colors[role], `value-of(${name})`, role);
   assert.ok(asked.includes("--chart-accent"));
-  assert.equal(colors.fill, "value-of(--chart-accent)");
+  assert.equal(colors.fill, "transparent");
 
   const painted = readChartColors((name) => (name === "--chart-accent" ? "oklch(0.52 0.17 258)" : ""), fakeProbe());
   assert.equal(painted.accent, "rgba(28, 101, 200, 1)");

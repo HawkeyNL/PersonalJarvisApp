@@ -144,7 +144,7 @@ function render() {
 const themeObserver = new MutationObserver(render);
 onMounted(() => {
   render();
-  void document.fonts.ready.then(() => chart && render());
+  if (document.fonts.status !== "loaded") void document.fonts.ready.then(() => chart && render());
   themeObserver.observe(document.documentElement, { attributeFilter: ["data-theme"] });
 });
 watch(() => [props.bars, props.mode, props.ma, props.volume], render);

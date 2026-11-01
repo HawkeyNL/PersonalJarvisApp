@@ -120,14 +120,14 @@ onMounted(refreshHoldings);
       </form>
 
       <p v-if="hError" class="err" role="alert">{{ hError }}</p>
-      <div v-if="loading" class="td-col" role="status" aria-busy="true">
+      <div v-if="loading" class="td-col" role="status">
         <span class="sr-only">Loading your positions…</span>
         <span class="skel" style="width: 100%; height: 14px" aria-hidden="true"></span>
         <span class="skel" style="width: 92%; height: 14px" aria-hidden="true"></span>
       </div>
 
-      <div v-else-if="holdings.length" class="td-scroll" tabindex="0" role="region" aria-labelledby="manual-title">
-        <table class="tbl">
+      <div v-else-if="holdings.length" class="td-scroll" tabindex="0" role="region" aria-label="Manual positions table">
+        <table class="tbl" style="min-width: 640px">
           <thead>
             <tr><th scope="col">Symbol</th><th scope="col" class="r">Quantity</th><th scope="col" class="r">Avg. cost</th><th scope="col" class="r">Cost basis</th><th scope="col">Weight</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
           </thead>
@@ -170,7 +170,7 @@ onMounted(refreshHoldings);
         <p class="td-note">Last sync {{ asOfText(data.as_of) }}.</p>
         <p v-if="skippedText(data)" class="td-note" role="note">{{ skippedText(data) }}</p>
         <p v-if="empty" class="empty t-sm">No open positions in your IBKR account.</p>
-        <div v-else class="td-scroll" tabindex="0" role="region" aria-labelledby="ibkr-title">
+        <div v-else class="td-scroll" tabindex="0" role="region" aria-label="IBKR positions table">
           <table class="tbl">
             <thead>
               <tr><th scope="col">Symbol</th><th scope="col" class="r">Quantity</th><th scope="col" class="r">Last</th><th scope="col" class="r">Value</th></tr>

@@ -37,8 +37,8 @@ const { state, reload } = useTradingRead<Portfolio>({
             <h3>No open positions</h3>
             <p class="t-sm">Your IBKR account has no open positions.</p>
           </div>
-          <div v-else class="td-scroll" tabindex="0" role="region" aria-labelledby="pos-open">
-            <table class="tbl">
+          <div v-else class="td-scroll" tabindex="0" role="region" aria-label="Open positions table">
+            <table class="tbl" style="min-width: 860px">
               <thead>
                 <tr><th scope="col">Instrument</th><th scope="col">Class</th><th scope="col" class="r">Quantity</th><th scope="col" class="r">Avg. cost</th><th scope="col" class="r">Last</th><th scope="col" class="r">Value</th><th scope="col" class="r">Result</th></tr>
               </thead>

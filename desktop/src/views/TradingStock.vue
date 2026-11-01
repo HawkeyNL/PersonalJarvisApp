@@ -125,7 +125,7 @@ const noteTime = (iso: string) => {
             <div class="td-well"><span class="t-xs t-2">Result</span><span class="mono" :class="`td-${signTone(position.unrealized_pnl)}`">{{ formatMoney(position.unrealized_pnl, base, { sign: true }) }}</span></div>
           </div>
           <p v-else-if="portfolio.kind === 'data' || portfolio.kind === 'stale'" class="t-sm t-2">You do not hold this instrument.</p>
-          <div v-else-if="portfolio.kind === 'loading'" class="td-wells" role="status" aria-busy="true">
+          <div v-else-if="portfolio.kind === 'loading'" class="td-wells" role="status">
             <span class="sr-only">Loading your position…</span>
             <span v-for="i in 4" :key="i" class="skel" style="height: 52px" aria-hidden="true"></span>
           </div>

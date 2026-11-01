@@ -116,8 +116,8 @@ const day = (iso: string) => {
 
           <section class="card td-tight" aria-labelledby="stocks-holdings">
             <div class="td-card-head"><h2 id="stocks-holdings">Holdings</h2><span class="t-sm t-2">{{ stocks(data).length }} {{ stocks(data).length === 1 ? "holding" : "holdings" }}</span></div>
-            <div v-if="stocks(data).length" class="td-scroll" tabindex="0" role="region" aria-labelledby="stocks-holdings">
-              <table class="tbl">
+            <div v-if="stocks(data).length" class="td-scroll" tabindex="0" role="region" aria-label="Holdings table">
+              <table class="tbl" style="min-width: 760px">
                 <thead>
                   <tr><th scope="col">Instrument</th><th scope="col">Type</th><th scope="col" class="r">Quantity</th><th scope="col" class="r">Value</th><th scope="col" class="r">Today</th><th scope="col" class="r">Total</th><th scope="col" class="r">Share</th></tr>
                 </thead>
