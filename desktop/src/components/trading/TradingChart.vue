@@ -5,6 +5,7 @@ import {
 } from "chart.js";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { changePercent, chartNumber, formatDecimal, formatPrice, movingAverage, type Bar } from "../../trading";
+import { themeChartColors, type ChartColors } from "./chartColors";
 
 // Price or value chart on chart.js. Candles are two floating-bar datasets
 // (wick low..high, body open..close), so no financial plugin is needed.
@@ -16,18 +17,12 @@ const props = withDefaults(defineProps<{
 
 Chart.register(LineController, LineElement, PointElement, BarController, BarElement, CategoryScale, LinearScale, Tooltip, Filler);
 
-// sRGB values of tokens.css (--chart-accent, --positive-solid, --negative-solid,
-// --chart-ma, --text-secondary, --separator, --border-strong, --border) plus a translucent
-// accent fill so volume bars show through. Chart.js cannot read CSS variables.
-const PALETTE = {
-  light: { accent: "#1c65c8", fill: "rgb(28 101 200 / 0.08)", up: "#0a8282", down: "#c9690c", ma: "#7347af", text: "#565b62", grid: "#e4e6e9", strong: "#82878c", vol: "#d5d8db" },
-  dark: { accent: "#70a6f5", fill: "rgb(112 166 245 / 0.12)", up: "#339797", down: "#d58042", ma: "#b699eb", text: "#b3b8be", grid: "#23272b", strong: "#6d7279", vol: "#32363b" },
-};
-
 const canvas = ref<HTMLCanvasElement | null>(null);
 /** The values table renders only while open: up to 5000 rows otherwise. */
 const tableOpen = ref(false);
 let chart: Chart | undefined;
+/** Colours of the last draw; the crosshair plugin reuses them. */
+let colors: ChartColors | undefined;
 
 const intraday = computed(() => {
   const first = Date.parse(props.bars[0]?.t ?? "");
@@ -58,7 +53,7 @@ const crosshair: Plugin = {
     if (!active?.length) return;
     const { ctx, chartArea } = c;
     ctx.save();
-    ctx.strokeStyle = palette().strong;
+    ctx.strokeStyle = colors?.strong ?? "";
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(active[0].element.x, chartArea.top);
@@ -67,13 +62,13 @@ const crosshair: Plugin = {
     ctx.restore();
   },
 };
-const palette = () => PALETTE[document.documentElement.dataset.theme === "dark" ? "dark" : "light"];
 
 function render() {
   chart?.destroy();
   chart = undefined;
   if (!canvas.value || !props.bars.length) return;
-  const p = palette();
+  const p = (colors = themeChartColors());
+  const font = { family: getComputedStyle(canvas.value).fontFamily, size: 12 };
   const bars = props.bars;
   const close = bars.map((b) => chartNumber(b.c));
   // Rising, falling, or neutral when open or close is missing (never "0").
@@ -120,6 +115,8 @@ function render() {
         tooltip: {
           filter: (item) => item.datasetIndex === 0,
           displayColors: false,
+          backgroundColor: p.tipBg, borderColor: p.tipBorder, borderWidth: 1, titleColor: p.tipText, bodyColor: p.tipText,
+          titleFont: { ...font, weight: 500 }, bodyFont: font, padding: 10, cornerRadius: 10,
           callbacks: {
             title: (items) => when(bars[items[0].dataIndex].t, true),
             label: (item) => {
@@ -133,24 +130,28 @@ function render() {
         },
       },
       scales: {
-        x: { grid: { display: false }, ticks: { color: p.text, maxTicksLimit: 6, maxRotation: 0 } },
+        x: { grid: { display: false }, border: { display: false }, ticks: { color: p.text, font, maxTicksLimit: 6, maxRotation: 0 } },
         // Bar charts start at zero by default; prices must not.
-        y: { position: "right", beginAtZero: false, grid: { color: p.grid }, ticks: { color: p.text, maxTicksLimit: 5 } },
+        y: { position: "right", beginAtZero: false, border: { display: false }, grid: { color: p.grid }, ticks: { color: p.text, font, maxTicksLimit: 5 } },
         vol: { type: "linear", axis: "y", display: false, beginAtZero: true, max: maxVol ? maxVol * 4 : 1 },
       },
     },
   });
 }
 
+// Draw again in the new token colours when the theme flips, and once the
+// web font has loaded so the axis labels use it.
 const themeObserver = new MutationObserver(render);
 onMounted(() => {
   render();
+  if (document.fonts.status !== "loaded") void document.fonts.ready.then(() => chart && render());
   themeObserver.observe(document.documentElement, { attributeFilter: ["data-theme"] });
 });
 watch(() => [props.bars, props.mode, props.ma, props.volume], render);
 onBeforeUnmount(() => {
   themeObserver.disconnect();
   chart?.destroy();
+  chart = undefined;
 });
 </script>
 
@@ -160,7 +161,7 @@ onBeforeUnmount(() => {
   </div>
   <details class="td-chart-table" @toggle="tableOpen = ($event.target as HTMLDetailsElement).open">
     <summary>Show the values as a table</summary>
-    <div v-if="tableOpen" class="scroll">
+    <div v-if="tableOpen" class="scroll" tabindex="0" role="region" :aria-label="`${label}, values`">
       <table>
         <thead>
           <tr><th scope="col">Time</th><template v-if="mode === 'candle'"><th scope="col">Open</th><th scope="col">High</th><th scope="col">Low</th></template><th scope="col">{{ mode === "candle" ? "Close" : "Value" }}</th><th v-if="volume" scope="col">Volume</th></tr>
@@ -180,7 +181,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .td-chart { position: relative; min-width: 0; }
-.td-chart-table { margin-top: 10px; font-size: var(--fs-12); color: var(--text-secondary); }
+.td-chart-table { margin-top: 10px; font-size: 12px; color: var(--text-secondary); }
 summary { cursor: pointer; width: max-content; }
 .scroll { max-height: 280px; overflow: auto; overscroll-behavior: contain; margin-top: 8px; }
 table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
