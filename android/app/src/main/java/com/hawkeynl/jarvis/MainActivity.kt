@@ -9,8 +9,11 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import com.hawkeynl.jarvis.security.AgentApprovalService
+import com.hawkeynl.jarvis.auth.EnrollmentService
 import com.hawkeynl.jarvis.security.BiometricAvailability
+import com.hawkeynl.jarvis.security.BiometricNotRecognisedException
 import com.hawkeynl.jarvis.security.BiometricResult
+import com.hawkeynl.jarvis.security.PromptAttempts
 import com.hawkeynl.jarvis.security.ModelControlService
 import com.hawkeynl.jarvis.security.PairingApprovalService
 import com.hawkeynl.jarvis.security.UnlockApprovalService
@@ -44,8 +47,11 @@ class MainActivity : FragmentActivity() {
         { !viewModel.state.value.locked && viewModel.state.value.authenticated }) }
 
     // Every device signature: one strong-biometric prompt that authorises the device key's cipher.
+    // Sign-in gives up after three rejected fingers or faces, so the password screen takes over.
     private val signingPrompt: suspend (String, Cipher) -> Cipher? = { reason, cipher ->
-        val result = strongBiometric("Jarvis device key", reason, BiometricPrompt.CryptoObject(cipher))
+        val maxFailures = if (reason == EnrollmentService.SIGN_IN_REASON) EnrollmentService.SIGN_IN_ATTEMPTS else Int.MAX_VALUE
+        val result = strongBiometric("Jarvis device key", reason, BiometricPrompt.CryptoObject(cipher), maxFailures)
+        if (result == BiometricResult.Failed) throw BiometricNotRecognisedException()
         (result as? BiometricResult.Authenticated)?.cryptoObject?.cipher
     }
 
@@ -83,7 +89,7 @@ class MainActivity : FragmentActivity() {
      *  or the app is not in the foreground; the result is handed back only once this
      *  Activity is resumed again. */
     private suspend fun strongBiometric(
-        title: String, reason: String, cryptoObject: BiometricPrompt.CryptoObject? = null,
+        title: String, reason: String, cryptoObject: BiometricPrompt.CryptoObject? = null, maxFailures: Int = Int.MAX_VALUE,
     ): BiometricResult? = withContext(Dispatchers.Main.immediate) {
         val activity = this@MainActivity
         val result = suspendCancellableCoroutine<BiometricResult?> { continuation ->
@@ -92,12 +98,15 @@ class MainActivity : FragmentActivity() {
                 continuation.resume(null); return@suspendCancellableCoroutine
             }
             biometricPromptActive = true
-            val prompt = container.biometricGate.authenticate(
+            // A rejected finger or face keeps the prompt open for another try, up to maxFailures.
+            val attempts = PromptAttempts(maxFailures)
+            var prompt: BiometricPrompt? = null
+            prompt = container.biometricGate.authenticate(
                 activity, ContextCompat.getMainExecutor(activity), title, description = reason, cryptoObject = cryptoObject,
-            ) { result ->
-                // A rejected finger or face keeps the prompt open for another try.
-                if (result == BiometricResult.Failed) return@authenticate
+            ) { raw ->
+                val result = attempts.settle(raw) ?: return@authenticate
                 biometricPromptActive = false
+                if (result == BiometricResult.Failed) prompt?.cancelAuthentication()
                 if (continuation.isActive) continuation.resume(result)
             }
             continuation.invokeOnCancellation { runOnUiThread { prompt?.cancelAuthentication(); biometricPromptActive = false } }

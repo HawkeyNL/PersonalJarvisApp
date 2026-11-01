@@ -118,6 +118,15 @@ On iOS there is no window: every model or routing change, like sign-in and
 pairing approval, needs its own Face ID / Touch ID prompt (no passcode), and
 the device key itself can only be read after that prompt.
 
+When a mobile session expires, signing in again needs only Face ID / Touch ID
+(iOS) or strong biometrics (Android) and the device key, as long as Core saw a
+password sign-in from that device within the last 30 days. Otherwise, against
+an older Core, or when the prompt does not recognise the face or finger (one
+Face ID prompt with the system's own retries on iOS, three tries on Android),
+the app asks for the account password; that sign-in still needs the biometric
+prompt for the device key. After a refusal the app goes straight to the password
+screen until a sign-in succeeds. Desktop sign-in always needs the account password.
+
 Changing Home Node/session, cancelling authentication, an expired approval,
 or a changed policy requires a new confirmation. The UI refreshes authoritative
 state after a change; it does not optimistically claim success. Older Core

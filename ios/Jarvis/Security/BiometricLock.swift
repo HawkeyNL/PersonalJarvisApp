@@ -34,14 +34,21 @@ struct BiometricLock {
             return try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason)
                 ? (.unlocked, context) : (.denied, nil)
         } catch let error as LAError {
-            switch error.code {
-            case .appCancel, .systemCancel, .userCancel, .userFallback: return (.cancelled, nil)
-            case .biometryLockout: return (.unavailable(Self.biometricsLocked), nil)
-            case .biometryNotAvailable, .biometryNotEnrolled: return (.unavailable(Self.biometricsRequired), nil)
-            default: return (.denied, nil)
-            }
+            return (Self.biometricOnlyResult(error.code), nil)
         } catch {
-            return (.denied, nil)
+            return (.cancelled, nil)
+        }
+    }
+
+    static func biometricOnlyResult(_ code: LAError.Code) -> LocalUnlockResult {
+        switch code {
+        case .appCancel, .systemCancel, .userCancel, .userFallback: .cancelled
+        case .biometryLockout: .unavailable(biometricsLocked)
+        case .biometryNotAvailable, .biometryNotEnrolled: .unavailable(biometricsRequired)
+        // Only a face or finger that did not match counts as denied. iOS has already
+        // retried inside its own prompt, so sign-in goes to the password screen.
+        case .authenticationFailed: .denied
+        default: .cancelled
         }
     }
 

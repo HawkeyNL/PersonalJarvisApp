@@ -21,10 +21,12 @@ import com.hawkeynl.jarvis.network.LoginResponse
 import com.hawkeynl.jarvis.network.PairingCreateRequest
 import com.hawkeynl.jarvis.network.PairingStatusResponse
 import com.hawkeynl.jarvis.network.PairingTicket
+import com.hawkeynl.jarvis.security.BiometricNotRecognisedException
 import com.hawkeynl.jarvis.security.DeviceIdentity
 import com.hawkeynl.jarvis.security.DeviceMessage
 import com.hawkeynl.jarvis.security.DeviceKeyInvalidatedException
 import com.hawkeynl.jarvis.security.DeviceSigningException
+import com.hawkeynl.jarvis.security.SigningCancelledException
 import com.hawkeynl.jarvis.storage.SessionRepository
 import com.hawkeynl.jarvis.testing.InMemorySecureValueStore
 import java.io.File
@@ -118,6 +120,119 @@ class EnrollmentServiceTest {
     }
 
     @Test
+    fun `expired session renews with one biometric signature and no password`() = runTest {
+        val api = FakeApi().apply { account = AccountStatus(1, true, false) }
+        val sessions = SessionRepository(InMemorySecureValueStore())
+        sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
+        val identity = FakeIdentity()
+        assertTrue(EnrollmentService(api, identity, sessions).login(endpoint) is EnrollmentOutcome.Authenticated)
+        assertEquals(null, api.loginRequest?.password)
+        assertEquals(LoginMessage(CHALLENGE_ID, DEVICE_ID, "02".repeat(32)), identity.signed)
+        assertEquals(EnrollmentService.SIGN_IN_REASON, identity.reason)
+        assertEquals("token", sessions.session().token)
+    }
+
+    @Test
+    fun `refused renewal goes to the password screen and keeps the binding`() = runTest {
+        val api = FakeApi().apply { account = AccountStatus(1, true, false); anchored = false }
+        val sessions = SessionRepository(InMemorySecureValueStore())
+        sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
+        val service = EnrollmentService(api, FakeIdentity(), sessions)
+        assertEquals(EnrollmentOutcome.PasswordRequired, service.login(endpoint))
+        assertEquals(DEVICE_ID, sessions.session().deviceId)
+        val password = "fixture account password"
+        assertTrue(service.startOrResume(endpoint, "fixture", 100, password) is EnrollmentOutcome.Authenticated)
+        assertEquals(password, api.loginRequest?.password)
+    }
+
+    @Test
+    fun `three rejected biometric attempts go to the password screen without login`() = runTest {
+        val api = FakeApi().apply { account = AccountStatus(1, true, false) }
+        val sessions = SessionRepository(InMemorySecureValueStore())
+        sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
+        val identity = FakeIdentity().apply { failure = BiometricNotRecognisedException() }
+        assertEquals(EnrollmentOutcome.PasswordRequired, EnrollmentService(api, identity, sessions).login(endpoint))
+        assertEquals(null, api.loginRequest)
+        assertEquals(DEVICE_ID, sessions.session().deviceId)
+    }
+
+    @Test
+    fun `refused renewal stops prompting until a sign-in succeeds`() = runTest {
+        val api = FakeApi().apply { account = AccountStatus(1, true, false); anchored = false }
+        val sessions = SessionRepository(InMemorySecureValueStore())
+        sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
+        val identity = FakeIdentity()
+        val service = EnrollmentService(api, identity, sessions)
+        assertEquals(EnrollmentOutcome.PasswordRequired, service.login(endpoint))
+        // Returning to the app: no second prompt and no second 401 against Core's per-IP limit.
+        identity.reason = null; api.loginRequest = null
+        assertEquals(EnrollmentOutcome.PasswordRequired, service.login(endpoint))
+        assertEquals(null, identity.reason)
+        assertEquals(null, api.loginRequest)
+        assertTrue(service.startOrResume(endpoint, "fixture", 100, "fixture account password") is EnrollmentOutcome.Authenticated)
+        api.anchored = true; identity.reason = null
+        assertTrue(service.login(endpoint) is EnrollmentOutcome.Authenticated)
+        assertEquals(EnrollmentService.SIGN_IN_REASON, identity.reason)
+    }
+
+    @Test
+    fun `rejected biometrics stop prompting until the binding is erased`() = runTest {
+        val api = FakeApi().apply { account = AccountStatus(1, true, false) }
+        val sessions = SessionRepository(InMemorySecureValueStore())
+        sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
+        val identity = FakeIdentity().apply { failure = BiometricNotRecognisedException() }
+        val service = EnrollmentService(api, identity, sessions)
+        assertEquals(EnrollmentOutcome.PasswordRequired, service.login(endpoint))
+        identity.reason = null; identity.failure = null
+        assertEquals(EnrollmentOutcome.PasswordRequired, service.login(endpoint))
+        assertEquals(null, identity.reason)
+        service.eraseLocally()
+        sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
+        assertTrue(service.login(endpoint) is EnrollmentOutcome.Authenticated)
+        assertEquals(EnrollmentService.SIGN_IN_REASON, identity.reason)
+    }
+
+    @Test
+    fun `rejected biometrics on the password sign-in show an error and keep renewal`() = runTest {
+        val api = FakeApi().apply { account = AccountStatus(1, true, false) }
+        val sessions = SessionRepository(InMemorySecureValueStore())
+        sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
+        val identity = FakeIdentity().apply { failure = BiometricNotRecognisedException() }
+        val service = EnrollmentService(api, identity, sessions)
+        val result = service.startOrResume(endpoint, "fixture", 100, "fixture account password")
+        assertEquals(EnrollmentOutcome.InvalidResponse(BiometricNotRecognisedException().message.orEmpty()), result)
+        assertEquals(null, api.loginRequest)
+        identity.failure = null
+        assertTrue(service.login(endpoint) is EnrollmentOutcome.Authenticated)
+    }
+
+    @Test
+    fun `cancelled biometrics keep their message during renewal`() = runTest {
+        val api = FakeApi().apply { account = AccountStatus(1, true, false) }
+        val sessions = SessionRepository(InMemorySecureValueStore())
+        sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
+        val identity = FakeIdentity().apply { failure = SigningCancelledException() }
+        val result = EnrollmentService(api, identity, sessions).login(endpoint)
+        assertEquals(EnrollmentOutcome.InvalidResponse(SigningCancelledException().message.orEmpty()), result)
+        assertEquals(null, api.loginRequest)
+    }
+
+    @Test
+    fun `renewal errors other than a refused login fail closed`() = runTest {
+        for (revoked in listOf(true, false)) {
+            val api = FakeApi().apply {
+                account = AccountStatus(1, true, false)
+                if (revoked) rejectChallenge = true else loginFailure = ApiResult.HttpError(429, "slow down")
+            }
+            val sessions = SessionRepository(InMemorySecureValueStore())
+            sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
+            val result = EnrollmentService(api, FakeIdentity(), sessions).login(endpoint)
+            assertEquals(if (revoked) 401 else 429, (result as EnrollmentOutcome.Rejected).status)
+            assertEquals("fixture-session-not-a-secret", sessions.session().token)
+        }
+    }
+
+    @Test
     fun `first account reports activation rather than creating pairing`() = runTest {
         val api = FakeApi().apply { account = AccountStatus(1, false, true) }
         val service = EnrollmentService(api, FakeIdentity(), SessionRepository(InMemorySecureValueStore()))
@@ -152,11 +267,13 @@ private const val CHALLENGE_ID = "00112233-4455-6677-8899-aabbccddeeff"
 
 private class FakeIdentity : DeviceIdentity {
     var signed: DeviceMessage? = null
+    var reason: String? = null
     var failure: Exception? = null
     var resets = 0
     override fun publicKeyHex() = "ab".repeat(32)
     override suspend fun enrollmentKeyHex(reason: String) = publicKeyHex()
     override suspend fun sign(message: DeviceMessage, reason: String): String {
+        this.reason = reason
         failure?.let { throw it }
         signed = message
         return "cd".repeat(64)
@@ -173,6 +290,9 @@ private class FakeApi : JarvisApi {
     var pairingDecision: String? = null
     var rejectChallenge = false
     var loginRequest: LoginRequest? = null
+    /** Core has a 30-day password anchor for this device, so a login without a password succeeds. */
+    var anchored = true
+    var loginFailure: ApiResult<LoginResponse>? = null
 
     override suspend fun ready(endpoint: HomeNodeEndpoint) = ApiResult.Success(HealthResponse("ready"))
     override suspend fun createPairing(endpoint: HomeNodeEndpoint, request: PairingCreateRequest): ApiResult<PairingTicket> {
@@ -185,6 +305,8 @@ private class FakeApi : JarvisApi {
         if (rejectChallenge) ApiResult.Unauthorized else ApiResult.Success(ChallengeResponse(CHALLENGE_ID, "02".repeat(32)))
     override suspend fun login(endpoint: HomeNodeEndpoint, request: LoginRequest): ApiResult<LoginResponse> {
         loginRequest = request
+        loginFailure?.let { return it }
+        if (request.password == null && !anchored) return ApiResult.Unauthorized
         return ApiResult.Success(LoginResponse("token", 900))
     }
     override suspend fun logout(endpoint: HomeNodeEndpoint, token: String) = ApiResult.Success(Unit)

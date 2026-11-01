@@ -23,6 +23,9 @@ class DeviceKeyInvalidatedException : DeviceSigningException(
 /** The user cancelled or failed the biometric prompt; nothing was signed. */
 class SigningCancelledException : DeviceSigningException("Cancelled; fingerprint or face unlock is required.")
 
+/** The sign-in prompt rejected the finger or face too often; nothing was signed. */
+class BiometricNotRecognisedException : DeviceSigningException("Fingerprint or face not recognised. Try again.")
+
 /** Android Keystore side of the device key, replaced by a fake in JVM tests. */
 interface DeviceKeyVault {
     /** Plain app-private storage: the public key and the seed ciphertext. */
