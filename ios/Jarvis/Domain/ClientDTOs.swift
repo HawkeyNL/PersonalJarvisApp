@@ -531,10 +531,12 @@ struct DiskStatus: Decodable {
     let used_percent: Double?
 }
 
-struct IbkrStatus: Decodable {
-    let reachable: Bool
-    let authenticated: Bool
-    let connected: Bool?
+/// The part of GET /v1/trading/portfolio the Integrations page shows.
+struct IbkrPortfolio: Decodable {
+    struct Position: Decodable {}
+    let asOf: String
+    let positions: [Position]
+    enum CodingKeys: String, CodingKey { case asOf = "as_of", positions }
 }
 
 /// Public /livez and /readyz bodies.

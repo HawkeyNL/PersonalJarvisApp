@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  agentStatus, canSignApproval, countOf, diskState, filterConversations, formatMs, groupAgents, ibkrState, isTrader, measuredCount,
+  agentStatus, canSignApproval, countOf, diskState, filterConversations, formatMs, groupAgents, isTrader, measuredCount,
   outcomeTone, serviceState, servicesSummary, sessionState, splitSessions,
 } from "../src/nodeModels.ts";
 
@@ -41,11 +41,7 @@ test("agent audit outcomes map to tones", () => {
   assert.equal(outcomeTone("pending"), "idle");
 });
 
-test("IBKR gateway state is labelled without guessing", () => {
-  assert.deepEqual(ibkrState({ reachable: false, authenticated: false }), ["warn", "Gateway unreachable"]);
-  assert.deepEqual(ibkrState({ reachable: true, authenticated: false }), ["warn", "Not logged in"]);
-  assert.deepEqual(ibkrState({ reachable: true, authenticated: true, connected: false }), ["warn", "Logged in, not connected"]);
-  assert.deepEqual(ibkrState({ reachable: true, authenticated: true }), ["ok", "Connected"]);
+test("countOf counts items with a truthy flag", () => {
   assert.equal(countOf([{ a: true }, { a: false }, { a: true }], (x) => x.a), "2 of 3");
   assert.equal(countOf([], () => true), "0 of 0");
 });

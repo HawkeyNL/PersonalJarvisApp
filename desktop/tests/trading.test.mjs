@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  STALE_AFTER_MS, ageText, changePercent, chartNumber, dataState, decimalSign, failureState, formatDecimal, formatMoney,
+  STALE_AFTER_MS, ageText, changePercent, chartNumber, dataState, decimalSign, errorText, failureState, formatDecimal, formatMoney, ibkrLinkState,
   LIMITS, changeRatio, formatPercent, formatPrice, movingAverage, notConnectedText, onTarget, parseConid, readBars, readHistory,
   readPortfolio, signTone, sourceLabel,
 } from "../src/trading.ts";
@@ -81,14 +81,43 @@ test("failed reads: not connected for 404/405/501/503 and no answer, else an err
   assert.deepEqual(failureState(api(404)), { kind: "not-connected", reason: "no-api" });
   assert.deepEqual(failureState(api(405)), { kind: "not-connected", reason: "no-api" });
   assert.deepEqual(failureState(api(501)), { kind: "not-connected", reason: "no-api" });
-  assert.deepEqual(failureState(api(503)), { kind: "not-connected", reason: "gateway" });
+  assert.deepEqual(failureState(api(503)), { kind: "not-connected", reason: "not-synced" });
   assert.deepEqual(failureState({ name: "NetworkError" }), { kind: "not-connected", reason: "unreachable" });
   assert.deepEqual(failureState(api(401)), { kind: "error", reason: "signin" });
   assert.deepEqual(failureState(api(500)), { kind: "error", reason: "failed" });
   assert.deepEqual(failureState(new Error("boom")), { kind: "error", reason: "failed" });
   // Every not-connected reason tells the owner what to do.
-  for (const reason of ["no-api", "gateway", "unreachable"]) assert.ok(notConnectedText(reason).detail.length > 40, reason);
+  for (const reason of ["no-api", "not-synced", "unreachable"]) {
+    const { title, detail } = notConnectedText(reason);
+    assert.ok(detail.length > 40, reason);
+    // Core reaches IBKR through its own broker now: never send the owner to a gateway.
+    assert.doesNotMatch(title + detail, /gateway|client portal/i, reason);
+  }
   assert.match(notConnectedText("no-api").title, /Not connected to IBKR yet/);
+  assert.match(notConnectedText("not-synced").title, /IBKR not connected yet/);
+});
+
+test("bars: 404 means the instrument is no longer held, not a missing API", () => {
+  const api = (status) => ({ name: "ApiError", status });
+  assert.deepEqual(failureState(api(404), true), { kind: "error", reason: "not-held" });
+  assert.match(errorText("not-held"), /no longer in your portfolio/);
+  // Everything else classifies as for any other read.
+  assert.deepEqual(failureState(api(503), true), { kind: "not-connected", reason: "not-synced" });
+  assert.deepEqual(failureState(api(405), true), { kind: "not-connected", reason: "no-api" });
+  assert.deepEqual(failureState(api(400), true), { kind: "error", reason: "failed" });
+  assert.deepEqual(failureState(api(500), true), { kind: "error", reason: "failed" });
+});
+
+test("IBKR link state comes from the portfolio read", () => {
+  const p = { source: "IBKR", as_of: "2026-11-01T12:00:00Z" };
+  assert.deepEqual(ibkrLinkState({ kind: "loading" }), ["idle", "Loading…"]);
+  assert.deepEqual(ibkrLinkState({ kind: "data", data: p }), ["ok", "Connected"]);
+  assert.deepEqual(ibkrLinkState({ kind: "empty", data: p }), ["ok", "Connected"]);
+  assert.deepEqual(ibkrLinkState({ kind: "stale", data: p, ageMs: 3_600_000, empty: false }), ["warn", "Connected, sync is old"]);
+  assert.deepEqual(ibkrLinkState({ kind: "not-connected", reason: "not-synced" }), ["warn", "Not connected"]);
+  assert.deepEqual(ibkrLinkState({ kind: "not-connected", reason: "no-api" }), ["idle", "Requires newer Core"]);
+  assert.deepEqual(ibkrLinkState({ kind: "not-connected", reason: "unreachable" }), ["warn", "Unavailable"]);
+  assert.deepEqual(ibkrLinkState({ kind: "error", reason: "failed" }), ["warn", "Unavailable"]);
 });
 
 test("successful reads: empty, data or stale", () => {

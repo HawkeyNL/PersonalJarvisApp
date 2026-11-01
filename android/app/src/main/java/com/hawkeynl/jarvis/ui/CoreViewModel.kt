@@ -10,7 +10,7 @@ import com.hawkeynl.jarvis.network.Availability
 import com.hawkeynl.jarvis.network.CodingSessionsResponse
 import com.hawkeynl.jarvis.network.DevicesResponse
 import com.hawkeynl.jarvis.network.HomeNodeEndpoint
-import com.hawkeynl.jarvis.network.IbkrStatus
+import com.hawkeynl.jarvis.network.IbkrPortfolio
 import com.hawkeynl.jarvis.network.ModelPolicyList
 import com.hawkeynl.jarvis.network.PairingRequestList
 import com.hawkeynl.jarvis.network.PendingResponse
@@ -42,7 +42,7 @@ data class CoreData(
     val agentAudit: Availability<AgentAuditResponse> = Availability.Loading,
     val registry: Availability<Registry> = Availability.Loading,
     val models: Availability<ModelPolicyList> = Availability.Loading,
-    val ibkr: Availability<IbkrStatus> = Availability.Loading,
+    val ibkr: Availability<IbkrPortfolio> = Availability.Loading,
     val usage: Availability<SystemUsage> = Availability.Loading,
     val services: Availability<ServicesResponse> = Availability.Loading,
     val systemAudit: Availability<SystemAuditResponse> = Availability.Loading,
@@ -84,7 +84,7 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
     private val agentAudit = source("/v1/agent/audit", AgentAuditResponse.serializer()) { copy(agentAudit = it) }
     private val registry = source("/v1/system/registry", Registry.serializer()) { copy(registry = it) }
     private val models = source("/v1/system/models", ModelPolicyList.serializer()) { copy(models = it) }
-    private val ibkr = source("/v1/broker/ibkr/status", IbkrStatus.serializer()) { copy(ibkr = it) }
+    private val ibkr = source("/v1/trading/portfolio", IbkrPortfolio.serializer()) { copy(ibkr = it) }
     private val usage = source("/v1/system/usage", SystemUsage.serializer()) { copy(usage = it) }
     private val services = source("/v1/system/services", ServicesResponse.serializer()) { copy(services = it) }
     private val systemAudit = source("/v1/system/audit", SystemAuditResponse.serializer()) { copy(systemAudit = it) }

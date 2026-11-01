@@ -1,7 +1,8 @@
 package com.hawkeynl.jarvis.network
 
 /** Why an optional Core read failed. */
-enum class LoadFailure { SIGNIN, FORBIDDEN, NETWORK, FAILED }
+/** UNAVAILABLE: Core answered 503, it cannot serve this right now (e.g. IBKR not connected yet). */
+enum class LoadFailure { SIGNIN, FORBIDDEN, NETWORK, UNAVAILABLE, FAILED }
 
 /**
  * Result of an optional, read-only Core call for the hub and node pages.
@@ -25,7 +26,8 @@ fun <T, R> Availability<T>.map(transform: (T) -> R): Availability<R> = when (thi
     is Availability.Failed -> this
 }
 
-/** Availability of a failed call: 404/405 = older Core, 401 = session to renew, 403 = turned off in Core;
+/** Availability of a failed call: 404/405 = older Core, 401 = session to renew, 403 = turned off in Core,
+ *  503 = Core cannot serve it right now;
  *  only a request that never got an answer is a connection problem. */
 fun ApiResult<*>.failure(): Availability<Nothing> = when (this) {
     is ApiResult.Success -> throw IllegalStateException("Success is not a failure")
@@ -34,6 +36,7 @@ fun ApiResult<*>.failure(): Availability<Nothing> = when (this) {
         404, 405 -> Availability.Unsupported
         401 -> Availability.Failed(LoadFailure.SIGNIN)
         403 -> Availability.Failed(LoadFailure.FORBIDDEN)
+        503 -> Availability.Failed(LoadFailure.UNAVAILABLE)
         else -> Availability.Failed(LoadFailure.FAILED)
     }
     is ApiResult.Unreachable -> Availability.Failed(LoadFailure.NETWORK)

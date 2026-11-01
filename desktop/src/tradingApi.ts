@@ -61,6 +61,8 @@ export function useTradingRead<T extends Freshness>(opts: {
   read: (x: unknown) => T | null;
   isEmpty: (data: T) => boolean;
   key?: () => unknown;
+  /** The read is an instrument's bars: 404 means not held (see failureState). */
+  instrument?: boolean;
 }): { state: Ref<TradingState<T>>; reload: () => Promise<void> } {
   const state = ref({ kind: "loading" }) as Ref<TradingState<T>>;
   let seq = 0;
@@ -87,7 +89,7 @@ export function useTradingRead<T extends Freshness>(opts: {
       const data = opts.read(await fetchRaw());
       next = data ? dataState(data, opts.isEmpty, Date.now()) : { kind: "error", reason: "failed" };
     } catch (error) {
-      next = failureState(error);
+      next = failureState(error, opts.instrument);
     }
     if (id === seq) state.value = next;
   }

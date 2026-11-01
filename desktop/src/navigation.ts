@@ -69,7 +69,7 @@ export const PAGES: Page[] = [
   { path: "/trading/stocks", name: "stocks", view: "stocks", nav: "stocks" },
   { path: "/trading/stocks/:conid(\\d+)", name: "stock", view: "stock", nav: "stocks" },
   { path: "/trading/positions", name: "positions", view: "positions", nav: "positions" },
-  // Manual holdings and the gateway status: one older view, tab driven by the path.
+  // Manual holdings and the IBKR status: one older view, tab driven by the path.
   { path: "/trading/holdings", name: "trading-holdings", view: "trading", nav: "dashboard" },
   { path: "/trading/ibkr", name: "trading-ibkr", view: "trading", nav: "dashboard" },
   // The memecoin PAPER trader (/v1/trading/meme/*); a simulation, no wallet.

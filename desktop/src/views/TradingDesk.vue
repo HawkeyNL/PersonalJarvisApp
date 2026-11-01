@@ -139,7 +139,7 @@ const changeTone = computed(() => (signTone(rangeRatio.value) === "neg" ? "neg" 
 
       <p class="td-note">
         Also here: <RouterLink to="/trading/holdings">manual holdings</RouterLink> and the
-        <RouterLink to="/trading/ibkr">IBKR gateway status</RouterLink>.
+        <RouterLink to="/trading/ibkr">IBKR status</RouterLink>.
       </p>
     </section>
     <DevDataToggle />

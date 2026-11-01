@@ -2,6 +2,7 @@ package com.hawkeynl.jarvis.network
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 // Read-only owner endpoints shown on the hub and node pages. Every field the
 // app does not strictly need has a default, so an older or newer Core shape
@@ -163,12 +164,9 @@ data class PolicyModel(
 @Serializable
 data class ModelPolicyList(val models: List<PolicyModel> = emptyList())
 
+/** The part of GET /v1/trading/portfolio the Integrations page shows. */
 @Serializable
-data class IbkrStatus(
-    val reachable: Boolean = false,
-    val authenticated: Boolean = false,
-    val connected: Boolean? = null,
-)
+data class IbkrPortfolio(val as_of: String = "", val positions: List<JsonElement> = emptyList())
 
 @Serializable
 data class BackendUsage(val backend: String = "", val spent_eur: Double = 0.0, val total_tokens: Long = 0)

@@ -9,10 +9,13 @@ import JvUnavailable from "../components/jv/JvUnavailable.vue";
 import NavIcon from "../components/NavIcon.vue";
 import { loadOptional } from "../coreStatus";
 import type { Availability, Tone } from "../hubModel";
-import { countOf, ibkrState, type IbkrState } from "../nodeModels";
+import TradingStatus from "../components/trading/TradingStatus.vue";
+import { countOf } from "../nodeModels";
+import { asOfText, ibkrLinkState, readPortfolio, type Portfolio } from "../trading";
+import { tradingApi, useTradingRead } from "../tradingApi";
 
 // Integrations: the brains, model catalog and host tools Core probed, the
-// owner model policy and the IBKR gateway. Codex, GitHub and OpenSandbox are
+// owner model policy and the IBKR link. Codex, GitHub and OpenSandbox are
 // not reported by Core yet.
 type Brain = { id: string; label: string; cost: string; available: boolean; note: string };
 type CatalogModel = { id: string; backend: string; class: string; cost: string; available: boolean };
@@ -22,12 +25,17 @@ type PolicyModel = { provider: string; model: string; enabled: boolean; route?: 
 
 const registry = ref<Availability<Registry>>({ state: "loading" });
 const policy = ref<Availability<{ models: PolicyModel[] }>>({ state: "loading" });
-const ibkr = ref<Availability<IbkrState>>({ state: "loading" });
+// IBKR has no status route: a portfolio from Core means connected.
+const { state: ibkr, reload: reloadIbkr } = useTradingRead<Portfolio>({
+  live: tradingApi.portfolio,
+  fixture: (f, set) => f.portfolioFixture(set),
+  read: readPortfolio,
+  isEmpty: (p) => p.positions.length === 0,
+});
 async function load() {
-  [registry.value, policy.value, ibkr.value] = await Promise.all([
+  [registry.value, policy.value] = await Promise.all([
     loadOptional<Registry>("/v1/system/registry"),
     loadOptional<{ models: PolicyModel[] }>("/v1/system/models"),
-    loadOptional<IbkrState>("/v1/broker/ibkr/status"),
   ]);
 }
 onMounted(load);
@@ -49,7 +57,7 @@ const planned = (id: string, label: string, title: string, icon: NodeItem["icon"
 const items = computed<NodeItem[]>(() => {
   const b = status(registry.value, () => [brains.value.some((x) => x.available) ? "ok" : "idle", `${countOf(brains.value, (x) => x.available)} ready`]);
   const m = status(policy.value, () => [allowed.value.length ? "ok" : "idle", `${allowed.value.length} allowed`]);
-  const i = status(ibkr.value, ibkrState);
+  const i = ibkrLinkState(ibkr.value);
   return [
     { id: "brains", label: "Brains", title: "AI brains", icon: "spark", description: "Who does the thinking, and how it is paid", tone: b[0], status: b[1] },
     { id: "models", label: "Models", title: "Models", icon: "layers", description: "Which models Jarvis may use", tone: m[0], status: m[1] },
@@ -73,7 +81,7 @@ const subTabs = computed(() => SUB_TABS[selected.value] ?? []);
 const DETAILS: Record<string, string> = {
   brains: "The brains Core found on your Home Node. Ready means it is set up, not that it is in use.",
   models: "Allowing a model lets Jarvis choose it; it never selects a model for a running request.",
-  ibkr: "Gateway status for Interactive Brokers. Jarvis only reads; it never places orders.",
+  ibkr: "Core's read-only link to Interactive Brokers. Jarvis only reads; it never places orders.",
   codex: "Core does not report the Codex broker status to the app yet.",
   github: "Core does not report a GitHub connection to the app yet.",
   sandbox: "Core does not report OpenSandbox status to the app yet.",
@@ -96,15 +104,6 @@ const catalogRows = computed<ActivityItem[]>(() => catalog.value.map((m) => ({
   id: `${m.backend}/${m.id}`, icon: "layers", title: m.id, detail: `${m.backend} · ${m.class} · ${COST[m.cost] ?? m.cost}`,
   tone: m.available ? "ok" : "idle", toneLabel: m.available ? "Provider set up" : "Provider not set up",
 })));
-const ibkrTiles = computed(() => {
-  if (ibkr.value.state !== "ok") return null;
-  const s = ibkr.value.value;
-  return {
-    gateway: s.reachable ? "Reachable" : "Unreachable",
-    session: s.authenticated ? "Logged in" : "Not logged in",
-    connection: s.connected === undefined ? "Not reported" : s.connected ? "Connected" : "Not connected",
-  };
-});
 </script>
 
 <template>
@@ -170,15 +169,14 @@ const ibkrTiles = computed(() => {
 
       <!-- IBKR -->
       <template v-else-if="current.id === 'ibkr'">
-        <JvUnavailable v-if="ibkr.state === 'unsupported' || ibkr.state === 'error'" title="IBKR"
-          :kind="ibkr.state === 'unsupported' ? 'core-update' : 'error'" icon="trend" />
-        <p v-else-if="!ibkrTiles" class="muted" role="status">Checking the gateway…</p>
-        <div v-else class="node-grid ibkr">
-          <JvTile icon="api" label="Gateway" :value="ibkrTiles.gateway" />
-          <JvTile icon="key" label="Session" :value="ibkrTiles.session" />
-          <JvTile icon="link-2" label="Connection" :value="ibkrTiles.connection" />
-          <JvTile icon="shield" label="Access" value="Read-only" />
-        </div>
+        <TradingStatus :state="ibkr" what="the IBKR link" @retry="reloadIbkr" v-slot="{ data }">
+          <div class="node-grid ibkr">
+            <JvTile icon="link-2" label="Connection" :value="current.status" />
+            <JvTile icon="clock" label="Last sync" :value="asOfText(data.as_of)" />
+            <JvTile icon="trend" label="Positions" :value="String(data.positions.length)" />
+            <JvTile icon="shield" label="Access" value="Read-only" />
+          </div>
+        </TradingStatus>
       </template>
 
       <JvUnavailable v-else :title="current.title" :icon="current.icon" :detail="DETAILS[current.id]" />

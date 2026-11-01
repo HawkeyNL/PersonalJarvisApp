@@ -2,13 +2,15 @@
 // selection for the trading screens. Pure: no Vue or Tauri imports, so tests
 // load this file directly.
 //
-// Core serves these routes once the IBKR broker lands:
+// Core serves these routes from its IBKR broker (OAuth, read-only):
 //   GET /v1/trading/portfolio                           -> Portfolio
 //   GET /v1/trading/portfolio/history?range=<HistoryRange> -> PortfolioHistory
 //   GET /v1/trading/instruments/{conid}/bars?range=<BarRange> -> InstrumentBars
 // Money, prices and quantities are decimal strings ("-1234.5600"), never JSON
 // numbers: a JS float cannot hold every amount exactly. They become numbers
 // only to draw a chart (chartNumber).
+
+import type { Tone } from "./hubModel";
 
 /** Exact decimal as a string: optional "-", digits, optional "." + digits. */
 export type Decimal = string;
@@ -257,27 +259,33 @@ export const STALE_AFTER_MS = 10 * 60_000;
 
 /** Why there is no trading data at all.
  *  no-api: Core has no trading read API yet (404/405/501).
- *  gateway: Core has it but cannot reach the IBKR gateway (503).
+ *  not-synced: Core has it, but IBKR is not configured, not synced yet or
+ *  unreachable from Core (503).
  *  unreachable: no answer from the Home Node. */
-export type NotConnected = "no-api" | "gateway" | "unreachable";
+export type NotConnected = "no-api" | "not-synced" | "unreachable";
+/** not-held: the instrument is no longer in the portfolio (404 on bars). */
+export type TradingError = "signin" | "failed" | "not-held";
 
 export type TradingState<T> =
   | { kind: "loading" }
   | { kind: "not-connected"; reason: NotConnected }
-  | { kind: "error"; reason: "signin" | "failed" }
+  | { kind: "error"; reason: TradingError }
   | { kind: "empty"; data: T }
   | { kind: "data"; data: T }
   | { kind: "stale"; data: T; ageMs: number; empty: boolean };
 
 type Failure = Extract<TradingState<never>, { kind: "not-connected" | "error" }>;
 
-/** Classify a failed read (ApiError / NetworkError from api.ts, by shape). */
-export function failureState(error: unknown): Failure {
+/** Classify a failed read (ApiError / NetworkError from api.ts, by shape).
+ *  `instrument`: the read was /instruments/{conid}/bars, where 404 means the
+ *  instrument is not held, not a missing API. */
+export function failureState(error: unknown, instrument = false): Failure {
   const e = error as { name?: string; status?: number } | null;
   if (e?.name === "NetworkError") return { kind: "not-connected", reason: "unreachable" };
   if (e?.name === "ApiError") {
+    if (instrument && e.status === 404) return { kind: "error", reason: "not-held" };
     if (e.status === 404 || e.status === 405 || e.status === 501) return { kind: "not-connected", reason: "no-api" };
-    if (e.status === 503) return { kind: "not-connected", reason: "gateway" };
+    if (e.status === 503) return { kind: "not-connected", reason: "not-synced" };
     if (e.status === 401) return { kind: "error", reason: "signin" };
   }
   return { kind: "error", reason: "failed" };
@@ -300,20 +308,34 @@ export function notConnectedText(reason: NotConnected): { title: string; detail:
     case "no-api":
       return {
         title: "Not connected to IBKR yet",
-        detail: "This Core has no trading data yet; it comes with the IBKR broker connection. Update Core, then start the IBKR Client Portal Gateway on your Home Node and log in. Nothing is shown until then.",
+        detail: "This Core has no trading data yet; it comes with the IBKR broker connection. Update Core on your Home Node and turn on the IBKR portfolio sync. Nothing is shown until then.",
       };
-    case "gateway":
+    case "not-synced":
       return {
-        title: "IBKR gateway not connected",
-        detail: "Core cannot reach the IBKR Client Portal Gateway. Start it on your Home Node and log in with your IBKR account.",
+        title: "IBKR not connected yet",
+        detail: "Core has no IBKR data yet: the IBKR connection is not set up, the first sync has not finished, or Core cannot reach IBKR right now. Check the IBKR broker on your Home Node, then try again.",
       };
     case "unreachable":
       return { title: "Home Node unreachable", detail: "No answer from your Home Node. Check the connection; trading data comes from Core." };
   }
 }
 
-export function errorText(reason: "signin" | "failed"): string {
+export function errorText(reason: TradingError): string {
+  if (reason === "not-held") return "This instrument is no longer in your portfolio.";
   return reason === "signin" ? "Sign in again on the Core page." : "Core returned an error. Try again later.";
+}
+
+/** Tone and label of the IBKR link, read from GET /v1/trading/portfolio:
+ *  a portfolio means connected; 503 means not connected (yet). */
+export function ibkrLinkState(state: TradingState<unknown>): [Tone, string] {
+  switch (state.kind) {
+    case "loading": return ["idle", "Loading…"];
+    case "data": case "empty": return ["ok", "Connected"];
+    case "stale": return ["warn", "Connected, sync is old"];
+    case "not-connected":
+      return state.reason === "no-api" ? ["idle", "Requires newer Core"] : state.reason === "not-synced" ? ["warn", "Not connected"] : ["warn", "Unavailable"];
+    case "error": return ["warn", "Unavailable"];
+  }
 }
 
 /** "10:42" today, "5 Nov, 10:42" otherwise. */

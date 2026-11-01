@@ -32,6 +32,7 @@ const { state: bars, reload } = useTradingRead<InstrumentBars>({
   read: readBars,
   isEmpty: (b) => b.bars.length === 0,
   key: () => [conid.value, range.value],
+  instrument: true,
 });
 const { state: portfolio } = useTradingRead<Portfolio>({
   live: tradingApi.portfolio,
