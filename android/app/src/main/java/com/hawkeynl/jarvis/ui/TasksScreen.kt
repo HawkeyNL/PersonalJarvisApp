@@ -1,5 +1,6 @@
 package com.hawkeynl.jarvis.ui
 
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -7,27 +8,25 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import com.hawkeynl.jarvis.network.AgentAuditEntry
 import com.hawkeynl.jarvis.network.Availability
 import com.hawkeynl.jarvis.network.CodingSession
 import com.hawkeynl.jarvis.network.valueOrNull
 import com.hawkeynl.jarvis.security.AgentApprovalService
 
-private val TASK_DETAILS = mapOf(
-    "active" to "Coding sessions Jarvis is running or has paused on your Home Node.",
-    "waiting" to "Changes an agent proposed. Nothing runs until you approve it with this phone's key or on a trusted desktop.",
-    "completed" to "Coding sessions that ended, and every agent action Core recorded.",
-    "scheduled" to "Core cannot run tasks at a set time yet.",
-    "recurring" to "Core cannot repeat tasks on a schedule yet.",
-    "goals" to "Core does not track goals or split them into tasks yet.",
+private val LATER = listOf(
+    Triple(JvIcon.CALENDAR, "Scheduled", "Runs at a set time or day"),
+    Triple(JvIcon.REPEAT, "Recurring", "Things Jarvis does every week"),
+    Triple(JvIcon.GOAL, "Goals", "Bigger outcomes split into tasks"),
 )
 
 private const val AGENT_OFF = "Agent is turned off in Core."
 
-/** Tasks: coding sessions, agent actions waiting for the owner and the agent
- *  audit history. Each waiting action opens in a sheet, is shown in full and is
- *  approved or denied with a strong-biometric prompt. Scheduled and recurring tasks and goals need
- *  Core support. */
+/** Tasks (D-Runs): coding sessions, agent actions waiting for the owner and the agent
+ *  audit history, one view at a time. Each waiting action opens in a sheet, is shown in
+ *  full and is approved or denied with a strong-biometric prompt. Scheduled and recurring
+ *  tasks and goals need Core support. */
 @Composable
 fun TasksScreen(data: CoreData, onNavigate: (Screen) -> Unit, onRefresh: () -> Unit, agentApprovals: AgentApprovalService?) {
     LaunchedEffect(Unit) { onRefresh() }
@@ -36,81 +35,59 @@ fun TasksScreen(data: CoreData, onNavigate: (Screen) -> Unit, onRefresh: () -> U
     val (open, finished) = splitSessions(sessionList)
     val running = open.count { it.state == "active" }
     val waiting = data.pending.valueOrNull?.pending.orEmpty()
-
-    val active = statusOf(data.sessions) { (if (running > 0) Tone.OK else Tone.IDLE) to "$running running" }
-    val wait = statusOf(data.pending) {
-        if (waiting.isEmpty()) Tone.IDLE to "Nothing waiting"
-        else Tone.WARN to "${waiting.size} ${if (waiting.size == 1) "approval" else "approvals"}"
-    }
-    val done = statusOf(data.sessions) { (if (finished.isEmpty()) Tone.IDLE else Tone.OK) to "${finished.size} finished" }
-    val items = listOf(
-        NodeItem("active", "Active", "Active", JvIcon.PLAY, active.first, active.second, "Coding sessions in progress"),
-        planned("scheduled", "Scheduled", "Scheduled", JvIcon.CALENDAR, "Runs at a set time or day"),
-        NodeItem("waiting", "Waiting", "Waiting on you", JvIcon.ALERT, wait.first, wait.second, "Agent actions that need your OK"),
-        NodeItem("completed", "Completed", "Completed", JvIcon.TASKS, done.first, done.second, "Finished sessions and agent history"),
-        planned("recurring", "Recurring", "Recurring", JvIcon.REPEAT, "Things Jarvis does every week"),
-        planned("goals", "Goals", "Goals", JvIcon.GOAL, "Bigger outcomes split into tasks"),
-    )
-    var selected by rememberSaveable { mutableStateOf("active") }
-    var sub by rememberSaveable { mutableStateOf("sessions") }
-    val current = items.first { it.id == selected }
+    var view by rememberSaveable { mutableStateOf("active") }
 
     fun sessionRows(list: List<CodingSession>) = list.map { s ->
         val (tone, label) = sessionState(s.state)
-        ActivityItem(
-            s.id, JvIcon.CODE, s.objective?.ifEmpty { null } ?: "Coding session",
-            listOfNotNull(label, s.repository).joinToString(" · "), relativeTime(s.updated_at, now), tone, label,
-        )
+        ActivityItem(s.id, JvIcon.CODE, s.objective?.ifEmpty { null } ?: "Coding session", s.repository, relativeTime(s.updated_at, now), tone, label)
     }
 
-    NodePage("Tasks", "What Jarvis is working on", items, selected, { selected = it; sub = "sessions" }, { onNavigate(backOf(Screen.TASKS)) }) {
-        Panel(
-            current.icon, current.title, current.tone, current.status,
-            description = TASK_DETAILS[current.id],
-            quote = if (current.id == "waiting") "Jarvis proposes, you decide." else null,
-            action = if (current.id in setOf("active", "waiting", "completed")) ({ ActionButton("Refresh", onRefresh) }) else null,
-        ) {
-            when (current.id) {
-                "active" -> Loaded(data.sessions, "Coding sessions", JvIcon.CODE, "Loading sessions…", AGENT_OFF) {
-                    TileGrid(
-                        "At a glance",
-                        listOf(
-                            TileData(JvIcon.PLAY, "Running", running.toString()),
-                            TileData(JvIcon.CLOCK, "Paused", (open.size - running).toString()),
-                            TileData(JvIcon.ALERT, "Waiting on you", if (data.pending is Availability.Ok) waiting.size.toString() else "Unavailable"),
-                            TileData(JvIcon.TASKS, "Finished", finished.size.toString()),
-                            TileData(
-                                JvIcon.SHIELD, "Agent actions",
-                                data.agentAudit.valueOrNull?.let { if (it.enabled) "Enabled" else "Disabled on Core" } ?: "Unavailable",
-                            ),
-                            TileData(JvIcon.CALENDAR, "Last update", relativeTime(sessionList.firstOrNull()?.updated_at, now).ifEmpty { "—" }),
-                        ),
-                    )
-                    ActivityList("Active & paused", sessionRows(open).take(5), "No coding session is running.")
-                }
-                "waiting" -> Loaded(data.pending, "Approvals", JvIcon.ALERT, "Loading approvals…", AGENT_OFF) {
-                    MutedText("Read the whole action first. Approving signs exactly what is shown with this phone's device key; anything this app cannot show in full can only be denied here.")
-                    if (waiting.isEmpty()) ActivityList("Waiting for approval", emptyList(), "Nothing is waiting for you.")
-                    PendingActions(waiting, now, agentApprovals, onRefresh)
-                }
-                "completed" -> {
-                    ChipRow(
-                        listOf(ChipItem("sessions", "Sessions", JvIcon.CODE), ChipItem("history", "History", JvIcon.CLOCK)),
-                        sub, { sub = it }, small = true,
-                    )
-                    if (sub == "sessions") {
-                        Loaded(data.sessions, "Coding sessions", JvIcon.CODE, "Loading sessions…", AGENT_OFF) {
-                            ActivityList("Finished sessions", sessionRows(finished), "No finished sessions yet.")
-                        }
-                    } else {
-                        Loaded(data.agentAudit, "Agent history", JvIcon.SHIELD, "Loading history…", AGENT_OFF) { audit ->
-                            ActivityList("Agent actions", auditRows(audit.entries, now), "No agent actions recorded.")
-                        }
+    PushedPage(
+        screenTitle(Screen.TASKS), "What Jarvis is working on", { onNavigate(backOf(Screen.TASKS)) },
+        trailing = { GhostButton("Refresh", onRefresh) },
+    ) {
+        Segmented(
+            listOf("active" to "Active", "waiting" to if (waiting.isEmpty()) "Waiting" else "Waiting · ${waiting.size}", "done" to "Done"),
+            view, { view = it },
+        )
+        when (view) {
+            "active" -> Loaded(data.sessions, "Coding sessions", JvIcon.CODE, "Loading sessions…", AGENT_OFF, onRefresh) {
+                Facts(
+                    "At a glance",
+                    listOf(
+                        "Running" to running.toString(),
+                        "Paused" to (open.size - running).toString(),
+                        "Waiting on you" to if (data.pending is Availability.Ok) waiting.size.toString() else "Unavailable",
+                        "Finished" to finished.size.toString(),
+                        "Agent actions" to (data.agentAudit.valueOrNull?.let { if (it.enabled) "Enabled" else "Disabled on Core" } ?: "Unavailable"),
+                        "Last update" to relativeTime(sessionList.firstOrNull()?.updated_at, now).ifEmpty { "—" },
+                    ),
+                )
+                ActivityList("Running and paused", sessionRows(open), "No coding session is running.")
+            }
+            "waiting" -> Loaded(data.pending, "Approvals", JvIcon.ALERT, "Loading approvals…", AGENT_OFF, onRefresh) {
+                MutedText(
+                    "Changes an agent proposed. Nothing runs until you approve it. Read the whole action first: approving signs " +
+                        "exactly what is shown with this phone's device key; anything this app cannot show in full can only be denied here.",
+                    Modifier.padding(horizontal = JvSpace.xs),
+                )
+                if (waiting.isEmpty()) {
+                    ListSection(null) {
+                        EmptyState("Nothing is waiting for you", body = "Agent actions that need your OK show up here.", icon = JvIcon.SHIELD)
                     }
                 }
-                else -> Unavailable(current.title, current.icon, detail = TASK_DETAILS[current.id])
+                PendingActions(waiting, now, agentApprovals, onRefresh)
+            }
+            else -> {
+                Loaded(data.sessions, "Coding sessions", JvIcon.CODE, "Loading sessions…", AGENT_OFF, onRefresh) {
+                    ActivityList("Finished sessions", sessionRows(finished), "No finished sessions yet.")
+                }
+                Loaded(data.agentAudit, "Agent history", JvIcon.SHIELD, "Loading history…", AGENT_OFF, onRefresh) { audit ->
+                    ActivityList("Agent history", auditRows(audit.entries, now), "No agent actions recorded.")
+                }
             }
         }
+        LaterSection(LATER)
     }
 }
 

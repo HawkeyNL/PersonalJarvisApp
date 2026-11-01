@@ -1,32 +1,28 @@
 package com.hawkeynl.jarvis.ui
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 
 private val MEMORY_ITEMS = listOf(
-    planned("people", "People", "People", JvIcon.PEOPLE, "Who matters and how you know them"),
-    planned("projects", "Projects", "Projects", JvIcon.CONTEXT, "Everything about what you build"),
-    planned("preferences", "Preferences", "Preferences", JvIcon.HEART, "How you like things done"),
-    planned("knowledge", "Knowledge", "Knowledge", JvIcon.BOOK, "Notes, clips and saved insights"),
-    planned("routines", "Routines", "Routines", JvIcon.REPEAT, "Your habits and recurring days"),
-    planned("ideas", "Ideas", "Ideas", JvIcon.BULB, "Sparks worth coming back to"),
+    Triple(JvIcon.PEOPLE, "People", "Who matters and how you know them"),
+    Triple(JvIcon.CONTEXT, "Projects", "Everything about what you build"),
+    Triple(JvIcon.HEART, "Preferences", "How you like things done"),
+    Triple(JvIcon.BOOK, "Knowledge", "Notes, clips and saved insights"),
+    Triple(JvIcon.REPEAT, "Routines", "Your habits and recurring days"),
+    Triple(JvIcon.BULB, "Ideas", "Sparks worth coming back to"),
 )
 
-/** Memory: Core keeps conversations but has no browsable memory store yet,
- *  so every category says so plainly; no sample data. */
+/** Memory (D-Memory): Core keeps conversations but has no browsable memory store yet,
+ *  so the page says so plainly and lists what comes later; no sample data. */
 @Composable
 fun MemoryScreen(onNavigate: (Screen) -> Unit) {
-    var selected by rememberSaveable { mutableStateOf("people") }
-    val current = MEMORY_ITEMS.first { it.id == selected }
-    NodePage("Memory", "What Jarvis knows about your world", MEMORY_ITEMS, selected, { selected = it }, { onNavigate(backOf(Screen.MEMORY)) }) {
-        Panel(current.icon, current.title, Tone.IDLE, current.status, description = current.description) {
-            Unavailable(
-                current.title, current.icon,
-                detail = "Jarvis keeps your conversations, but your Core does not have a browsable memory store yet. Nothing is shown until it does.",
+    PushedPage(screenTitle(Screen.MEMORY), "What Jarvis remembers about you", { onNavigate(backOf(Screen.MEMORY)) }) {
+        ListSection(null) {
+            EmptyState(
+                "No memory store yet",
+                body = "Jarvis keeps your conversations, but your Core does not have a browsable memory store yet. Nothing is shown until it does.",
+                icon = JvIcon.MEMORY,
             )
         }
+        LaterSection(MEMORY_ITEMS)
     }
 }

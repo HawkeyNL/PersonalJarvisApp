@@ -67,7 +67,7 @@ fun HomeScreen(state: JarvisUiState, data: CoreData, onNavigate: (Screen) -> Uni
                             NavRow(JvIcon.CHAT, "Conversations", it.detail, { onNavigate(screen) }, it.tone)
                         }
                         Screen.MEMORY -> NavRow(JvIcon.MEMORY, "Memory", "Not yet available · needs Core support", { onNavigate(screen) }, Tone.IDLE)
-                        else -> error("No Home row for $screen")
+                        else -> MissingLinkRow(Tab.JARVIS, screen, onNavigate)
                     }
                 }
             }

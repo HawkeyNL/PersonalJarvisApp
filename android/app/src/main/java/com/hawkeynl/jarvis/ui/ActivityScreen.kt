@@ -68,7 +68,7 @@ fun ActivityScreen(data: CoreData, onNavigate: (Screen) -> Unit, onRefresh: () -
                     Screen.AGENTS -> agentsCard(data.agents).let {
                         NavRow(JvIcon.AGENTS, "Agents", it.detail, { onNavigate(screen) }, it.tone)
                     }
-                    else -> error("No Activity row for $screen")
+                    else -> MissingLinkRow(Tab.ACTIVITY, screen, onNavigate)
                 }
             }
         }

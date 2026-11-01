@@ -90,4 +90,14 @@ class ShellModelTest {
         assertEquals("Good evening", greeting(18))
         assertEquals("Good evening", greeting(2))
     }
+
+    @Test
+    fun `every screen has a distinct sentence-case title`() {
+        val titles = Screen.entries.map(::screenTitle)
+        assertEquals(titles.size, titles.toSet().size)
+        for (title in titles) {
+            assertTrue(title, title.isNotBlank() && title.first().isUpperCase())
+            assertEquals(title, title.first() + title.drop(1).lowercase(), title)
+        }
+    }
 }
