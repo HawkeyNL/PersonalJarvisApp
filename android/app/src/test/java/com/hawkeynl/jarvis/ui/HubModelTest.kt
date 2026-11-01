@@ -89,13 +89,10 @@ class HubModelTest {
     }
 
     @Test
-    fun `status pill and connection mapping`() {
+    fun `connection mapping and orb speed`() {
         assertEquals(true, onlineOf(ConnectionState.Reachable("ready")))
         assertEquals(false, onlineOf(ConnectionState.Unreachable(UnreachableReason.DNS)))
         assertEquals(null, onlineOf(ConnectionState.Checking))
-        assertEquals("Offline", statusPill(Mood.THINKING, false).label)
-        assertEquals("Thinking", statusPill(Mood.THINKING, true).label)
-        assertEquals("Ready", statusPill(Mood.IDLE, true).label)
         assertEquals(0.4f, moodFactor(Mood.THINKING))
     }
 

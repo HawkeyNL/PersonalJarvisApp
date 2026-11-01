@@ -1,33 +1,21 @@
 package com.hawkeynl.jarvis.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.hawkeynl.jarvis.network.Availability
 
-/** One satellite of a node page: selectable section with its live status. */
+/** One section of a node page: selectable chip with its live status. */
 data class NodeItem(
     val id: String,
     val label: String,
@@ -41,13 +29,9 @@ data class NodeItem(
 fun planned(id: String, label: String, title: String, icon: JvIcon, description: String) =
     NodeItem(id, label, title, icon, Tone.IDLE, "Not yet available", description)
 
-// Satellite positions around the small orb (dp from its centre), as in the mobile export.
-private val SATELLITES = listOf(-88 to -62, -108 to 0, -88 to 62, 88 to -62, 108 to 0, 88 to 62)
-
 /**
- * Shared layout of every module page (mobile export): back, title and
- * profile; the small orb with up to six satellites; a chip row with every
- * section; then the detail content for the selected section.
+ * Shared layout of every pushed module page: back and title, a chip row with
+ * every section, then the detail content for the selected section.
  */
 @Composable
 fun NodePage(
@@ -56,85 +40,20 @@ fun NodePage(
     items: List<NodeItem>,
     selected: String,
     onSelect: (String) -> Unit,
-    onNavigate: (Screen) -> Unit,
-    mood: Mood = Mood.IDLE,
+    onBack: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-            CircleIconButton(
-                JvIcon.ARROW_LEFT, "Back to Core", { onNavigate(Screen.HUB) }, Modifier.align(Alignment.CenterStart),
-            )
-            PageTitle(title, subtitle, Modifier.align(Alignment.Center).padding(horizontal = 52.dp))
-            ProfileButton({ onNavigate(Screen.SETTINGS) }, Modifier.align(Alignment.CenterEnd))
-        }
-        Box(Modifier.fillMaxWidth().height(200.dp)) {
-            JvOrb(150.dp, mood, Modifier.align(Alignment.Center))
-            items.take(SATELLITES.size).forEachIndexed { i, item ->
-                val (x, y) = SATELLITES[i]
-                CircleIconButton(
-                    item.icon, item.title, { onSelect(item.id) },
-                    Modifier.align(Alignment.Center).offset(x.dp, y.dp),
-                    selected = item.id == selected,
-                )
-            }
+            CircleIconButton(JvIcon.ARROW_LEFT, "Back", onBack, Modifier.align(Alignment.CenterStart))
+            PageTitle(title, subtitle, Modifier.align(Alignment.Center).padding(horizontal = 56.dp))
         }
         if (items.isNotEmpty()) ChipRow(items.map { ChipItem(it.id, it.label, it.icon) }, selected, onSelect)
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) { content() }
     }
 }
 
-/** The design's bottom dock: Core, Tasks, chat, Memory, Agents. */
-@Composable
-fun Dock(current: Screen, onNavigate: (Screen) -> Unit, modifier: Modifier = Modifier) {
-    val c = JvTheme.colors
-    val shape = JvShapes.pill
-    Row(
-        modifier
-            .fillMaxWidth()
-            .padding(horizontal = JvSpace.lg, vertical = 10.dp)
-            .height(64.dp)
-            .shadowBorder(shape)
-            .clip(shape)
-            .background(c.bgSurface)
-            .padding(horizontal = 6.dp),
-        horizontalArrangement = Arrangement.SpaceAround,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        DockItem(JvIcon.HOME, "Core", current == Screen.HUB) { onNavigate(Screen.HUB) }
-        DockItem(JvIcon.TASKS, "Tasks", current == Screen.TASKS) { onNavigate(Screen.TASKS) }
-        Box(
-            Modifier
-                .size(52.dp)
-                .pressScale()
-                .clip(CircleShape)
-                .background(c.accentSolid)
-                .clickable(role = Role.Button, onClick = { onNavigate(Screen.CHAT) }),
-            contentAlignment = Alignment.Center,
-        ) { JvIconView(JvIcon.CHAT, tint = c.textOnAccent, size = 22.dp, contentDescription = "Chat with Jarvis") }
-        DockItem(JvIcon.MEMORY, "Memory", current == Screen.MEMORY) { onNavigate(Screen.MEMORY) }
-        DockItem(JvIcon.AGENTS, "Agents", current == Screen.AGENTS) { onNavigate(Screen.AGENTS) }
-    }
-}
-
-@Composable
-private fun DockItem(icon: JvIcon, label: String, on: Boolean, onClick: () -> Unit) {
-    Column(
-        Modifier
-            .size(width = 60.dp, height = 52.dp)
-            .clip(JvShapes.md)
-            .then(if (on) Modifier.background(JvTheme.colors.bgSelected) else Modifier)
-            .selectable(selected = on, role = Role.Tab, onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
-    ) {
-        val color = if (on) JvTheme.colors.accentText else JvTheme.colors.textSecondary
-        JvIconView(icon, tint = color, size = 20.dp)
-        Text(label, color = color, style = MaterialTheme.typography.labelSmall)
-    }
-}
-
-/** Satellite status of an optional Core source. */
+/** Section status of an optional Core source. */
 fun <T> statusOf(source: Availability<T>, ok: (T) -> Pair<Tone, String>): Pair<Tone, String> = when (source) {
     is Availability.Ok -> ok(source.value)
     Availability.Loading -> Tone.IDLE to "Loading…"

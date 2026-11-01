@@ -20,7 +20,7 @@ private fun ordered(agents: List<AgentInfo>) =
 /** Agents: the agent bundle installed on Core (read-only metadata and this
  *  month's usage). Core reports no live run state, so none is shown. */
 @Composable
-fun AgentsScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRefresh: () -> Unit) {
+fun AgentsScreen(data: CoreData, onNavigate: (Screen) -> Unit, onRefresh: () -> Unit) {
     LaunchedEffect(Unit) { onRefresh() }
     val response = data.agents.valueOrNull
     val usageReason = response?.usage_unavailable_reason
@@ -34,7 +34,7 @@ fun AgentsScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRef
     val agent = agents.firstOrNull { it.id == chosen } ?: agents.firstOrNull()
     val current = items.firstOrNull { it.id == agent?.id }
 
-    NodePage("Agents", "Your personal AI system", items, agent?.id.orEmpty(), { chosen = it; sub = "overview" }, onNavigate, mood) {
+    NodePage("Agents", "Your personal AI system", items, agent?.id.orEmpty(), { chosen = it; sub = "overview" }, { onNavigate(backOf(Screen.AGENTS)) }) {
         if (agent == null || current == null) {
             Loaded(data.agents, "Agents", JvIcon.AGENTS, "Loading agents…", "Agent is turned off in Core.") {
                 Unavailable(

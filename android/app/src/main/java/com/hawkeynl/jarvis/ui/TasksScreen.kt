@@ -3,11 +3,11 @@ package com.hawkeynl.jarvis.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import com.hawkeynl.jarvis.network.AgentAuditEntry
 import com.hawkeynl.jarvis.network.Availability
 import com.hawkeynl.jarvis.network.CodingSession
 import com.hawkeynl.jarvis.network.valueOrNull
@@ -25,11 +25,11 @@ private val TASK_DETAILS = mapOf(
 private const val AGENT_OFF = "Agent is turned off in Core."
 
 /** Tasks: coding sessions, agent actions waiting for the owner and the agent
- *  audit history. Each waiting action is shown in full and approved or denied
- *  with a strong-biometric prompt. Scheduled and recurring tasks and goals need
+ *  audit history. Each waiting action opens in a sheet, is shown in full and is
+ *  approved or denied with a strong-biometric prompt. Scheduled and recurring tasks and goals need
  *  Core support. */
 @Composable
-fun TasksScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRefresh: () -> Unit, agentApprovals: AgentApprovalService?) {
+fun TasksScreen(data: CoreData, onNavigate: (Screen) -> Unit, onRefresh: () -> Unit, agentApprovals: AgentApprovalService?) {
     LaunchedEffect(Unit) { onRefresh() }
     val now = remember(data.loadedAt) { System.currentTimeMillis() }
     val sessionList = data.sessions.valueOrNull?.sessions.orEmpty()
@@ -63,7 +63,7 @@ fun TasksScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRefr
         )
     }
 
-    NodePage("Tasks", "What Jarvis is working on", items, selected, { selected = it; sub = "sessions" }, onNavigate, mood) {
+    NodePage("Tasks", "What Jarvis is working on", items, selected, { selected = it; sub = "sessions" }, { onNavigate(backOf(Screen.TASKS)) }) {
         Panel(
             current.icon, current.title, current.tone, current.status,
             description = TASK_DETAILS[current.id],
@@ -91,9 +91,7 @@ fun TasksScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRefr
                 "waiting" -> Loaded(data.pending, "Approvals", JvIcon.ALERT, "Loading approvals…", AGENT_OFF) {
                     MutedText("Read the whole action first. Approving signs exactly what is shown with this phone's device key; anything this app cannot show in full can only be denied here.")
                     if (waiting.isEmpty()) ActivityList("Waiting for approval", emptyList(), "Nothing is waiting for you.")
-                    waiting.forEach { p ->
-                        key(p.pending_id) { AgentActionCard(p, relativeTime(p.created_at, now), agentApprovals, onRefresh) }
-                    }
+                    PendingActions(waiting, now, agentApprovals, onRefresh)
                 }
                 "completed" -> {
                     ChipRow(
@@ -106,16 +104,7 @@ fun TasksScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRefr
                         }
                     } else {
                         Loaded(data.agentAudit, "Agent history", JvIcon.SHIELD, "Loading history…", AGENT_OFF) { audit ->
-                            ActivityList(
-                                "Agent actions",
-                                audit.entries.mapIndexed { i, e ->
-                                    ActivityItem(
-                                        "${e.ts}-$i", JvIcon.SHIELD, e.action, listOfNotNull(e.risk.ifEmpty { null }, e.note).joinToString(" · "),
-                                        relativeTime(e.ts, now), outcomeTone(e.outcome), e.outcome,
-                                    )
-                                },
-                                "No agent actions recorded.",
-                            )
+                            ActivityList("Agent actions", auditRows(audit.entries, now), "No agent actions recorded.")
                         }
                     }
                 }
@@ -123,4 +112,12 @@ fun TasksScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRefr
             }
         }
     }
+}
+
+/** Agent audit entries as list rows, in the order Core sends them. */
+fun auditRows(entries: List<AgentAuditEntry>, now: Long): List<ActivityItem> = entries.mapIndexed { i, e ->
+    ActivityItem(
+        "${e.ts}-$i", JvIcon.SHIELD, e.action, listOfNotNull(e.risk.ifEmpty { null }, e.note).joinToString(" · "),
+        relativeTime(e.ts, now), outcomeTone(e.outcome), e.outcome,
+    )
 }

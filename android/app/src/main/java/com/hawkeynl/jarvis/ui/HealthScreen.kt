@@ -49,7 +49,6 @@ private fun tokens(n: Long): String = NumberFormat.getIntegerInstance(Locale.ENG
 fun HealthScreen(
     state: JarvisUiState,
     data: CoreData,
-    mood: Mood,
     onNavigate: (Screen) -> Unit,
     onRefresh: () -> Unit,
     onCheckConnection: () -> Unit,
@@ -95,7 +94,7 @@ fun HealthScreen(
         ActivityItem("${e.ts}-$i", if (e.event.startsWith("auth")) JvIcon.KEY else JvIcon.SHIELD, e.event, e.outcome, relativeTime(e.ts, now), if (good) Tone.OK else Tone.WARN, e.outcome)
     }
 
-    NodePage("System health", "The state of your Home Node", items, selected, { selected = it; sub = "overview" }, onNavigate, mood) {
+    NodePage("System health", "The state of your Home Node", items, selected, { selected = it; sub = "overview" }, { onNavigate(backOf(Screen.HEALTH)) }) {
         Panel(
             current.icon, current.title, current.tone, current.status,
             description = HEALTH_DETAILS[current.id],

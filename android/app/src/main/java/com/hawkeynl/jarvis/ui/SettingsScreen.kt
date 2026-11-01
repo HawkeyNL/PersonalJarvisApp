@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -26,6 +28,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,25 +43,32 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.hawkeynl.jarvis.network.map
 import com.hawkeynl.jarvis.storage.ThemeMode
 import kotlinx.coroutines.launch
 
+/** The Settings tab (I-Settings): appearance, Home Node, voice, app updates, the system
+ *  pages and this device, as Instrument list sections. */
 @Composable
 internal fun SettingsScreen(
     state: JarvisUiState,
     actions: JarvisViewModel,
+    data: CoreData,
     onInstallUpdate: () -> Unit,
+    onRefresh: () -> Unit,
 ) {
+    LaunchedEffect(Unit) { onRefresh() }
     var voiceMenu by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize().imePadding().testTag("settings")) {
-        ScreenHeader("Settings", { actions.navigate(Screen.HUB) })
-        Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            ThemeChooser(state.themeMode, actions::setThemeMode)
+    Column(
+        Modifier.fillMaxSize().imePadding().testTag("settings").verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        TabTitle("Settings")
+        ThemeChooser(state.themeMode, actions::setThemeMode)
 
-            Panel(JvIcon.HOME, "Home Node", connectionTone(state.connection), connectionText(state.connection)) {
+        ListSection("Home Node") {
+            SectionBody {
+                ConnectionLine(state.connection)
                 OutlinedTextField(
                     value = state.endpointDraft,
                     onValueChange = actions::editEndpoint,
@@ -71,12 +81,25 @@ internal fun SettingsScreen(
                     ActionButton("Test", actions::checkConnection, Modifier.weight(1f))
                 }
             }
+        }
 
-            Panel(JvIcon.WAVE, "Voice", if (state.voiceEnabled) Tone.OK else Tone.IDLE, if (state.voiceEnabled) "Local speech on" else "Local speech off") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Speak replies on the active device", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    Switch(checked = state.voiceEnabled, onCheckedChange = actions::setVoiceEnabled)
+        ListSection("Voice") {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .toggleable(value = state.voiceEnabled, role = Role.Switch, onValueChange = actions::setVoiceEnabled)
+                    .padding(horizontal = JvSpace.lg),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Speak replies", style = MaterialTheme.typography.bodyMedium)
+                    MutedText(if (state.voiceEnabled) "Local speech on the active device" else "Local speech off")
                 }
+                Switch(checked = state.voiceEnabled, onCheckedChange = null)
+            }
+            ListDivider()
+            SectionBody {
                 Column {
                     Text("Speech rate: ${state.voiceRate}× (next fragments)", style = MaterialTheme.typography.bodyMedium)
                     Slider(
@@ -101,11 +124,33 @@ internal fun SettingsScreen(
                     }
                 }
             }
+        }
 
-            UpdatePanel(state, actions, onInstallUpdate)
+        UpdatePanel(state, actions, onInstallUpdate)
 
-            Panel(JvIcon.SHIELD, "This device", Tone.OK, "Signed in with a device-bound key") {
-                MutedText("Model access moved to System Health → Models.")
+        ListSection("System") {
+            val online = onlineOf(state.connection)
+            linksOf(Tab.SETTINGS).forEachIndexed { i, screen ->
+                if (i > 0) ListDivider()
+                when (screen) {
+                    Screen.INTEGRATIONS -> integrationsCard(data.registry).let {
+                        NavRow(JvIcon.INTEGRATIONS, "Integrations", it.detail, { actions.navigate(screen) }, it.tone)
+                    }
+                    Screen.HEALTH -> healthCard(online, data.registry).let {
+                        NavRow(JvIcon.HEALTH, "System health", it.detail, { actions.navigate(screen) }, it.tone)
+                    }
+                    Screen.CONTEXT -> contextCard(data.devices.map { it.devices.size }).let {
+                        NavRow(JvIcon.CONTEXT, "Context and devices", it.detail, { actions.navigate(screen) }, it.tone)
+                    }
+                    else -> Unit
+                }
+            }
+        }
+
+        ListSection("This device") {
+            SectionBody {
+                StatusDot(Tone.OK, "Signed in with a device-bound key")
+                MutedText("Model access is under System health → Models.")
                 ActionButton("Sign out", actions::logout)
                 PasswordChange(actions)
                 PasswordReset(state, actions)
@@ -115,14 +160,19 @@ internal fun SettingsScreen(
     }
 }
 
+/** Padded content of a [ListSection] that holds a form instead of rows. */
+@Composable
+private fun SectionBody(content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(JvSpace.lg), verticalArrangement = Arrangement.spacedBy(JvSpace.md), content = content)
+}
+
 /** Light, dark or follow the system; saved on this device only. */
 @Composable
 private fun ThemeChooser(mode: ThemeMode, onChange: (ThemeMode) -> Unit) {
     val c = JvTheme.colors
-    Column(verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
-        SectionLabel("Appearance")
+    ListSection("Appearance") {
         Row(
-            Modifier.fillMaxWidth().clip(JvShapes.md).background(c.bgSunken).padding(3.dp).selectableGroup(),
+            Modifier.fillMaxWidth().padding(JvSpace.md).clip(JvShapes.md).background(c.bgSunken).padding(3.dp).selectableGroup(),
             horizontalArrangement = Arrangement.spacedBy(JvSpace.xxs),
         ) {
             for ((option, label) in listOf(ThemeMode.LIGHT to "Light", ThemeMode.DARK to "Dark", ThemeMode.SYSTEM to "System")) {
@@ -130,7 +180,7 @@ private fun ThemeChooser(mode: ThemeMode, onChange: (ThemeMode) -> Unit) {
                 Box(
                     Modifier
                         .weight(1f)
-                        .heightIn(min = 44.dp)
+                        .heightIn(min = 48.dp)
                         .then(if (on) Modifier.border(1.dp, c.accentSolid, JvShapes.sm) else Modifier)
                         .clip(JvShapes.sm)
                         .background(if (on) c.bgSurface else Color.Transparent)
@@ -254,20 +304,23 @@ private fun UpdatePanel(state: JarvisUiState, actions: JarvisViewModel, onInstal
         AndroidUpdateUiState.PermissionRequired -> Tone.WARN to "Install permission needed"
         is AndroidUpdateUiState.Failed -> Tone.ERROR to "Update failed"
     }
-    Panel(JvIcon.PHONE, "Jarvis Android", tone, status) {
-        when (update) {
-            is AndroidUpdateUiState.Available -> ActionButton("Download update", actions::downloadUpdate)
-            is AndroidUpdateUiState.Ready -> ActionButton("Open Android installer", onInstallUpdate)
-            AndroidUpdateUiState.PermissionRequired -> {
-                ErrorText("Allow Jarvis to install this verified APK in Android settings, then try again.")
-                ActionButton("Open installer again", onInstallUpdate)
+    ListSection("Jarvis Android") {
+        SectionBody {
+            StatusDot(tone, status)
+            when (update) {
+                is AndroidUpdateUiState.Available -> ActionButton("Download update", actions::downloadUpdate)
+                is AndroidUpdateUiState.Ready -> ActionButton("Open Android installer", onInstallUpdate)
+                AndroidUpdateUiState.PermissionRequired -> {
+                    ErrorText("Allow Jarvis to install this verified APK in Android settings, then try again.")
+                    ActionButton("Open installer again", onInstallUpdate)
+                }
+                is AndroidUpdateUiState.Failed -> ErrorText(update.message)
+                else -> Unit
             }
-            is AndroidUpdateUiState.Failed -> ErrorText(update.message)
-            else -> Unit
+            GhostButton(
+                "Check again", actions::checkForUpdate, Modifier.fillMaxWidth(),
+                enabled = update !is AndroidUpdateUiState.Checking && update !is AndroidUpdateUiState.Downloading,
+            )
         }
-        GhostButton(
-            "Check again", actions::checkForUpdate, Modifier.fillMaxWidth(),
-            enabled = update !is AndroidUpdateUiState.Checking && update !is AndroidUpdateUiState.Downloading,
-        )
     }
 }

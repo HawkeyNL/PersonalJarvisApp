@@ -15,7 +15,7 @@ import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.Locale
 
-// Pure presentation helpers for the hub and node pages (no Android or Compose
+// Pure presentation helpers for the tab roots and node pages (no Android or Compose
 // imports), ported from desktop/src/hubModel.ts and nodeModels.ts.
 
 /** Target of a notification deep link: a screen and, for Health, its node. */
@@ -60,6 +60,13 @@ fun failureText(reason: LoadFailure, forbidden: String = "Turned off in Core."):
     LoadFailure.NETWORK -> "Check the connection to your Home Node."
     LoadFailure.UNAVAILABLE -> "Core cannot provide this right now. Try again later."
     LoadFailure.FAILED -> "Core returned an error. Try again later."
+}
+
+/** "Good morning" before noon, "Good afternoon" until six, then "Good evening". */
+fun greeting(hour: Int): String = when (hour) {
+    in 5..11 -> "Good morning"
+    in 12..17 -> "Good afternoon"
+    else -> "Good evening"
 }
 
 private const val MINUTE = 60_000L
@@ -110,8 +117,11 @@ fun eur(amount: Double): String = String.format(Locale.ROOT, "€%.2f", amount)
 
 private fun plural(n: Int, one: String, many: String = "${one}s") = "$n ${if (n == 1) one else many}"
 
-/** What a hub card shows: two short lines and a status tone. */
+/** What a home or settings row shows: two short lines and a status tone. */
 data class CardSummary(val line1: String, val line2: String, val tone: Tone)
+
+/** Both lines as one row detail: "1 active · 2 awaiting approval". */
+val CardSummary.detail: String get() = listOf(line1, line2).filter { it.isNotEmpty() }.joinToString(" · ")
 
 private fun hint(reason: LoadFailure) = when (reason) {
     LoadFailure.SIGNIN -> "Sign in again"
@@ -175,17 +185,6 @@ fun healthCard(online: Boolean?, registry: Availability<Registry>): CardSummary 
         ?: return CardSummary("Core ready", if (registry is Availability.Ok) "Live vitals need newer Core" else "", Tone.OK)
     val cpu = live.cpu_percent?.let { " · CPU ${Math.round(it)}%" } ?: ""
     return CardSummary("Up ${formatUptime(live.uptime_seconds)}", "Core ready$cpu", Tone.OK)
-}
-
-/** Label, hint and tone of the status pill under the orb. */
-data class StatusPill(val label: String, val hint: String, val tone: Tone)
-
-fun statusPill(mood: Mood, online: Boolean?): StatusPill = when {
-    online == false -> StatusPill("Offline", "Home Node unreachable", Tone.ERROR)
-    online == null -> StatusPill("Connecting", "Reaching your Home Node…", Tone.IDLE)
-    mood == Mood.THINKING -> StatusPill("Thinking", "Working on your request…", Tone.OK)
-    mood == Mood.LISTENING -> StatusPill("Listening", "Speak now…", Tone.OK)
-    else -> StatusPill("Ready", "Type to begin", Tone.OK)
 }
 
 // --- Conversations --------------------------------------------------------------

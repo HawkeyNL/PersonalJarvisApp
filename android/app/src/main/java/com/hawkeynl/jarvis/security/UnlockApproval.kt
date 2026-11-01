@@ -40,6 +40,9 @@ class UnlockChoiceSets(private val now: () -> Long = { System.currentTimeMillis(
     }
 }
 
+/** Core expires unlock requests two minutes after `created_at`; the sheet counts down to it. */
+const val UNLOCK_EXPIRES_AFTER_SECONDS = 120L
+
 /** Core expires unlock requests after two minutes; anything older is refused here too. */
 private const val UNLOCK_MAX_AGE_SECONDS = 130L
 

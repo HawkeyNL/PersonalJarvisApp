@@ -65,7 +65,7 @@ fun PairingApprovalsScreen(
         }
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        ScreenHeader("Pairing requests", { onNavigate(Screen.CONTEXT) })
+        ScreenHeader("Pairing requests", { onNavigate(backOf(Screen.PAIRING_APPROVALS)) })
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             if (!biometrics) {
                 Unavailable(
