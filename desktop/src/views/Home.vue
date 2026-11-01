@@ -200,9 +200,9 @@ const cards = computed<Card[]>(() => [
   { key: "chat", to: "/conversations", icon: "chat", title: "Conversations", summary: conversationsCard(conversationsState.value, now.value) },
   { key: "agents", to: "/agents", icon: "agents", title: "Agents", summary: agentsCard(agentCount.value) },
   { key: "memory", to: "/memory", icon: "memory", title: "Memory", summary: { lines: ["Not yet available", "Needs Core support"], tone: "idle" } },
-  { key: "tasks", to: "/tasks", icon: "tasks", title: "Tasks", summary: tasksCard(pick(sessions.value, "sessions"), pick(pending.value, "pending")) },
+  { key: "tasks", to: "/runs", icon: "tasks", title: "Tasks", summary: tasksCard(pick(sessions.value, "sessions"), pick(pending.value, "pending")) },
   { key: "integrations", to: "/integrations", icon: "integrations", title: "Integrations", summary: integrationsCard(registry.value) },
-  { key: "context", to: "/context", icon: "context", title: "Context", summary: contextCard(pick(devices.value, "devices")) },
+  { key: "context", to: "/devices", icon: "context", title: "Context", summary: contextCard(pick(devices.value, "devices")) },
   { key: "health", to: "/health", icon: "health", title: "System Health", summary: healthCard(online.value, registry.value) },
 ]);
 // Before sign-in the owner cards cannot load; say so instead of "Loading…".

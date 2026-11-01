@@ -9,28 +9,14 @@ import Tasks from "../views/Tasks.vue";
 import Integrations from "../views/Integrations.vue";
 import Agents from "../views/Agents.vue";
 import Memory from "../views/Memory.vue";
+import ComingSoon from "../views/ComingSoon.vue";
+import { buildRoutes } from "../navigation";
 
+// Paths, sidebar mapping and redirects live in navigation.ts.
 export const router = createRouter({
   history: createWebHistory(),
-  routes: [
-    // Core hub + module pages
-    { path: "/", name: "home", component: Home },
-    { path: "/conversations", name: "conversations", component: Conversations },
-    { path: "/agents", name: "agents", component: Agents },
-    { path: "/tasks", name: "tasks", component: Tasks },
-    { path: "/integrations", name: "integrations", component: Integrations },
-    { path: "/health", name: "health", component: Health },
-    { path: "/memory", name: "memory", component: Memory },
-    { path: "/context", name: "context", component: Context },
-    { path: "/settings", name: "settings", component: Settings },
-
-    // Trading desk — one component, sub-tab driven by the path
-    { path: "/trading", name: "trading", component: Trading },
-    { path: "/trading/ibkr", name: "trading-ibkr", component: Trading },
-
-    // Legacy paths → new structure
-    { path: "/status", redirect: "/health" },
-    { path: "/portfolio", redirect: "/trading" },
-    { path: "/broker", redirect: "/trading/ibkr" },
-  ],
+  routes: buildRoutes({
+    home: Home, conversations: Conversations, agents: Agents, integrations: Integrations, health: Health,
+    memory: Memory, trading: Trading, tasks: Tasks, context: Context, settings: Settings, soon: ComingSoon,
+  }),
 });
