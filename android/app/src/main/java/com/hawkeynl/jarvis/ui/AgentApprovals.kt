@@ -1,6 +1,7 @@
 package com.hawkeynl.jarvis.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
@@ -35,6 +36,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -236,6 +238,7 @@ private fun Fact(label: String, value: String, mono: Boolean = false) {
 /** The reviewed text in its own scroll box; [scroll] feeds the scroll-to-end gate. */
 @Composable
 private fun Content(label: String, value: String, scroll: ScrollState) {
+    var focused by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(JvSpace.xs)) {
         SectionLabel(label)
         // Strictly left-to-right: each line isolated at display time only.
@@ -246,7 +249,9 @@ private fun Content(label: String, value: String, scroll: ScrollState) {
                 .heightIn(max = 280.dp)
                 .clip(JvShapes.md)
                 .background(JvTheme.colors.bgSunken)
+                .then(if (focused) Modifier.border(2.dp, JvTheme.colors.focusRing, JvShapes.md) else Modifier)
                 // Focusable, so a keyboard or switch user can scroll it to the end too.
+                .onFocusChanged { focused = it.isFocused }
                 .focusable()
                 .verticalScroll(scroll)
                 .padding(JvSpace.md),
