@@ -1,87 +1,193 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import NodePage, { type NodeItem } from "../components/jv/NodePage.vue";
-import JvPanel from "../components/jv/JvPanel.vue";
-import JvTile from "../components/jv/JvTile.vue";
-import JvActivityList, { type ActivityItem } from "../components/jv/JvActivityList.vue";
-import JvUnavailable from "../components/jv/JvUnavailable.vue";
-import { loadOptional } from "../coreStatus";
-import { currentAuthStatus } from "../auth";
-import { relativeTime, summarize, type Availability } from "../hubModel";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import PageShell from "../components/PageShell.vue";
+import NavIcon from "../components/NavIcon.vue";
+import { loadOptional, coreOnline } from "../coreStatus";
+import { currentAuthStatus, revokeDevice } from "../auth";
+import { homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
+import { initPlatformCapabilities, platformCapabilities } from "../platform";
+import { failureText, type Availability } from "../hubModel";
+import { deviceRows, revokeFailureText, type Device, type DeviceRow } from "../devices";
 
-// Context: only the linked devices are real today. Modes, sources and the
-// schedule need Core support that does not exist yet.
-type Device = { id: string; name: string; platform: string; status: string; created_at?: number };
+// Devices (canvas D-Devices): the linked devices from GET /v1/devices. A Mac
+// revokes another device with a Touch ID approval; elsewhere the list is read-only.
+const { title = "Devices", subtitle = "The apps linked to Jarvis" } = defineProps<{ title?: string; subtitle?: string }>();
+
 const devices = ref<Availability<{ devices: Device[] }>>({ state: "loading" });
 const thisDevice = ref<string | null>(null);
+const signer = computed(() => platformCapabilities.value.supportsBiometricSigning);
+const rows = computed(() =>
+  devices.value.state === "ok" ? deviceRows(devices.value.value.devices, thisDevice.value, signer.value, Date.now()) : []);
+
 onMounted(async () => {
+  void loadHomeNodeConfig().catch(() => {});
+  void initPlatformCapabilities().catch(() => {});
   devices.value = await loadOptional<{ devices: Device[] }>("/v1/devices");
   try { thisDevice.value = (await currentAuthStatus()).device_id; } catch { /* browser preview */ }
 });
 
-const deviceSummary = computed(() => summarize(devices.value, ({ devices: list }) => ({
-  lines: [`${list.length} linked`, ""],
-  tone: list.length ? "ok" : "idle",
-})));
+// Revoke: a native modal dialog (focus trap, Esc, inert page); Cancel has focus first.
+const dialog = ref<HTMLDialogElement | null>(null);
+const confirming = ref<DeviceRow | null>(null);
+const revoking = ref(false);
+const revokeError = ref("");
+const notice = ref("");
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 
-const planned = (id: string, label: string, title: string, icon: NodeItem["icon"], description: string): NodeItem =>
-  ({ id, label, title, icon, description, tone: "idle", status: "Not yet available" });
-const items = computed<NodeItem[]>(() => [
-  planned("work", "Work", "Work mode", "briefcase", "Focus on projects and code"),
-  planned("focus", "Focus", "Focus mode", "moon", "Only what really matters"),
-  planned("home", "Home", "Home mode", "home", "Personal life, no work pings"),
-  planned("sources", "Sources", "Sources", "link-2", "Where context comes from"),
-  planned("schedule", "Schedule", "Schedule", "calendar", "When each mode switches on"),
-  { id: "devices", label: "Devices", title: "Devices", icon: "monitor", description: "Desktop and mobile app",
-    tone: deviceSummary.value.tone, status: deviceSummary.value.lines[0] },
-]);
-// /devices passes its own heading; the hub's Context card uses the default.
-const { title = "Context", subtitle = "What Jarvis pays attention to" } = defineProps<{ title?: string; subtitle?: string }>();
-const selected = ref("devices");
-const current = computed(() => items.value.find((item) => item.id === selected.value)!);
+watch(confirming, (device) => {
+  if (device && !dialog.value?.open) dialog.value?.showModal();
+  else if (!device && dialog.value?.open) dialog.value.close();
+}, { flush: "post" }); // after render, so showModal() finds the autofocus button
 
-const list = computed(() => (devices.value.state === "ok" ? devices.value.value.devices : []));
-const platforms = computed(() => [...new Set(list.value.map((d) => d.platform))].join(", ") || "—");
-const mine = computed(() => list.value.find((d) => d.id === thisDevice.value)?.name ?? "Unknown");
-const activity = computed<ActivityItem[]>(() => list.value.slice(0, 5).map((d) => ({
-  id: d.id,
-  icon: /ios|android/i.test(d.platform) ? "phone" : "monitor",
-  title: d.id === thisDevice.value ? `${d.name} (this device)` : d.name,
-  detail: d.platform,
-  time: d.created_at ? `linked ${relativeTime(new Date(d.created_at * 1000).toISOString(), Date.now())}` : undefined,
-  tone: d.status === "active" ? "ok" : "idle",
-  toneLabel: d.status,
-})));
+function ask(device: DeviceRow) {
+  revokeError.value = "";
+  confirming.value = device;
+}
+
+async function confirmRevoke() {
+  const device = confirming.value;
+  if (!device || revoking.value) return;
+  revoking.value = true;
+  revokeError.value = "";
+  try {
+    await revokeDevice(device.id);
+    if (devices.value.state === "ok") {
+      devices.value = { state: "ok", value: { devices: devices.value.value.devices.filter((d) => d.id !== device.id) } };
+    }
+    confirming.value = null;
+    clearTimeout(noticeTimer);
+    notice.value = `${device.name} revoked. Its sessions have ended.`;
+    noticeTimer = setTimeout(() => { notice.value = ""; }, 5000);
+  } catch (error) {
+    revokeError.value = revokeFailureText(error);
+  } finally {
+    revoking.value = false;
+  }
+}
+
+// Esc must not dismiss the dialog while the Touch ID approval is in flight.
+function onCancel(event: Event) {
+  if (revoking.value) event.preventDefault();
+}
+
+onBeforeUnmount(() => clearTimeout(noticeTimer));
 </script>
 
 <template>
-  <NodePage v-model="selected" :title="title" :subtitle="subtitle" :items="items">
-    <JvPanel :icon="current.icon" :title="current.title" :tone="current.tone" :status="current.status" :description="current.description">
-      <div v-if="current.id === 'devices'" class="split">
-        <JvUnavailable v-if="devices.state === 'unsupported' || devices.state === 'error'" title="Devices"
-          :kind="devices.state === 'error' ? 'error' : 'core-update'" icon="monitor"
-          detail="Sign in and check the connection to your Home Node." />
-        <template v-else>
-          <div class="tiles">
-            <JvTile icon="monitor" label="Linked devices" :value="devices.state === 'ok' ? String(list.length) : 'Loading…'" />
-            <JvTile icon="user" label="This device" :value="mine" />
-            <JvTile icon="layers" label="Platforms" :value="platforms" />
-            <JvTile icon="shield" label="Sign-in" value="Device-bound keys" />
-          </div>
-          <JvActivityList title="Devices" :items="activity" empty="No devices linked yet." />
-        </template>
+  <PageShell :title="title" :subtitle="subtitle">
+    <section class="card tight" aria-label="Linked devices">
+      <p v-if="devices.state === 'loading'" class="state t-sm t-2" role="status">Loading devices…</p>
+      <div v-else-if="devices.state !== 'ok'" class="empty" role="status">
+        <h3>Devices could not load</h3>
+        <p class="t-sm">{{ devices.state === "unsupported" ? "This needs a newer Core." : failureText(devices.reason) }}</p>
       </div>
-      <JvUnavailable v-else :title="current.title" :icon="current.icon"
-        detail="Context modes, sources and schedules need Core support that does not exist yet. Nothing is shown until it does." />
-    </JvPanel>
-  </NodePage>
+      <div v-else-if="!rows.length" class="empty"><h3>No devices linked yet</h3></div>
+      <div v-else class="scroll">
+        <table class="tbl" aria-label="Linked devices">
+          <thead><tr><th scope="col">Device</th><th scope="col">Platform</th><th scope="col">Linked</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+          <tbody>
+            <tr v-for="row in rows" :key="row.id">
+              <td>
+                <div class="who">
+                  <span class="tile" aria-hidden="true"><NavIcon :name="row.icon" /></span>
+                  <span class="name-col">
+                    <span class="name">{{ row.name }}</span>
+                    <span class="t-xs t-2 mono id">{{ row.id }}</span>
+                  </span>
+                </div>
+              </td>
+              <td class="t-sm">{{ row.platform }}</td>
+              <td class="t-sm">{{ row.linked || "—" }}</td>
+              <td><span class="badge" :class="{ pos: row.active }"><span class="dot"></span>{{ row.status }}</span></td>
+              <td class="r">
+                <span v-if="row.isThis" class="badge acc">This device</span>
+                <button v-else-if="row.canRevoke" type="button" class="btn btn-danger-quiet btn-sm"
+                  :aria-label="`Revoke ${row.name}`" @click="ask(row)">Revoke</button>
+                <span v-else-if="signer && row.lastApprover" class="t-xs t-2">Last approver</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="pair">
+      <section class="card col" aria-labelledby="node-heading">
+        <h2 id="node-heading">Home Node</h2>
+        <dl class="kv t-sm">
+          <div><dt class="t-2">Origin</dt><dd class="mono">{{ homeNodeConfig.origin ?? "Not configured" }}</dd></div>
+          <div><dt class="t-2">This device</dt><dd class="mono">{{ thisDevice ?? "—" }}</dd></div>
+          <div>
+            <dt class="t-2">Connection</dt>
+            <dd>
+              <span class="badge" :class="{ pos: coreOnline === true, dng: coreOnline === false }"><span class="dot"></span>
+                {{ coreOnline === null ? "Checking…" : coreOnline ? "Connected" : "Offline" }}</span>
+            </dd>
+          </div>
+        </dl>
+      </section>
+      <section class="card col" aria-labelledby="approve-heading">
+        <h2 id="approve-heading">How approving works</h2>
+        <p class="t-sm t-2 prose">
+          Account changes, such as revoking a device, are signed on an iOS, Android or macOS device after
+          Face ID or Touch ID. Core always keeps one of those approvers: the last one cannot be revoked.
+        </p>
+        <p v-if="!signer" class="t-sm t-2 prose">
+          This computer cannot sign, so the list is read-only here. Revoke from a Mac, or on the Home Node
+          with Core Admin: <code>sudo jarvis devices revoke &lt;device id&gt;</code>
+        </p>
+      </section>
+    </div>
+
+    <dialog ref="dialog" class="dialog" aria-labelledby="revoke-title" aria-describedby="revoke-body"
+      @cancel="onCancel" @close="confirming = null">
+      <template v-if="confirming">
+        <h2 id="revoke-title">Revoke {{ confirming.name }}?</h2>
+        <p id="revoke-body" class="t-sm t-2">
+          {{ confirming.name }} is signed out at once and its sessions end. It can no longer sign in or
+          approve anything until you pair it again. Touch ID confirms this.
+        </p>
+        <p v-if="revokeError" class="err" role="alert">{{ revokeError }}</p>
+        <div class="actions">
+          <button type="button" class="btn btn-secondary" autofocus :disabled="revoking" @click="confirming = null">Cancel</button>
+          <button type="button" class="btn btn-danger" :aria-busy="revoking" @click="confirmRevoke">
+            {{ revoking ? "Waiting for Touch ID…" : "Revoke" }}
+          </button>
+        </div>
+      </template>
+    </dialog>
+
+    <div class="toast-slot" role="status" aria-live="polite">
+      <div v-if="notice" class="toast">{{ notice }}</div>
+    </div>
+  </PageShell>
 </template>
 
 <style scoped>
-.split { display: grid; grid-template-columns: minmax(0, 544px) minmax(0, 1fr); gap: 20px; }
-.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; align-content: start; padding-right: 17px; border-right: 1px solid var(--line-a30); }
-@media (max-width: 1099px), (max-height: 759px) {
-  .split { grid-template-columns: minmax(0, 1fr); }
-  .tiles { padding-right: 0; border-right: none; }
+.card.tight { padding: 4px 8px; }
+.state { margin: 0; padding: 16px 12px; }
+.empty p { margin: 0; }
+.scroll { overflow-x: auto; }
+.tbl { min-width: 640px; }
+.tbl td { vertical-align: middle; }
+.who { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.tile :deep(svg) { width: 18px; height: 18px; }
+.name-col { display: flex; flex-direction: column; min-width: 0; }
+.name { font-weight: 500; overflow-wrap: anywhere; }
+.id { overflow-wrap: anywhere; user-select: text; }
+.pair { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.pair > .card { flex: 1 1 420px; min-width: 0; }
+.col { display: flex; flex-direction: column; gap: 10px; }
+.kv { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.kv > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.kv dd { margin: 0; min-width: 0; text-align: right; overflow-wrap: anywhere; user-select: text; }
+.prose { margin: 0; line-height: 1.6; }
+.prose code { user-select: text; overflow-wrap: anywhere; }
+.dialog h2, .dialog p { margin: 0; }
+.actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.toast-slot { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 60; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; border: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
 }
 </style>

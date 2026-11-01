@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {currentTheme, initTheme, resolveTheme, setTheme} from "../src/theme.ts";
+import {readFileSync} from "node:fs";
+import {currentTheme, initTheme, resolveTheme, setTheme, themeCards} from "../src/theme.ts";
 
 function fakeEnv({dark = false, saved = null} = {}) {
   const store = new Map(saved ? [["jarvis.theme", saved]] : []);
@@ -60,4 +61,40 @@ test("choice persists across launches and transitions are restored after the swa
   const next = fakeEnv({saved: first.localStorage.getItem("jarvis.theme")});
   initTheme(next);
   assert.equal(theme(next), "dark");
+});
+
+test("theme cards: one checked card, and System previews and names what the OS picks", () => {
+  for (const dark of [false, true]) {
+    const cards = themeCards("system", dark);
+    assert.deepEqual(cards.map(c => c.id), ["light", "dark", "system"]);
+    assert.deepEqual(cards.filter(c => c.checked).map(c => c.id), ["system"]);
+    assert.deepEqual(cards.map(c => c.preview), ["light", "dark", dark ? "dark" : "light"]);
+    assert.equal(cards[2].label, `System (now ${dark ? "dark" : "light"})`);
+  }
+  assert.deepEqual(themeCards("dark", false).filter(c => c.checked).map(c => c.id), ["dark"]);
+});
+
+test("theme cards are native radios in one labelled group, wired to setTheme", () => {
+  const read = path => readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
+  const cards = read("components/settings/ThemeCards.vue");
+  assert.match(cards, /role="radiogroup" aria-labelledby="theme-heading"/);
+  assert.match(cards, /<input class="sr-only" type="radio" name="theme" :value="card\.id" :checked="card\.checked"/);
+  assert.match(cards, /\.choice:has\(input:focus-visible\) \{ outline: 2px solid var\(--focus-ring\)/);
+  const settings = read("views/Settings.vue");
+  assert.match(settings, /<ThemeCards [^>]*:model-value="theme" @update:model-value="pickTheme"/);
+  assert.match(settings, /function pickTheme\(t: ThemeChoice\) \{[^}]*setTheme\(t\);/);
+});
+
+test("theme card previews use the exact light and dark token values", () => {
+  const read = path => readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
+  const vars = block => Object.fromEntries([...block.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map(([, k, v]) => [k, v.trim()]));
+  const block = (css, selector) => css.slice(css.indexOf(`${selector} {`)).split("}")[0];
+  const tokens = read("tokens.css");
+  const cards = read("components/settings/ThemeCards.vue");
+  for (const [theme, selector] of [["light", ":root"], ["dark", ':root[data-theme="dark"]']]) {
+    const preview = vars(block(cards, `.preview.${theme}`));
+    const source = vars(block(tokens, selector));
+    assert.ok(Object.keys(preview).length >= 8, theme);
+    for (const [name, value] of Object.entries(preview)) assert.equal(value, source[name], `${theme} ${name}`);
+  }
 });

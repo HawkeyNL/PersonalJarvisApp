@@ -50,7 +50,7 @@ onBeforeUnmount(() => { currentPassword.value = ""; newPassword.value = ""; });
 </script>
 
 <template>
-  <section class="panel glass account-administration">
+  <section class="card account-administration">
     <h2>Account and devices</h2>
     <template v-if="signer">
       <p>A password never replaces the signed approval of a trusted device. Every change asks for Touch ID.</p>
