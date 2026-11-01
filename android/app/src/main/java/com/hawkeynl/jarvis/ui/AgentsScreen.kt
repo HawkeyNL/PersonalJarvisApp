@@ -34,7 +34,7 @@ fun AgentsScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRef
     val agent = agents.firstOrNull { it.id == chosen } ?: agents.firstOrNull()
     val current = items.firstOrNull { it.id == agent?.id }
 
-    NodePage("AGENTS", "YOUR PERSONAL AI SYSTEM", items, agent?.id.orEmpty(), { chosen = it; sub = "overview" }, onNavigate, mood) {
+    NodePage("Agents", "Your personal AI system", items, agent?.id.orEmpty(), { chosen = it; sub = "overview" }, onNavigate, mood) {
         if (agent == null || current == null) {
             Loaded(data.agents, "Agents", JvIcon.AGENTS, "Loading agents…", "Agent is turned off in Core.") {
                 Unavailable(

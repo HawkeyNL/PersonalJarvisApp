@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- bg-page, dark: oklch(0.165 0.008 255); keep in step with JvDark.bgPage. -->
+    <color name="jarvis_background">#0C0F12</color>
+</resources>

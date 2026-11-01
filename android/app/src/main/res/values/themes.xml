@@ -1,9 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Jarvis" parent="android:style/Theme.Material.NoActionBar">
+    <!-- DayNight: values-night overrides the base theme and colours, so the starting
+         window already has the system theme's page colour (bg-page in tokens.css). -->
+    <style name="Theme.Jarvis.Base" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+
+    <style name="Theme.Jarvis" parent="Theme.Jarvis.Base">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowBackground">@color/jarvis_background</item>
-        <item name="android:windowLightStatusBar">false</item>
         <item name="android:statusBarColor">@color/jarvis_background</item>
         <item name="android:navigationBarColor">@color/jarvis_background</item>
         <item name="android:windowActionModeOverlay">true</item>

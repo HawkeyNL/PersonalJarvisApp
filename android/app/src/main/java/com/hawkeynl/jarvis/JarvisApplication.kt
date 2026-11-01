@@ -19,6 +19,7 @@ class JarvisApplication : Application() {
 
 class AppContainer(application: Application) {
     val voicePreferences = application.getSharedPreferences("jarvis-local-voice", android.content.Context.MODE_PRIVATE)
+    val appearance = com.hawkeynl.jarvis.storage.AppearancePreference(application)
     val localSpeech = com.hawkeynl.jarvis.chat.AndroidSpeechOutput(application)
     private val secureValues = AndroidKeystoreSecureValueStore(application)
     val settings = EndpointSettingsRepository(application)

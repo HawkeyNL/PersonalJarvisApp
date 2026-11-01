@@ -1,17 +1,26 @@
-Bundled fonts in res/font (latin subsets; TrueType decoded from the WOFF2 files
-in desktop/src/assets/fonts, as served by Google Fonts):
+Bundled fonts in res/font (unmodified TrueType files from the official IBM Plex
+releases at https://github.com/IBM/plex/releases):
 
-  exo2_variable.ttf               Exo 2 (variable, upright)
-  exo2_italic_variable.ttf        Exo 2 (variable, italic)
-    Copyright 2013 The Exo 2 Project Authors (https://github.com/NDISCOVER/Exo-2.0)
+  ibm_plex_sans_regular.ttf       IBMPlexSans-Regular.ttf
+  ibm_plex_sans_medium.ttf        IBMPlexSans-Medium.ttf
+  ibm_plex_sans_semibold.ttf      IBMPlexSans-SemiBold.ttf
+    from ibm-plex-sans.zip, release @ibm/plex-sans@1.1.0 (font version 3.005)
+    sha256 of the zip: fb365d910566e6d199cc2c15579a7dd9a267128e18431a394ed81f1970c69200
 
-  rajdhani_medium.ttf             Rajdhani Medium
-  rajdhani_semibold.ttf           Rajdhani SemiBold
-    Copyright 2014 Indian Type Foundry (info@indiantypefoundry.com)
+  ibm_plex_mono_regular.ttf       IBMPlexMono-Regular.ttf
+  ibm_plex_mono_medium.ttf        IBMPlexMono-Medium.ttf
+    from ibm-plex-mono.zip, release @ibm/plex-mono@1.1.0 (font version 2.004)
+    sha256 of the zip: 4bfc936d0e1fd19db6327a3786eabdbc3dc0d464500576f6458f6706df68d26c
 
-Both font families are licensed under the SIL Open Font License, Version 1.1.
-This license is copied below, and is also available with a FAQ at:
-https://openfontlicense.org
+Both families are licensed under the SIL Open Font License, Version 1.1, as
+included in each release (LICENSE.txt), copied below:
+
+
+Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+This license is copied below, and is also available with a FAQ at: http://scripts.sil.org/OFL
 
 
 -----------------------------------------------------------
@@ -27,7 +36,7 @@ with others.
 
 The OFL allows the licensed fonts to be used, studied, modified and
 redistributed freely as long as they are not sold by themselves. The
-fonts, including any derivative works, can be bundled, embedded,
+fonts, including any derivative works, can be bundled, embedded, 
 redistributed and/or sold with any software provided that any reserved
 names are not used by derivative works. The fonts and derivatives,
 however, cannot be released under any other type of license. The
@@ -74,7 +83,7 @@ Name(s) unless explicit written permission is granted by the corresponding
 Copyright Holder. This restriction only applies to the primary font name as
 presented to the users.
 
-4) The name(s) of the Copyright Holder(s) and the Author(s) of the Font
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
 Software shall not be used to promote, endorse or advertise any
 Modified Version, except to acknowledge the contribution(s) of the
 Copyright Holder(s) and the Author(s) or with their explicit written

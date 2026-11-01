@@ -25,7 +25,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -40,7 +39,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import kotlin.math.PI
 import kotlin.math.abs
@@ -48,8 +46,8 @@ import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.max
 
-// The living Jarvis orb from the design export, drawn on one Canvas: halo,
-// two rotating spark rings, three membranes, the beating sphere with drifting
+// The living Jarvis orb from the design export, drawn on one Canvas: two
+// rotating spark rings, three membranes, the beating sphere with drifting
 // light, neural veins with travelling signals, nucleus and gloss. The mood
 // speeds up heartbeat, nucleus and signals (idle x1, listening x0.7,
 // thinking x0.4). With Android animations turned off (animator duration
@@ -91,6 +89,9 @@ private val NODES = arrayOf(
     floatArrayOf(22f, 72f, 0.8f, -1.9f), floatArrayOf(14f, 52f, 0.7f, -2.4f), floatArrayOf(88f, 48f, 0.7f, -0.2f),
 )
 
+// The orb is an illustration with its own fixed palette; it sits on any page colour.
+private val ORB = Color(0xFF2EE6A2)
+private val ORB_LABEL = Color(0xFFF4FFFA)
 private val SPARK = Color(0xFFB8FFDF)
 private val MINT = Color(0xFF96FFD2)
 
@@ -135,22 +136,10 @@ fun JvOrb(size: Dp, mood: Mood, modifier: Modifier = Modifier, label: Boolean = 
         modifier.size(size).drawWithCache {
             val d = this.size.width
             val c = this.size.center
-            val r = d / 2
             val sr = d * 0.435f // sphere radius (87 %)
             val dp = density
-            val accent = Jv.Accent
-            val halo = Brush.radialGradient(
-                0f to accent.copy(alpha = 0.34f), 0.36f to accent.copy(alpha = 0.12f), 0.62f to Color.Transparent,
-                center = c, radius = 2.26f * r,
-            )
-            val glowR = r + 22 * dp
-            val membraneGlow = Brush.radialGradient(
-                (r - 22 * dp) / glowR to Color.Transparent, r / glowR to accent.copy(alpha = 0.3f), 1f to Color.Transparent,
-                center = c, radius = glowR,
-            )
+            val accent = ORB
             val innerFill = Brush.radialGradient(0.6f to Color.Transparent, 1f to accent.copy(alpha = 0.12f), center = c, radius = 0.47f * d)
-            val sphereGlowR = sr + 70 * dp
-            val sphereGlow = Brush.radialGradient(sr / sphereGlowR to accent.copy(alpha = 0.55f), 1f to Color.Transparent, center = c, radius = sphereGlowR)
             val sphereTopLeft = Offset(c.x - sr, c.y - sr)
             val sphere = Brush.radialGradient(
                 0f to Color(0xFF3FF0A2), 0.28f to Color(0xFF14A868), 0.56f to Color(0xFF0A6744),
@@ -189,10 +178,6 @@ fun JvOrb(size: Dp, mood: Mood, modifier: Modifier = Modifier, label: Boolean = 
             onDrawBehind {
                 val t = clock.longValue / 1000f
 
-                // Halo breathes.
-                val breathe = pulse(cycle(t, 6f))
-                scale(0.97f + 0.08f * breathe, c) { drawCircle(halo, 1.6f * r, c, alpha = 0.6f + 0.4f * breathe) }
-
                 // Spark rings.
                 rotate(360f * cycle(t, 60f), c) { sparks(SPARKS_A, 1.22f, t, dp, 1f) }
                 rotate(-360f * cycle(t, 95f), c) { sparks(SPARKS_B, 1.44f, t, dp, 0.7f) }
@@ -200,7 +185,6 @@ fun JvOrb(size: Dp, mood: Mood, modifier: Modifier = Modifier, label: Boolean = 
                 // Membranes: slightly irregular ovals that rotate.
                 rotate(360f * easeInOut(cycle(t, 14f)), c) {
                     membrane(c, 0.52f * d, 0.975f, MINT.copy(alpha = 0.3f), 1 * dp)
-                    drawCircle(membraneGlow, glowR, c)
                     membrane(c, 0.5f * d, 0.985f, MINT.copy(alpha = 0.5f), 1.5f * dp)
                 }
                 rotate(-360f * easeInOut(cycle(t, 19f)), c) {
@@ -210,7 +194,6 @@ fun JvOrb(size: Dp, mood: Mood, modifier: Modifier = Modifier, label: Boolean = 
 
                 // The beating sphere.
                 scale(keyframes(cycle(t, 3.2f * factor), BEAT_KEYS, BEAT_VALUES), c) {
-                    drawCircle(sphereGlow, sphereGlowR, c)
                     drawCircle(sphere, sr, c)
                     clipPath(sphereClip) {
                         drift(blobA, t, 9f, floatArrayOf(0f, 0.30f, -0.08f), floatArrayOf(0f, 0.20f, 0.34f), floatArrayOf(1f, 1.15f, 0.9f), 0.56f * 2 * sr)
@@ -252,18 +235,12 @@ fun JvOrb(size: Dp, mood: Mood, modifier: Modifier = Modifier, label: Boolean = 
             val labelSize = max(13f, size.value * 0.088f).sp
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    "JARVIS",
-                    // Leading padding balances the trailing letter spacing.
-                    modifier = Modifier.padding(start = (labelSize.value * 0.4f).dp),
-                    style = TextStyle(
-                        fontFamily = Rajdhani, fontWeight = FontWeight.SemiBold, fontSize = labelSize,
-                        letterSpacing = 0.4.em, color = Jv.Text0,
-                        shadow = Shadow(Color(0xD9001E14), Offset.Zero, 12f),
-                    ),
+                    "Jarvis",
+                    style = TextStyle(fontFamily = PlexSans, fontWeight = FontWeight.SemiBold, fontSize = labelSize, color = ORB_LABEL),
                 )
                 Box(
                     Modifier.padding(top = (labelSize.value * 0.47f).dp).width((labelSize.value * 2.2f).dp).height(2.dp)
-                        .background(Jv.Text0.copy(alpha = 0.85f)),
+                        .background(ORB_LABEL.copy(alpha = 0.85f)),
                 )
             }
         }
@@ -282,7 +259,6 @@ private fun DrawScope.sparks(sparks: Array<FloatArray>, box: Float, t: Float, dp
     for (s in sparks) {
         val at = origin + Offset(s[0] / 100f * d, s[1] / 100f * d)
         val twinkle = (0.2f + 0.8f * pulse(cycle(t, 3.2f, s[3]))) * alpha
-        if (s[2] >= 3f) drawCircle(Jv.Accent, s[2] * dp * 1.6f, at, alpha = 0.25f * twinkle)
         drawCircle(SPARK, s[2] / 2 * dp, at, alpha = twinkle)
     }
 }

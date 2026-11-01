@@ -63,7 +63,7 @@ fun TasksScreen(data: CoreData, mood: Mood, onNavigate: (Screen) -> Unit, onRefr
         )
     }
 
-    NodePage("TASKS", "WHAT JARVIS IS WORKING ON", items, selected, { selected = it; sub = "sessions" }, onNavigate, mood) {
+    NodePage("Tasks", "What Jarvis is working on", items, selected, { selected = it; sub = "sessions" }, onNavigate, mood) {
         Panel(
             current.icon, current.title, current.tone, current.status,
             description = TASK_DETAILS[current.id],

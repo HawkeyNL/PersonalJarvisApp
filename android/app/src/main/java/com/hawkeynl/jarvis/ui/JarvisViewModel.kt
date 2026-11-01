@@ -18,6 +18,7 @@ import com.hawkeynl.jarvis.security.BiometricAvailability
 import com.hawkeynl.jarvis.security.BiometricResult
 import com.hawkeynl.jarvis.security.PairingApproval
 import com.hawkeynl.jarvis.security.SigningCancelledException
+import com.hawkeynl.jarvis.storage.ThemeMode
 import com.hawkeynl.jarvis.update.AndroidUpdateCheck
 import com.hawkeynl.jarvis.update.AndroidUpdateDownload
 import com.hawkeynl.jarvis.update.InstallerHandoff
@@ -57,6 +58,7 @@ data class JarvisUiState(
     val selectedVoice: String = "",
     val availableVoices: List<com.hawkeynl.jarvis.chat.LocalVoice> = emptyList(),
     val voiceStatus: String? = null,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val screen: Screen = Screen.HUB,
     /** Node the Health screen opens on; set by a deep link. */
     val healthNode: String = "core",
@@ -93,7 +95,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     private val _state = MutableStateFlow(
         JarvisUiState(locked = container.sessions.hasSessionRecord(), voiceEnabled = container.voicePreferences.getBoolean("enabled", false),
             voiceRate = SpeechRate.normalize(container.voicePreferences.getFloat("rate", 1f)),
-            selectedVoice = container.voicePreferences.getString("voice", "") ?: ""),
+            selectedVoice = container.voicePreferences.getString("voice", "") ?: "", themeMode = container.appearance.mode),
     )
     val state: StateFlow<JarvisUiState> = _state.asStateFlow()
 
@@ -385,7 +387,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             container.enrollment.eraseLocally()
             _state.update {
-                JarvisUiState(endpoint = it.endpoint, endpointDraft = it.endpointDraft, connection = it.connection)
+                JarvisUiState(endpoint = it.endpoint, endpointDraft = it.endpointDraft, connection = it.connection, themeMode = it.themeMode)
             }
         }
     }
@@ -520,6 +522,11 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         container.localSpeech.rate = rate
         container.voicePreferences.edit().putFloat("rate", rate).apply()
         _state.update { it.copy(voiceRate = rate) }
+    }
+
+    fun setThemeMode(mode: ThemeMode) {
+        container.appearance.save(mode)
+        _state.update { it.copy(themeMode = mode) }
     }
 
     fun refreshLocalVoices() {

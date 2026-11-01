@@ -1,21 +1,28 @@
 package com.hawkeynl.jarvis.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,11 +33,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.hawkeynl.jarvis.storage.ThemeMode
 import kotlinx.coroutines.launch
 
 @Composable
@@ -46,6 +56,8 @@ internal fun SettingsScreen(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            ThemeChooser(state.themeMode, actions::setThemeMode)
+
             Panel(JvIcon.HOME, "Home Node", connectionTone(state.connection), connectionText(state.connection)) {
                 OutlinedTextField(
                     value = state.endpointDraft,
@@ -62,12 +74,15 @@ internal fun SettingsScreen(
 
             Panel(JvIcon.WAVE, "Voice", if (state.voiceEnabled) Tone.OK else Tone.IDLE, if (state.voiceEnabled) "Local speech on" else "Local speech off") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Speak replies on the active device", Modifier.weight(1f), style = exo(13f, color = Jv.Text2))
+                    Text("Speak replies on the active device", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                     Switch(checked = state.voiceEnabled, onCheckedChange = actions::setVoiceEnabled)
                 }
                 Column {
-                    Text("Speech rate: ${state.voiceRate}× (next fragments)", style = exo(13f, color = Jv.Text2))
-                    Slider(value = state.voiceRate, onValueChange = actions::setVoiceRate, valueRange = 0.5f..2f, steps = 5)
+                    Text("Speech rate: ${state.voiceRate}× (next fragments)", style = MaterialTheme.typography.bodyMedium)
+                    Slider(
+                        value = state.voiceRate, onValueChange = actions::setVoiceRate, valueRange = 0.5f..2f, steps = 5,
+                        colors = SliderDefaults.colors(inactiveTrackColor = JvTheme.colors.borderStrong),
+                    )
                 }
                 Box {
                     ActionButton(
@@ -81,7 +96,7 @@ internal fun SettingsScreen(
                             DropdownMenuItem(text = { Text(voice.label) }, onClick = { actions.selectLocalVoice(voice.id); voiceMenu = false })
                         }
                         if (state.availableVoices.isEmpty()) {
-                            Text("No offline voices installed", Modifier.padding(16.dp), style = exo(13f, color = Jv.Text4))
+                            Text("No offline voices installed", Modifier.padding(16.dp), color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
@@ -95,6 +110,35 @@ internal fun SettingsScreen(
                 PasswordChange(actions)
                 PasswordReset(state, actions)
                 GhostButton("Erase this device and pair again", actions::resetDevice, Modifier.fillMaxWidth(), danger = true)
+            }
+        }
+    }
+}
+
+/** Light, dark or follow the system; saved on this device only. */
+@Composable
+private fun ThemeChooser(mode: ThemeMode, onChange: (ThemeMode) -> Unit) {
+    val c = JvTheme.colors
+    Column(verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+        SectionLabel("Appearance")
+        Row(
+            Modifier.fillMaxWidth().clip(JvShapes.md).background(c.bgSunken).padding(3.dp).selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(JvSpace.xxs),
+        ) {
+            for ((option, label) in listOf(ThemeMode.LIGHT to "Light", ThemeMode.DARK to "Dark", ThemeMode.SYSTEM to "System")) {
+                val on = option == mode
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .heightIn(min = 44.dp)
+                        .then(if (on) Modifier.border(1.dp, c.accentSolid, JvShapes.sm) else Modifier)
+                        .clip(JvShapes.sm)
+                        .background(if (on) c.bgSurface else Color.Transparent)
+                        .selectable(selected = on, role = Role.RadioButton, onClick = { onChange(option) }),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(label, color = if (on) c.textPrimary else c.textSecondary, style = MaterialTheme.typography.labelLarge)
+                }
             }
         }
     }
@@ -157,7 +201,7 @@ private fun PasswordReset(state: JarvisUiState, actions: JarvisViewModel) {
     state.passwordResetRequest?.let { id ->
         MutedText("Run this on the Home Node within 15 minutes:")
         SelectionContainer {
-            Text("sudo jarvis account recovery confirm ${id.lowercase()}", fontFamily = FontFamily.Monospace)
+            Text("sudo jarvis account recovery confirm ${id.lowercase()}", fontFamily = PlexMono)
         }
         MutedText("Check that the request id matches. After confirming, every device is signed out; sign in with the new password.")
         GhostButton("Done", { actions.dismissPasswordReset(); open = false }, Modifier.fillMaxWidth())

@@ -21,7 +21,7 @@ private val MEMORY_ITEMS = listOf(
 fun MemoryScreen(mood: Mood, onNavigate: (Screen) -> Unit) {
     var selected by rememberSaveable { mutableStateOf("people") }
     val current = MEMORY_ITEMS.first { it.id == selected }
-    NodePage("MEMORY", "WHAT JARVIS KNOWS ABOUT YOUR WORLD", MEMORY_ITEMS, selected, { selected = it }, onNavigate, mood) {
+    NodePage("Memory", "What Jarvis knows about your world", MEMORY_ITEMS, selected, { selected = it }, onNavigate, mood) {
         Panel(current.icon, current.title, Tone.IDLE, current.status, description = current.description) {
             Unavailable(
                 current.title, current.icon,

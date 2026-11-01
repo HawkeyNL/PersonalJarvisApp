@@ -1,7 +1,6 @@
 package com.hawkeynl.jarvis.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -9,7 +8,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.hawkeynl.jarvis.security.*
 import kotlinx.coroutines.CancellationException
@@ -57,7 +55,7 @@ fun ModelRoutingEditor(controller: ModelControlService) {
     val enabled = current?.models?.filter { it.enabled }?.map { "${it.provider}/${it.model}" }?.toSet().orEmpty()
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Eyebrow("Model routing")
+        SectionLabel("Model routing")
         when {
             loadFailed -> Unavailable("Model routing", JvIcon.LAYERS, kind = UnavailableKind.ERROR,
                 detail = "Model policy unreachable. Check the connection and session.")
@@ -134,7 +132,7 @@ fun ModelRoutingEditor(controller: ModelControlService) {
 private fun SwitchRow(title: String, detail: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(Modifier.weight(1f)) {
-            Text(title, style = exo(13.5f, FontWeight.Medium, Jv.Text1))
+            Text(title, style = MaterialTheme.typography.titleSmall)
             MutedText(detail)
         }
         Switch(checked, onChange, enabled = enabled)
@@ -147,13 +145,13 @@ private fun TierEditor(
     options: List<ModelEntry>, menuOpen: Boolean, setMenu: (Boolean) -> Unit, onChange: (TierRoute?) -> Unit,
 ) {
     Column(
-        Modifier.fillMaxWidth().background(Jv.accent(0.05f), Jv.R12).border(1.dp, Jv.Line16, Jv.R12).padding(14.dp)
+        Modifier.fillMaxWidth().background(JvTheme.colors.bgSunken, JvShapes.md).padding(14.dp)
             .semantics { contentDescription = "${tier.label} tier" },
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(tier.label, style = exo(14f, FontWeight.SemiBold, Jv.Text0))
+                Text(tier.label, style = MaterialTheme.typography.titleMedium)
                 MutedText(tier.blurb)
             }
             if (route == null) GhostButton("Customize", { onChange(TierRoute(emptyList())) }, enabled = editable)
@@ -162,9 +160,9 @@ private fun TierEditor(
         if (route == null) { MutedText("Built-in order."); return@Column }
         route.chain.forEachIndexed { i, entry ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("${i + 1}", Modifier.width(18.dp), style = exo(12.5f, color = Jv.Accent))
+                Text("${i + 1}", Modifier.width(18.dp), color = JvTheme.colors.accentText, style = MaterialTheme.typography.bodySmall.tabular())
                 Column(Modifier.weight(1f)) {
-                    Text(entry.model, style = exo(13f, color = Jv.Text1))
+                    Text(entry.model, style = MaterialTheme.typography.bodySmall)
                     MutedText("${entry.provider} · ${kind(entry.provider)}${if (entry.label !in enabled) " · blocked" else ""}")
                 }
                 GhostButton("Up", { onChange(route.copy(chain = moveEntry(route.chain, i, -1))) }, enabled = editable && i > 0)
@@ -191,7 +189,7 @@ private fun TierEditor(
         }
         if (route.meteredAfterSubscription) {
             Text("When the subscription is unavailable or its plan is used up, this tier may fall back to a paid API and cost money.",
-                style = exo(12.5f, color = Jv.Warn))
+                color = JvTheme.colors.negativeText, style = MaterialTheme.typography.bodySmall)
         }
         if (!paidApiAllowed && route.chain.any { isMetered(it.provider) }) MutedText("Paid APIs are off: paid entries in this tier are skipped.")
     }

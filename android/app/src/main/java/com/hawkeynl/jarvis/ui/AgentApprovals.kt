@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -18,8 +19,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -57,12 +56,12 @@ fun AgentActionCard(item: PendingAction, time: String, service: AgentApprovalSer
         }
     }
     Column(
-        Modifier.fillMaxWidth().clip(Jv.R14).background(Jv.ListBg).border(1.dp, Jv.Warn.copy(alpha = 0.4f), Jv.R14).padding(12.dp),
+        Modifier.fillMaxWidth().clip(JvShapes.lg).background(JvTheme.colors.bgSurface).border(1.dp, JvTheme.colors.negativeSolid, JvShapes.lg).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(title(review, item), Modifier.weight(1f), style = exo(14f, FontWeight.Medium, Jv.Bright))
-            Text(time, style = exo(11f, color = Jv.Text5))
+            Text(title(review, item), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+            Text(time, color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.labelSmall.tabular())
         }
         when (review) {
             is AgentReview.Approvable -> when (val action = review.action) {
@@ -98,13 +97,13 @@ private fun title(review: AgentReview, item: PendingAction): String = when ((rev
 @Composable
 private fun Field(label: String, value: String) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Eyebrow(label)
+        SectionLabel(label)
         // Strictly left-to-right: each line isolated at display time only.
         Text(
             AgentReview.ltrLines(value),
-            Modifier.fillMaxWidth().clip(Jv.R10).background(Jv.Tile).padding(8.dp),
+            Modifier.fillMaxWidth().clip(JvShapes.sm).background(JvTheme.colors.bgSunken).padding(8.dp),
             style = TextStyle(
-                fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 16.sp, color = Jv.Text1,
+                fontFamily = PlexMono, fontSize = 12.sp, lineHeight = 16.sp, color = JvTheme.colors.textPrimary,
                 textDirection = TextDirection.Ltr,
             ),
         )

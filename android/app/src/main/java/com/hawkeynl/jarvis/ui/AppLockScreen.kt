@@ -4,10 +4,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
@@ -18,11 +21,11 @@ internal fun AppLockScreen(message: String?, onRetry: () -> Unit, onReset: () ->
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        JvOrb(150.dp, Mood.IDLE, Modifier.padding(bottom = 40.dp))
-        PageTitle("JARVIS IS LOCKED", "YOUR SECOND MIND")
+        Text("Jarvis is locked", Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
         Text(
             message ?: "Confirm with strong biometrics to open your session.",
-            style = exo(13.5f, color = Jv.Text2),
+            color = JvTheme.colors.textSecondary,
+            style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
         )
         ActionButton("Unlock again", onRetry)

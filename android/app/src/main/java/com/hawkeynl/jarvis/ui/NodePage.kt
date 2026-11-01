@@ -1,7 +1,6 @@
 package com.hawkeynl.jarvis.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,15 +16,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.hawkeynl.jarvis.network.Availability
@@ -67,7 +64,6 @@ fun NodePage(
         Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
             CircleIconButton(
                 JvIcon.ARROW_LEFT, "Back to Core", { onNavigate(Screen.HUB) }, Modifier.align(Alignment.CenterStart),
-                background = Color(5, 40, 30, 166),
             )
             PageTitle(title, subtitle, Modifier.align(Alignment.Center).padding(horizontal = 52.dp))
             ProfileButton({ onNavigate(Screen.SETTINGS) }, Modifier.align(Alignment.CenterEnd))
@@ -91,15 +87,16 @@ fun NodePage(
 /** The design's bottom dock: Core, Tasks, chat, Memory, Agents. */
 @Composable
 fun Dock(current: Screen, onNavigate: (Screen) -> Unit, modifier: Modifier = Modifier) {
-    val shape = RoundedCornerShape(32.dp)
+    val c = JvTheme.colors
+    val shape = JvShapes.pill
     Row(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = JvSpace.lg, vertical = 10.dp)
             .height(64.dp)
+            .shadowBorder(shape)
             .clip(shape)
-            .background(Jv.Dock)
-            .border(1.dp, Jv.accent(0.4f), shape)
+            .background(c.bgSurface)
             .padding(horizontal = 6.dp),
         horizontalArrangement = Arrangement.SpaceAround,
         verticalAlignment = Alignment.CenterVertically,
@@ -109,12 +106,12 @@ fun Dock(current: Screen, onNavigate: (Screen) -> Unit, modifier: Modifier = Mod
         Box(
             Modifier
                 .size(52.dp)
-                .drawBehind { drawCircle(Jv.Accent, size.minDimension * 0.7f, alpha = 0.2f) }
+                .pressScale()
                 .clip(CircleShape)
-                .background(Jv.Accent)
+                .background(c.accentSolid)
                 .clickable(role = Role.Button, onClick = { onNavigate(Screen.CHAT) }),
             contentAlignment = Alignment.Center,
-        ) { JvIconView(JvIcon.CHAT, tint = Jv.OnAccent, size = 22.dp, contentDescription = "Chat with Jarvis") }
+        ) { JvIconView(JvIcon.CHAT, tint = c.textOnAccent, size = 22.dp, contentDescription = "Chat with Jarvis") }
         DockItem(JvIcon.MEMORY, "Memory", current == Screen.MEMORY) { onNavigate(Screen.MEMORY) }
         DockItem(JvIcon.AGENTS, "Agents", current == Screen.AGENTS) { onNavigate(Screen.AGENTS) }
     }
@@ -125,14 +122,15 @@ private fun DockItem(icon: JvIcon, label: String, on: Boolean, onClick: () -> Un
     Column(
         Modifier
             .size(width = 60.dp, height = 52.dp)
-            .clip(Jv.R12)
+            .clip(JvShapes.md)
+            .then(if (on) Modifier.background(JvTheme.colors.bgSelected) else Modifier)
             .selectable(selected = on, role = Role.Tab, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
     ) {
-        val color = if (on) Jv.Accent else Jv.Muted
+        val color = if (on) JvTheme.colors.accentText else JvTheme.colors.textSecondary
         JvIconView(icon, tint = color, size = 20.dp)
-        Text(label, style = exo(11f, color = color, spacing = 0.06f))
+        Text(label, color = color, style = MaterialTheme.typography.labelSmall)
     }
 }
 

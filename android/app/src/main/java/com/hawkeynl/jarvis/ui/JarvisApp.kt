@@ -1,6 +1,7 @@
 package com.hawkeynl.jarvis.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -17,7 +19,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -53,7 +54,7 @@ fun JarvisApp(
     val signedIn = root == Root.SHELL
     // Locking or signing out drops every Core read and cancels running ones.
     LaunchedEffect(signedIn) { if (!signedIn) core.clear() }
-    Box(Modifier.fillMaxSize().jvBackdrop()) {
+    Box(Modifier.fillMaxSize().background(JvTheme.colors.bgPage)) {
         Box(Modifier.fillMaxSize().safeDrawingPadding()) {
             when (root) {
                 Root.LOCK -> AppLockScreen(
@@ -83,7 +84,7 @@ private fun LocalEraseDialog(reason: String, onErase: () -> Unit, onKeep: () -> 
             )
         },
         dismissButton = { TextButton(onClick = onKeep) { Text("Keep this device") } },
-        confirmButton = { TextButton(onClick = onErase) { Text("Erase locally only", color = Jv.Danger) } },
+        confirmButton = { TextButton(onClick = onErase) { Text("Erase locally only", color = JvTheme.colors.dangerText) } },
     )
 }
 
@@ -169,7 +170,7 @@ internal fun ScreenHeader(title: String, onBack: () -> Unit, trailing: (@Composa
         Text(
             title,
             Modifier.align(Alignment.Center).padding(horizontal = 56.dp),
-            style = exo(15f, FontWeight.Medium, Jv.Text0, 0.04f),
+            style = MaterialTheme.typography.titleMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

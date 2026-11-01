@@ -1,6 +1,8 @@
 package com.hawkeynl.jarvis
 
 import android.content.Intent
+import android.content.res.Configuration
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import androidx.biometric.BiometricPrompt
 import javax.crypto.Cipher
@@ -22,8 +24,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.graphics.toArgb
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -34,6 +38,8 @@ import com.hawkeynl.jarvis.ui.CoreViewModel
 import com.hawkeynl.jarvis.ui.JarvisApp
 import com.hawkeynl.jarvis.ui.JarvisTheme
 import com.hawkeynl.jarvis.ui.JarvisViewModel
+import com.hawkeynl.jarvis.ui.JvDark
+import com.hawkeynl.jarvis.ui.JvLight
 import com.hawkeynl.jarvis.ui.parseDeepLink
 
 class MainActivity : FragmentActivity() {
@@ -119,19 +125,18 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        container.appearance.applyToSystem()
         super.onCreate(savedInstanceState)
         container.identity.prompt = signingPrompt
-        // Jarvis is dark only: keep light system bar icons in every system theme.
-        enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
-        )
+        applySystemBars(container.appearance.mode.isDark(systemDark()))
         setContent {
             val state by viewModel.state.collectAsStateWithLifecycle()
+            val dark = state.themeMode.isDark(isSystemInDarkTheme())
+            LaunchedEffect(dark) { applySystemBars(dark) }
             LaunchedEffect(state.locked) {
                 if (state.locked) requestBiometricUnlock()
             }
-            JarvisTheme {
+            JarvisTheme(darkTheme = dark) {
                 JarvisApp(
                     state = state,
                     actions = viewModel,
@@ -147,6 +152,20 @@ class MainActivity : FragmentActivity() {
         }
         // A recreated Activity already applied its launch link.
         if (savedInstanceState == null) openDeepLink(intent)
+    }
+
+    private fun systemDark(): Boolean =
+        (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+
+    /** System bar icons and the window background follow the app theme. The values-night
+     *  resources already match the system theme before the first frame. */
+    // ponytail: before Android 12 a Light/Dark override cannot reach the system starting
+    // window, which keeps the system theme's background; AppCompat's DayNight would cover it.
+    private fun applySystemBars(dark: Boolean) {
+        val transparent = android.graphics.Color.TRANSPARENT
+        val style = if (dark) SystemBarStyle.dark(transparent) else SystemBarStyle.light(transparent, transparent)
+        enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+        window.setBackgroundDrawable(ColorDrawable((if (dark) JvDark else JvLight).bgPage.toArgb()))
     }
 
     override fun onNewIntent(intent: Intent) {
