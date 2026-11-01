@@ -55,6 +55,9 @@ export type MonthlyDeposit = { amount: Decimal; day_of_month: number; next_date:
 
 export type Dividend = { conid: number; symbol: string; ex_date: string; pay_date?: string; amount?: Decimal; currency: string };
 
+/** A position Core left out because it is not in the base currency. */
+export type SkippedPosition = { symbol: string; currency?: string };
+
 export type Portfolio = Freshness & {
   base_currency: string;
   net_liquidation: Decimal;
@@ -69,6 +72,10 @@ export type Portfolio = Freshness & {
   allocation?: AllocationTarget[];
   monthly_deposit?: MonthlyDeposit;
   upcoming_dividends?: Dividend[];
+  /** Both absent when Core showed every position; at most LIMITS.skipped of
+   *  skipped_count are named. Older Cores never send them. */
+  skipped_count?: number;
+  skipped_positions?: SkippedPosition[];
 };
 
 export const HISTORY_RANGES = ["1M", "3M", "1Y", "ALL"] as const;
@@ -385,7 +392,7 @@ export function onTarget(allocation: AllocationTarget[]): number {
 // yields an error state, never a crash. Lists are capped; a bar or history
 // point without finite prices is dropped rather than drawn as 0.
 
-export const LIMITS = { positions: 1000, bars: 5000, points: 5000, notes: 50, sources: 20, allocation: 50, dividends: 200 } as const;
+export const LIMITS = { positions: 1000, bars: 5000, points: 5000, notes: 50, sources: 20, allocation: 50, dividends: 200, skipped: 50 } as const;
 
 type Obj = Record<string, unknown>;
 const isObj = (x: unknown): x is Obj => typeof x === "object" && x !== null && !Array.isArray(x);
@@ -415,6 +422,15 @@ const isDividend = (d: unknown) =>
   isObj(d) && parseConid(d.conid) !== null && isStr(d.symbol) && isStr(d.ex_date) && isStr(d.currency) && optStr(d.pay_date) && optStr(d.amount);
 const isDeposit = (m: unknown) =>
   m === undefined || m === null || (isObj(m) && isStr(m.amount) && isStr(m.next_date) && Number.isInteger(m.day_of_month));
+const isSkipped = (s: unknown) =>
+  // Core counts code points, not UTF-16 units.
+  isObj(s) && isStr(s.symbol) && [...s.symbol].length >= 1 && [...s.symbol].length <= 32
+  && (s.currency === undefined || (isStr(s.currency) && /^[A-Z]{3}$/.test(s.currency)));
+/** Both absent, or a count of 1..positions limit naming 1..min(count, 50). */
+const isSkippedSet = (count: unknown, list: unknown) =>
+  (count === undefined && list === undefined)
+  || (Number.isSafeInteger(count) && (count as number) >= 1 && (count as number) <= LIMITS.positions
+    && isList(list, Math.min(count as number, LIMITS.skipped)) && list.length >= 1 && list.every(isSkipped));
 const isNote = (n: unknown) =>
   isObj(n) && isStr(n.t) && NOTE_KINDS.includes(n.kind) && isStr(n.text) && optList(n.sources, LIMITS.sources, isStr);
 
@@ -423,7 +439,19 @@ export function readPortfolio(x: unknown): Portfolio | null {
   if (![x.day_pnl, x.day_change_pct, x.total_pnl, x.total_return_pct, x.dividends_12m].every(optStr)) return null;
   if (!isList(x.positions, LIMITS.positions) || !x.positions.every(isPosition)) return null;
   if (!optList(x.allocation, LIMITS.allocation, isAllocation) || !optList(x.upcoming_dividends, LIMITS.dividends, isDividend)) return null;
+  if (!isSkippedSet(x.skipped_count, x.skipped_positions)) return null;
   return isDeposit(x.monthly_deposit) ? (x as unknown as Portfolio) : null;
+}
+
+/** "2 positions not shown (not in EUR): AAPL (USD), X (no currency)", or
+ *  null when Core showed every position. */
+export function skippedText(p: Portfolio): string | null {
+  const count = p.skipped_count ?? 0;
+  if (count === 0) return null;
+  const named = (p.skipped_positions ?? []).map((s) => `${s.symbol} (${s.currency ?? "no currency"})`);
+  const more = count - named.length;
+  const what = count === 1 ? "1 position" : `${count} positions`;
+  return `${what} not shown (not in ${p.base_currency}): ${named.join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
 }
 
 export function readHistory(x: unknown): PortfolioHistory | null {

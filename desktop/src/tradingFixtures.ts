@@ -42,6 +42,8 @@ export function portfolioFixture(set: FixtureSet): Portfolio {
         { label: "Cash", current_pct: "0", target_pct: "5" },
       ],
       upcoming_dividends: [{ conid: 9001, symbol: "WRLD-ACC-EUR-HEDGED", ex_date: "2026-11-05", currency: "EUR" }],
+      skipped_count: 60,
+      skipped_positions: [{ symbol: "BRK B", currency: "USD" }, { symbol: "X".repeat(32), currency: "GBP" }, { symbol: "NOCUR" }],
     };
   }
   return {

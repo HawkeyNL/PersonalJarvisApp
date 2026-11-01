@@ -4,7 +4,7 @@ import JvTopBar from "../components/jv/JvTopBar.vue";
 import DevDataToggle from "../components/trading/DevDataToggle.vue";
 import TradingStatus from "../components/trading/TradingStatus.vue";
 import "../components/trading/trading.css";
-import { asOfText, readPortfolio, formatDecimal, formatMoney, formatPrice, signTone, sourceLabel, type Portfolio } from "../trading";
+import { asOfText, readPortfolio, formatDecimal, formatMoney, formatPrice, signTone, skippedText, sourceLabel, type Portfolio } from "../trading";
 import { tradingApi, useTradingRead } from "../tradingApi";
 
 // Every open position in the IBKR account, all asset classes. Orders are not
@@ -39,6 +39,7 @@ const { state, reload } = useTradingRead<Portfolio>({
               <h2 id="pos-open">Open positions</h2>
               <span class="td-small">{{ data.positions.length ? `${data.positions.length} open` : "Nothing open" }}</span>
             </div>
+            <p v-if="skippedText(data)" class="td-note" role="note">{{ skippedText(data) }}</p>
             <p v-if="empty" class="td-empty">No open positions in your IBKR account.</p>
             <div v-else class="td-scroll">
               <table class="td-table">
