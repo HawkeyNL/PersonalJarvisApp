@@ -81,7 +81,11 @@ test("status picks the most restrictive state", () => {
   assert.equal(memeStatus({ ...o, running: false, last_error: "paper trader did not start; see the Core log" }).kind, "stopped");
   assert.match(memeStatus({ ...o, running: false, last_error: "paper trader did not start; see the Core log" }).detail, /did not start/);
   assert.equal(memeStatus({ ...o, paused: true, last_error: "tick timed out" }).kind, "paused");
-  assert.match(memeStatus({ ...o, paused: true }).detail, /exited/);
+  assert.match(memeStatus({ ...o, paused: true }).detail, /still valued and exited/);
+  // A failing tick is not hidden behind the pause, and exits are not claimed.
+  const pausedFailing = memeStatus({ ...o, paused: true, last_error: "tick timed out" }).detail;
+  assert.match(pausedFailing, /tick timed out/);
+  assert.doesNotMatch(pausedFailing, /still valued/);
   assert.equal(memeStatus({ ...o, last_error: "tick timed out" }).kind, "halted");
   assert.equal(memeStatus({ ...o, report: null }).kind, "starting");
   assert.equal(memeStatus(readOverview(overviewFixture("paused"))).kind, "paused");
@@ -143,6 +147,7 @@ test("pause errors say when, what Core answered and what holds", async () => {
   const r503 = await fail({ name: "ApiError", status: 503 });
   assert.match(r503.message, /HTTP 503/);
   assert.match(r503.message, /restart would undo it/);
+  assert.equal(r503.status, 503);
   const r404 = await fail({ name: "ApiError", status: 404 });
   assert.match(r404.message, /no memecoin pause/);
   const r500 = await fail({ name: "ApiError", status: 500 });

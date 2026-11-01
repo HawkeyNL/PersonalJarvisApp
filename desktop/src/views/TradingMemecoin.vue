@@ -25,7 +25,7 @@ const { state: trades, reload: reloadTrades } = useMemeRead({
   live: memeApi.trades, fixture: (f, set) => f.tradesFixture(set), read: readTrades,
 });
 
-// Set only once Core confirmed a pause, until the next deliberate refresh.
+// Set only once Core confirmed a pause, until the following overview read.
 const pausedHere = ref(false);
 const data = computed(() => {
   if (overview.value.kind !== "ok") return null;
@@ -77,12 +77,17 @@ async function confirmPause(): Promise<void> {
   const outcome = await sendPause(memeApi.pause);
   pauseNote.value = outcome;
   pauseStep.value = "idle";
-  if (outcome.ok) {
-    pausedHere.value = true;
-    void reloadOverview();
-  }
   await nextTick();
   noteEl.value?.focus();
+  if (outcome.ok) {
+    // Bridge until Core's own overview arrives; from then on it is the truth.
+    pausedHere.value = true;
+    await reloadOverview();
+    pausedHere.value = false;
+  } else if (outcome.status === 503) {
+    // Core paused in memory but did not save it: show what it reports now.
+    await reloadOverview();
+  }
 }
 
 watch(devDataSet, () => {

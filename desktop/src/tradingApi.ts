@@ -64,6 +64,8 @@ export function useTradingRead<T extends Freshness>(opts: {
 }): { state: Ref<TradingState<T>>; reload: () => Promise<void> } {
   const state = ref({ kind: "loading" }) as Ref<TradingState<T>>;
   let seq = 0;
+  // Dev only: a memecoin-only set (off, paused) means nothing here.
+  if (!(DATA_SETS as readonly string[]).includes(devDataSet.value)) setDevDataSet("live");
 
   async function fetchRaw(): Promise<unknown> {
     const set = devDataSet.value;

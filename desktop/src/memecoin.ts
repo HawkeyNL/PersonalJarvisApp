@@ -203,7 +203,10 @@ export function memeStatus(o: MemeOverview): MemeStatus {
   if (o.paused) {
     return {
       kind: "paused", label: "Paused", tone: "neg",
-      detail: "No new paper entries. Open paper positions are still valued and exited.",
+      // A failing tick also stops exits, so do not claim they run.
+      detail: o.last_error
+        ? `No new paper entries. The last tick also stopped: ${o.last_error}. Open paper positions may not be valued or exited until it recovers; the Core log has the details.`
+        : "No new paper entries. Open paper positions are still valued and exited.",
     };
   }
   if (o.last_error) {
@@ -254,7 +257,7 @@ export function failureText(f: MemeFailure): string {
 
 // ---- pause --------------------------------------------------------------
 
-export type PauseOutcome = { ok: true; at: string } | { ok: false; at: string; message: string };
+export type PauseOutcome = { ok: true; at: string } | { ok: false; at: string; message: string; status?: number };
 
 const clock = (d: Date) => `${d.toISOString().slice(11, 19)} UTC`;
 
@@ -274,7 +277,7 @@ export async function sendPause(post: () => Promise<unknown>, now: () => Date = 
     if (e?.name === "ApiError" && typeof e.status === "number") {
       if (e.status === 401) return { ok: false, at, message: `Pause refused at ${at} (HTTP 401): your session is not valid, so nothing changed. Sign in again on the Core page, then pause again.` };
       if (e.status === 503) {
-        return { ok: false, at, message: `Pause not saved at ${at} (HTTP 503): Core stopped new entries, but could not store the pause, so a restart would undo it. Pause again until it is confirmed.` };
+        return { ok: false, at, status: 503, message: `Pause not saved at ${at} (HTTP 503): Core stopped new entries, but could not store the pause, so a restart would undo it. Pause again until it is confirmed.` };
       }
       if (e.status === 404 || e.status === 405 || e.status === 501) return { ok: false, at, message: `Pause not available at ${at} (HTTP ${e.status}): this Core has no memecoin pause, so nothing changed.` };
       return { ok: false, at, message: `Pause failed at ${at} (HTTP ${e.status}). The pause is not confirmed; try again.` };
