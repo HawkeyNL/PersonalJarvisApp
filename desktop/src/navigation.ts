@@ -47,7 +47,7 @@ export const NAV: NavSection[] = [
 
 export type View =
   | "home" | "conversations" | "agents" | "integrations" | "health" | "memory"
-  | "trading" | "tasks" | "context" | "settings" | "soon";
+  | "trading" | "desk" | "stocks" | "stock" | "positions" | "tasks" | "context" | "settings" | "soon";
 
 /** One screen: its path, the view that renders it and the sidebar entry it highlights. */
 export type Page = { path: string; name: string; view: View; nav?: string; props?: Record<string, string> };
@@ -64,13 +64,16 @@ export const PAGES: Page[] = [
   { path: "/conversations", name: "conversations", view: "conversations", nav: "chat" },
   { path: "/memory", name: "memory", view: "memory", nav: "memory" },
 
-  // Trading desk: one component, sub-tab driven by the path.
-  { path: "/trading", name: "trading", view: "trading", nav: "dashboard" },
+  // Trading: the dashboard and the read-only IBKR screens (/v1/trading/*).
+  { path: "/trading", name: "trading", view: "desk", nav: "dashboard" },
+  { path: "/trading/stocks", name: "stocks", view: "stocks", nav: "stocks" },
+  { path: "/trading/stocks/:conid(\\d+)", name: "stock", view: "stock", nav: "stocks" },
+  { path: "/trading/positions", name: "positions", view: "positions", nav: "positions" },
+  // Manual holdings and the gateway status: one older view, tab driven by the path.
+  { path: "/trading/holdings", name: "trading-holdings", view: "trading", nav: "dashboard" },
   { path: "/trading/ibkr", name: "trading-ibkr", view: "trading", nav: "dashboard" },
-  soon("stocks", "Stock research and IBKR orders are not built yet. Your read-only IBKR positions are on the Dashboard."),
   soon("memecoin", "The memecoin pot is not built yet."),
   soon("futures", "Futures through IBKR come later."),
-  soon("positions", "A combined list of positions and orders is not built yet. Your read-only IBKR positions are on the Dashboard."),
   soon("autonomy", "Setting what Jarvis may do per pot is not built yet."),
 
   // Activity: approvals and runs share the Tasks view, opened on a different node.
@@ -92,7 +95,7 @@ export const PAGES: Page[] = [
 /** Old path → new path. Query and hash carry over (vue-router string redirects). */
 export const REDIRECTS: Record<string, string> = {
   "/status": "/health",
-  "/portfolio": "/trading",
+  "/portfolio": "/trading/holdings",
   "/broker": "/trading/ibkr",
   "/tasks": "/runs",
   "/context": "/devices",

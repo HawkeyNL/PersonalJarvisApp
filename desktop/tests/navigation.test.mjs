@@ -4,7 +4,7 @@ import {createMemoryHistory, createRouter} from "vue-router";
 
 import {NAV, PAGES, REDIRECTS, ariaCurrent, buildRoutes, tasksNode, tasksPath} from "../src/navigation.ts";
 
-const VIEWS = ["home", "conversations", "agents", "integrations", "health", "memory", "trading", "tasks", "context", "settings", "soon"];
+const VIEWS = ["home", "conversations", "agents", "integrations", "health", "memory", "trading", "desk", "stocks", "stock", "positions", "tasks", "context", "settings", "soon"];
 const stub = name => ({name, render: () => null});
 
 async function routerAt(path) {
@@ -42,7 +42,11 @@ test("pages map onto the existing views", async () => {
   const view = async path => (await routerAt(path)).matched[0].components.default.name;
   assert.equal(await view("/"), "home");
   assert.equal(await view("/memory"), "memory");
-  assert.equal(await view("/trading"), "trading");
+  assert.equal(await view("/trading"), "desk");
+  assert.equal(await view("/trading/stocks"), "stocks");
+  assert.equal(await view("/trading/positions"), "positions");
+  assert.equal(await view("/trading/holdings"), "trading");
+  assert.equal(await view("/trading/ibkr"), "trading");
   assert.equal(await view("/runs"), "tasks");
   assert.equal(await view("/approvals"), "tasks");
   assert.equal(await view("/settings"), "settings");
@@ -57,6 +61,7 @@ test("pages map onto the existing views", async () => {
 
 test("sub-paths and hub-only pages highlight their parent entry", async () => {
   assert.equal((await routerAt("/trading/ibkr")).meta.nav, "dashboard");
+  assert.equal((await routerAt("/trading/holdings")).meta.nav, "dashboard");
   assert.equal((await routerAt("/conversations")).meta.nav, "chat");
   assert.equal((await routerAt("/agents")).meta.nav, undefined);
 });
@@ -64,7 +69,7 @@ test("sub-paths and hub-only pages highlight their parent entry", async () => {
 test("placeholders say what is missing and carry no sample data", () => {
   const soon = PAGES.filter(p => p.view === "soon");
   assert.deepEqual(soon.map(p => p.path).sort(), [
-    "/content", "/notifications", "/trading/autonomy", "/trading/futures", "/trading/memecoin", "/trading/positions", "/trading/stocks",
+    "/content", "/notifications", "/trading/autonomy", "/trading/futures", "/trading/memecoin",
   ]);
   for (const page of soon) {
     assert.deepEqual(Object.keys(page.props).sort(), ["detail", "icon", "title"], page.path);
@@ -95,7 +100,7 @@ test("paths are unique and redirects never shadow or chain", () => {
 test("exactly one sidebar entry is aria-current on every sidebar page", async () => {
   const items = NAV.flatMap(s => s.items);
   for (const page of PAGES.filter(p => p.nav)) {
-    const nav = (await routerAt(page.path)).meta.nav;
+    const nav = (await routerAt(page.path.replace(/:conid\(.*\)/, "265598"))).meta.nav;
     const current = items.filter(i => ariaCurrent(i.id, nav) === "page").map(i => i.id);
     assert.deepEqual(current, [page.nav], page.path);
   }
@@ -119,4 +124,14 @@ test("Tasks keeps the route on Approvals only for the waiting node", async () =>
 
 test("Devices names its own heading", () => {
   assert.equal(PAGES.find(p => p.path === "/devices").props.title, "DEVICES");
+});
+
+test("a stock detail page opens by numeric IBKR conid under Stocks", async () => {
+  const route = await routerAt("/trading/stocks/265598");
+  assert.equal(route.matched[0].components.default.name, "stock");
+  assert.equal(route.params.conid, "265598");
+  assert.equal(route.meta.nav, "stocks");
+  // Anything but digits is no instrument page.
+  assert.equal((await routerAt("/trading/stocks/AAPL")).matched.length, 0);
+  assert.equal((await routerAt("/portfolio")).path, "/trading/holdings");
 });

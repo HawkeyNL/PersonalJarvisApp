@@ -11,7 +11,7 @@ import { ibkrStatus, ibkrPositions, type IbkrPosition } from "../ibkr";
 import JvBackdrop from "../components/jv/JvBackdrop.vue";
 import JvTopBar from "../components/jv/JvTopBar.vue";
 
-// Sub-tab is driven by the route (/trading vs /trading/ibkr).
+// Sub-tab is driven by the route (/trading/holdings vs /trading/ibkr).
 const route = useRoute();
 const seg = computed<"manual" | "ibkr">(() =>
   route.path.endsWith("/ibkr") ? "ibkr" : "manual",
@@ -134,7 +134,7 @@ onMounted(() => {
     </div>
 
     <nav class="seg" aria-label="Trading">
-      <RouterLink to="/trading" :class="{ on: seg === 'manual' }">Portfolio</RouterLink>
+      <RouterLink to="/trading/holdings" :class="{ on: seg === 'manual' }">Portfolio</RouterLink>
       <RouterLink to="/trading/ibkr" :class="{ on: seg === 'ibkr' }">IBKR</RouterLink>
     </nav>
 
