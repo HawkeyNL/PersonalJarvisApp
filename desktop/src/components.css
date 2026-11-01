@@ -79,8 +79,8 @@ h3 { font-size: 15px; line-height: 1.4; font-weight: 600; }
 .seg button[aria-pressed="true"], .seg button[aria-selected="true"] {
   background: var(--bg-surface); color: var(--accent-text); box-shadow: var(--shadow-border), inset 0 0 0 1.5px var(--accent-solid);
 }
-/* Inset ring: the track clips an outset one when it scrolls. */
-.seg button:focus-visible { outline-offset: -2px; }
+/* 1px offset: clear of the selected ring, still inside the 3px track padding so a scrolling track does not clip it. */
+.seg button:focus-visible { outline-offset: 1px; }
 
 /* Badges: colour plus label, never colour alone. */
 .badge {
