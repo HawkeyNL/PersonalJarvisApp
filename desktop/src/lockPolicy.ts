@@ -24,6 +24,14 @@ export function isSetUp(state: DeviceState): boolean {
   return state.authenticated || (state.device_id !== null && state.has_key);
 }
 
+/** Something to lock: a set-up device, or for the password lock a live session
+ *  to end (without one the sign-in screen already asks for the password).
+ *  Unreadable device state (null) counts as something to lock: fail closed. */
+export function hasSomethingToLock(mode: LockMode, state: DeviceState | null): boolean {
+  if (state === null) return true;
+  return mode === "password" ? state.authenticated : isSetUp(state);
+}
+
 /** Lock at launch only when there is something to protect. The password lock
  *  cannot be switched off. */
 export function shouldLockOnLaunch(input: {

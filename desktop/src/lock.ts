@@ -11,7 +11,7 @@ import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { currentAuthStatus, logout } from "./auth";
 import { initPlatformCapabilities, platformCapabilities } from "./platform";
-import { isSetUp, lockModeFor, shouldLockOnLaunch } from "./lockPolicy";
+import { hasSomethingToLock, lockModeFor, shouldLockOnLaunch } from "./lockPolicy";
 
 export const locked = ref(false); // resolved by initLock()
 watch(locked, (value) => {
@@ -40,24 +40,26 @@ const SESSION_UNLOCKED = "jarvis.unlocked";
 const INACTIVITY_MS = 15 * 60 * 1000;
 let idleTimer: number | undefined;
 
+const somethingToLock = async () =>
+  hasSomethingToLock(lockMode.value, await currentAuthStatus().catch(() => null));
+
 /** Decide whether to lock at launch. A Windows lock ends the session at once,
- *  so the next screen asks for the account password. */
-export async function initLock(): Promise<void> {
+ *  so the next screen asks for the account password. Returns true while that
+ *  reload is pending. */
+export async function initLock(): Promise<boolean> {
   await initPlatformCapabilities();
   const alreadyUnlocked = sessionStorage.getItem(SESSION_UNLOCKED) === "1";
-  // Fail closed: unreadable device state counts as set up.
-  const setUp = await currentAuthStatus().then(isSetUp, () => true);
   locked.value = shouldLockOnLaunch({
-    mode: lockMode.value, enabled: lockEnabled.value, alreadyUnlocked, setUp,
+    mode: lockMode.value, enabled: lockEnabled.value, alreadyUnlocked, setUp: await somethingToLock(),
   });
-  if (locked.value && lockMode.value === "password") await signOutFromLock();
+  return locked.value && lockMode.value === "password" && (await signOutFromLock());
 }
 
 export function setLockEnabled(v: boolean): void {
   lockEnabled.value = v;
   localStorage.setItem(LKEY, String(v));
   if (!v) unlockApp();
-  else if (lockAvailable.value) locked.value = true;
+  else void lockApp();
 }
 
 export function unlockApp(): void {
@@ -67,11 +69,13 @@ export function unlockApp(): void {
   armIdle();
 }
 
-export function lockApp(): void {
-  if (!lockActive()) return;
+/** Lock a set-up device. Before set-up there is nothing to protect, and a
+ *  Windows lock would wipe a half-typed password. */
+export async function lockApp(): Promise<void> {
+  if (!lockActive() || !(await somethingToLock())) return;
   sessionStorage.removeItem(SESSION_UNLOCKED);
   locked.value = true;
-  if (lockMode.value === "password") void signOutFromLock();
+  if (lockMode.value === "password") await signOutFromLock();
 }
 
 /** Local unlock: biometrics, or the OS password where the OS offers it. */
@@ -91,25 +95,30 @@ export async function biometricUnlock(): Promise<boolean> {
   }
 }
 
-/** Way out when the OS prompt is unavailable: end the session, then reload
- *  to the sign-in screen with no app state left in memory. Stays locked if
- *  the local session could not be cleared. */
-export async function signOutFromLock(): Promise<void> {
+/** End the session, then reload to the sign-in screen with no app state left
+ *  in memory. The lock stays up until the reload, and stays up if the local
+ *  session could not be cleared. Returns true when the reload is under way. */
+export async function signOutFromLock(): Promise<boolean> {
+  if (unlocking.value) return false;
+  unlocking.value = true;
   lockError.value = null;
   try {
     await logout();
   } catch (e) {
     lockError.value = e instanceof Error ? e.message : String(e);
-    return;
+    unlocking.value = false;
+    return false;
   }
-  unlockApp();
+  // The session is gone; skip the lock on the reload this window session.
+  sessionStorage.setItem(SESSION_UNLOCKED, "1");
   window.location.reload();
+  return true;
 }
 
 function armIdle(): void {
   if (!INACTIVITY_MS || !lockActive()) return;
   clearTimeout(idleTimer);
-  idleTimer = window.setTimeout(() => lockApp(), INACTIVITY_MS);
+  idleTimer = window.setTimeout(() => void lockApp(), INACTIVITY_MS);
 }
 
 /** Reset the inactivity timer on user interaction while unlocked. */

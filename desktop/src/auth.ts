@@ -8,6 +8,7 @@ import { chatSession } from "./chatSession";
 import { homeNodeOrigin } from "./homeNode";
 import { getJson, getJsonAuth, getJsonWithHeaders, postAuth, postJson, postJsonAuth, postJsonWithHeaders } from "./api";
 import { initPlatformCapabilities } from "./platform";
+import { lockModeFor } from "./lockPolicy";
 import { scheduleAutomaticUpdateCheck } from "./updates";
 import { groupFingerprint, keyFingerprint } from "./pairingFingerprint";
 
@@ -49,7 +50,10 @@ export async function login(enrolledDeviceId?: string, password?: string, boundO
   if (currentOrigin !== expectedOrigin) throw new Error("Home Node changed; sign in again");
   const account = await accountStatus();
   if (account.bootstrap_required) throw new AccountActivationRequired();
-  if (account.password_required && !password && !sessionStorage.getItem(PAIRING_WAIT_KEY)) throw new AccountPasswordRequired();
+  // Windows always signs in with the account password, whatever Core reports.
+  const passwordRequired = account.password_required
+    || lockModeFor((await initPlatformCapabilities()).platform) === "password";
+  if (passwordRequired && !password && !sessionStorage.getItem(PAIRING_WAIT_KEY)) throw new AccountPasswordRequired();
   const publicKey = await invoke<string>("auth_public_key");
   const info = await invoke<{ platform: string; name: string }>("device_info");
 
@@ -86,7 +90,7 @@ export async function login(enrolledDeviceId?: string, password?: string, boundO
     }
   }
 
-  if (account.password_required && !password) throw new AccountPasswordRequired();
+  if (passwordRequired && !password) throw new AccountPasswordRequired();
   // Challenge, signature and login run natively; the signature never reaches JS.
   await invoke("auth_login", { password, expectedOrigin });
   sessionStorage.removeItem(PAIRING_WAIT_KEY);

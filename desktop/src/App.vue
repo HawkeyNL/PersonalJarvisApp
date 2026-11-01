@@ -47,7 +47,7 @@ onMounted(async () => {
       // Missing/corrupt local update state is surfaced passively in Settings.
     }
   })();
-  await initLock();
+  if (await initLock()) return; // Windows sign-out reload is under way
   startApprovalPolling(); // other devices' unlock requests (a Mac approves them)
   startPairingPolling();
   maybeStartWake(); // resume "Hey Jarvis" if it was enabled

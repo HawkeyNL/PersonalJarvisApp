@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 
-import { isSetUp, lockModeFor, shouldLockOnLaunch } from "../src/lockPolicy.ts";
+import { hasSomethingToLock, isSetUp, lockModeFor, shouldLockOnLaunch } from "../src/lockPolicy.ts";
 
 test("each desktop gets its lock mode; Windows never uses Windows Hello", () => {
   assert.equal(lockModeFor("macos"), "biometric");
@@ -41,4 +42,26 @@ test("only the macOS lock can be switched off", () => {
   const base = { enabled: false, alreadyUnlocked: false, setUp: true };
   assert.equal(shouldLockOnLaunch({ ...base, mode: "biometric" }), false);
   assert.equal(shouldLockOnLaunch({ ...base, mode: "password" }), true);
+});
+
+test("the lock only covers something worth protecting, and fails closed", () => {
+  const signedIn = { device_id: "d1", authenticated: true, has_key: true };
+  const signedOut = { device_id: "d1", authenticated: false, has_key: true };
+  const fresh = { device_id: null, authenticated: false, has_key: false };
+  assert.equal(hasSomethingToLock("biometric", signedIn), true);
+  assert.equal(hasSomethingToLock("biometric", signedOut), true);
+  assert.equal(hasSomethingToLock("biometric", fresh), false);
+  // Windows: no session means the sign-in screen already asks for the password.
+  assert.equal(hasSomethingToLock("password", signedIn), true);
+  assert.equal(hasSomethingToLock("password", signedOut), false);
+  assert.equal(hasSomethingToLock("password", fresh), false);
+  for (const mode of ["biometric", "password"]) assert.equal(hasSomethingToLock(mode, null), true, mode);
+});
+
+test("Windows sign-in always asks for the account password", async () => {
+  const auth = await readFile(new URL("../src/auth.ts", import.meta.url), "utf8");
+  assert.match(auth, /const passwordRequired = account\.password_required\s*\|\| lockModeFor\(\(await initPlatformCapabilities\(\)\)\.platform\) === "password";/);
+  // Both password checks in login() use it, so Core's answer alone cannot skip it.
+  assert.equal(auth.match(/account\.password_required/g)?.length, 1);
+  assert.equal(auth.match(/if \(passwordRequired && !password/g)?.length, 2);
 });

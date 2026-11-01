@@ -16,7 +16,9 @@ import { biometricUnlock, lockMode, unlocking, lockError, signOutFromLock } from
       <!-- Windows: the session is ending; the sign-in screen asks for the account password. -->
       <template v-if="lockMode === 'password'">
         <p class="sub">Sign in again with your account password.</p>
-        <button class="primary" @click="signOutFromLock">Sign in</button>
+        <button class="primary" :disabled="unlocking" @click="signOutFromLock">
+          {{ unlocking ? "Signing out…" : "Sign in" }}
+        </button>
       </template>
       <template v-else>
         <p class="sub">Unlock with Touch ID or your computer password.</p>

@@ -203,7 +203,7 @@ onMounted(async () => {
         </span>
         <input
           type="checkbox"
-          :checked="lockEnabled"
+          :checked="lockEnabled || lockMode === 'password'"
           :disabled="!lockAvailable"
           @change="setLockEnabled(($event.target as HTMLInputElement).checked)"
         />
