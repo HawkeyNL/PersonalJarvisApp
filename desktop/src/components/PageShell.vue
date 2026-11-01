@@ -33,6 +33,6 @@ h1 { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
 </style>
 
 <style>
-/* Zero specificity: slotted paragraphs (crumb, subtitle) keep their own margins. */
+/* Lowest specificity: slotted paragraphs (crumb, subtitle) keep their own margins. */
 :where(.pagehead > div) p { margin: 0; }
 </style>

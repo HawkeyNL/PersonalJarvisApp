@@ -93,9 +93,9 @@ test("the shell renders navigation only in app mode and the router uses the guar
   // Core status and the update link live in the sidebar, which only app mode renders.
   const sidebar = await readFile(new URL("../src/components/AppSidebar.vue", import.meta.url), "utf8");
   assert.match(sidebar, /<RouterLink v-if="updateLabel" v-slot="\{ href, navigate \}" to="\/settings" custom>/);
-  // Home is the screen shown before sign-in: it links to no app page itself.
+  // Home is the screen shown before sign-in: it has no Settings link.
   const home = await readFile(new URL("../src/views/Home.vue", import.meta.url), "utf8");
-  assert.doesNotMatch(home, /to="\/settings"/);
+  assert.doesNotMatch(home, /to="'?\/settings/);
   const router = await readFile(new URL("../src/router/index.ts", import.meta.url), "utf8");
   assert.match(router, /router\.beforeEach\(shellGuard\(/);
 });
