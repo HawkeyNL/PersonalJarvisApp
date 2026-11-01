@@ -3,15 +3,17 @@ import { DATA_SETS, devDataSet, setDevDataSet, type DataSet } from "../../tradin
 
 // Dev builds only: swap the trading screens' data at the API boundary.
 // Plain chrome on purpose, so it never reads as part of the design.
+withDefaults(defineProps<{ sets?: readonly DataSet[] }>(), { sets: () => DATA_SETS });
 const dev = import.meta.env.DEV;
 const LABEL: Record<DataSet, string> = {
   live: "Live", demo: "Demo data", worst: "Worst case", empty: "Empty", stale: "Stale", offline: "Not connected", loading: "Loading",
+  disabled: "Off", paused: "Paused",
 };
 </script>
 
 <template>
   <div v-if="dev" class="dev-toggle" role="group" aria-label="Dev data (not in production builds)">
-    <button v-for="set in DATA_SETS" :key="set" type="button" :aria-pressed="devDataSet === set" @click="setDevDataSet(set)">
+    <button v-for="set in sets" :key="set" type="button" :aria-pressed="devDataSet === set" @click="setDevDataSet(set)">
       {{ LABEL[set] }}
     </button>
   </div>

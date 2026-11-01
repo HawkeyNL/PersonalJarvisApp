@@ -5,6 +5,7 @@ import TradingDesk from "../views/TradingDesk.vue";
 import TradingStocks from "../views/TradingStocks.vue";
 import TradingStock from "../views/TradingStock.vue";
 import TradingPositions from "../views/TradingPositions.vue";
+import TradingMemecoin from "../views/TradingMemecoin.vue";
 import Health from "../views/Health.vue";
 import Settings from "../views/Settings.vue";
 import Context from "../views/Context.vue";
@@ -21,6 +22,6 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: buildRoutes({
     home: Home, conversations: Conversations, agents: Agents, integrations: Integrations, health: Health,
-    memory: Memory, trading: Trading, desk: TradingDesk, stocks: TradingStocks, stock: TradingStock, positions: TradingPositions, tasks: Tasks, context: Context, settings: Settings, soon: ComingSoon,
+    memory: Memory, trading: Trading, desk: TradingDesk, stocks: TradingStocks, stock: TradingStock, positions: TradingPositions, memecoin: TradingMemecoin, tasks: Tasks, context: Context, settings: Settings, soon: ComingSoon,
   }),
 });

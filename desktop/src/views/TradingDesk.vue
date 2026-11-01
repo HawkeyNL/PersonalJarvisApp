@@ -127,8 +127,9 @@ const changeTone = computed(() => (signTone(rangeRatio.value) === "neg" ? "neg" 
           <RouterLink to="/trading/stocks" class="ghost-btn sm" style="align-self: flex-start">Open stocks</RouterLink>
         </article>
         <article class="td-card">
-          <div class="td-card-head"><h3>Memecoin</h3><span class="td-badge">Not built yet</span></div>
-          <p class="td-note">The memecoin pot (Solana, paper first) is not built yet. Nothing runs.</p>
+          <div class="td-card-head"><h3>Memecoin</h3><span class="td-badge">Paper only</span></div>
+          <p class="td-note">A paper simulation on Solana market data, off by default. No wallet, no real money.</p>
+          <RouterLink to="/trading/memecoin" class="ghost-btn sm" style="align-self: flex-start">Open memecoin</RouterLink>
         </article>
         <article class="td-card">
           <div class="td-card-head"><h3>Futures</h3><span class="td-badge">Later</span></div>

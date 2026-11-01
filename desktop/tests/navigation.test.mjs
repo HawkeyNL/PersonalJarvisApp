@@ -4,7 +4,7 @@ import {createMemoryHistory, createRouter} from "vue-router";
 
 import {NAV, PAGES, REDIRECTS, ariaCurrent, buildRoutes, tasksNode, tasksPath} from "../src/navigation.ts";
 
-const VIEWS = ["home", "conversations", "agents", "integrations", "health", "memory", "trading", "desk", "stocks", "stock", "positions", "tasks", "context", "settings", "soon"];
+const VIEWS = ["home", "conversations", "agents", "integrations", "health", "memory", "trading", "desk", "stocks", "stock", "positions", "memecoin", "tasks", "context", "settings", "soon"];
 const stub = name => ({name, render: () => null});
 
 async function routerAt(path) {
@@ -69,7 +69,7 @@ test("sub-paths and hub-only pages highlight their parent entry", async () => {
 test("placeholders say what is missing and carry no sample data", () => {
   const soon = PAGES.filter(p => p.view === "soon");
   assert.deepEqual(soon.map(p => p.path).sort(), [
-    "/content", "/notifications", "/trading/autonomy", "/trading/futures", "/trading/memecoin",
+    "/content", "/notifications", "/trading/autonomy", "/trading/futures",
   ]);
   for (const page of soon) {
     assert.deepEqual(Object.keys(page.props).sort(), ["detail", "icon", "title"], page.path);
