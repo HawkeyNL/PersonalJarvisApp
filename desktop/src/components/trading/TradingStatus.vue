@@ -33,7 +33,7 @@ const emit = defineEmits<{ retry: [] }>();
       <span><strong>Prices are {{ ageText(state.ageMs) }} old.</strong> Core got no newer data from IBKR; values may be off.</span>
       <button type="button" class="ghost-btn sm" @click="emit('retry')">Try again</button>
     </div>
-    <slot :data="state.data" :empty="state.kind === 'empty'" />
+    <slot :data="state.data" :empty="state.kind === 'empty' || (state.kind === 'stale' && state.empty)" />
   </template>
 </template>
 

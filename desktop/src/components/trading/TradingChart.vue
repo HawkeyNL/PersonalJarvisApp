@@ -17,14 +17,16 @@ const props = withDefaults(defineProps<{
 Chart.register(LineController, LineElement, PointElement, BarController, BarElement, CategoryScale, LinearScale, Tooltip, Filler);
 
 // sRGB values of tokens.css (--chart-accent, --positive-solid, --negative-solid,
-// --text-secondary, --separator, --border-strong, --border) plus a translucent
+// --chart-ma, --text-secondary, --separator, --border-strong, --border) plus a translucent
 // accent fill so volume bars show through. Chart.js cannot read CSS variables.
 const PALETTE = {
-  light: { accent: "#1c65c8", fill: "rgb(28 101 200 / 0.08)", up: "#0a8282", down: "#c9690c", text: "#565b62", grid: "#e4e6e9", strong: "#82878c", vol: "#d5d8db" },
-  dark: { accent: "#70a6f5", fill: "rgb(112 166 245 / 0.12)", up: "#339797", down: "#d58042", text: "#b3b8be", grid: "#23272b", strong: "#6d7279", vol: "#32363b" },
+  light: { accent: "#1c65c8", fill: "rgb(28 101 200 / 0.08)", up: "#0a8282", down: "#c9690c", ma: "#7347af", text: "#565b62", grid: "#e4e6e9", strong: "#82878c", vol: "#d5d8db" },
+  dark: { accent: "#70a6f5", fill: "rgb(112 166 245 / 0.12)", up: "#339797", down: "#d58042", ma: "#b699eb", text: "#b3b8be", grid: "#23272b", strong: "#6d7279", vol: "#32363b" },
 };
 
 const canvas = ref<HTMLCanvasElement | null>(null);
+/** The values table renders only while open: up to 5000 rows otherwise. */
+const tableOpen = ref(false);
 let chart: Chart | undefined;
 
 const intraday = computed(() => {
@@ -74,8 +76,13 @@ function render() {
   const p = palette();
   const bars = props.bars;
   const close = bars.map((b) => chartNumber(b.c));
-  const up = bars.map((b) => (chartNumber(b.c) ?? 0) >= (chartNumber(b.o) ?? 0));
-  const color = up.map((u) => (u ? p.up : p.down));
+  // Rising, falling, or neutral when open or close is missing (never "0").
+  const dir = bars.map((b) => {
+    const o = chartNumber(b.o);
+    const c = chartNumber(b.c);
+    return o === null || c === null ? 0 : c >= o ? 1 : -1;
+  });
+  const color = dir.map((d) => (d > 0 ? p.up : d < 0 ? p.down : p.strong));
   const candle = props.mode === "candle";
 
   /** A floating bar from two prices; a gap when either is missing. */
@@ -90,15 +97,15 @@ function render() {
       { type: "bar", label: "Open–close", data: bars.map((b) => span(b.o, b.c)), backgroundColor: color, barPercentage: 0.7, categoryPercentage: 0.9, minBarLength: 1, grouped: false, order: 1 },
     ]
     : [{ type: "line", label: "Close", data: close, borderColor: p.accent, backgroundColor: p.fill, fill: "start", borderWidth: 2, pointRadius: 0, pointHoverRadius: 3, tension: 0 }];
-  // Short average solid in --negative-solid, long one dashed in --text-secondary.
+  // Short average solid in --chart-ma, long one dashed in --text-secondary.
   props.ma.forEach((n) => datasets.push({
-    type: "line", label: `MA ${n}`, data: movingAverage(close, n), borderColor: n >= 200 ? p.text : p.down, borderWidth: 1.5,
+    type: "line", label: `MA ${n}`, data: movingAverage(close, n), borderColor: n >= 200 ? p.text : p.ma, borderWidth: 1.5,
     borderDash: n >= 200 ? [5, 4] : [], pointRadius: 0, pointHoverRadius: 0, fill: false, order: 0,
   }));
   const vols = bars.map((b) => chartNumber(b.v));
-  const maxVol = Math.max(0, ...vols.map((v) => v ?? 0));
+  const maxVol = vols.reduce<number>((max, v) => (v !== null && v > max ? v : max), 0);
   if (props.volume) {
-    datasets.push({ type: "bar", label: "Volume", data: vols, backgroundColor: up.map((u) => (u ? p.strong : p.vol)), yAxisID: "vol", grouped: false, order: 3 });
+    datasets.push({ type: "bar", label: "Volume", data: vols, backgroundColor: dir.map((d) => (d > 0 ? p.strong : p.vol)), yAxisID: "vol", grouped: false, order: 3 });
   }
 
   chart = new Chart(canvas.value, {
@@ -151,9 +158,9 @@ onBeforeUnmount(() => {
   <div class="td-chart" :style="{ height: `${height}px` }">
     <canvas ref="canvas" role="img" :aria-label="label" />
   </div>
-  <details class="td-chart-table">
+  <details class="td-chart-table" @toggle="tableOpen = ($event.target as HTMLDetailsElement).open">
     <summary>Show the values as a table</summary>
-    <div class="scroll">
+    <div v-if="tableOpen" class="scroll">
       <table>
         <thead>
           <tr><th scope="col">Time</th><template v-if="mode === 'candle'"><th scope="col">Open</th><th scope="col">High</th><th scope="col">Low</th></template><th scope="col">{{ mode === "candle" ? "Close" : "Value" }}</th><th v-if="volume" scope="col">Volume</th></tr>

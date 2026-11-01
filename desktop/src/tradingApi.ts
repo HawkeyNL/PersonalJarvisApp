@@ -5,25 +5,19 @@ import { ref, watch, type Ref } from "vue";
 import { getJsonAuth } from "./api";
 import { currentAuthStatus } from "./auth";
 import {
-  BAR_RANGES, HISTORY_RANGES, dataState, failureState,
-  type BarRange, type Freshness, type HistoryRange, type InstrumentBars, type Portfolio, type PortfolioHistory, type TradingState,
+  BAR_RANGES, HISTORY_RANGES, dataState, failureState, parseConid,
+  type BarRange, type Freshness, type HistoryRange, type TradingState,
 } from "./trading";
 
-/** A conid from a route or a response: a positive safe integer, else null. */
-export function parseConid(value: unknown): number | null {
-  const n = typeof value === "string" && /^\d{1,12}$/.test(value) ? Number(value) : value;
-  return typeof n === "number" && Number.isSafeInteger(n) && n > 0 ? n : null;
-}
-
 export const tradingApi = {
-  portfolio: () => getJsonAuth<Portfolio>("/v1/trading/portfolio"),
+  portfolio: () => getJsonAuth<unknown>("/v1/trading/portfolio"),
   history: (range: HistoryRange) => {
     if (!HISTORY_RANGES.includes(range)) throw new Error("invalid range");
-    return getJsonAuth<PortfolioHistory>(`/v1/trading/portfolio/history?range=${range}`);
+    return getJsonAuth<unknown>(`/v1/trading/portfolio/history?range=${range}`);
   },
   bars: (conid: number, range: BarRange) => {
     if (parseConid(conid) === null || !BAR_RANGES.includes(range)) throw new Error("invalid instrument request");
-    return getJsonAuth<InstrumentBars>(`/v1/trading/instruments/${conid}/bars?range=${range}`);
+    return getJsonAuth<unknown>(`/v1/trading/instruments/${conid}/bars?range=${range}`);
   },
 };
 
@@ -56,20 +50,13 @@ export function setDevDataSet(set: DataSet): void {
 
 type Fixtures = typeof import("./tradingFixtures");
 
-/** Shape check at the boundary: an older or broken Core must not crash a screen. */
-const fresh = (x: unknown): x is Freshness =>
-  typeof x === "object" && x !== null && typeof (x as Freshness).as_of === "string" && typeof (x as Freshness).source === "string";
-export const isPortfolio = (x: unknown): x is Portfolio =>
-  fresh(x) && Array.isArray((x as Portfolio).positions) && (x as Portfolio).positions.every((p) => parseConid(p?.conid) !== null);
-export const isHistory = (x: unknown): x is PortfolioHistory => fresh(x) && Array.isArray((x as PortfolioHistory).points);
-export const isBars = (x: unknown): x is InstrumentBars => fresh(x) && Array.isArray((x as InstrumentBars).bars);
-
 /** Load one trading read into a TradingState, again whenever `key` or the dev
  *  data set changes. Only the newest request may set the state. */
 export function useTradingRead<T extends Freshness>(opts: {
   live: () => Promise<unknown>;
   fixture: (f: Fixtures, set: FixtureSet) => unknown;
-  valid: (x: unknown) => x is T;
+  /** Response guard from trading.ts (readPortfolio, ...); null = invalid. */
+  read: (x: unknown) => T | null;
   isEmpty: (data: T) => boolean;
   key?: () => unknown;
 }): { state: Ref<TradingState<T>>; reload: () => Promise<void> } {
@@ -93,8 +80,8 @@ export function useTradingRead<T extends Freshness>(opts: {
     state.value = { kind: "loading" };
     let next: TradingState<T>;
     try {
-      const raw = await fetchRaw();
-      next = opts.valid(raw) ? dataState(raw, opts.isEmpty, Date.now()) : { kind: "error", reason: "failed" };
+      const data = opts.read(await fetchRaw());
+      next = data ? dataState(data, opts.isEmpty, Date.now()) : { kind: "error", reason: "failed" };
     } catch (error) {
       next = failureState(error);
     }

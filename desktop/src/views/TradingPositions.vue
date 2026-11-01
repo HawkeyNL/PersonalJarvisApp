@@ -4,15 +4,15 @@ import JvTopBar from "../components/jv/JvTopBar.vue";
 import DevDataToggle from "../components/trading/DevDataToggle.vue";
 import TradingStatus from "../components/trading/TradingStatus.vue";
 import "../components/trading/trading.css";
-import { asOfText, formatDecimal, formatMoney, formatPrice, signTone, sourceLabel, type Portfolio } from "../trading";
-import { isPortfolio, tradingApi, useTradingRead } from "../tradingApi";
+import { asOfText, readPortfolio, formatDecimal, formatMoney, formatPrice, signTone, sourceLabel, type Portfolio } from "../trading";
+import { tradingApi, useTradingRead } from "../tradingApi";
 
 // Every open position in the IBKR account, all asset classes. Orders are not
 // part of the read-only connection, so that section says so.
 const { state, reload } = useTradingRead<Portfolio>({
   live: tradingApi.portfolio,
   fixture: (f, set) => f.portfolioFixture(set),
-  valid: isPortfolio,
+  read: readPortfolio,
   isEmpty: (p) => p.positions.length === 0,
 });
 </script>

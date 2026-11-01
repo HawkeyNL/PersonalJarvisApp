@@ -5,17 +5,17 @@ import DevDataToggle from "../components/trading/DevDataToggle.vue";
 import TradingStatus from "../components/trading/TradingStatus.vue";
 import "../components/trading/trading.css";
 import {
-  asOfText, chartNumber, decimalSign, formatDecimal, formatMoney, formatPercent, signTone, sourceLabel,
+  asOfText, chartNumber, readPortfolio, decimalSign, formatDecimal, formatMoney, formatPercent, signTone, sourceLabel,
   type AllocationTarget, type Portfolio, type Position,
 } from "../trading";
-import { isPortfolio, tradingApi, useTradingRead } from "../tradingApi";
+import { tradingApi, useTradingRead } from "../tradingApi";
 
 // Stocks pot: holdings, allocation against the owner's targets, the monthly
 // deposit and dividends. Everything comes from GET /v1/trading/portfolio.
 const { state, reload } = useTradingRead<Portfolio>({
   live: tradingApi.portfolio,
   fixture: (f, set) => f.portfolioFixture(set),
-  valid: isPortfolio,
+  read: readPortfolio,
   isEmpty: (p) => p.positions.length === 0 && decimalSign(p.net_liquidation) === 0,
 });
 

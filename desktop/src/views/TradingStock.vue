@@ -9,10 +9,11 @@ import TradingChart from "../components/trading/TradingChart.vue";
 import TradingStatus from "../components/trading/TradingStatus.vue";
 import "../components/trading/trading.css";
 import {
-  BAR_RANGES, NOTE_LABEL, asOfText, changePercent, formatDecimal, formatMoney, formatPrice, signTone, sourceLabel,
+  BAR_RANGES, NOTE_LABEL, asOfText, changeRatio, formatDecimal, formatMoney, formatPercent, formatPrice, parseConid, readBars, readPortfolio,
+  signTone, sourceLabel,
   type BarRange, type InstrumentBars, type Portfolio,
 } from "../trading";
-import { isBars, isPortfolio, parseConid, tradingApi, useTradingRead } from "../tradingApi";
+import { tradingApi, useTradingRead } from "../tradingApi";
 
 // One instrument: price chart (line or candles, 1D–5Y, moving averages,
 // volume), Jarvis's notes labelled by kind, and your position if you hold it.
@@ -28,25 +29,25 @@ const MODES = [{ id: "line", label: "Line" }, { id: "candle", label: "Candles" }
 const { state: bars, reload } = useTradingRead<InstrumentBars>({
   live: () => (conid.value === null ? Promise.reject(new Error("invalid conid")) : tradingApi.bars(conid.value, range.value)),
   fixture: (f, set) => f.barsFixture(set, conid.value ?? 0, range.value),
-  valid: isBars,
+  read: readBars,
   isEmpty: (b) => b.bars.length === 0,
   key: () => [conid.value, range.value],
 });
 const { state: portfolio } = useTradingRead<Portfolio>({
   live: tradingApi.portfolio,
   fixture: (f, set) => f.portfolioFixture(set),
-  valid: isPortfolio,
+  read: readPortfolio,
   isEmpty: () => false,
 });
 
 const data = computed(() => (bars.value.kind === "data" || bars.value.kind === "stale" ? bars.value.data : null));
 const title = computed(() => data.value?.name ?? data.value?.symbol ?? (conid.value ? `Instrument ${conid.value}` : "Unknown instrument"));
 const last = computed(() => data.value?.bars[data.value.bars.length - 1]);
-const change = computed(() => (data.value && last.value ? changePercent(data.value.bars[0].o, last.value.c) : null));
+const changeRaw = computed(() => (data.value && last.value ? changeRatio(data.value.bars[0].o, last.value.c) : null));
 const barCount = computed(() => data.value?.bars.length ?? 0);
 const ma = computed(() => [show.value.ma50 && 50, show.value.ma200 && 200].filter((n): n is number => !!n && n <= barCount.value));
 const hasVolume = computed(() => data.value?.bars.some((b) => b.v !== undefined) ?? false);
-const chartLabel = computed(() => `${data.value?.symbol ?? "Price"}, ${range.value}: ${change.value ?? "no data"}`);
+const chartLabel = computed(() => `${data.value?.symbol ?? "Price"}, ${range.value}: ${changeRaw.value === null ? "no change data" : formatPercent(changeRaw.value)}`);
 const position = computed(() =>
   portfolio.value.kind === "data" || portfolio.value.kind === "stale" ? portfolio.value.data.positions.find((p) => p.conid === conid.value) : undefined,
 );
@@ -69,7 +70,7 @@ const noteTime = (iso: string) => {
           <p v-if="data" class="td-sub td-mono">{{ data.symbol }}<template v-if="data.exchange"> · {{ data.exchange }}</template></p>
           <p v-if="data && last" class="price">
             <span class="td-big">{{ formatPrice(last.c, data.currency) }}</span>
-            <span class="td-num" :class="change?.startsWith('−') ? 'td-neg' : 'td-pos'">{{ change }} over {{ range }}</span>
+            <span v-if="changeRaw !== null" class="td-num" :class="`td-${signTone(changeRaw)}`">{{ formatPercent(changeRaw) }} over {{ range }}</span>
           </p>
         </div>
       </header>
@@ -81,13 +82,13 @@ const noteTime = (iso: string) => {
             <JvSegmented v-model="mode" :items="MODES" label="Chart type" controls="stock-chart" class="td-seg" />
           </div>
           <div class="toggles" role="group" aria-label="Indicators">
-            <button type="button" class="td-toggle" :aria-pressed="show.ma50" :disabled="barCount < 50" :title="barCount < 50 ? `Needs 50 bars; this period has ${barCount}` : undefined" @click="show.ma50 = !show.ma50">
+            <button type="button" class="td-toggle" :aria-pressed="show.ma50 && barCount >= 50" :disabled="barCount < 50" :title="barCount < 50 ? `Needs 50 bars; this period has ${barCount}` : undefined" @click="show.ma50 = !show.ma50">
               <span class="swatch ma50" aria-hidden="true"></span>Average 50
             </button>
-            <button type="button" class="td-toggle" :aria-pressed="show.ma200" :disabled="barCount < 200" :title="barCount < 200 ? `Needs 200 bars; this period has ${barCount}` : undefined" @click="show.ma200 = !show.ma200">
+            <button type="button" class="td-toggle" :aria-pressed="show.ma200 && barCount >= 200" :disabled="barCount < 200" :title="barCount < 200 ? `Needs 200 bars; this period has ${barCount}` : undefined" @click="show.ma200 = !show.ma200">
               <span class="swatch ma200" aria-hidden="true"></span>Average 200
             </button>
-            <button type="button" class="td-toggle" :aria-pressed="show.volume" :disabled="!hasVolume" @click="show.volume = !show.volume">
+            <button type="button" class="td-toggle" :aria-pressed="show.volume && hasVolume" :disabled="!hasVolume" @click="show.volume = !show.volume">
               <span class="swatch" aria-hidden="true"></span>Volume
             </button>
           </div>
@@ -143,7 +144,7 @@ const noteTime = (iso: string) => {
 .detail { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 20px; align-items: start; }
 .side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .toggles { display: flex; gap: 6px; flex-wrap: wrap; }
-.swatch.ma50 { color: var(--negative-solid); }
+.swatch.ma50 { color: var(--chart-ma); }
 .swatch.ma200 { color: var(--text-secondary); border-top-style: dashed; }
 .note { display: flex; flex-direction: column; gap: 6px; }
 .note .text { margin: 0; font-size: var(--fs-13); line-height: 1.55; color: var(--text-primary); overflow-wrap: anywhere; }

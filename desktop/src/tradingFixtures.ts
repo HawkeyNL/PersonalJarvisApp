@@ -7,7 +7,7 @@ import type { FixtureSet } from "./tradingApi";
 
 const fresh = () => new Date(Date.now() - 60_000).toISOString();
 const old = () => new Date(Date.now() - 3 * 3_600_000).toISOString();
-const meta = (set: FixtureSet) => ({ source: "IBKR", delay_minutes: set === "worst" ? 0 : 15, as_of: set === "stale" ? old() : fresh() });
+const meta = (set: FixtureSet) => ({ source: "IBKR", delay_minutes: set === "worst" ? undefined : 15, as_of: set === "stale" ? old() : fresh() });
 
 const pos = (p: Partial<Position> & Pick<Position, "conid" | "symbol" | "quantity" | "market_value">): Position =>
   ({ asset_class: "STK", currency: "EUR", avg_cost: "0", last_price: "0", ...p });

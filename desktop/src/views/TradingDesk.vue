@@ -8,17 +8,17 @@ import TradingChart from "../components/trading/TradingChart.vue";
 import TradingStatus from "../components/trading/TradingStatus.vue";
 import "../components/trading/trading.css";
 import {
-  HISTORY_RANGES, asOfText, changePercent, decimalSign, formatMoney, formatPercent, onTarget, signTone, sourceLabel,
+  HISTORY_RANGES, asOfText, changeRatio, decimalSign, readHistory, readPortfolio, formatMoney, formatPercent, onTarget, signTone, sourceLabel,
   type HistoryRange, type Portfolio, type PortfolioHistory,
 } from "../trading";
-import { isHistory, isPortfolio, tradingApi, useTradingRead } from "../tradingApi";
+import { tradingApi, useTradingRead } from "../tradingApi";
 
 // Trading dashboard: every pot on one desk. Read-only; only the IBKR stocks
 // pot has data, the others say plainly that they are not built yet.
 const { state: portfolio, reload: reloadPortfolio } = useTradingRead<Portfolio>({
   live: tradingApi.portfolio,
   fixture: (f, set) => f.portfolioFixture(set),
-  valid: isPortfolio,
+  read: readPortfolio,
   isEmpty: (p) => p.positions.length === 0 && decimalSign(p.net_liquidation) === 0,
 });
 
@@ -27,19 +27,20 @@ const RANGES = HISTORY_RANGES.map((id) => ({ id, label: id === "ALL" ? "All" : i
 const { state: history, reload: reloadHistory } = useTradingRead<PortfolioHistory>({
   live: () => tradingApi.history(range.value),
   fixture: (f, set) => f.historyFixture(set, range.value),
-  valid: isHistory,
+  read: readHistory,
   isEmpty: (h) => h.points.length < 2,
   key: () => range.value,
 });
 
 const historyData = computed(() => (history.value.kind === "data" || history.value.kind === "stale" ? history.value.data : null));
 const series = computed(() => (historyData.value?.points ?? []).map((p) => ({ t: p.t, o: p.value, h: p.value, l: p.value, c: p.value })));
-const rangeChange = computed(() => {
+const rangeRatio = computed(() => {
   const points = historyData.value?.points ?? [];
-  return points.length > 1 ? changePercent(points[0].value, points[points.length - 1].value) : null;
+  return points.length > 1 ? changeRatio(points[0].value, points[points.length - 1].value) : null;
 });
+const rangeChange = computed(() => (rangeRatio.value === null ? null : formatPercent(rangeRatio.value)));
 const chartLabel = computed(() => `Total value over ${range.value === "ALL" ? "all time" : range.value}: ${rangeChange.value ?? "no change data"}`);
-const changeTone = computed(() => (rangeChange.value?.startsWith("−") ? "neg" : "acc"));
+const changeTone = computed(() => (signTone(rangeRatio.value) === "neg" ? "neg" : "acc"));
 </script>
 
 <template>

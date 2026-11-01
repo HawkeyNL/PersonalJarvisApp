@@ -17,8 +17,9 @@ export type Decimal = string;
 export type Freshness = {
   /** Display name of the data source, e.g. "IBKR". */
   source: string;
-  /** Price delay of the market-data subscription; 0 is real time. */
-  delay_minutes: number;
+  /** Price delay of the market-data subscription; 0 is real time. Absent:
+   *  unknown, shown as "delay unknown", never as real time. */
+  delay_minutes?: number;
   /** ISO 8601 time of Core's last successful read from the broker. */
   as_of: string;
 };
@@ -166,25 +167,38 @@ export function formatPercent(value: unknown, { sign = true, places = 2 } = {}):
 
 const CURRENCY = /^[A-Z]{3}$/;
 
-/** Money in its currency: "€23,820.00", "+$3.23", "−€63.10". Fraction digits
- *  follow the currency (JPY 0, EUR 2) unless `places` is given. */
-export function formatMoney(value: unknown, currency: string, { sign = false, places }: { sign?: boolean; places?: number } = {}): string {
-  const raw = parse(value);
-  if (!raw) return DASH;
-  let symbol = currency;
-  let digits = 2;
-  let after = !CURRENCY.test(currency); // not an ISO code: show it as text after the amount
-  if (CURRENCY.test(currency)) {
+type CurrencyStyle = { symbol: string; after: boolean; digits: number };
+const currencyStyles = new Map<string, CurrencyStyle>();
+
+/** Symbol, position and fraction digits per ISO code, cached (Intl is slow to build). */
+function currencyStyle(code: string): CurrencyStyle {
+  let style = currencyStyles.get(code);
+  if (style) return style;
+  // Not an ISO code: show it as text after the amount.
+  style = { symbol: code, after: true, digits: 2 };
+  if (CURRENCY.test(code)) {
     try {
-      const nf = new Intl.NumberFormat("en", { style: "currency", currency, currencyDisplay: "narrowSymbol" });
+      const nf = new Intl.NumberFormat("en", { style: "currency", currency: code, currencyDisplay: "narrowSymbol" });
       const parts = nf.formatToParts(1);
-      symbol = parts.find((part) => part.type === "currency")?.value ?? currency;
-      after = parts.findIndex((part) => part.type === "currency") > parts.findIndex((part) => part.type === "integer");
-      digits = nf.resolvedOptions().maximumFractionDigits ?? 2;
+      style = {
+        symbol: parts.find((part) => part.type === "currency")?.value ?? code,
+        after: parts.findIndex((part) => part.type === "currency") > parts.findIndex((part) => part.type === "integer"),
+        digits: nf.resolvedOptions().maximumFractionDigits ?? 2,
+      };
     } catch {
-      /* unknown code: show it as text */
+      /* unknown code: keep it as text */
     }
   }
+  if (currencyStyles.size < 200) currencyStyles.set(code, style);
+  return style;
+}
+
+/** Money in its currency: "€23,820.00", "+$3.23", "−€63.10". Fraction digits
+ *  follow the currency (JPY 0, EUR 2) unless `places` is given. */
+export function formatMoney(value: unknown, currency: unknown, { sign = false, places }: { sign?: boolean; places?: number } = {}): string {
+  const raw = parse(value);
+  if (!raw) return DASH;
+  const { symbol, after, digits } = currencyStyle(typeof currency === "string" ? currency.slice(0, 12) : "");
   const p = round(raw, places ?? digits);
   const body = group(p.int) + (p.frac ? `.${p.frac}` : "");
   const prefix = isZero(p) ? "" : p.neg ? "−" : sign ? "+" : "";
@@ -194,7 +208,7 @@ export function formatMoney(value: unknown, currency: string, { sign = false, pl
 
 /** A price: sub-cent prices keep their digits (up to 8), others follow the
  *  currency, so a $0.0004 token never shows as "$0.00". */
-export function formatPrice(value: unknown, currency: string): string {
+export function formatPrice(value: unknown, currency: unknown): string {
   const digits = typeof value === "string" ? (value.split(".")[1] ?? "").replace(/0+$/, "").length : 0;
   return formatMoney(value, currency, digits > 2 ? { places: Math.min(8, digits) } : {});
 }
@@ -225,9 +239,14 @@ export function movingAverage(closes: (number | null)[], n: number): (number | n
   });
 }
 
-/** "IBKR · delayed 15 min" or "IBKR · real time". */
+/** A delay Core actually reported: a finite number of minutes, 0 or more. */
+export const knownDelay = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
+
+/** "IBKR · delayed 15 min", "IBKR · real time", or "IBKR · delay unknown"
+ *  when Core did not say: never claim real time without data. */
 export function sourceLabel(meta: Pick<Freshness, "source" | "delay_minutes">): string {
-  const delay = meta.delay_minutes > 0 ? `delayed ${meta.delay_minutes} min` : "real time";
+  const d = meta.delay_minutes;
+  const delay = !knownDelay(d) ? "delay unknown" : d > 0 ? `delayed ${Math.round(d)} min` : "real time";
   return `${meta.source || "Unknown source"} · ${delay}`;
 }
 
@@ -248,7 +267,7 @@ export type TradingState<T> =
   | { kind: "error"; reason: "signin" | "failed" }
   | { kind: "empty"; data: T }
   | { kind: "data"; data: T }
-  | { kind: "stale"; data: T; ageMs: number };
+  | { kind: "stale"; data: T; ageMs: number; empty: boolean };
 
 type Failure = Extract<TradingState<never>, { kind: "not-connected" | "error" }>;
 
@@ -264,13 +283,15 @@ export function failureState(error: unknown): Failure {
   return { kind: "error", reason: "failed" };
 }
 
-/** State for a successful read: empty when `isEmpty`, stale when Core's read
- *  is old or its time is unreadable. */
+/** State for a successful read: stale when Core's read is old or its time is
+ *  unreadable (checked first: an old "nothing" is not a fresh "nothing"),
+ *  else empty when `isEmpty`, else data. */
 export function dataState<T extends Freshness>(data: T, isEmpty: (data: T) => boolean, now: number): TradingState<T> {
-  if (isEmpty(data)) return { kind: "empty", data };
   const at = Date.parse(data.as_of);
   const ageMs = Number.isNaN(at) ? Infinity : now - at;
-  return ageMs > STALE_AFTER_MS ? { kind: "stale", data, ageMs } : { kind: "data", data };
+  const empty = isEmpty(data);
+  if (ageMs > STALE_AFTER_MS) return { kind: "stale", data, ageMs, empty };
+  return empty ? { kind: "empty", data } : { kind: "data", data };
 }
 
 /** What the owner sees, and must do, when there is no trading data. */
@@ -303,11 +324,19 @@ export function asOfText(iso: string, now = Date.now()): string {
   return d.toLocaleString("en", today ? { hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-/** "+4.80%" change from the first to the last value; "—" when unknown. */
-export function changePercent(first: unknown, last: unknown): string {
+/** Percent change from the first to the last value as a decimal string
+ *  ("4.80"), for signTone and formatPercent; null when unknown. */
+export function changeRatio(first: unknown, last: unknown): string | null {
   const a = chartNumber(first);
   const b = chartNumber(last);
-  return a && b !== null ? formatPercent(((b / a - 1) * 100).toFixed(2)) : DASH;
+  if (!a || b === null) return null;
+  const pct = ((b / a - 1) * 100).toFixed(2);
+  return parse(pct) ? pct : null;
+}
+
+/** "+4.80%" change from the first to the last value; "—" when unknown. */
+export function changePercent(first: unknown, last: unknown): string {
+  return formatPercent(changeRatio(first, last));
 }
 
 /** "3 min", "2 h", "4 days" for a stale banner. */
@@ -327,4 +356,65 @@ export function onTarget(allocation: AllocationTarget[]): number {
     const goal = chartNumber(a.target_pct);
     return now !== null && goal !== null && Math.abs(now - goal) < 2;
   }).length;
+}
+
+// ---- response guards ----------------------------------------------------
+// Core's answer is checked before any screen sees it: an older or broken Core
+// yields an error state, never a crash. Lists are capped; a bar or history
+// point without finite prices is dropped rather than drawn as 0.
+
+export const LIMITS = { positions: 1000, bars: 5000, points: 5000, notes: 50, sources: 20, allocation: 50, dividends: 200 } as const;
+
+type Obj = Record<string, unknown>;
+const isObj = (x: unknown): x is Obj => typeof x === "object" && x !== null && !Array.isArray(x);
+const isStr = (x: unknown): x is string => typeof x === "string";
+const optStr = (x: unknown) => x === undefined || x === null || isStr(x);
+const isList = (x: unknown, max: number): x is unknown[] => Array.isArray(x) && x.length <= max;
+const optList = (x: unknown, max: number, each: (item: unknown) => boolean) =>
+  x === undefined || x === null || (isList(x, max) && x.every(each));
+const NOTE_KINDS: readonly unknown[] = ["fact", "calculation", "inference"];
+
+/** A conid from a route or a response: a positive safe integer, else null. */
+export function parseConid(value: unknown): number | null {
+  const n = typeof value === "string" && /^\d{1,12}$/.test(value) ? Number(value) : value;
+  return typeof n === "number" && Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
+/** source and as_of are required; delay_minutes is absent or a known delay. */
+export const isFresh = (x: unknown): x is Freshness & Obj =>
+  isObj(x) && isStr(x.source) && isStr(x.as_of) && (x.delay_minutes === undefined || knownDelay(x.delay_minutes));
+
+const isPosition = (p: unknown) =>
+  isObj(p) && parseConid(p.conid) !== null && isStr(p.symbol) && isStr(p.asset_class) && isStr(p.currency)
+  && isStr(p.quantity) && isStr(p.avg_cost) && isStr(p.last_price) && isStr(p.market_value)
+  && optStr(p.name) && optStr(p.exchange) && optStr(p.day_pnl) && optStr(p.day_change_pct) && optStr(p.unrealized_pnl) && optStr(p.weight_pct);
+const isAllocation = (a: unknown) => isObj(a) && isStr(a.label) && isStr(a.current_pct) && isStr(a.target_pct);
+const isDividend = (d: unknown) =>
+  isObj(d) && parseConid(d.conid) !== null && isStr(d.symbol) && isStr(d.ex_date) && isStr(d.currency) && optStr(d.pay_date) && optStr(d.amount);
+const isDeposit = (m: unknown) =>
+  m === undefined || m === null || (isObj(m) && isStr(m.amount) && isStr(m.next_date) && Number.isInteger(m.day_of_month));
+const isNote = (n: unknown) =>
+  isObj(n) && isStr(n.t) && NOTE_KINDS.includes(n.kind) && isStr(n.text) && optList(n.sources, LIMITS.sources, isStr);
+
+export function readPortfolio(x: unknown): Portfolio | null {
+  if (!isFresh(x) || !isStr(x.base_currency) || !isStr(x.net_liquidation) || !isStr(x.cash)) return null;
+  if (![x.day_pnl, x.day_change_pct, x.total_pnl, x.total_return_pct, x.dividends_12m].every(optStr)) return null;
+  if (!isList(x.positions, LIMITS.positions) || !x.positions.every(isPosition)) return null;
+  if (!optList(x.allocation, LIMITS.allocation, isAllocation) || !optList(x.upcoming_dividends, LIMITS.dividends, isDividend)) return null;
+  return isDeposit(x.monthly_deposit) ? (x as unknown as Portfolio) : null;
+}
+
+export function readHistory(x: unknown): PortfolioHistory | null {
+  if (!isFresh(x) || !isStr(x.base_currency) || !isList(x.points, LIMITS.points)) return null;
+  const points = x.points.filter((p): p is { t: string; value: string } => isObj(p) && isStr(p.t) && chartNumber(p.value) !== null);
+  return { ...(x as unknown as PortfolioHistory), points };
+}
+
+export function readBars(x: unknown): InstrumentBars | null {
+  if (!isFresh(x) || parseConid(x.conid) === null || !isStr(x.symbol) || !isStr(x.currency)) return null;
+  if (!optStr(x.name) || !optStr(x.exchange) || !isList(x.bars, LIMITS.bars) || !optList(x.notes, LIMITS.notes, isNote)) return null;
+  const bars = x.bars
+    .filter((b): b is Bar => isObj(b) && isStr(b.t) && [b.o, b.h, b.l, b.c].every((v) => chartNumber(v) !== null))
+    .map((b) => (b.v === undefined || chartNumber(b.v) !== null ? b : { ...b, v: undefined }));
+  return { ...(x as unknown as InstrumentBars), bars };
 }
