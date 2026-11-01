@@ -165,7 +165,12 @@ struct MainTabs: View {
         switch item {
         case .jarvis: HomeView(model: model, unlocks: unlocks) { tab = .activity }
         case .trading: TradingPage(model: model)
-        case .activity: ActivityView(model: model, unlocks: unlocks) { item in if sheet == nil { sheet = .unlock(item) } }
+        case .activity:
+            ActivityView(model: model, unlocks: unlocks) { item in
+                guard sheet == nil else { return }
+                offered.insert(item.id)
+                sheet = .unlock(item)
+            }
         case .settings: SettingsView(model: model, inTabs: true)
         }
     }
