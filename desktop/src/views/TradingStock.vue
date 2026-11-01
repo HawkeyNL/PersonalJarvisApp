@@ -60,91 +60,98 @@ const noteTime = (iso: string) => {
 
 <template>
   <PageShell class="td-page" :title="title">
-    <template #crumb><p class="td-crumb"><RouterLink to="/trading">Trading</RouterLink> / <RouterLink to="/trading/stocks">Stocks</RouterLink></p></template>
+    <template #crumb><p class="td-crumb"><RouterLink to="/trading">Trading</RouterLink><span class="t-2"> / </span><RouterLink to="/trading/stocks">Stocks</RouterLink></p></template>
+    <template #badges>
+      <span v-if="data" class="mono t-2 ident">{{ data.symbol }}<template v-if="data.exchange"> · {{ data.exchange }}</template></span>
+    </template>
     <template #subtitle>
-      <p v-if="data" class="td-sub td-mono">{{ data.symbol }}<template v-if="data.exchange"> · {{ data.exchange }}</template></p>
       <p v-if="data && last" class="price">
-        <span class="td-big">{{ formatPrice(last.c, data.currency) }}</span>
-        <span v-if="changeRaw !== null" class="td-num" :class="`td-${signTone(changeRaw)}`">{{ formatPercent(changeRaw) }} over {{ range }}</span>
+        <span class="big">{{ formatPrice(last.c, data.currency) }}</span>
+        <span v-if="changeRaw !== null" class="num change" :class="`td-${signTone(changeRaw)}`">{{ formatPercent(changeRaw) }} over {{ range }}</span>
       </p>
     </template>
 
-      <div class="detail">
-        <section class="td-card" aria-label="Price chart">
-          <div class="td-card-head">
-            <JvSegmented v-model="range" :items="RANGES" label="Period" controls="stock-chart" class="td-seg" />
-            <JvSegmented v-model="mode" :items="MODES" label="Chart type" controls="stock-chart" class="td-seg" />
-          </div>
-          <div class="toggles" role="group" aria-label="Indicators">
-            <button type="button" class="td-toggle" :aria-pressed="show.ma50 && barCount >= 50" :disabled="barCount < 50" :title="barCount < 50 ? `Needs 50 bars; this period has ${barCount}` : undefined" @click="show.ma50 = !show.ma50">
-              <span class="swatch ma50" aria-hidden="true"></span>Average 50
-            </button>
-            <button type="button" class="td-toggle" :aria-pressed="show.ma200 && barCount >= 200" :disabled="barCount < 200" :title="barCount < 200 ? `Needs 200 bars; this period has ${barCount}` : undefined" @click="show.ma200 = !show.ma200">
-              <span class="swatch ma200" aria-hidden="true"></span>Average 200
-            </button>
-            <button type="button" class="td-toggle" :aria-pressed="show.volume && hasVolume" :disabled="!hasVolume" @click="show.volume = !show.volume">
-              <span class="swatch" aria-hidden="true"></span>Volume
-            </button>
-          </div>
-          <div id="stock-chart">
-            <TradingStatus :state="bars" what="the price history" compact @retry="reload">
-              <template #default="{ data: d, empty }">
-                <p v-if="empty" class="td-empty">No prices for this period. The market may not have traded yet.</p>
-                <TradingChart v-else :bars="d.bars" :mode="mode" :currency="d.currency" :label="chartLabel" :ma="ma" :volume="show.volume && hasVolume" />
-                <p class="td-note">Prices: {{ sourceLabel(d) }} · as of {{ asOfText(d.as_of) }}. Averages are over the bars of this period.</p>
-              </template>
-            </TradingStatus>
-          </div>
+    <div class="detail">
+      <section class="card td-col chart-card" aria-label="Price chart">
+        <div class="td-card-head">
+          <JvSegmented v-model="range" :items="RANGES" label="Period" controls="stock-chart" class="td-seg" />
+          <JvSegmented v-model="mode" :items="MODES" label="Chart type" controls="stock-chart" class="td-seg" />
+        </div>
+        <div class="toggles" role="group" aria-label="Indicators">
+          <button type="button" class="btn btn-sm" :class="show.ma50 && barCount >= 50 ? 'btn-quiet' : 'btn-secondary'" :aria-pressed="show.ma50 && barCount >= 50" :disabled="barCount < 50" :title="barCount < 50 ? `Needs 50 bars; this period has ${barCount}` : undefined" @click="show.ma50 = !show.ma50">
+            <span class="td-swatch ma50" aria-hidden="true"></span>Average 50
+          </button>
+          <button type="button" class="btn btn-sm" :class="show.ma200 && barCount >= 200 ? 'btn-quiet' : 'btn-secondary'" :aria-pressed="show.ma200 && barCount >= 200" :disabled="barCount < 200" :title="barCount < 200 ? `Needs 200 bars; this period has ${barCount}` : undefined" @click="show.ma200 = !show.ma200">
+            <span class="td-swatch ma200" aria-hidden="true"></span>Average 200
+          </button>
+          <button type="button" class="btn btn-sm" :class="show.volume && hasVolume ? 'btn-quiet' : 'btn-secondary'" :aria-pressed="show.volume && hasVolume" :disabled="!hasVolume" @click="show.volume = !show.volume">
+            <span class="td-swatch vol" aria-hidden="true"></span>Volume
+          </button>
+        </div>
+        <div id="stock-chart" class="td-col">
+          <TradingStatus :state="bars" what="the price history" compact @retry="reload">
+            <template #default="{ data: d, empty }">
+              <p v-if="empty" class="empty t-sm">No prices for this period. The market may not have traded yet.</p>
+              <TradingChart v-else :bars="d.bars" :mode="mode" :currency="d.currency" :label="chartLabel" :ma="ma" :volume="show.volume && hasVolume" />
+              <p class="td-note">Prices: {{ sourceLabel(d) }} · as of {{ asOfText(d.as_of) }}. Averages are over the bars of this period.</p>
+            </template>
+          </TradingStatus>
+        </div>
+      </section>
+
+      <aside class="side">
+        <section class="card td-col notes" aria-labelledby="stock-notes">
+          <h2 id="stock-notes">Jarvis notes</h2>
+          <template v-if="data?.notes?.length">
+            <div v-for="(n, i) in data.notes" :key="i" class="note">
+              <div class="td-card-head">
+                <span class="badge" :class="{ acc: n.kind === 'calculation', 'td-outline': n.kind === 'inference' }">{{ NOTE_LABEL[n.kind] ?? n.kind }}</span>
+                <span class="t-xs t-2">{{ noteTime(n.t) }}</span>
+              </div>
+              <p class="t-sm text">{{ n.text }}</p>
+              <p v-if="n.sources?.length" class="td-note">Sources: {{ n.sources.join(", ") }}</p>
+            </div>
+            <p class="td-note legend">Fact: from a source. Calculation: computed by code. AI inference: Jarvis's estimate, which can be wrong.</p>
+          </template>
+          <p v-else class="t-sm t-2">No notes from Jarvis for this period.</p>
         </section>
 
-        <aside class="side">
-          <section class="td-card" aria-labelledby="stock-notes">
-            <h2 id="stock-notes">Jarvis notes</h2>
-            <template v-if="data?.notes?.length">
-              <div v-for="(n, i) in data.notes" :key="i" class="note">
-                <div class="td-card-head">
-                  <span class="td-badge" :class="{ acc: n.kind === 'calculation', outline: n.kind === 'inference' }">{{ NOTE_LABEL[n.kind] ?? n.kind }}</span>
-                  <span class="td-small">{{ noteTime(n.t) }}</span>
-                </div>
-                <p class="text">{{ n.text }}</p>
-                <p v-if="n.sources?.length" class="td-small">Sources: {{ n.sources.join(", ") }}</p>
-              </div>
-              <p class="td-note">Fact: from a source. Calculation: computed by code. AI inference: Jarvis's estimate, which can be wrong.</p>
-            </template>
-            <p v-else class="td-note">No notes from Jarvis for this period.</p>
-          </section>
-
-          <section class="td-card" aria-labelledby="stock-position">
-            <h2 id="stock-position">Your position</h2>
-            <div v-if="position" class="wells">
-              <div><span class="td-small">Quantity</span><span class="td-num">{{ formatDecimal(position.quantity, { maxPlaces: 8 }) }}</span></div>
-              <div><span class="td-small">Avg. cost</span><span class="td-num">{{ formatPrice(position.avg_cost, position.currency) }}</span></div>
-              <div><span class="td-small">Value</span><span class="td-num">{{ formatMoney(position.market_value, base) }}</span></div>
-              <div><span class="td-small">Result</span><span class="td-num" :class="`td-${signTone(position.unrealized_pnl)}`">{{ formatMoney(position.unrealized_pnl, base, { sign: true }) }}</span></div>
-            </div>
-            <p v-else-if="portfolio.kind === 'data' || portfolio.kind === 'stale'" class="td-note">You do not hold this instrument.</p>
-            <p v-else-if="portfolio.kind === 'loading'" class="td-note">Loading your position…</p>
-            <p v-else class="td-note">Your position shows once Core reports your IBKR portfolio.</p>
-          </section>
-        </aside>
-      </div>
+        <section class="card td-col" aria-labelledby="stock-position">
+          <h2 id="stock-position">Your position</h2>
+          <div v-if="position" class="td-wells">
+            <div class="td-well"><span class="t-xs t-2">Quantity</span><span class="mono">{{ formatDecimal(position.quantity, { maxPlaces: 8 }) }}</span></div>
+            <div class="td-well"><span class="t-xs t-2">Avg. cost</span><span class="mono">{{ formatPrice(position.avg_cost, position.currency) }}</span></div>
+            <div class="td-well"><span class="t-xs t-2">Value</span><span class="mono">{{ formatMoney(position.market_value, base) }}</span></div>
+            <div class="td-well"><span class="t-xs t-2">Result</span><span class="mono" :class="`td-${signTone(position.unrealized_pnl)}`">{{ formatMoney(position.unrealized_pnl, base, { sign: true }) }}</span></div>
+          </div>
+          <p v-else-if="portfolio.kind === 'data' || portfolio.kind === 'stale'" class="t-sm t-2">You do not hold this instrument.</p>
+          <div v-else-if="portfolio.kind === 'loading'" class="td-wells" role="status" aria-busy="true">
+            <span class="sr-only">Loading your position…</span>
+            <span v-for="i in 4" :key="i" class="skel" style="height: 52px" aria-hidden="true"></span>
+          </div>
+          <p v-else class="t-sm t-2">Your position shows once Core reports your IBKR portfolio.</p>
+        </section>
+      </aside>
+    </div>
     <DevDataToggle />
   </PageShell>
 </template>
 
 <style scoped>
-.price { margin: 10px 0 0; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.detail { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 20px; align-items: start; }
-.side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.ident { overflow-wrap: anywhere; }
+.price { margin-top: 8px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.price .big { overflow-wrap: anywhere; }
+.change { font-weight: 500; }
+.detail { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.chart-card { flex: 999 1 620px; gap: 14px; }
+.side { flex: 1 1 340px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .toggles { display: flex; gap: 6px; flex-wrap: wrap; }
-.swatch.ma50 { color: var(--chart-ma); }
-.swatch.ma200 { color: var(--text-secondary); border-top-style: dashed; }
-.note { display: flex; flex-direction: column; gap: 6px; }
-.note .text { margin: 0; font-size: var(--fs-13); line-height: 1.55; color: var(--text-primary); overflow-wrap: anywhere; }
-.note p.td-small { margin: 0; }
-.wells { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.wells > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--r-10); background: var(--bg-sunken); min-width: 0; overflow-wrap: anywhere; }
-@media (max-width: 899px) {
-  .detail { grid-template-columns: minmax(0, 1fr); }
-}
+.td-swatch.ma50 { color: var(--chart-ma); }
+.td-swatch.ma200 { color: var(--text-secondary); border-top-style: dashed; }
+.td-swatch.vol { color: var(--border-strong); }
+.notes { gap: 14px; }
+.note { display: flex; flex-direction: column; gap: 4px; }
+.note .badge { align-self: flex-start; }
+.note .text { line-height: 1.55; overflow-wrap: anywhere; }
+.legend { padding-top: 12px; border-top: 1px solid var(--separator); }
 </style>

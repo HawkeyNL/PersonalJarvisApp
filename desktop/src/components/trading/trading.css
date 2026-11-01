@@ -1,65 +1,68 @@
-/* Shared layout for the trading screens (Dashboard, Stocks, Stock, Positions).
-   Instrument tokens only; prefixed td- so nothing leaks into other views. */
+/* Shared layout for the trading screens, on top of the canvas classes in
+   components.css (.card, .big, .tbl, .badge, .seg, .btn, .empty, .skel, .tile).
+   Only what that layer lacks lives here, prefixed td- so nothing leaks into
+   other views. Instrument tokens only. */
 /* Room below the content for the fixed dev-data toggle. */
 .main.td-page { padding-bottom: 96px; }
-.td-crumb { font-size: var(--fs-13); color: var(--text-secondary); margin-bottom: 4px; }
+:where(.td-page) :is(h2, h3, p) { margin: 0; }
+:where(.td-page) a { color: var(--accent-text); text-underline-offset: 3px; }
+.td-crumb { font-size: 13px; }
 .td-crumb a { color: var(--accent-text); text-decoration: none; }
-.td-sub, .td-source { margin: 6px 0 0; font-size: var(--fs-12); color: var(--text-secondary); }
-.td-note { margin: 0; font-size: var(--fs-12); color: var(--text-secondary); line-height: 1.5; }
-
-.td-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
-.td-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px; align-items: start; }
-.td-card {
-  min-width: 0; display: flex; flex-direction: column; gap: 12px; padding: 18px 20px;
-  border: 1px solid transparent; border-radius: var(--r-14); background: var(--bg-surface); box-shadow: var(--shadow-border);
-}
-.td-card.tight { padding: 0; gap: 0; }
-.td-card.tight > .td-card-head { padding: 18px 20px 8px; }
-.td-card h2 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text-primary); }
-.td-card h3 { margin: 0; font-size: var(--fs-14); font-weight: 600; color: var(--text-primary); }
-.td-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-.td-kpi { gap: 4px; }
-.td-label { font-size: var(--fs-13); color: var(--text-secondary); }
-.td-big {
-  font-size: 24px; font-weight: 600; color: var(--text-primary); line-height: 1.2;
-  font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
-}
-.td-small { font-size: var(--fs-12); color: var(--text-secondary); overflow-wrap: anywhere; }
-.td-num { font-variant-numeric: tabular-nums; }
-.td-mono { font-family: var(--mono); }
+.td-sub { margin-top: 6px; font-size: 13px; line-height: 1.45; color: var(--text-secondary); overflow-wrap: anywhere; }
+.td-note { font-size: 12px; line-height: 1.45; color: var(--text-secondary); overflow-wrap: anywhere; }
 .td-pos { color: var(--positive-text); }
 .td-neg { color: var(--negative-text); }
 .td-flat { color: var(--text-secondary); }
-.td-empty { padding: 28px 20px; text-align: center; color: var(--text-secondary); font-size: var(--fs-13); line-height: 1.55; }
-.td-empty h3 { margin: 0 0 6px; color: var(--text-primary); }
-
-.td-badge {
-  display: inline-flex; align-items: center; flex-shrink: 0; height: 22px; padding: 0 8px; white-space: nowrap;
-  border-radius: var(--r-pill); background: var(--bg-sunken); color: var(--text-secondary); font-size: 12px; font-weight: 500;
+:where(.td-page) .sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
-.td-badge.acc { background: var(--accent-subtle); color: var(--accent-text); }
-.td-badge.outline { background: transparent; box-shadow: inset 0 0 0 1px var(--border-strong); }
-.td-badge.neg { background: var(--negative-subtle); color: var(--negative-text); }
 
-.td-meter { position: relative; height: 8px; border-radius: 4px; background: var(--bg-sunken); }
-.td-meter > i { display: block; height: 100%; max-width: 100%; border-radius: 4px; background: var(--accent-solid); }
-.td-meter > i.over { background: var(--negative-solid); }
+/* Cards and rows (canvas .col / .row between / .card.tight) */
+.td-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.td-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.td-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.card.td-tight { padding: 0; gap: 0; overflow: hidden; }
+.td-tight > .td-card-head { padding: 18px 20px 6px; }
+.td-tight > .td-note, .td-tight > .td-inline { padding: 0 20px 12px; }
+.td-kpis, .td-grid { display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch; }
+.td-kpi { flex: 1 1 200px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.td-kpi .big { overflow-wrap: anywhere; }
+.td-grid > * { flex: 1 1 320px; }
+.td-grid > .td-wide { flex: 2 1 480px; }
+.td-well { display: flex; flex-direction: column; min-width: 0; padding: 12px 14px; border-radius: var(--r-md); background: var(--bg-sunken); overflow-wrap: anywhere; }
+.td-wells { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.td-wells.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+/* Banner: accent by default, .warn for stale or stuck data */
+.td-banner {
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-radius: var(--r-lg); background: var(--accent-subtle); color: var(--text-primary);
+}
+.td-banner.warn { background: var(--negative-subtle); }
+.td-banner strong { font-weight: 600; }
+
+/* Badges: canvas dot size (styles.css has a larger global .dot), and an
+   outlined variant for AI inference and "Paper" */
+.badge > .dot { width: 6px; height: 6px; }
+.badge.td-outline { background: transparent; box-shadow: inset 0 0 0 1px var(--border-strong); }
+
+/* Meter; .lg carries a target mark (<b>) */
+.td-meter { position: relative; height: 6px; border-radius: 3px; background: var(--bg-sunken); }
+.td-meter.lg { height: 8px; border-radius: 4px; }
+.td-meter > i { display: block; height: 100%; max-width: 100%; border-radius: inherit; background: var(--accent-solid); }
+.td-meter > i.over, .td-meter.neg > i { background: var(--negative-solid); }
 .td-meter > b { position: absolute; top: -3px; width: 2px; height: 14px; margin-left: -1px; border-radius: 1px; background: var(--text-primary); }
 
-.td-scroll { overflow-x: auto; }
-.td-table { width: 100%; border-collapse: collapse; font-size: var(--fs-13); }
-.td-table th {
-  padding: 8px 12px; text-align: left; font-weight: 500; font-size: var(--fs-12); color: var(--text-secondary);
-  border-bottom: 1px solid var(--separator); white-space: nowrap;
-}
-.td-table td { padding: 10px 12px; border-bottom: 1px solid var(--separator); vertical-align: top; }
-.td-table tr:last-child td { border-bottom: none; }
-.td-table th:first-child, .td-table td:first-child { padding-left: 20px; }
-.td-table th:last-child, .td-table td:last-child { padding-right: 20px; }
-.td-table .r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.td-inst { display: flex; flex-direction: column; min-width: 0; max-width: 340px; text-decoration: none; color: inherit; }
-.td-inst .sym { font-family: var(--mono); font-weight: 600; overflow-wrap: anywhere; }
-.td-inst .name { font-size: var(--fs-12); color: var(--text-secondary); overflow-wrap: anywhere; }
+/* Tables: a keyboard-scrollable region; the table keeps its columns readable */
+.td-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
+.td-scroll > .tbl { min-width: 720px; }
+/* In an edge-to-edge card the outer columns line up with the card heading. */
+.td-tight .tbl :is(th, td):first-child { padding-left: 20px; }
+.td-tight .tbl :is(th, td):last-child { padding-right: 20px; }
+.td-inst { display: flex; flex-direction: column; min-width: 0; max-width: 320px; text-decoration: none; color: inherit; }
+.td-inst .sym { font-family: var(--font-mono); font-weight: 600; overflow-wrap: anywhere; }
+.td-inst .name { font-size: 13px; color: var(--text-secondary); overflow-wrap: anywhere; }
 a.td-inst .sym { color: var(--accent-text); }
 @media (hover: hover) {
   a.td-inst:hover .sym { text-decoration: underline; }
@@ -67,14 +70,22 @@ a.td-inst .sym { color: var(--accent-text); }
 
 /* Segmented controls keep their labels whole; they wrap to their own line instead. */
 .td-seg.jv-seg { flex: 0 0 auto; max-width: 100%; }
-.td-seg.jv-seg button { flex: 1 0 auto; padding: 0 14px; }
+.td-seg.jv-seg button { flex: 1 0 auto; }
 
-.td-toggle {
-  display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: var(--r-10);
-  border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-secondary);
-  font: inherit; font-size: var(--fs-12); cursor: pointer;
-  transition-property: background-color, border-color, color; transition-duration: var(--d-hover); transition-timing-function: ease-out;
+/* Route tabs drawn as a segmented control (links, so the URL holds the tab) */
+.td-seg-nav { align-self: flex-start; }
+.td-seg-nav a {
+  display: inline-flex; align-items: center; min-height: 34px; padding: 0 14px; border-radius: 8px;
+  color: var(--text-secondary); font: 500 14px var(--font-sans); text-decoration: none;
+  transition: background-color var(--d-hover) ease, color var(--d-hover) ease;
 }
-.td-toggle[aria-pressed="true"] { background: var(--bg-selected); border-color: var(--accent-border); color: var(--text-primary); }
-.td-toggle:disabled { opacity: 0.5; cursor: default; }
-.td-toggle .swatch { width: 14px; border-top: 2px solid currentColor; }
+.td-seg-nav a[aria-current="page"] {
+  background: var(--bg-surface); color: var(--accent-text); box-shadow: var(--shadow-border), inset 0 0 0 1.5px var(--accent-solid);
+}
+.td-seg-nav a:focus-visible { outline-offset: 1px; }
+@media (hover: hover) and (pointer: fine) {
+  .td-seg-nav a:not([aria-current="page"]):hover { color: var(--text-primary); }
+}
+
+/* Line sample in the chart's indicator buttons */
+.td-swatch { width: 14px; height: 0; border-top: 2px solid currentColor; }
