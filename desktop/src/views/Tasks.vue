@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import NodePage, { type NodeItem } from "../components/jv/NodePage.vue";
 import JvPanel from "../components/jv/JvPanel.vue";
 import JvSegmented, { type SegmentItem } from "../components/jv/JvSegmented.vue";
@@ -11,6 +12,7 @@ import { approveAction, denyAction, type PendingAction } from "../agentApprovals
 import { failureText, relativeTime, type Availability, type Tone } from "../hubModel";
 import { canSignApproval, outcomeTone, sessionState, splitSessions, type CodingSessionRow } from "../nodeModels";
 import { platformCapabilities } from "../platform";
+import { tasksNode, tasksPath } from "../navigation";
 
 // Tasks: coding sessions, agent actions waiting for the owner, and the agent
 // audit history. Scheduled and recurring tasks and goals need Core support
@@ -58,11 +60,15 @@ const items = computed<NodeItem[]>(() => {
     planned("goals", "Goals", "Goals", "goal", "Bigger outcomes split into tasks"),
   ];
 });
-// `node` opens a node directly: /approvals opens "waiting", /runs the default.
-// Both routes share this instance, so follow the prop when it changes.
+// Two sidebar entries share this view: /approvals opens "waiting", /runs the
+// rest. Picking a node moves to the matching route so the sidebar stays
+// truthful; both routes share this instance, so follow the prop back.
 const props = defineProps<{ node?: string }>();
+const route = useRoute();
+const router = useRouter();
 const selected = ref(props.node ?? "active");
-watch(() => props.node, (node) => { selected.value = node ?? "active"; });
+watch(() => props.node, (node) => { selected.value = tasksNode(node, selected.value); });
+watch(selected, (node) => { if (route.path !== tasksPath(node)) void router.replace(tasksPath(node)); });
 const sub = ref("overview");
 watch(selected, () => { sub.value = "overview"; });
 const current = computed(() => items.value.find((item) => item.id === selected.value)!);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {createMemoryHistory, createRouter} from "vue-router";
 
-import {NAV, PAGES, REDIRECTS, buildRoutes} from "../src/navigation.ts";
+import {NAV, PAGES, REDIRECTS, ariaCurrent, buildRoutes, tasksNode, tasksPath} from "../src/navigation.ts";
 
 const VIEWS = ["home", "conversations", "agents", "integrations", "health", "memory", "trading", "tasks", "context", "settings", "soon"];
 const stub = name => ({name, render: () => null});
@@ -90,4 +90,33 @@ test("paths are unique and redirects never shadow or chain", () => {
     assert.ok(!paths.includes(from), `${from} is both a page and a redirect`);
     assert.ok(paths.includes(to), `${from} redirects to unknown ${to}`);
   }
+});
+
+test("exactly one sidebar entry is aria-current on every sidebar page", async () => {
+  const items = NAV.flatMap(s => s.items);
+  for (const page of PAGES.filter(p => p.nav)) {
+    const nav = (await routerAt(page.path)).meta.nav;
+    const current = items.filter(i => ariaCurrent(i.id, nav) === "page").map(i => i.id);
+    assert.deepEqual(current, [page.nav], page.path);
+  }
+  const nav = (await routerAt("/health")).meta.nav;
+  assert.deepEqual(items.filter(i => ariaCurrent(i.id, nav)), []);
+});
+
+test("Tasks keeps the route on Approvals only for the waiting node", async () => {
+  assert.equal(tasksPath("waiting"), "/approvals");
+  for (const node of ["active", "completed", "scheduled"]) assert.equal(tasksPath(node), "/runs");
+  // Both paths resolve to a page whose props open the matching node.
+  for (const node of ["waiting", "active"]) {
+    const page = PAGES.find(p => p.path === tasksPath(node));
+    assert.equal(tasksNode(page.props?.node, node), node);
+  }
+  // Clicking Approvals opens waiting; leaving it for Runs drops waiting but keeps any other choice.
+  assert.equal(tasksNode("waiting", "completed"), "waiting");
+  assert.equal(tasksNode(undefined, "waiting"), "active");
+  assert.equal(tasksNode(undefined, "completed"), "completed");
+});
+
+test("Devices names its own heading", () => {
+  assert.equal(PAGES.find(p => p.path === "/devices").props.title, "DEVICES");
 });

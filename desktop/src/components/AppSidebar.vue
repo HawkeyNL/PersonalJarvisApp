@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { useRoute } from "vue-router";
 import NavIcon from "./NavIcon.vue";
-import { NAV } from "../navigation";
+import { NAV, ariaCurrent } from "../navigation";
 
 // Desktop sidebar. The active entry comes from the route's meta.nav, so a
 // sub-path (/trading/ibkr) or a view shared by two entries (Runs, Approvals)
@@ -20,17 +20,17 @@ const tip = (label: string, badge?: string) => (badge ? `${label} (${badge})` : 
         <li v-for="item in section.items" :key="item.id">
           <RouterLink v-if="item.path" v-slot="{ href, navigate }" :to="item.path" custom>
             <a :href="href" class="entry" :title="tip(item.label, item.badge)"
-              :aria-current="current === item.id ? 'page' : undefined" @click="navigate">
+              :aria-current="ariaCurrent(item.id, current)" @click="navigate">
               <NavIcon :name="item.icon" />
               <span class="label">{{ item.label }}</span>
               <span v-if="item.badge" class="badge">{{ item.badge }}</span>
             </a>
           </RouterLink>
-          <span v-else class="entry static" :title="item.hint ?? tip(item.label, item.badge)"
-            :aria-disabled="item.disabled ? 'true' : undefined">
+          <span v-else class="entry static" :title="item.hint ?? tip(item.label, item.badge)">
             <NavIcon :name="item.icon" />
             <span class="label">{{ item.label }}</span>
             <span v-if="item.badge" class="badge">{{ item.badge }}</span>
+            <span v-if="item.hint" class="sr-only">{{ item.hint }}</span>
           </span>
         </li>
       </ul>
@@ -74,6 +74,11 @@ a.entry:active { background: var(--bg-selected); }
   a.entry:active { transform: scale(0.98); }
 }
 a.entry:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
 
 /* Narrow windows: an icon rail. Labels stay for screen readers; the title tooltip names each entry. */
 @media (max-width: 1279px) {

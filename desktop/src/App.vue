@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount } from "vue";
+import { onMounted, onBeforeUnmount, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAppStore } from "./stores/app";
 import AppLock from "./components/AppLock.vue";
@@ -19,6 +19,11 @@ import { busy as voiceCheckBusy } from "./voiceServer";
 const route = useRoute();
 const router = useRouter();
 const app = useAppStore();
+
+// Skip link: focus the page itself, past the sidebar. A plain #main jump would
+// also be read by the router as a navigation.
+const main = ref<HTMLElement | null>(null);
+const skipToContent = () => main.value?.focus();
 
 // Ctrl/⌘K opens the chat overlay from anywhere; it lives on the hub.
 function onShortcut(event: KeyboardEvent) {
@@ -61,9 +66,10 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app">
+    <a class="skip" href="#main" @click.prevent="skipToContent">Skip to content</a>
     <div class="shell">
       <AppSidebar />
-      <main class="content">
+      <main id="main" ref="main" class="content" tabindex="-1">
         <RouterView />
       </main>
     </div>
@@ -79,4 +85,12 @@ onBeforeUnmount(() => {
 <style scoped>
 .shell { flex: 1; min-height: 0; display: flex; }
 .shell > .content { min-width: 0; }
+.content:focus { outline: none; }
+/* Hidden until focused; the first Tab stop on every page. */
+.skip {
+  position: absolute; left: 12px; top: 12px; z-index: 300; padding: 8px 14px; border-radius: var(--r-md);
+  background: var(--bg-surface); color: var(--text-primary); box-shadow: var(--shadow-pop); text-decoration: none;
+  transform: translateY(calc(-100% - 16px));
+}
+.skip:focus-visible { transform: none; }
 </style>

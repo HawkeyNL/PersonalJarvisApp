@@ -35,6 +35,8 @@ const items = computed<NodeItem[]>(() => [
   { id: "devices", label: "Devices", title: "Devices", icon: "monitor", description: "Desktop and mobile app",
     tone: deviceSummary.value.tone, status: deviceSummary.value.lines[0] },
 ]);
+// /devices passes its own heading; the hub's Context card uses the default.
+const { title = "CONTEXT", subtitle = "WHAT JARVIS PAYS ATTENTION TO" } = defineProps<{ title?: string; subtitle?: string }>();
 const selected = ref("devices");
 const current = computed(() => items.value.find((item) => item.id === selected.value)!);
 
@@ -53,7 +55,7 @@ const activity = computed<ActivityItem[]>(() => list.value.slice(0, 5).map((d) =
 </script>
 
 <template>
-  <NodePage v-model="selected" title="CONTEXT" subtitle="WHAT JARVIS PAYS ATTENTION TO" :items="items">
+  <NodePage v-model="selected" :title="title" :subtitle="subtitle" :items="items">
     <JvPanel :icon="current.icon" :title="current.title" :tone="current.tone" :status="current.status" :description="current.description">
       <div v-if="current.id === 'devices'" class="split">
         <JvUnavailable v-if="devices.state === 'unsupported' || devices.state === 'error'" title="Devices"

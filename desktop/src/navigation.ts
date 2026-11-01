@@ -80,7 +80,8 @@ export const PAGES: Page[] = [
   soon("content", "Trends, scripts and publishing proposals come after trading."),
 
   { path: "/settings", name: "settings", view: "settings", nav: "settings" },
-  { path: "/devices", name: "devices", view: "context", nav: "devices" },
+  { path: "/devices", name: "devices", view: "context", nav: "devices",
+    props: { title: "DEVICES", subtitle: "THE APPS LINKED TO JARVIS" } },
 
   // Reached from the hub; not in the sidebar.
   { path: "/agents", name: "agents", view: "agents" },
@@ -96,6 +97,16 @@ export const REDIRECTS: Record<string, string> = {
   "/tasks": "/runs",
   "/context": "/devices",
 };
+
+/** aria-current for a sidebar entry, given the route's meta.nav. */
+export const ariaCurrent = (itemId: string, nav: unknown) => (itemId === nav ? "page" : undefined);
+
+/** Tasks serves two entries: its waiting node is Approvals, every other node is Runs. */
+export const tasksPath = (node: string) => (node === "waiting" ? "/approvals" : "/runs");
+/** Node to show once the Tasks route changes: the route's own node, else the
+ *  current choice, except that leaving Approvals leaves the waiting node. */
+export const tasksNode = (routeNode: string | undefined, selected: string) =>
+  routeNode ?? (selected === "waiting" ? "active" : selected);
 
 export function buildRoutes(views: Record<View, RouteComponent>): RouteRecordRaw[] {
   return [
