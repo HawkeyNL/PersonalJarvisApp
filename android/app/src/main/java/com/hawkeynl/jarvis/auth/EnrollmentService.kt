@@ -39,6 +39,11 @@ class EnrollmentService(
     private val identity: DeviceIdentity,
     private val sessions: SessionRepository,
 ) {
+    /** Core or the user refused a biometric-only renewal; until a sign-in succeeds or the
+     *  binding is erased, renewal goes straight to the password screen. Without it every
+     *  return to the app would prompt again and spend one of Core's per-IP login attempts. */
+    @Volatile private var renewalRefused = false
+
     fun currentSession(): ProtectedSession = sessions.session()
 
     suspend fun startOrResume(
@@ -114,6 +119,7 @@ class EnrollmentService(
     /** Erases this device's session, binding and key here only. Revoking it on Core is a
      *  separate signed approval ([com.hawkeynl.jarvis.security.AccountApprovalService]). */
     suspend fun eraseLocally() {
+        renewalRefused = false
         sessions.reset()
         identity.reset()
     }
@@ -156,7 +162,8 @@ class EnrollmentService(
     /** Without a password and with [renew], signs in with biometrics and the device key
      *  alone. Core accepts that within 30 days of the last password sign-in and answers
      *  401 otherwise (older Core always does); both 401 and [SIGN_IN_ATTEMPTS] rejected
-     *  fingers or faces lead to the password screen, which still needs the device key. */
+     *  fingers or faces lead to the password screen, which still needs the device key.
+     *  After that, renewal asks for the password without a prompt ([renewalRefused]). */
     private suspend fun login(
         endpoint: HomeNodeEndpoint, deviceId: String, password: String? = null, renew: Boolean = true,
     ): EnrollmentOutcome {
@@ -164,7 +171,7 @@ class EnrollmentService(
             is ApiResult.Success -> status.value.password_required && password == null
             else -> return status.toEnrollmentFailure()
         }
-        if (renewing && !renew) return EnrollmentOutcome.PasswordRequired
+        if (renewing && (!renew || renewalRefused)) return EnrollmentOutcome.PasswordRequired
         val challenge = when (val result = api.challenge(endpoint, ChallengeRequest(deviceId))) {
             is ApiResult.Success -> result.value
             ApiResult.Unauthorized -> return EnrollmentOutcome.Rejected(401,
@@ -178,7 +185,9 @@ class EnrollmentService(
             identity.sign(LoginMessage(challenge.challenge_id, deviceId, challenge.nonce), SIGN_IN_REASON)
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: BiometricNotRecognisedException) {
+        } catch (notRecognised: BiometricNotRecognisedException) {
+            if (!renewing) return EnrollmentOutcome.InvalidResponse(notRecognised.message.orEmpty())
+            renewalRefused = true
             return EnrollmentOutcome.PasswordRequired
         } catch (_: DeviceKeyInvalidatedException) {
             // Erasing is the user's decision; this may be a background sign-in.
@@ -194,9 +203,13 @@ class EnrollmentService(
         )) {
             is ApiResult.Success -> {
                 sessions.saveLogin(deviceId, result.value.token, result.value.expires_at)
+                renewalRefused = false
                 EnrollmentOutcome.Authenticated(result.value.expires_at)
             }
-            ApiResult.Unauthorized -> if (renewing) EnrollmentOutcome.PasswordRequired else EnrollmentOutcome.Rejected(401,
+            ApiResult.Unauthorized -> if (renewing) {
+                renewalRefused = true
+                EnrollmentOutcome.PasswordRequired
+            } else EnrollmentOutcome.Rejected(401,
                 "Password/device signature refused. Check your password and original device identity. No settings or keys were erased.")
             else -> result.toEnrollmentFailure()
         }

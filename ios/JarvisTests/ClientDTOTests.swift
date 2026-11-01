@@ -461,7 +461,7 @@ final class DeviceLoginRecoveryTests: XCTestCase {
 final class FaceIDRenewalTests: XCTestCase {
     private let accounts = ["device-ed25519-seed-v2", "device-ed25519-public-v2", "registered-device-id-v1", "authenticated-session-v1"]
 
-    private func fixture(host: String, prompts: [LocalUnlockResult], promptDelay: UInt64 = 0)
+    private func fixture(host: String, prompts: [LocalUnlockResult], held: Bool = false)
         async throws -> (AuthService, SecureCredentialStore, RenewalPrompts, FixtureSecureStorage) {
         let store = FixtureSecureStorage()
         let credentials = SecureCredentialStore(keychain: store)
@@ -471,12 +471,9 @@ final class FaceIDRenewalTests: XCTestCase {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [RenewalProtocol.self]
         let api = JarvisAPIClient(baseURL: URL(string: "https://\(host)")!, session: URLSession(configuration: config))
-        let queue = RenewalPrompts(prompts)
+        let queue = RenewalPrompts(prompts, held: held)
         let auth = AuthService(api: api, identity: identity, credentials: credentials,
-                               authenticateBiometric: { _ in
-            if promptDelay > 0 { try? await Task.sleep(nanoseconds: promptDelay) }
-            return store.prompt(await queue.next())
-        })
+                               authenticateBiometric: { _ in store.prompt(await queue.next()) })
         RenewalProtocol.reset()
         return (auth, credentials, queue, store)
     }
@@ -507,31 +504,56 @@ final class FaceIDRenewalTests: XCTestCase {
         XCTAssertNil(session)
         let device = try await credentials.deviceId()
         XCTAssertNotNil(device)
+        // Returning to the app: no second prompt and no second 401 against Core's per-IP limit.
+        let again = try await auth.restore()
+        XCTAssertEqual(again, .needsPassword)
+        let countAgain = await prompts.count
+        XCTAssertEqual(countAgain, 1)
+        XCTAssertEqual(RenewalProtocol.loginBodies().count, 1)
         // The password screen then signs in with the password and one more Face ID.
         await prompts.push(.unlocked)
         let retried = try await auth.restore(password: "fixture-password-only")
         XCTAssertEqual(retried, .authenticated)
         XCTAssertEqual(RenewalProtocol.loginBodies().last?["password"], "fixture-password-only")
+        // That sign-in clears the refusal: the next expired session tries Face ID again.
+        try await credentials.clearSession()
+        await prompts.push(.unlocked)
+        let renewedAgain = try await auth.restore()
+        XCTAssertEqual(renewedAgain, .needsPassword)
+        let countAfter = await prompts.count
+        XCTAssertEqual(countAfter, 3)
     }
 
-    func testThreeFaceIDMismatchesGoToPasswordWithoutSigning() async throws {
-        let (auth, _, prompts, store) = try await fixture(host: "anchored.example.com", prompts: [.denied, .denied, .denied, .unlocked])
+    func testFaceIDMismatchGoesToPasswordWithoutSigningOrPromptingAgain() async throws {
+        // One system prompt already includes iOS's own retries; another would near its lockout.
+        let (auth, _, prompts, store) = try await fixture(host: "anchored.example.com", prompts: [.denied, .unlocked])
         defer { cleanup(store) }
         let outcome = try await auth.restore()
         XCTAssertEqual(outcome, .needsPassword)
+        let again = try await auth.restore()
+        XCTAssertEqual(again, .needsPassword)
         let count = await prompts.count
-        XCTAssertEqual(count, 3)
+        XCTAssertEqual(count, 1)
         XCTAssertTrue(RenewalProtocol.loginBodies().isEmpty)
     }
 
-    func testFaceIDMismatchThenMatchRenews() async throws {
-        let (auth, _, prompts, store) = try await fixture(host: "anchored.example.com", prompts: [.denied, .denied, .unlocked])
-        defer { cleanup(store) }
-        let outcome = try await auth.restore()
-        XCTAssertEqual(outcome, .authenticated)
-        let count = await prompts.count
-        XCTAssertEqual(count, 3)
-        XCTAssertEqual(RenewalProtocol.loginBodies().count, 1)
+    func testDeviceKeyErrorsPropagateDuringRenewal() async throws {
+        for locked in [true, false] {
+            let (auth, _, prompts, store) = try await fixture(host: "anchored.example.com", prompts: [.unlocked])
+            defer { cleanup(store) }
+            if locked { store.protectedReadStatus = errSecAuthFailed } else { try store.delete(account: "device-ed25519-seed-v2") }
+            do {
+                let outcome = try await auth.restore()
+                XCTFail("A device key error must not become \(outcome)")
+            } catch DeviceIdentityError.keyLocked where locked {
+            } catch DeviceIdentityError.biometryChanged where !locked {
+            } catch {
+                XCTFail("Unexpected \(error)")
+            }
+            let count = await prompts.count
+            XCTAssertEqual(count, 1)
+            XCTAssertTrue(RenewalProtocol.loginBodies().isEmpty)
+        }
     }
 
     func testLockoutCancelAndUnavailableKeepTheirErrors() async throws {
@@ -541,7 +563,7 @@ final class FaceIDRenewalTests: XCTestCase {
             (.cancelled, ApprovalInterrupted.cancelled),
         ]
         for (prompt, expected) in cases {
-            let (auth, credentials, prompts, store) = try await fixture(host: "anchored.example.com", prompts: [.denied, prompt, .unlocked])
+            let (auth, credentials, prompts, store) = try await fixture(host: "anchored.example.com", prompts: [prompt, .unlocked])
             defer { cleanup(store) }
             do {
                 _ = try await auth.restore()
@@ -550,7 +572,7 @@ final class FaceIDRenewalTests: XCTestCase {
                 XCTAssertEqual(error.localizedDescription, expected.localizedDescription)
             }
             let count = await prompts.count
-            XCTAssertEqual(count, 2, "No further prompt after \(prompt)")
+            XCTAssertEqual(count, 1, "No further prompt after \(prompt)")
             XCTAssertTrue(RenewalProtocol.loginBodies().isEmpty)
             let session = try await credentials.session()
             XCTAssertNil(session)
@@ -559,9 +581,11 @@ final class FaceIDRenewalTests: XCTestCase {
 
     func testRenewalErrorsOtherThanRefusalFailClosed() async throws {
         let cases: [(host: String, expected: String?)] = [
-            ("revoked.example.com", DeviceLoginError.deviceRejected.localizedDescription), ("broken.example.com", nil)]
+            ("revoked.example.com", DeviceLoginError.deviceRejected.localizedDescription), ("broken.example.com", nil),
+            ("throttled.example.com", JarvisAPIError.rejected(status: 429, message: nil).localizedDescription),
+            ("offline.example.com", JarvisAPIError.unreachable.localizedDescription)]
         for (host, expected) in cases {
-            let (auth, credentials, _, store) = try await fixture(host: host, prompts: [.unlocked])
+            let (auth, credentials, prompts, store) = try await fixture(host: host, prompts: [.unlocked])
             defer { cleanup(store) }
             do {
                 let outcome = try await auth.restore()
@@ -572,16 +596,26 @@ final class FaceIDRenewalTests: XCTestCase {
             }
             let session = try await credentials.session()
             XCTAssertNil(session)
+            // Not a refusal: the next restore tries Face ID again (the queue then cancels).
+            _ = try? await auth.restore()
+            let count = await prompts.count
+            XCTAssertEqual(count, 2, "\(host) must not skip the next renewal")
         }
     }
 
     func testConcurrentRestoresShareOneFaceIDPrompt() async throws {
-        // The slow prompt keeps the first renewal open while the second restore arrives.
-        let (auth, _, prompts, store) = try await fixture(host: "anchored.example.com", prompts: [.unlocked],
-                                                          promptDelay: 500_000_000)
+        // The held prompt keeps the first renewal open until both restores have their
+        // account status, so the second arrives while the first is still renewing.
+        let (auth, _, prompts, store) = try await fixture(host: "anchored.example.com", prompts: [.unlocked], held: true)
         defer { cleanup(store) }
         async let first = auth.restore()
         async let second = auth.restore()
+        while true {
+            let prompted = await prompts.count
+            if prompted >= 1 && RenewalProtocol.statusCount() >= 2 { break }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        await prompts.release()
         let outcomes = try await [first, second]
         XCTAssertEqual(outcomes, [.authenticated, .authenticated])
         let count = await prompts.count
@@ -598,12 +632,34 @@ final class FaceIDRenewalTests: XCTestCase {
     }
 }
 
+final class BiometricOnlyMappingTests: XCTestCase {
+    func testLAErrorCodesMapToUnlockResults() {
+        let cases: [(LAError.Code, LocalUnlockResult)] = [
+            (.authenticationFailed, .denied),
+            (.userCancel, .cancelled), (.systemCancel, .cancelled), (.appCancel, .cancelled), (.userFallback, .cancelled),
+            (.biometryLockout, .unavailable(BiometricLock.biometricsLocked)),
+            (.biometryNotAvailable, .unavailable(BiometricLock.biometricsRequired)),
+            (.biometryNotEnrolled, .unavailable(BiometricLock.biometricsRequired)),
+            (.invalidContext, .cancelled), (.notInteractive, .cancelled),
+        ]
+        for (code, expected) in cases { XCTAssertEqual(BiometricLock.biometricOnlyResult(code), expected, "\(code)") }
+    }
+}
+
 private actor RenewalPrompts {
     private var queue: [LocalUnlockResult]
     private(set) var count = 0
-    init(_ queue: [LocalUnlockResult]) { self.queue = queue }
+    /// While held, prompts wait for `release()` before answering.
+    private var held: Bool
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+    init(_ queue: [LocalUnlockResult], held: Bool = false) { self.queue = queue; self.held = held }
     func push(_ result: LocalUnlockResult) { queue.append(result) }
-    func next() -> LocalUnlockResult { count += 1; return queue.isEmpty ? .cancelled : queue.removeFirst() }
+    func release() { held = false; waiting.forEach { $0.resume() }; waiting = [] }
+    func next() async -> LocalUnlockResult {
+        count += 1
+        if held { await withCheckedContinuation { waiting.append($0) } }
+        return queue.isEmpty ? .cancelled : queue.removeFirst()
+    }
 }
 
 /// Core with a 30-day password anchor on "anchored" hosts: a login without a
@@ -611,8 +667,10 @@ private actor RenewalPrompts {
 private final class RenewalProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var logins: [[String: String]] = []
-    static func reset() { lock.withLock { logins = [] } }
+    private static var statuses = 0
+    static func reset() { lock.withLock { logins = []; statuses = 0 } }
     static func loginBodies() -> [[String: String]] { lock.withLock { logins } }
+    static func statusCount() -> Int { lock.withLock { statuses } }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -620,6 +678,7 @@ private final class RenewalProtocol: URLProtocol {
         let body: String
         switch request.url!.path {
         case "/v1/auth/account/status":
+            Self.lock.withLock { Self.statuses += 1 }
             body = #"{"protocol":1,"password_required":true,"bootstrap_required":false}"#
         case "/v1/auth/me":
             body = #"{"user_id":"00000000-0000-0000-0000-000000000003","device_id":"00000000-0000-0000-0000-000000000004"}"#
@@ -639,7 +698,11 @@ private final class RenewalProtocol: URLProtocol {
             }
             let login = (try? JSONSerialization.jsonObject(with: data)) as? [String: String] ?? [:]
             Self.lock.withLock { Self.logins.append(login) }
+            if request.url!.host!.hasPrefix("offline.") {
+                client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet)); return
+            }
             if request.url!.host!.hasPrefix("broken.") { status = 500 }
+            else if request.url!.host!.hasPrefix("throttled.") { status = 429 }
             else if login["password"] == nil && !request.url!.host!.hasPrefix("anchored.") { status = 401 }
             body = #"{"token":"fixture-session-only","expires_at":4102444800}"#
         default:

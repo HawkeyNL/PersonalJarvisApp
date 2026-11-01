@@ -157,6 +157,56 @@ class EnrollmentServiceTest {
     }
 
     @Test
+    fun `refused renewal stops prompting until a sign-in succeeds`() = runTest {
+        val api = FakeApi().apply { account = AccountStatus(1, true, false); anchored = false }
+        val sessions = SessionRepository(InMemorySecureValueStore())
+        sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
+        val identity = FakeIdentity()
+        val service = EnrollmentService(api, identity, sessions)
+        assertEquals(EnrollmentOutcome.PasswordRequired, service.login(endpoint))
+        // Returning to the app: no second prompt and no second 401 against Core's per-IP limit.
+        identity.reason = null; api.loginRequest = null
+        assertEquals(EnrollmentOutcome.PasswordRequired, service.login(endpoint))
+        assertEquals(null, identity.reason)
+        assertEquals(null, api.loginRequest)
+        assertTrue(service.startOrResume(endpoint, "fixture", 100, "fixture account password") is EnrollmentOutcome.Authenticated)
+        api.anchored = true; identity.reason = null
+        assertTrue(service.login(endpoint) is EnrollmentOutcome.Authenticated)
+        assertEquals(EnrollmentService.SIGN_IN_REASON, identity.reason)
+    }
+
+    @Test
+    fun `rejected biometrics stop prompting until the binding is erased`() = runTest {
+        val api = FakeApi().apply { account = AccountStatus(1, true, false) }
+        val sessions = SessionRepository(InMemorySecureValueStore())
+        sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
+        val identity = FakeIdentity().apply { failure = BiometricNotRecognisedException() }
+        val service = EnrollmentService(api, identity, sessions)
+        assertEquals(EnrollmentOutcome.PasswordRequired, service.login(endpoint))
+        identity.reason = null; identity.failure = null
+        assertEquals(EnrollmentOutcome.PasswordRequired, service.login(endpoint))
+        assertEquals(null, identity.reason)
+        service.eraseLocally()
+        sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
+        assertTrue(service.login(endpoint) is EnrollmentOutcome.Authenticated)
+        assertEquals(EnrollmentService.SIGN_IN_REASON, identity.reason)
+    }
+
+    @Test
+    fun `rejected biometrics on the password sign-in show an error and keep renewal`() = runTest {
+        val api = FakeApi().apply { account = AccountStatus(1, true, false) }
+        val sessions = SessionRepository(InMemorySecureValueStore())
+        sessions.saveLogin(DEVICE_ID, "fixture-session-not-a-secret", 1)
+        val identity = FakeIdentity().apply { failure = BiometricNotRecognisedException() }
+        val service = EnrollmentService(api, identity, sessions)
+        val result = service.startOrResume(endpoint, "fixture", 100, "fixture account password")
+        assertEquals(EnrollmentOutcome.InvalidResponse(BiometricNotRecognisedException().message.orEmpty()), result)
+        assertEquals(null, api.loginRequest)
+        identity.failure = null
+        assertTrue(service.login(endpoint) is EnrollmentOutcome.Authenticated)
+    }
+
+    @Test
     fun `cancelled biometrics keep their message during renewal`() = runTest {
         val api = FakeApi().apply { account = AccountStatus(1, true, false) }
         val sessions = SessionRepository(InMemorySecureValueStore())

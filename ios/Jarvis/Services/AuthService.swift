@@ -42,6 +42,10 @@ enum AuthServiceOutcome: Equatable {
 actor AuthService {
     private var approvalRunning = false
     private var renewal: Task<AuthServiceOutcome, Error>?
+    /// Core or Face ID refused a renewal. Until a sign-in succeeds or the binding is
+    /// erased, restore asks for the password without a prompt, so returning to the app
+    /// does not prompt again and spend one of Core's per-IP login attempts.
+    private var renewalRefused = false
     private let api: JarvisAPIClient
     private let identity: DeviceIdentityStore
     private let credentials: SecureCredentialStore
@@ -75,7 +79,7 @@ actor AuthService {
         if let deviceId = try await credentials.deviceId() {
             let status: AccountStatus = try await api.get("/v1/auth/account/status")
             if status.passwordRequired && password == nil {
-                guard renew else { return .needsPassword }
+                guard renew, !renewalRefused else { return .needsPassword }
                 // A restore that starts while one is renewing shares its prompt and result.
                 if let renewal { return try await renewal.value }
                 let task = Task { try await renewWithoutPassword(deviceId: deviceId) }
@@ -325,7 +329,10 @@ actor AuthService {
 
     // Origin changes must clear server-specific state before the new host is
     // configured. No revocation request is sent to the replacement host.
-    func clearLocalBinding() async throws { try await credentials.reset(); try await identity.reset() }
+    func clearLocalBinding() async throws {
+        renewalRefused = false
+        try await credentials.reset(); try await identity.reset()
+    }
 
     /// Silent launch-time move of an older device key behind Face ID / Touch ID.
     func migrateIdentity() async throws { try await identity.migrateIfNeeded() }
@@ -700,6 +707,7 @@ actor AuthService {
 
     /// Erases this device's session, binding and key here only.
     func eraseLocally() async throws {
+        renewalRefused = false
         var resetError: Error?
         do { try await credentials.reset() }
         catch { resetError = error }
@@ -733,23 +741,19 @@ actor AuthService {
 
     /// Face ID and the device signature alone. Core accepts that within 30 days of
     /// the last password sign-in and answers 401 otherwise (older Core always does).
-    /// Three Face ID mismatches in a row also go to the password screen, which still
-    /// needs Face ID to sign. Cancel, lockout and unavailable biometrics throw as before.
+    /// A Face ID mismatch also goes to the password screen, which still needs Face ID
+    /// to sign: iOS reports it only after retrying inside its own prompt, so another
+    /// round would run into the system lockout. Cancel, lockout and unavailable
+    /// biometrics throw as before.
     private func renewWithoutPassword(deviceId: UUID) async throws -> AuthServiceOutcome {
-        for _ in 1...Self.renewalFaceIDAttempts {
-            do {
-                try await login(deviceId: deviceId, password: nil)
-                return .authenticated
-            } catch DeviceLoginError.loginRejected {
-                return .needsPassword
-            } catch ApprovalInterrupted.denied {
-                continue
-            }
+        do {
+            try await login(deviceId: deviceId, password: nil)
+            return .authenticated
+        } catch DeviceLoginError.loginRejected, ApprovalInterrupted.denied {
+            renewalRefused = true
+            return .needsPassword
         }
-        return .needsPassword
     }
-
-    private static let renewalFaceIDAttempts = 3
 
     private func login(deviceId: UUID, password: String? = nil) async throws {
         // Prompt before fetching the challenge so a slow prompt cannot expire it.
@@ -778,6 +782,7 @@ actor AuthService {
             throw DeviceLoginError.loginRejected
         }
         try await credentials.save(session: SecureSession(token: response.token, expiresAt: response.expiresAt))
+        renewalRefused = false
     }
 }
 
