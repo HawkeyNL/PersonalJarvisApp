@@ -75,9 +75,9 @@ h3 { font-size: 15px; line-height: 1.4; font-weight: 600; }
   color: var(--text-secondary); font: 500 14px var(--font-sans); cursor: pointer;
   transition: background-color var(--d-hover) ease, color var(--d-hover) ease;
 }
-/* Accent text marks the selected segment; the raised surface alone is under 3:1. */
+/* Selected: raised surface plus accent text and an inset accent ring (3:1+ in both themes). */
 .seg button[aria-pressed="true"], .seg button[aria-selected="true"] {
-  background: var(--bg-surface); color: var(--accent-text); box-shadow: var(--shadow-border);
+  background: var(--bg-surface); color: var(--accent-text); box-shadow: var(--shadow-border), inset 0 0 0 1.5px var(--accent-solid);
 }
 /* Inset ring: the track clips an outset one when it scrolls. */
 .seg button:focus-visible { outline-offset: -2px; }

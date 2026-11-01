@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const read = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
@@ -15,7 +16,7 @@ function rules(css) {
   }));
 }
 
-const srcDir = new URL("../src/", import.meta.url).pathname;
+const srcDir = fileURLToPath(new URL("../src/", import.meta.url));
 const sources = readdirSync(srcDir, { recursive: true }).filter((f) => /\.(css|vue)$/.test(f));
 
 test("desktop no longer ships or references Exo 2 or Rajdhani", () => {
