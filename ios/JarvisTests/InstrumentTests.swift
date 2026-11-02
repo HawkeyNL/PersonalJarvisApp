@@ -56,6 +56,9 @@ final class InstrumentTests: XCTestCase {
             (.textOnAccent, .accentSolid), (.textOnAccent, .accentSolidHover), (.textOnAccent, .dangerSolid),
             (.textOnAccent, .dangerSolidHover), (.dangerText, .bgSurface), (.dangerText, .bgPage),
             (.positiveText, .bgSurface), (.negativeText, .bgSurface), (.negativeText, .bgSunken),
+            // Badges, and rows on a selected background.
+            (.positiveText, .positiveSubtle), (.negativeText, .negativeSubtle), (.dangerText, .dangerSubtle),
+            (.textPrimary, .bgSelected), (.textSecondary, .bgSelected), (.textPrimary, .bgRaised),
         ]
         for (fg, bg) in text {
             XCTAssertGreaterThanOrEqual(contrast(fg.rgba.light, bg.rgba.light), 4.5, "\(fg.rawValue) on \(bg.rawValue) light")
@@ -69,6 +72,19 @@ final class InstrumentTests: XCTestCase {
     func testBundledPlexFacesRegister() {
         let faces = ["IBMPlexSans", "IBMPlexSans-Medm", "IBMPlexSans-SmBld", "IBMPlexMono", "IBMPlexMono-Medm"]
         XCTAssertEqual(JV.registeredFaces, Set(faces))
+    }
+
+    /// Bold Text draws every weight with the heaviest bundled face.
+    func testBoldTextUsesSemibold() {
+        let weights: [JV.Weight] = [.regular, .medium, .semibold]
+        XCTAssertEqual(weights.map { $0.legible(bold: false) }, weights)
+        XCTAssertEqual(weights.map { $0.legible(bold: true) }, [.semibold, .semibold, .semibold])
+        XCTAssertEqual(JV.Weight.semibold.legible(bold: true).sansFace, "IBMPlexSans-SmBld")
+    }
+
+    /// Every status tone has its own badge colours; idle stays neutral.
+    func testToneBadgeStyles() {
+        XCTAssertEqual([Tone.ok, .idle, .warn, .error].map(\.badge), [.positive, .neutral, .negative, .danger])
     }
 
     /// Stored raw values are persisted; changing them would reset the owner's choice.

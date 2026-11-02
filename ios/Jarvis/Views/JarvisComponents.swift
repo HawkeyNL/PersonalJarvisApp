@@ -1,38 +1,8 @@
 import SwiftUI
 
-// Building blocks of the Jarvis design language (desktop components/jv/*),
-// drawn with the Instrument tokens (Instrument.swift).
-
-// MARK: - Orb
-
-/// The Jarvis orb in Instrument accent colours, light and dark. It breathes
-/// slowly; mood speeds it up (idle ×1, listening ×0.7, thinking ×0.4).
-/// Reduce Motion shows a still frame.
-struct JarvisOrb: View {
-    var size: CGFloat
-    var mood: Mood = .idle
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { context in
-            let time = reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate
-            let breathe = (sin(time / (4 * moodFactor(mood)) * 2 * .pi) + 1) / 2
-            ZStack {
-                Circle()
-                    .fill(JV.accentSubtle)
-                    .overlay(Circle().strokeBorder(JV.accentBorder, lineWidth: 1))
-                    .scaleEffect(0.94 + 0.06 * breathe)
-                Circle()
-                    .fill(RadialGradient(colors: [JV.focusRing, JV.accentSolid], center: UnitPoint(x: 0.4, y: 0.35),
-                                         startRadius: 0, endRadius: size * 0.36))
-                    .frame(width: size * 0.6, height: size * 0.6)
-                    .scaleEffect(0.97 + 0.04 * breathe)
-            }
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
-    }
-}
+// Instrument mobile patterns (canvas I-* boards; tokens.css .list/.li, .seg,
+// .badge, .tile, .card, .empty, .skel), drawn with the tokens in Instrument.swift.
+// Spacing follows the canvas values; tokens.css has no spacing scale.
 
 // MARK: - Status
 
@@ -62,6 +32,66 @@ struct StatusLabel: View {
     }
 }
 
+/// Status badge (.badge): a dot and its label on a tinted pill. The label always
+/// carries the meaning; Increase Contrast adds an outline.
+struct Badge: View {
+    enum Style: Equatable {
+        case neutral, accent, positive, negative, danger
+
+        var foreground: Color {
+            switch self {
+            case .neutral: JV.textPrimary
+            case .accent: JV.accentText
+            case .positive: JV.positiveText
+            case .negative: JV.negativeText
+            case .danger: JV.dangerText
+            }
+        }
+
+        var background: Color {
+            switch self {
+            case .neutral: JV.bgSunken
+            case .accent: JV.accentSubtle
+            case .positive: JV.positiveSubtle
+            case .negative: JV.negativeSubtle
+            case .danger: JV.dangerSubtle
+            }
+        }
+    }
+
+    let text: String
+    var style: Style = .neutral
+    var dot = true
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if dot { Circle().fill(style.foreground).frame(width: 6, height: 6).accessibilityHidden(true) }
+            Text(verbatim: text)
+                .font(JV.font(12, .medium, relativeTo: .caption))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(style.foreground)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 3)
+        .frame(minHeight: 24)
+        .background(style.background, in: Capsule())
+        .overlay { if contrast == .increased { Capsule().strokeBorder(style.foreground, lineWidth: 1) } }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+extension Tone {
+    var badge: Badge.Style {
+        switch self {
+        case .ok: .positive
+        case .idle: .neutral
+        case .warn: .negative
+        case .error: .danger
+        }
+    }
+}
+
 /// Sentence-case section label ("Your system").
 struct Eyebrow: View {
     let text: String
@@ -74,24 +104,25 @@ struct Eyebrow: View {
     }
 }
 
-/// Accent icon tile.
+/// Icon tile (.tile), accent by default.
 struct IconBadge: View {
     let symbol: String
     var size: CGFloat = 40
+    var style: Badge.Style = .accent
 
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: size * 0.42, weight: .regular))
-            .foregroundStyle(JV.accentText)
+            .foregroundStyle(style == .neutral ? JV.textSecondary : style.foreground)
             .frame(width: size, height: size)
-            .background(JV.accentSubtle, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
+            .background(style.background, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
             .accessibilityHidden(true)
     }
 }
 
 // MARK: - Lists
 
-/// Instrument list row: icon tile, title, optional detail and value, chevron.
+/// Instrument list row (.li): icon tile, title, optional detail and value, chevron.
 struct ListRow: View {
     let title: String
     let symbol: String
@@ -116,8 +147,8 @@ struct ListRow: View {
                 .foregroundStyle(JV.textSecondary)
                 .accessibilityHidden(true)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
         .frame(minHeight: 52)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
@@ -141,9 +172,14 @@ struct RouteList: View {
     }
 }
 
-/// Hairline between list rows, inset past the icon tile.
+/// Hairline between list rows, by default inset past the icon tile.
 struct ListDivider: View {
-    var body: some View { Rectangle().fill(JV.separator).frame(height: 1).padding(.leading, 56) }
+    var inset: CGFloat = 60
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        Rectangle().fill(contrast == .increased ? JV.border : JV.separator).frame(height: 1).padding(.leading, inset)
+    }
 }
 
 /// Titled group of an Instrument page (I-Settings sections).
@@ -159,9 +195,102 @@ struct ListSection<Content: View>: View {
     }
 }
 
+/// Segmented views (.seg): one choice of a few, 44 pt segments; the selected
+/// one is raised with a 3:1 outline. Scrolls sideways when the labels do not
+/// fit (narrow width, large text).
+struct SegmentedControl<ID: Hashable>: View {
+    struct Option: Identifiable {
+        let id: ID
+        let label: String
+        var accessibilityValue = ""
+    }
+
+    let label: String
+    let options: [Option]
+    @Binding var selection: ID
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            segments(fill: true)
+            ScrollView(.horizontal) { segments(fill: false) }.scrollIndicators(.hidden)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(label)
+    }
+
+    private func segments(fill: Bool) -> some View {
+        HStack(spacing: 2) {
+            ForEach(options) { option in
+                let selected = option.id == selection
+                let shape = RoundedRectangle(cornerRadius: JV.Radius.md - 2, style: .continuous)
+                Button { selection = option.id } label: {
+                    Text(verbatim: option.label)
+                        .font(JV.font(14, selected ? .semibold : .medium))
+                        .foregroundStyle(selected ? JV.textPrimary : JV.textSecondary)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.horizontal, 14)
+                        .frame(maxWidth: fill ? .infinity : nil, minHeight: 44)
+                        .background(selected ? JV.bgRaised : Color.clear, in: shape)
+                        .overlay { if selected { shape.strokeBorder(JV.borderStrong, lineWidth: 1) } }
+                        .contentShape(shape)
+                }
+                .buttonStyle(.plain)
+                .accessibilityValue(option.accessibilityValue)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
+    }
+}
+
+extension SegmentedControl where ID == String {
+    /// The views of a page; each segment's status is its accessibility value.
+    init(label: String, items: [NodeItem], selection: Binding<String>) {
+        self.init(label: label, options: items.map { Option(id: $0.id, label: $0.label, accessibilityValue: $0.status) },
+                  selection: selection)
+    }
+
+    /// Plain views without a status, as (id, label) pairs.
+    init(label: String, pairs: [(String, String)], selection: Binding<String>) {
+        self.init(label: label, options: pairs.map { Option(id: $0.0, label: $0.1) }, selection: selection)
+    }
+}
+
 // MARK: - Panel, tiles, activity
 
-/// Detail panel of a node page: header, description and optional actions.
+/// Title and status badge of a card; the badge moves under the title when
+/// both do not fit on one line.
+struct TitleBadgeRow: View {
+    let title: String
+    let badge: Badge
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                heading
+                Spacer(minLength: 8)
+                badge
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                heading
+                badge
+            }
+        }
+    }
+
+    private var heading: some View {
+        Text(verbatim: title)
+            .font(JV.font(18, .semibold, relativeTo: .title3))
+            .foregroundStyle(JV.textPrimary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Summary card of a page view (D-Memory persona card): title, status badge,
+/// description and optional actions.
 struct NodePanel<Accessory: View>: View {
     let item: NodeItem
     let accessory: Accessory
@@ -172,23 +301,15 @@ struct NodePanel<Accessory: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 14) {
-                IconBadge(symbol: item.icon, size: 52)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.title)
-                        .font(JV.font(18, .semibold, relativeTo: .title3))
-                        .foregroundStyle(JV.textPrimary)
-                        .accessibilityAddTraits(.isHeader)
-                    StatusLabel(tone: item.tone, text: item.status)
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            TitleBadgeRow(title: item.title, badge: Badge(text: item.status, style: item.tone.badge))
+            if !item.detail.isEmpty {
+                Text(verbatim: item.detail)
+                    .font(JV.font(13))
+                    .foregroundStyle(JV.textSecondary)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Text(item.detail)
-                .font(JV.font(15))
-                .foregroundStyle(JV.textSecondary)
-                .lineSpacing(3)
-                .padding(.top, 12)
-                .fixedSize(horizontal: false, vertical: true)
             accessory
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -210,49 +331,53 @@ struct PanelButton: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Text(title)
-                Image(systemName: symbol).font(.system(size: 13, weight: .semibold))
+                Image(systemName: symbol).font(.system(size: 13, weight: .semibold)).accessibilityHidden(true)
             }
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(JVButtonStyle(kind: .quiet, size: .large))
-        .padding(.top, 14)
+        .padding(.top, 6)
     }
 }
 
 struct TileData: Identifiable {
     let label: String
     let value: String
-    let symbol: String
     var id: String { label }
 }
 
-/// Two-column grid of labelled values.
+/// Labelled values as small cards (D-Runs figures), two per row; one per row
+/// at accessibility text sizes.
 struct TileGrid: View {
     let tiles: [TileData]
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
-            ForEach(tiles) { tile in
-                VStack(alignment: .leading, spacing: 6) {
-                    Image(systemName: tile.symbol)
-                        .font(.system(size: 15))
-                        .foregroundStyle(JV.accentText)
-                        .accessibilityHidden(true)
-                    Text(tile.value)
-                        .font(JV.number(17, .semibold))
-                        .foregroundStyle(JV.textPrimary)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.8)
-                    Text(tile.label)
-                        .font(JV.font(13))
-                        .foregroundStyle(JV.textSecondary)
+        let columns = typeSize.isAccessibilitySize ? 1 : 2
+        Grid(horizontalSpacing: 12, verticalSpacing: 12) {
+            ForEach(Array(stride(from: 0, to: tiles.count, by: columns)), id: \.self) { start in
+                GridRow {
+                    ForEach(tiles[start..<min(start + columns, tiles.count)]) { tile in cell(tile) }
+                    if start + columns > tiles.count { Color.clear.gridCellUnsizedAxes([.horizontal, .vertical]) }
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
-                .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
-                .accessibilityElement(children: .combine)
             }
         }
+    }
+
+    private func cell(_ tile: TileData) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(verbatim: tile.label)
+                .font(JV.font(13))
+                .foregroundStyle(JV.textSecondary)
+            Text(verbatim: tile.value)
+                .font(JV.number(20, .semibold, relativeTo: .title3))
+                .foregroundStyle(JV.textPrimary)
+                .lineLimit(3)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .jvCard(padding: 16)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -264,46 +389,62 @@ struct ActivityRow: Identifiable {
     var time: String? = nil
     let tone: Tone
     let toneLabel: String
+    /// Shows `toneLabel` as a status badge; off where it would repeat on every row.
+    var badge = true
+    var selected = false
 }
 
+/// A row of a list card (.li): tile, title and detail, status badge and time.
+/// At accessibility text sizes the badge and time move under the title.
 struct ActivityRowView: View {
     let row: ActivityRow
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
+        let stacked = typeSize.isAccessibilitySize
         HStack(spacing: 12) {
-            Image(systemName: row.symbol)
-                .font(.system(size: 15))
-                .foregroundStyle(JV.textSecondary)
-                .frame(width: 36, height: 36)
-                .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(row.title)
+            if !stacked {
+                IconBadge(symbol: row.symbol, size: 36, style: .neutral)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: row.title)
                     .font(JV.font(15, .medium))
                     .foregroundStyle(JV.textPrimary)
-                    .lineLimit(1)
+                    .lineLimit(stacked ? nil : 2)
                 if let detail = row.detail, !detail.isEmpty {
-                    Text(detail)
-                        .font(JV.font(13))
+                    Text(verbatim: detail)
+                        .font(JV.font(12, relativeTo: .caption))
                         .foregroundStyle(JV.textSecondary)
-                        .lineLimit(2)
+                        .lineLimit(stacked ? nil : 2)
                 }
+                if stacked { trailing(alignment: .leading).padding(.top, 4) }
             }
-            Spacer(minLength: 4)
-            if let time = row.time, !time.isEmpty {
-                Text(time).font(JV.number(13)).foregroundStyle(JV.textSecondary)
+            if !stacked {
+                Spacer(minLength: 4)
+                trailing(alignment: .trailing)
             }
-            StatusDot(tone: row.tone)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .frame(minHeight: 58)
+        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+        .background(row.selected ? JV.bgSelected : Color.clear)
         .accessibilityElement(children: .combine)
-        .accessibilityValue(row.toneLabel)
+        // A shown badge is already read as part of the row.
+        .accessibilityValue(Text(verbatim: row.badge ? "" : row.toneLabel))
+        .accessibilityAddTraits(row.selected ? .isSelected : [])
+    }
+
+    private func trailing(alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 4) {
+            if row.badge { Badge(text: row.toneLabel, style: row.tone.badge) }
+            if let time = row.time, !time.isEmpty {
+                Text(verbatim: time).font(JV.number(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
+            }
+        }
     }
 }
 
-/// Bordered list of activity rows; rows are tappable when `onSelect` is set.
+/// List card of activity rows; rows are tappable when `onSelect` is set.
 struct ActivityList: View {
     let rows: [ActivityRow]
     var emptyText = "Nothing to show yet."
@@ -315,10 +456,13 @@ struct ActivityList: View {
                 Text(emptyText)
                     .font(JV.font(15))
                     .foregroundStyle(JV.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 20)
                     .frame(maxWidth: .infinity, minHeight: 58)
             }
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                if index > 0 { Divider().overlay(JV.separator) }
+                if index > 0 { ListDivider(inset: 0) }
                 if let onSelect {
                     Button { onSelect(row) } label: { ActivityRowView(row: row).contentShape(Rectangle()) }
                         .buttonStyle(.plain)
@@ -327,78 +471,207 @@ struct ActivityList: View {
                 }
             }
         }
+        .clipShape(RoundedRectangle(cornerRadius: JV.Radius.lg, style: .continuous))
         .jvCard(padding: 0)
     }
 }
 
-// MARK: - Unavailable
+/// What Core does not offer yet, as plain rows. Never sample data.
+struct LaterList: View {
+    let items: [NodeItem]
 
-/// Honest empty state for features Core does not offer (yet). Never sample data.
+    var body: some View {
+        ListSection(title: "Later") {
+            VStack(spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    if index > 0 { ListDivider(inset: 0) }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(verbatim: item.title).font(JV.font(15, .medium)).foregroundStyle(JV.textPrimary)
+                        Text(verbatim: item.detail)
+                            .font(JV.font(13))
+                            .foregroundStyle(JV.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityValue("Not yet available")
+                }
+            }
+            .jvCard(padding: 0)
+        }
+    }
+}
+
+// MARK: - Empty, loading and error
+
+/// Empty, unavailable and error states (F-Components). Empty and unavailable
+/// are a centred card; an error names the read, says why and offers Try again
+/// where the page can repeat its own read. Never sample data.
 struct UnavailableState: View {
-    enum Kind { case planned, coreUpdate, error }
+    enum Kind { case empty, planned, coreUpdate, error }
+
+    struct Action {
+        let label: String
+        let run: () async -> Void
+    }
 
     let title: String
     var kind: Kind = .planned
     var detail: String? = nil
     var symbol = "sparkles"
+    var action: Action? = nil
+    @State private var running = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            Image(systemName: symbol)
-                .font(.system(size: 17))
-                .foregroundStyle(JV.textSecondary)
-                .frame(width: 40, height: 40)
-                .background(JV.bgSunken, in: Circle())
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(JV.font(15, .semibold)).foregroundStyle(JV.textPrimary)
-                Text(kindLabel)
-                    .font(JV.font(13, .medium))
-                    .foregroundStyle(JV.textSecondary)
-                if let detail {
-                    Text(detail)
-                        .font(JV.font(13))
-                        .foregroundStyle(JV.textSecondary)
-                        .lineSpacing(3)
-                        .padding(.top, 4)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
-        .background(JV.bgSurface, in: RoundedRectangle(cornerRadius: JV.Radius.lg, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: JV.Radius.lg, style: .continuous)
-            .strokeBorder(JV.border, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
-        .accessibilityElement(children: .combine)
+        if kind == .error { errorCard } else { emptyCard }
     }
 
-    private var kindLabel: String {
+    private var emptyCard: some View {
+        VStack(spacing: 10) {
+            VStack(spacing: 10) {
+                IconBadge(symbol: symbol, size: 36)
+                Text(verbatim: title)
+                    .font(JV.font(15, .semibold))
+                    .foregroundStyle(JV.textPrimary)
+                    .accessibilityAddTraits(.isHeader)
+                if let label = kindLabel { Badge(text: label, dot: false) }
+                if let detail {
+                    Text(verbatim: detail)
+                        .font(JV.font(13))
+                        .foregroundStyle(JV.textSecondary)
+                        .lineSpacing(2)
+                }
+            }
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityElement(children: .combine)
+            actionButton
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 32)
+        .frame(maxWidth: .infinity)
+        .jvCard(padding: 0)
+    }
+
+    private var errorCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    IconBadge(symbol: "exclamationmark.triangle", size: 36, style: .negative)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(verbatim: title)
+                            .font(JV.font(15, .semibold))
+                            .foregroundStyle(JV.textPrimary)
+                            .accessibilityAddTraits(.isHeader)
+                        Text("Could not load").font(JV.font(13, .medium)).foregroundStyle(JV.dangerText)
+                    }
+                }
+                if let detail {
+                    Text(verbatim: detail)
+                        .font(JV.font(13))
+                        .foregroundStyle(JV.textSecondary)
+                        .lineSpacing(2)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityElement(children: .combine)
+            actionButton
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jvCard(padding: 16)
+    }
+
+    @ViewBuilder private var actionButton: some View {
+        if let action {
+            Button(action.label) {
+                Task {
+                    running = true
+                    await action.run()
+                    running = false
+                }
+            }
+            .buttonStyle(JVButtonStyle(kind: .secondary, size: .large))
+            .disabled(running)
+        }
+    }
+
+    private var kindLabel: String? {
         switch kind {
+        case .empty, .error: nil
         case .planned: "Not yet available"
         case .coreUpdate: "Requires newer Core"
-        case .error: "Could not load"
         }
     }
 }
 
 extension UnavailableState {
-    /// Empty state for a read that did not succeed; `nil` while it loads or after success.
+    /// State for a read that did not succeed; `nil` while it loads or after
+    /// success. `retry` repeats the page's own read.
     static func forSource<T>(_ source: Availability<T>, title: String, symbol: String = "sparkles",
-                             forbidden: String = "Turned off in Core.") -> UnavailableState? {
+                             forbidden: String = "Turned off in Core.",
+                             retry: (() async -> Void)? = nil) -> UnavailableState? {
         switch source {
         case .unsupported:
             return UnavailableState(title: title, kind: .coreUpdate, detail: "Update Core to see this here.", symbol: symbol)
         case let .error(reason):
-            return UnavailableState(title: title, kind: .error, detail: failureText(reason, forbidden: forbidden), symbol: symbol)
+            return UnavailableState(title: title, kind: .error, detail: failureText(reason, forbidden: forbidden), symbol: symbol,
+                                    action: retry.map { Action(label: "Try again", run: $0) })
         case .loading, .ok:
             return nil
         }
     }
 }
 
-// MARK: - Node page scaffold
+/// One placeholder row (.skel): sunken bars the size of the row that replaces it.
+struct SkeletonRow: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            bar(width: 36, height: 36, radius: JV.Radius.md)
+            VStack(alignment: .leading, spacing: 8) {
+                bar(width: 150, height: 14)
+                bar(width: 96, height: 12)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func bar(width: CGFloat, height: CGFloat, radius: CGFloat = JV.Radius.sm) -> some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous).fill(JV.bgSunken).frame(width: width, height: height)
+    }
+}
+
+/// Loading state: a list card of placeholder rows that pulses gently and holds
+/// still with Reduce Motion. VoiceOver reads `label`.
+struct LoadingState: View {
+    let label: String
+    var rows = 3
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dim = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(0..<rows, id: \.self) { index in
+                if index > 0 { ListDivider(inset: 0) }
+                SkeletonRow()
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 11)
+                    .frame(minHeight: 58)
+            }
+        }
+        .opacity(dim ? 0.55 : 1)
+        .jvCard(padding: 0)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { dim = true }
+        }
+    }
+}
+
+// MARK: - Pages
 
 struct NodeItem: Identifiable {
     let id: String
@@ -414,90 +687,48 @@ struct NodeItem: Identifiable {
     }
 }
 
-/// Horizontal pill selector (satellites on the node pages, sub-tabs).
-struct ChipRow: View {
-    struct Chip: Identifiable {
-        let id: String
-        let label: String
-        let symbol: String
-        var accessibilityValue = ""
-    }
-
-    let chips: [Chip]
-    @Binding var selection: String
-    var compact = false
-
-    var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(chips) { chip in
-                    let selected = chip.id == selection
-                    Button { selection = chip.id } label: {
-                        HStack(spacing: 7) {
-                            Image(systemName: chip.symbol).font(.system(size: compact ? 12 : 14))
-                            Text(chip.label).font(JV.font(compact ? 13 : 14, .medium))
-                        }
-                        .foregroundStyle(selected ? JV.accentText : JV.textSecondary)
-                        .padding(.horizontal, compact ? 12 : 14)
-                        .frame(minHeight: compact ? 36 : 40)
-                        .background(selected ? JV.bgSelected : (compact ? Color.clear : JV.bgSunken),
-                                    in: RoundedRectangle(cornerRadius: compact ? JV.Radius.md : JV.Radius.xl, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: compact ? JV.Radius.md : JV.Radius.xl, style: .continuous)
-                            .strokeBorder(selected ? JV.accentBorder : (compact ? JV.border : Color.clear), lineWidth: 1))
-                        .contentShape(RoundedRectangle(cornerRadius: compact ? JV.Radius.md : JV.Radius.xl, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(chip.label)
-                    .accessibilityValue(chip.accessibilityValue)
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 2)
-        }
-        .scrollIndicators(.hidden)
-        .padding(.horizontal, -16)
-    }
-}
-
-/// Shared layout of every node page: satellite selector and the page's own
-/// content for the selected satellite.
-struct NodeScaffold<Content: View>: View {
+/// A pushed page: title and line in the bar, then the page's cards and lists.
+/// The page scrolls back to the top when `top` changes.
+struct PageScaffold<Content: View>: View {
     let title: String
     let subtitle: String
-    let items: [NodeItem]
-    @Binding var selection: String
+    let top: AnyHashable?
     let content: Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(title: String, subtitle: String, items: [NodeItem], selection: Binding<String>,
-         @ViewBuilder content: () -> Content) {
+    init(title: String, subtitle: String, top: AnyHashable? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
         self.subtitle = subtitle
-        self.items = items
-        self._selection = selection
+        self.top = top
         self.content = content()
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                ChipRow(chips: items.map { ChipRow.Chip(id: $0.id, label: $0.label, symbol: $0.icon, accessibilityValue: $0.status) },
-                        selection: $selection)
-                content
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    content
+                }
+                .id(Self.topID)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 32)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 32)
+            .onChange(of: top) { _, _ in
+                withAnimation(reduceMotion ? nil : JV.Motion.easeOut(JV.Motion.enter)) { proxy.scrollTo(Self.topID, anchor: .top) }
+            }
         }
         .background(JV.bgPage)
         .jarvisNavigationBar(title: title, subtitle: subtitle)
     }
+
+    private static var topID: String { "page-top" }
 }
 
 extension View {
-    /// Navigation bar with a sentence-case title and subtitle. Settings is a
-    /// tab, so pages carry no profile button.
-    func jarvisNavigationBar(title: String, subtitle: String) -> some View {
+    /// Navigation bar with a sentence-case title and optional line. Settings is
+    /// a tab, so pages carry no profile button.
+    func jarvisNavigationBar(title: String, subtitle: String? = nil) -> some View {
         navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(JV.bgPage, for: .navigationBar)
@@ -505,12 +736,14 @@ extension View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 1) {
-                        Text(title)
+                        Text(verbatim: title)
                             .font(JV.font(17, .semibold, relativeTo: .headline))
                             .foregroundStyle(JV.textPrimary)
-                        Text(subtitle)
-                            .font(JV.font(12, relativeTo: .caption))
-                            .foregroundStyle(JV.textSecondary)
+                        if let subtitle {
+                            Text(verbatim: subtitle)
+                                .font(JV.font(12, relativeTo: .caption))
+                                .foregroundStyle(JV.textSecondary)
+                        }
                     }
                     .lineLimit(1)
                     .accessibilityElement(children: .combine)
@@ -518,6 +751,21 @@ extension View {
                 }
             }
     }
+
+    /// Instrument page behind a system List or Form: page background, surface
+    /// rows (set per section with `listRowBackground`), sentence-case headers.
+    func instrumentList() -> some View {
+        scrollContentBackground(.hidden)
+            .background(JV.bgPage)
+            .textCase(nil)
+            .toolbarBackground(JV.bgPage, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+    }
+}
+
+/// Section header of a system List in Plex.
+@MainActor func listHeader(_ text: String) -> some View {
+    Text(verbatim: text).font(JV.font(13, .medium, relativeTo: .footnote)).foregroundStyle(JV.textSecondary)
 }
 
 /// Opens Settings from the enrollment screen (connection, voice, security).
