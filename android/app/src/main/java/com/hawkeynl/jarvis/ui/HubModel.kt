@@ -37,16 +37,6 @@ fun parseDeepLink(uri: String?): DeepLink? {
 /** Status colour of a dot or label; every tone is always paired with text. */
 enum class Tone { OK, IDLE, WARN, ERROR }
 
-/** What the orb shows. */
-enum class Mood { IDLE, LISTENING, THINKING }
-
-/** Animation-duration multiplier per mood (export: x1 / x0.7 / x0.4). */
-fun moodFactor(mood: Mood): Float = when (mood) {
-    Mood.THINKING -> 0.4f
-    Mood.LISTENING -> 0.7f
-    Mood.IDLE -> 1f
-}
-
 /** Reachability of Core from the connection check: null while unknown. */
 fun onlineOf(connection: ConnectionState): Boolean? = when (connection) {
     is ConnectionState.Reachable -> true

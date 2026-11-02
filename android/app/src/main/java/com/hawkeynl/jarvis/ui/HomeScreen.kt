@@ -45,8 +45,8 @@ fun HomeScreen(state: JarvisUiState, data: CoreData, onNavigate: (Screen) -> Uni
     val millis = remember(now) { System.currentTimeMillis() }
     Column(Modifier.fillMaxSize()) {
         Column(
-            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(JvSpace.lg),
+            verticalArrangement = Arrangement.spacedBy(JvSpace.xl),
         ) {
             TabTitle(greeting(now.hour), DAY.format(now))
             WaitingCard(data) { onNavigate(Screen.ACTIVITY) }

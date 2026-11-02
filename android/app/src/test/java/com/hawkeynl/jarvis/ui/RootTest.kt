@@ -32,4 +32,23 @@ class RootTest {
             assertEquals(Root.SHELL, rootFor(JarvisUiState(screen = screen, endpoint = endpoint, authenticated = true)))
         }
     }
+
+    @Test
+    fun `onboarding progress follows the real sign-in state`() {
+        assertEquals(0, onboardingStep(JarvisUiState(), editingEndpoint = false))
+        assertEquals(1, onboardingStep(JarvisUiState(endpoint = endpoint), editingEndpoint = false))
+        assertEquals(1, onboardingStep(JarvisUiState(endpoint = endpoint, activationRequired = true), editingEndpoint = false))
+        assertEquals(1, onboardingStep(JarvisUiState(endpoint = endpoint, deviceKeyLost = true), editingEndpoint = false))
+        assertEquals(1, onboardingStep(JarvisUiState(endpoint = endpoint, deviceKeyLost = true, pairingPending = true), editingEndpoint = false))
+        assertEquals(2, onboardingStep(JarvisUiState(endpoint = endpoint, pairingPending = true), editingEndpoint = false))
+        assertEquals(0, onboardingStep(JarvisUiState(endpoint = endpoint, pairingPending = true), editingEndpoint = true))
+    }
+
+    @Test
+    fun `saving the same Home Node ends the edit`() {
+        assertEquals(true, savesSameEndpoint("https://jarvis.example.test/", endpoint))
+        assertEquals(false, savesSameEndpoint("https://other.example.test", endpoint))
+        assertEquals(false, savesSameEndpoint("not a url", endpoint))
+        assertEquals(false, savesSameEndpoint("https://jarvis.example.test", null))
+    }
 }

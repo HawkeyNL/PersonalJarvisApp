@@ -5,6 +5,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.hawkeynl.jarvis.security.*
@@ -28,30 +29,52 @@ fun ModelControls(controller: ModelControlService) {
         catch (_: Exception) { notice = "Model policy unreachable"; policy = null }
         finally { busy = false }
     } })
-    if (open) AlertDialog(onDismissRequest = { if (!busy) open = false }, title = { Text("Models") },
+    if (open) AlertDialog(onDismissRequest = { if (!busy) open = false }, title = { Text("Models", style = MaterialTheme.typography.titleLarge) },
         text = {
-            Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
-                Text("Every change needs your fingerprint or face and applies to all devices. Budget limits stay active.")
-                OutlinedTextField(value = search, onValueChange = { search = it; page = 0 }, label = { Text("Search") })
-                Text(notice)
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(JvSpace.md),
+            ) {
+                Text(
+                    "Every change needs your fingerprint or face and applies to all devices. Budget limits stay active.",
+                    color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedTextField(value = search, onValueChange = { search = it; page = 0 }, modifier = Modifier.fillMaxWidth(), label = { Text("Search") })
+                if (notice.isNotEmpty()) MutedText(notice)
                 val entries = policy?.models?.filter { "${it.provider}/${it.model}".contains(search, ignoreCase = true) }.orEmpty()
-                entries.drop(page * 25).take(25).forEach { entry ->
-                    HorizontalDivider()
-                    Text(entry.model, style = MaterialTheme.typography.titleSmall)
-                    Text("${entry.provider} · ${if (entry.enabled) "on" else "off"}")
-                    Button(enabled = !busy && policy?.mutation == "device-signed-model-toggle-v1", onClick = { selected = entry }) {
-                        Text(if (entry.enabled) "Turn off" else "Turn on")
+                Column {
+                    entries.drop(page * 25).take(25).forEach { entry ->
+                        ListDivider()
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = JvSpace.sm),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(JvSpace.sm),
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(entry.model, color = JvTheme.colors.textPrimary, style = MaterialTheme.typography.titleSmall)
+                                MutedText("${entry.provider} · ${if (entry.enabled) "on" else "off"}")
+                            }
+                            GhostButton(
+                                if (entry.enabled) "Turn off" else "Turn on", { selected = entry },
+                                enabled = !busy && policy?.mutation == "device-signed-model-toggle-v1",
+                            )
+                        }
                     }
                 }
-                Row {
-                    TextButton(enabled = !busy && page > 0, onClick = { page-- }) { Text("Previous") }
-                    TextButton(enabled = !busy && (page + 1) * 25 < entries.size, onClick = { page++ }) { Text("Next") }
+                Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+                    GhostButton("Previous", { page-- }, Modifier.weight(1f), enabled = !busy && page > 0)
+                    GhostButton("Next", { page++ }, Modifier.weight(1f), enabled = !busy && (page + 1) * 25 < entries.size)
                 }
             }
         }, confirmButton = { TextButton(enabled = !busy, onClick = { open = false }) { Text("Close") } })
     selected?.let { entry ->
-        AlertDialog(onDismissRequest = { selected = null }, title = { Text("Confirm model change?") },
-            text = { Text("${entry.provider}/${entry.model} ${if (entry.enabled) "off" else "on"}? Running requests are not cancelled.") },
+        AlertDialog(onDismissRequest = { selected = null }, title = { Text("Confirm model change?", style = MaterialTheme.typography.titleLarge) },
+            text = {
+                Text(
+                    "${entry.provider}/${entry.model} ${if (entry.enabled) "off" else "on"}? Running requests are not cancelled.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
             dismissButton = { TextButton(onClick = { selected = null }) { Text("Cancel") } },
             confirmButton = { TextButton(onClick = {
                 selected = null
