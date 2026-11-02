@@ -74,12 +74,15 @@ function scrollToBottom() {
   if (el) el.scrollTop = el.scrollHeight;
 }
 watch(
-  () => [messages.value.length, thinking.value, last.value?.text] as const,
-  ([length], [previous]) => {
+  () => [currentId.value, messages.value.length, thinking.value, last.value?.text] as const,
+  ([id, length], [previousId, previousLength]) => {
     const el = logEl.value;
-    if (el && (length !== previous || el.scrollHeight - el.scrollTop - el.clientHeight < 80)) void nextTick(scrollToBottom);
+    const pinned = id !== previousId || length !== previousLength;
+    if (el && (pinned || el.scrollHeight - el.scrollTop - el.clientHeight < 80)) void nextTick(scrollToBottom);
   },
 );
+// The log replaces the empty state once a conversation has messages.
+watch(logEl, (el) => { if (el) scrollToBottom(); }, { flush: "post" });
 
 // Screen readers: the log itself is not live (a reload or a stream of tokens
 // would flood them). This status line says when Jarvis starts a reply and
@@ -88,6 +91,10 @@ const announcement = ref("");
 let askedIn: string | null = null;
 const plain = (markdown: string) =>
   new DOMParser().parseFromString(renderMarkdown(markdown), "text/html").body.textContent?.trim() ?? "";
+// A reply that starts a new conversation belongs to the id Core gives it.
+watch(currentId, (id, previous) => {
+  if (thinking.value && askedIn === null && previous === null) askedIn = id;
+});
 watch(thinking, (busy, before) => {
   if (busy) {
     askedIn = currentId.value;
@@ -132,11 +139,18 @@ const confirming = ref(false);
 const deleting = ref(false);
 const deleteError = ref<string | null>(null);
 const cancelEl = ref<HTMLButtonElement | null>(null);
+const deleteEl = ref<HTMLButtonElement | null>(null);
 watch(currentId, () => { confirming.value = false; deleteError.value = null; });
 async function askDelete() {
   confirming.value = true;
   await nextTick();
   cancelEl.value?.focus();
+}
+async function cancelDelete() {
+  if (deleting.value) return;
+  confirming.value = false;
+  await nextTick();
+  deleteEl.value?.focus();
 }
 async function removeCurrent() {
   const id = currentId.value;
@@ -156,12 +170,8 @@ async function removeCurrent() {
   }
 }
 
-// The home reads the mic state and focuses the composer (Ctrl/⌘K, New).
-defineExpose({
-  listening: mic.listening,
-  startListening: () => { if (!mic.listening.value) mic.toggle(); },
-  focusInput: () => inputEl.value?.focus(),
-});
+// The home focuses the composer (Ctrl/⌘K, New).
+defineExpose({ focusInput: () => inputEl.value?.focus() });
 
 onMounted(async () => {
   try {
@@ -187,12 +197,12 @@ onMounted(async () => {
         <h2 id="chat-title">{{ current ? current.title || "Untitled" : "New conversation" }}</h2>
         <span class="t-xs t-2">{{ day ? `${day} · Stored on your Home Node` : "Your first message starts it" }}</span>
       </div>
-      <div v-if="current" class="head-actions">
+      <div v-if="current" class="head-actions" @keydown.esc="cancelDelete">
         <template v-if="confirming">
           <button type="button" class="btn btn-danger-quiet btn-sm" :aria-busy="deleting" @click="removeCurrent">Delete for good</button>
-          <button ref="cancelEl" type="button" class="btn btn-secondary btn-sm" :disabled="deleting" @click="confirming = false">Cancel</button>
+          <button ref="cancelEl" type="button" class="btn btn-secondary btn-sm" :disabled="deleting" @click="cancelDelete">Cancel</button>
         </template>
-        <button v-else type="button" class="btn btn-ghost btn-sm" :aria-label="`Delete ${current.title || 'this conversation'}`" @click="askDelete">Delete</button>
+        <button v-else ref="deleteEl" type="button" class="btn btn-ghost btn-sm" :aria-label="`Delete ${current.title || 'this conversation'}`" @click="askDelete">Delete</button>
       </div>
     </header>
     <p v-if="deleteError" class="err banner" role="alert">{{ deleteError }}</p>
@@ -321,7 +331,10 @@ onMounted(async () => {
 }
 .who { display: flex; align-items: center; gap: 8px; }
 .mark { width: 24px; height: 24px; border-radius: 7px; }
-.thinking { margin: 0; display: flex; align-items: center; gap: 8px; }
+.thinking {
+  margin: 0; align-self: flex-start; display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-radius: 10px; background: var(--bg-sunken);
+}
 
 /* Rendered Markdown (v-html, so :deep). Tables get the canvas .tbl in a card. */
 .md { line-height: 1.6; overflow-wrap: anywhere; }

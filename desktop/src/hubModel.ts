@@ -61,15 +61,6 @@ export function relativeTime(iso: string, now: number): string {
   return `${Math.floor(diff / DAY)}d ago`;
 }
 
-/** Number of items updated within the last `days` days. */
-export function countSince(items: { updated_at: string }[], days: number, now: number): number {
-  const since = now - days * DAY;
-  return items.filter((item) => {
-    const at = Date.parse(item.updated_at);
-    return !Number.isNaN(at) && at >= since;
-  }).length;
-}
-
 /** "14d 2h", "3h 12m", "5m" from seconds of uptime. */
 export function formatUptime(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));

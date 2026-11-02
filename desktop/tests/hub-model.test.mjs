@@ -8,7 +8,6 @@ import {
   failureText,
   fitScale,
   contextCard,
-  countSince,
   deepLinkRoute,
   formatUptime,
   healthCard,
@@ -28,15 +27,13 @@ test("orb mood sets the animation speed", () => {
   assert.deepEqual(["idle", "listening", "thinking"].map(moodFactor), [1, 0.7, 0.4]);
 });
 
-test("relative time and counts", () => {
+test("relative time", () => {
   assert.equal(relativeTime(ago(10_000), NOW), "just now");
   assert.equal(relativeTime(ago(4 * MIN), NOW), "4m ago");
   assert.equal(relativeTime(ago(125 * MIN), NOW), "2h ago");
   assert.equal(relativeTime(ago(3 * DAY + 1), NOW), "3d ago");
   assert.equal(relativeTime("not a date", NOW), "");
   assert.equal(relativeTime(new Date(NOW + 5 * MIN).toISOString(), NOW), "just now");
-  const items = [{ updated_at: ago(DAY) }, { updated_at: ago(6 * DAY) }, { updated_at: ago(8 * DAY) }, { updated_at: "bad" }];
-  assert.equal(countSince(items, 7, NOW), 2);
 });
 
 test("uptime formatting", () => {

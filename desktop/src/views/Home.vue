@@ -227,6 +227,9 @@ watch([() => app.consoleOpen, consoleRef], ([requested, chat]) => {
   chat.focusInput();
   app.consoleOpen = false;
 }, { immediate: true, flush: "post" });
+// A request made while sign-in fails or waits for approval is dropped, so a
+// later sign-in does not pull focus away from whatever the user is doing.
+watch(auth, (state) => { if (state !== "checking" && state !== "in") app.consoleOpen = false; });
 
 onMounted(async () => {
   const config = await loadHomeNodeConfig();
@@ -269,6 +272,7 @@ onBeforeUnmount(() => {
                   <NavIcon :name="link.icon" />
                   <span class="strip-label">{{ link.label }}</span>
                   <span class="strip-value t-xs t-2"><span class="dot" :class="link.summary.tone" aria-hidden="true"></span>{{ link.summary.lines[0] }}</span>
+                  <span v-if="link.summary.lines[1]" class="sr-only">, {{ link.summary.lines[1] }}</span>
                 </RouterLink>
               </li>
             </ul>
@@ -280,10 +284,14 @@ onBeforeUnmount(() => {
         <p v-else-if="backend === 'fout'" class="notice err" role="status">
           Home Node unreachable at {{ homeNodeConfig.origin }}. Check the network and try again.
         </p>
+        <p v-else-if="auth === 'wachten'" class="notice" role="status">
+          Waiting for approval from your phone, a Mac or the Home Node.
+          <template v-if="ownFingerprint"><br />Check that it shows this key fingerprint: <code>{{ ownFingerprint }}</code></template>
+        </p>
         <!-- Mounted while signed in, so wake word and realtime chat keep working. -->
         <JarvisConsole v-if="auth === 'in'" ref="consoleRef" />
-        <p v-else-if="backend !== 'fout' && !authError" class="empty connecting" role="status">
-          <span class="spinner" aria-hidden="true"></span>Connecting to your Home Node…
+        <p v-else-if="backend !== 'fout' && !authError && auth !== 'wachten'" class="empty connecting" role="status">
+          <span class="spinner" aria-hidden="true"></span>{{ auth === "checking" ? "Connecting to your Home Node…" : "Signing in…" }}
         </p>
       </div>
     </template>
