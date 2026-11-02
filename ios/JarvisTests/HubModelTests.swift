@@ -171,9 +171,22 @@ final class HubModelTests: XCTestCase {
         XCTAssertEqual(statusPill(mood: .idle, online: false).label, "Offline")
         XCTAssertEqual(statusPill(mood: .thinking, online: true).label, "Thinking")
         XCTAssertEqual(statusPill(mood: .idle, online: nil).tone, .idle)
-        XCTAssertEqual(moodFactor(.thinking), 0.4)
-        XCTAssertEqual(moodFactor(.listening), 0.7)
-        XCTAssertEqual(moodFactor(.idle), 1)
+    }
+
+    func testDiskBadgeFollowsTheDiskTone() {
+        XCTAssertEqual([Tone.ok, .warn, .error, .idle].map(diskBadge), ["OK", "Filling up", "Nearly full", "Unknown"])
+    }
+
+    func testOnlyOtherActiveDevicesCanBeRevoked() {
+        func device(_ id: String, _ status: String = "active") -> LinkedDevice {
+            LinkedDevice(id: id, name: id, platform: "ios", status: status, created_at: nil)
+        }
+        let mine = "AAAAAAAA-0000-0000-0000-000000000001"
+        let list = [device(mine), device("other-active"), device("other-revoked", "revoked")]
+        // Nothing is offered before this device's own id is known.
+        XCTAssertTrue(revocableDevices(list, thisDevice: nil).isEmpty)
+        // This device is matched case-insensitively and never offered.
+        XCTAssertEqual(revocableDevices(list, thisDevice: mine.lowercased()).map(\.id), ["other-active"])
     }
 
     func testDeepLinksOnlyMapTheTwoSupportedRoutes() {

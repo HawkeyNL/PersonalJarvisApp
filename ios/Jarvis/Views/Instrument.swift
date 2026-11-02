@@ -167,6 +167,11 @@ enum JV {
         /// Plex Mono ships Regular and Medium here; semibold uses Medium.
         var monoFace: String { self == .regular ? "IBMPlexMono" : "IBMPlexMono-Medm" }
 
+        /// Bold Text: custom faces do not follow it on their own, so every
+        /// weight draws as semibold, the heaviest bundled face. It applies
+        /// when a view next redraws.
+        func legible(bold: Bool) -> Weight { bold ? .semibold : self }
+
         var system: Font.Weight {
             switch self {
             case .regular: .regular
@@ -178,12 +183,14 @@ enum JV {
 
     /// IBM Plex Sans, scaled with Dynamic Type relative to `style`.
     static func font(_ size: CGFloat, _ weight: Weight = .regular, relativeTo style: Font.TextStyle = .body) -> Font {
-        face(weight.sansFace, size, weight, style)
+        let weight = weight.legible(bold: UIAccessibility.isBoldTextEnabled)
+        return face(weight.sansFace, size, weight, style)
     }
 
     /// IBM Plex Mono, scaled with Dynamic Type.
     static func mono(_ size: CGFloat, _ weight: Weight = .regular, relativeTo style: Font.TextStyle = .body) -> Font {
-        face(weight.monoFace, size, weight, style, monospaced: true)
+        let weight = weight.legible(bold: UIAccessibility.isBoldTextEnabled)
+        return face(weight.monoFace, size, weight, style, monospaced: true)
     }
 
     /// Plex Sans with tabular figures for numbers that change or line up
@@ -234,11 +241,23 @@ private extension UIColor {
 extension View {
     /// Instrument card: surface, 14 pt corners and the hairline border shadow.
     /// `border` replaces the hairline, e.g. for a card that waits on the owner.
-    func jvCard(padding: CGFloat = 20, border: Color = JV.shadowRing) -> some View {
+    func jvCard(padding: CGFloat = 20, border: Color? = nil) -> some View {
+        modifier(CardSurface(padding: padding, border: border))
+    }
+}
+
+private struct CardSurface: ViewModifier {
+    let padding: CGFloat
+    let border: Color?
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: JV.Radius.lg, style: .continuous)
-        return self.padding(padding)
+        // Increase Contrast: the faint hairline becomes a 3:1 outline.
+        let hairline = contrast == .increased ? JV.borderStrong : JV.shadowRing
+        return content.padding(padding)
             .background(JV.bgSurface, in: shape)
-            .overlay(shape.strokeBorder(border, lineWidth: 1))
+            .overlay(shape.strokeBorder(border ?? hairline, lineWidth: 1))
             .shadow(color: JV.shadowDrop, radius: 2, y: 1)
     }
 }

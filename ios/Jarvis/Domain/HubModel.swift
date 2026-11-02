@@ -6,7 +6,7 @@ import Foundation
 /// Status color of a dot/label. Every tone is always paired with text.
 enum Tone: Equatable { case ok, idle, warn, error }
 
-/// What the orb shows.
+/// What Jarvis is doing (the Home status line).
 enum Mood: Equatable { case idle, listening, thinking }
 
 /// Why an optional Core read failed.
@@ -68,15 +68,6 @@ func sourceStatus<T>(_ source: Availability<T>, ok: (T) -> (Tone, String)) -> (T
     case .loading: return (.idle, "Loading…")
     case .unsupported: return (.idle, "Requires newer Core")
     case .error: return (.warn, "Unavailable")
-    }
-}
-
-/// Animation-duration multiplier per mood (export: x1 / x0.7 / x0.4).
-func moodFactor(_ mood: Mood) -> Double {
-    switch mood {
-    case .thinking: 0.4
-    case .listening: 0.7
-    case .idle: 1
     }
 }
 
@@ -401,6 +392,16 @@ func servicesSummary(_ services: [ServiceStatus]) -> (Tone, String) {
     return (running == services.count ? .ok : .warn, "\(running) of \(services.count) running")
 }
 
+/// Short badge text for a disk's tone (`diskState`); the summary line says how full.
+func diskBadge(_ tone: Tone) -> String {
+    switch tone {
+    case .ok: "OK"
+    case .warn: "Filling up"
+    case .error: "Nearly full"
+    case .idle: "Unknown"
+    }
+}
+
 /// Tone and one-line summary of a disk; full disks warn early.
 func diskState(_ disk: DiskStatus) -> (Tone, String) {
     guard disk.state == "ok", let used = disk.used_percent, let free = disk.free_bytes, let total = disk.total_bytes else {
@@ -408,4 +409,13 @@ func diskState(_ disk: DiskStatus) -> (Tone, String) {
     }
     let tone: Tone = used >= 90 ? .error : used >= 80 ? .warn : .ok
     return (tone, "\(Int(used.rounded()))% used · \(formatGiB(free)) free of \(formatGiB(total))")
+}
+
+// MARK: - Devices
+
+/// Devices that may be offered for revoking: active ones other than this
+/// device. Nothing is offered until this device's own id (lowercased) is known.
+func revocableDevices(_ list: [LinkedDevice], thisDevice: String?) -> [LinkedDevice] {
+    guard let thisDevice else { return [] }
+    return list.filter { $0.status == "active" && $0.id.lowercased() != thisDevice }
 }

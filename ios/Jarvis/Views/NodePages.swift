@@ -1,7 +1,29 @@
 import SwiftUI
 
-// The module pages reached from the Core hub. Each one shows what Core really
-// reports; features Core lacks are honest "Not yet available" states.
+// The pushed pages (canvas D-Home, D-Runs, D-Memory, D-Devices, D-Approvals in
+// the I-* mobile patterns). Each one shows what Core really reports; features
+// Core lacks are listed under Later, never as sample data.
+
+/// Skeleton while `source` loads, the error or "Requires newer Core" card when
+/// it did not load, otherwise `content`.
+struct Loaded<Value, Content: View>: View {
+    let source: Availability<Value>
+    let title: String
+    var symbol = "sparkles"
+    var forbidden = "Turned off in Core."
+    var rows = 3
+    var retry: (() async -> Void)? = nil
+    @ViewBuilder let content: (Value) -> Content
+
+    var body: some View {
+        switch source {
+        case .loading: LoadingState(label: "\(title), loading", rows: rows)
+        case let .ok(value): content(value)
+        case .unsupported, .error:
+            UnavailableState.forSource(source, title: title, symbol: symbol, forbidden: forbidden, retry: retry)
+        }
+    }
+}
 
 // MARK: - Conversations
 
@@ -9,13 +31,13 @@ struct ConversationsPage: View {
     @ObservedObject var model: JarvisAppModel
     let navigate: (HubRoute) -> Void
     @State private var selected = "all"
-    @State private var sub = "overview"
     @State private var query = ""
     @State private var now = Date()
 
     private var timestamps: [String] { model.conversations.map(\.updatedAt) }
+    private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    private var items: [NodeItem] {
+    private var views: [NodeItem] {
         let total = model.conversations.count
         let week = countSince(timestamps, days: 7, now: now)
         return [
@@ -25,19 +47,22 @@ struct ConversationsPage: View {
             NodeItem(id: "week", label: "This week", title: "This week", icon: "calendar",
                      detail: "Conversations you or Jarvis added to in the last seven days.",
                      tone: week > 0 ? .ok : .idle, status: "\(week) active"),
-            .planned("channels", "Channels", "Channels", icon: "iphone",
-                     detail: "Core does not record where a conversation took place yet, so threads cannot be split by voice, desktop or mobile."),
-            .planned("summaries", "Summaries", "Summaries", icon: "doc.text",
-                     detail: "Core does not write summaries of conversations yet."),
-            .planned("actions", "Action items", "Action items", icon: "checkmark.circle",
-                     detail: "Core does not extract action items from conversations yet."),
-            .planned("memories", "Memories", "Linked memories", icon: "brain",
-                     detail: "Core has no browsable memory store yet, so nothing can be linked to a conversation."),
         ]
     }
 
+    private static let later: [NodeItem] = [
+        .planned("channels", "Channels", "Channels", icon: "iphone",
+                 detail: "Core does not record where a conversation took place yet, so threads cannot be split by voice, desktop or mobile."),
+        .planned("summaries", "Summaries", "Summaries", icon: "doc.text",
+                 detail: "Core does not write summaries of conversations yet."),
+        .planned("actions", "Action items", "Action items", icon: "checkmark.circle",
+                 detail: "Core does not extract action items from conversations yet."),
+        .planned("memories", "Memories", "Linked memories", icon: "brain",
+                 detail: "Core has no browsable memory store yet, so nothing can be linked to a conversation."),
+    ]
+
     private var rows: [ActivityRow] {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let q = trimmedQuery
         let since = selected == "week" ? now.addingTimeInterval(-7 * 86_400) : nil
         return model.conversations.filter { item in
             if !q.isEmpty && !item.title.localizedCaseInsensitiveContains(q) { return false }
@@ -46,54 +71,73 @@ struct ConversationsPage: View {
             return date >= since
         }.map {
             ActivityRow(id: $0.id.uuidString, symbol: "bubble.left", title: $0.title.isEmpty ? "Untitled" : $0.title,
-                        time: relativeTime($0.updatedAt, now: now), tone: .ok, toneLabel: "Stored on Core")
+                        time: relativeTime($0.updatedAt, now: now), tone: .ok, toneLabel: "Stored on Core", badge: false)
         }
     }
 
     var body: some View {
-        NodeScaffold(title: "Conversations", subtitle: "Everything you and Jarvis said", items: items,
-                     selection: $selected) {
-            if let current = items.first(where: { $0.id == selected }) {
-                if selected == "all" || selected == "week" {
-                    NodePanel(item: current) {
-                        PanelButton(title: "New conversation", symbol: "square.and.pencil") {
-                            model.newConversation()
-                            navigate(.chat)
-                        }
-                    }
-                    ChipRow(chips: [ChipRow.Chip(id: "overview", label: "Overview", symbol: "doc.text"),
-                                    ChipRow.Chip(id: "threads", label: "Threads", symbol: "text.alignleft")],
-                            selection: $sub, compact: true)
-                    if sub == "overview" {
-                        TileGrid(tiles: [
-                            TileData(label: "Conversations", value: "\(model.conversations.count)", symbol: "bubble.left"),
-                            TileData(label: "Active this week", value: "\(countSince(timestamps, days: 7, now: now))", symbol: "calendar"),
-                            TileData(label: "Active today", value: "\(countSince(timestamps, days: 1, now: now))", symbol: "sun.max"),
-                            TileData(label: "Last activity", value: lastActivity, symbol: "clock"),
-                        ])
-                        Eyebrow(text: "Recent")
-                        ActivityList(rows: Array(rows.prefix(5)), emptyText: "No conversations yet.", onSelect: open)
-                    } else {
-                        TextField("Search conversations", text: $query)
-                            .font(JV.font(15))
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .padding(.horizontal, 12)
-                            .frame(minHeight: 44)
-                            .background(JV.bgSurface, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous).strokeBorder(JV.borderStrong, lineWidth: 1))
-                        ActivityList(rows: rows, emptyText: "No conversations match.", onSelect: open)
-                    }
-                } else {
-                    NodePanel(item: current)
-                    UnavailableState(title: current.title, detail: current.detail, symbol: current.icon)
-                }
+        PageScaffold(title: "Conversations", subtitle: "Everything you and Jarvis said") {
+            Button {
+                model.newConversation()
+                navigate(.chat)
+            } label: {
+                Label("New conversation", systemImage: "square.and.pencil").frame(maxWidth: .infinity)
             }
+            .buttonStyle(JVButtonStyle(kind: .quiet, size: .large))
+            TileGrid(tiles: [
+                TileData(label: "Conversations", value: "\(model.conversations.count)"),
+                TileData(label: "Active this week", value: "\(countSince(timestamps, days: 7, now: now))"),
+                TileData(label: "Active today", value: "\(countSince(timestamps, days: 1, now: now))"),
+                TileData(label: "Last activity", value: lastActivity),
+            ])
+            SegmentedControl(label: "Show", items: views, selection: $selected)
+            if let current = views.first(where: { $0.id == selected }) {
+                Text(verbatim: current.detail)
+                    .font(JV.font(13))
+                    .foregroundStyle(JV.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+            }
+            searchField
+            list
+            LaterList(items: Self.later)
         }
-        .onChange(of: selected) { _, _ in sub = "overview" }
         .task {
             await model.refreshConversationList()
             now = Date()
+        }
+    }
+
+    private var searchField: some View {
+        let shape = RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous)
+        return HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(JV.textSecondary).accessibilityHidden(true)
+            TextField("Search conversations", text: $query)
+                .font(JV.font(15))
+                .foregroundStyle(JV.textPrimary)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 44)
+        .background(JV.bgSurface, in: shape)
+        .overlay(shape.strokeBorder(JV.borderStrong, lineWidth: 1))
+    }
+
+    @ViewBuilder private var list: some View {
+        if model.conversations.isEmpty {
+            UnavailableState(title: "No conversations yet", kind: .empty,
+                             detail: "Start one with New conversation, or ask from the Jarvis tab.", symbol: "bubble.left")
+        } else if rows.isEmpty {
+            let q = trimmedQuery
+            UnavailableState(title: q.isEmpty ? "Nothing this week" : "Nothing found", kind: .empty,
+                             detail: q.isEmpty ? "No conversation was active in the last seven days."
+                                 : "No conversation title contains \u{201C}\(q.prefix(40))\u{201D}.",
+                             symbol: "magnifyingglass",
+                             action: q.isEmpty ? nil : UnavailableState.Action(label: "Clear search") { query = "" })
+        } else {
+            ActivityList(rows: rows, onSelect: open)
         }
     }
 
@@ -111,6 +155,8 @@ struct ConversationsPage: View {
 
 // MARK: - Agents
 
+/// Agents per group (D-Runs list pattern); the selected agent's card, figures
+/// and tools sit on top.
 struct AgentsPage: View {
     @ObservedObject var model: JarvisAppModel
     @State private var source: Availability<AgentsResponse> = .loading
@@ -118,51 +164,45 @@ struct AgentsPage: View {
     @State private var sub = "overview"
 
     private var response: AgentsResponse? { source.value }
-    private var ordered: [AgentInfo] { groupAgents(response?.agents ?? []).flatMap { $0.agents } }
+    private var groups: [(group: String, agents: [AgentInfo])] { groupAgents(response?.agents ?? []) }
+    private var ordered: [AgentInfo] { groups.flatMap { $0.agents } }
 
-    private var items: [NodeItem] {
-        ordered.map { agent in
-            let (tone, status) = agentStatus(agent.usage, unavailableReason: response?.usage_unavailable_reason)
-            return NodeItem(id: agent.id, label: agent.name, title: agent.name,
-                            icon: isTrader(agent) ? "chart.line.uptrend.xyaxis" : "person.2",
-                            detail: agent.description ?? "", tone: tone, status: status)
-        }
+    private func symbol(_ agent: AgentInfo) -> String { isTrader(agent) ? "chart.line.uptrend.xyaxis" : "person.2" }
+
+    private func item(_ agent: AgentInfo) -> NodeItem {
+        let (tone, status) = agentStatus(agent.usage, unavailableReason: response?.usage_unavailable_reason)
+        return NodeItem(id: agent.id, label: agent.name, title: agent.name, icon: symbol(agent),
+                        detail: agent.description ?? "", tone: tone, status: status)
     }
 
     var body: some View {
-        NodeScaffold(title: "Agents", subtitle: "Your personal AI system", items: items, selection: $selected) {
-            if let state = UnavailableState.forSource(source, title: "Agents", symbol: "person.2", forbidden: "Agents are turned off in Core.") {
-                state
-            } else if let response, response.agents.isEmpty {
-                UnavailableState(title: "No agents", detail: response.unavailable_reason == nil
-                                 ? "The installed agent bundle has no agents."
-                                 : "Core has no agent bundle installed, so there are no agents to show.", symbol: "person.2")
-            } else if let agent = ordered.first(where: { $0.id == selected }),
-                      let current = items.first(where: { $0.id == selected }) {
-                NodePanel(item: current) {
-                    if isTrader(agent) {
-                        Text("Trading opens in the desktop app.")
-                            .font(JV.font(13))
-                            .foregroundStyle(JV.textSecondary)
-                            .padding(.top, 6)
+        PageScaffold(title: "Agents", subtitle: "Your personal AI system", top: selected) {
+            Loaded(source: source, title: "Agents", symbol: "person.2", forbidden: "Agents are turned off in Core.", retry: load) { response in
+                if response.agents.isEmpty {
+                    UnavailableState(title: "No agents", kind: .empty, detail: response.unavailable_reason == nil
+                                     ? "The installed agent bundle has no agents."
+                                     : "Core has no agent bundle installed, so there are no agents to show.", symbol: "person.2")
+                } else if let agent = ordered.first(where: { $0.id == selected }) {
+                    NodePanel(item: item(agent)) {
+                        if isTrader(agent) {
+                            Text("Trading opens in the desktop app.")
+                                .font(JV.font(13))
+                                .foregroundStyle(JV.textSecondary)
+                        }
                     }
-                }
-                ChipRow(chips: [ChipRow.Chip(id: "overview", label: "Overview", symbol: "doc.text"),
-                                ChipRow.Chip(id: "tools", label: "Tools", symbol: "terminal")],
-                        selection: $sub, compact: true)
-                if sub == "overview" {
-                    TileGrid(tiles: tiles(agent))
-                    Eyebrow(text: "All agents")
-                    ActivityList(rows: ordered.map { other in
-                        let (tone, label) = agentStatus(other.usage, unavailableReason: response?.usage_unavailable_reason)
-                        return ActivityRow(id: other.id, symbol: isTrader(other) ? "chart.line.uptrend.xyaxis" : "person.2",
-                                           title: other.name, detail: [other.group, other.model_policy].compactMap { $0 }.joined(separator: " · "),
-                                           tone: tone, toneLabel: label)
-                    }, onSelect: { selected = $0.id })
-                } else {
-                    ActivityList(rows: (agent.allowed_tools ?? []).map {
-                        ActivityRow(id: $0, symbol: "terminal", title: $0, tone: .ok, toneLabel: "Allowed")
-                    }, emptyText: "This agent may not use any tools.")
+                    SegmentedControl(label: "Agent details", pairs: [("overview", "Overview"), ("tools", "Tools")], selection: $sub)
+                    if sub == "overview" {
+                        TileGrid(tiles: tiles(agent))
+                    } else {
+                        ActivityList(rows: (agent.allowed_tools ?? []).map {
+                            ActivityRow(id: $0, symbol: "terminal", title: $0, tone: .ok, toneLabel: "Allowed", badge: false)
+                        }, emptyText: "This agent may not use any tools.")
+                    }
+                    ForEach(groups, id: \.group) { group in
+                        ListSection(title: group.group) {
+                            ActivityList(rows: group.agents.map(row), onSelect: { selected = $0.id })
+                        }
+                    }
                 }
             }
         }
@@ -171,16 +211,22 @@ struct AgentsPage: View {
         .task { await load() }
     }
 
+    private func row(_ agent: AgentInfo) -> ActivityRow {
+        let (tone, label) = agentStatus(agent.usage, unavailableReason: response?.usage_unavailable_reason)
+        return ActivityRow(id: agent.id, symbol: symbol(agent), title: agent.name,
+                           detail: agent.model_policy, tone: tone, toneLabel: label, selected: agent.id == selected)
+    }
+
     private func tiles(_ agent: AgentInfo) -> [TileData] {
         let usage = agent.usage
         let notMeasured = response?.usage_unavailable_reason == agentUsageNotInstrumented ? "Not measured yet" : "—"
         return [
-            TileData(label: "Model policy", value: agent.model_policy ?? "—", symbol: "square.stack.3d.up"),
-            TileData(label: "Group", value: agent.group ?? "Other", symbol: "folder"),
-            TileData(label: "Requests this month", value: usage.map { "\($0.requests)" } ?? notMeasured, symbol: "arrow.up.arrow.down"),
-            TileData(label: "Tokens this month", value: usage?.total_tokens.map(formatCompact) ?? notMeasured, symbol: "number"),
-            TileData(label: "Spend this month", value: usage?.spent_eur.map(formatEuro) ?? notMeasured, symbol: "eurosign.circle"),
-            TileData(label: "Latency p95", value: formatMs(usage?.latency_p95_ms), symbol: "timer"),
+            TileData(label: "Model policy", value: agent.model_policy ?? "—"),
+            TileData(label: "Group", value: agent.group ?? "Other"),
+            TileData(label: "Requests this month", value: usage.map { "\($0.requests)" } ?? notMeasured),
+            TileData(label: "Tokens this month", value: usage?.total_tokens.map(formatCompact) ?? notMeasured),
+            TileData(label: "Spend this month", value: usage?.spent_eur.map(formatEuro) ?? notMeasured),
+            TileData(label: "Latency p95", value: formatMs(usage?.latency_p95_ms)),
         ]
     }
 
@@ -194,6 +240,7 @@ struct AgentsPage: View {
 
 // MARK: - Tasks
 
+/// Coding sessions and agent actions (D-Runs): Active, Waiting and Completed.
 struct TasksPage: View {
     @ObservedObject var model: JarvisAppModel
     @State private var sessions: Availability<[CodingSession]> = .loading
@@ -205,9 +252,8 @@ struct TasksPage: View {
     @Environment(\.openAgentApproval) private var openAgentApproval
 
     private var split: (open: [CodingSession], finished: [CodingSession]) { splitSessions(sessions.value ?? []) }
-    private var waiting: [PendingAction] { pending.value ?? [] }
 
-    private var items: [NodeItem] {
+    private var views: [NodeItem] {
         let running = split.open.filter { $0.state == "active" }.count
         let finished = split.finished.count
         let active = sourceStatus(sessions) { _ in (running > 0 ? Tone.ok : Tone.idle, "\(running) running") }
@@ -218,66 +264,83 @@ struct TasksPage: View {
         return [
             NodeItem(id: "active", label: "Active", title: "Active", icon: "play.circle",
                      detail: "Coding sessions Jarvis is running or has paused on your Home Node.", tone: active.0, status: active.1),
-            .planned("scheduled", "Scheduled", "Scheduled", icon: "calendar", detail: "Core cannot run tasks at a set time yet."),
             NodeItem(id: "waiting", label: "Waiting", title: "Waiting on you", icon: "exclamationmark.triangle",
                      detail: "Changes an agent proposed. Nothing runs until you approve it with this iPhone's key or on a trusted desktop.", tone: wait.0, status: wait.1),
             NodeItem(id: "completed", label: "Completed", title: "Completed", icon: "checkmark.circle",
                      detail: "Coding sessions that ended, and every agent action Core recorded.", tone: done.0, status: done.1),
-            .planned("recurring", "Recurring", "Recurring", icon: "repeat", detail: "Core cannot repeat tasks on a schedule yet."),
-            .planned("goals", "Goals", "Goals", icon: "target", detail: "Core does not track goals or split them into tasks yet."),
         ]
     }
 
+    private static let later: [NodeItem] = [
+        .planned("scheduled", "Scheduled", "Scheduled", icon: "calendar", detail: "Core cannot run tasks at a set time yet."),
+        .planned("recurring", "Recurring", "Recurring", icon: "repeat", detail: "Core cannot repeat tasks on a schedule yet."),
+        .planned("goals", "Goals", "Goals", icon: "target", detail: "Core does not track goals or split them into tasks yet."),
+    ]
+
     var body: some View {
-        NodeScaffold(title: "Tasks", subtitle: "What Jarvis is working on", items: items, selection: $selected) {
-            if let current = items.first(where: { $0.id == selected }) {
+        PageScaffold(title: "Tasks", subtitle: "What Jarvis is working on") {
+            SegmentedControl(label: "Tasks", items: views, selection: $selected)
+            if let current = views.first(where: { $0.id == selected }) {
                 NodePanel(item: current)
                 switch selected {
-                case "active":
-                    if let state = UnavailableState.forSource(sessions, title: "Coding sessions", symbol: "play.circle") { state }
-                    TileGrid(tiles: [
-                        TileData(label: "Running", value: "\(split.open.filter { $0.state == "active" }.count)", symbol: "play.circle"),
-                        TileData(label: "Paused", value: "\(split.open.filter { $0.state == "suspended" }.count)", symbol: "pause.circle"),
-                        TileData(label: "Awaiting approval", value: pending.value.map { "\($0.count)" } ?? "—", symbol: "exclamationmark.triangle"),
-                        TileData(label: "Last update", value: lastUpdate, symbol: "clock"),
-                    ])
-                    Eyebrow(text: "Open sessions")
-                    ActivityList(rows: sessionRows(split.open), emptyText: "No coding sessions are running.")
-                case "waiting":
-                    if let state = UnavailableState.forSource(pending, title: "Approvals", symbol: "exclamationmark.triangle",
-                                                              forbidden: "Agent actions are turned off in Core.") { state }
-                    Text("Read the whole action first. Approving signs exactly what is shown with this iPhone's device key; anything this app cannot show in full can only be denied here.")
-                        .font(JV.font(13))
-                        .foregroundStyle(JV.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if waiting.isEmpty {
-                        ActivityList(rows: [], emptyText: "Nothing is waiting for you.")
-                    }
-                    ForEach(waiting) { action in
-                        PendingActionRow(item: action, time: relativeTime(action.created_at, now: now)) {
-                            openAgentApproval(action) { await load() }
-                        }
-                    }
-                case "completed":
-                    ChipRow(chips: [ChipRow.Chip(id: "overview", label: "Sessions", symbol: "chevron.left.forwardslash.chevron.right"),
-                                    ChipRow.Chip(id: "history", label: "History", symbol: "clock")],
-                            selection: $sub, compact: true)
-                    if sub == "overview" {
-                        if let state = UnavailableState.forSource(sessions, title: "Coding sessions", symbol: "checkmark.circle") { state }
-                        ActivityList(rows: sessionRows(split.finished), emptyText: "No finished sessions yet.")
-                    } else {
-                        if let state = UnavailableState.forSource(audit, title: "Agent history", symbol: "shield",
-                                                                  forbidden: "Agent actions are turned off in Core.") { state }
-                        ActivityList(rows: auditRows(audit.value ?? [], now: now), emptyText: "Core recorded no agent actions yet.")
-                    }
-                default:
-                    UnavailableState(title: current.title, detail: current.detail, symbol: current.icon)
+                case "active": active
+                case "waiting": waiting
+                default: completed
                 }
             }
+            LaterList(items: Self.later)
         }
         .onChange(of: selected) { _, _ in sub = "overview" }
         .refreshable { await load() }
         .task { await load() }
+    }
+
+    private var active: some View {
+        Loaded(source: sessions, title: "Coding sessions", symbol: "play.circle", retry: load) { _ in
+            TileGrid(tiles: [
+                TileData(label: "Running", value: "\(split.open.filter { $0.state == "active" }.count)"),
+                TileData(label: "Paused", value: "\(split.open.filter { $0.state == "suspended" }.count)"),
+                TileData(label: "Awaiting approval", value: pending.value.map { "\($0.count)" } ?? "—"),
+                TileData(label: "Last update", value: lastUpdate),
+            ])
+            ListSection(title: "Open sessions") {
+                ActivityList(rows: sessionRows(split.open), emptyText: "No coding sessions are running.")
+            }
+        }
+    }
+
+    @ViewBuilder private var waiting: some View {
+        Text("Read the whole action first. Approving signs exactly what is shown with this iPhone's device key; anything this app cannot show in full can only be denied here.")
+            .font(JV.font(13))
+            .foregroundStyle(JV.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 4)
+        Loaded(source: pending, title: "Approvals", symbol: "exclamationmark.triangle",
+               forbidden: "Agent actions are turned off in Core.", rows: 2, retry: load) { list in
+            if list.isEmpty {
+                UnavailableState(title: "Nothing waiting for you", kind: .empty,
+                                 detail: "When an agent needs a yes, it shows up here and on Activity.", symbol: "checkmark.shield")
+            }
+            ForEach(list) { action in
+                PendingActionRow(item: action, time: relativeTime(action.created_at, now: now)) {
+                    openAgentApproval(action) { await load() }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var completed: some View {
+        SegmentedControl(label: "Completed", pairs: [("overview", "Sessions"), ("history", "History")], selection: $sub)
+        if sub == "overview" {
+            Loaded(source: sessions, title: "Coding sessions", symbol: "checkmark.circle", retry: load) { _ in
+                ActivityList(rows: sessionRows(split.finished), emptyText: "No finished sessions yet.")
+            }
+        } else {
+            Loaded(source: audit, title: "Agent history", symbol: "shield",
+                   forbidden: "Agent actions are turned off in Core.", retry: load) { entries in
+                ActivityList(rows: auditRows(entries, now: now), emptyText: "Core recorded no agent actions yet.")
+            }
+        }
     }
 
     private var lastUpdate: String {
@@ -291,7 +354,7 @@ struct TasksPage: View {
             let (tone, label) = sessionState(session.state)
             return ActivityRow(id: session.id, symbol: "chevron.left.forwardslash.chevron.right",
                                title: session.objective.flatMap { $0.isEmpty ? nil : $0 } ?? "Coding session",
-                               detail: [label, session.repository].compactMap { $0 }.joined(separator: " · "),
+                               detail: session.repository,
                                time: session.updated_at.map { relativeTime($0, now: now) }, tone: tone, toneLabel: label)
         }
     }
@@ -330,14 +393,11 @@ struct IntegrationsPage: View {
     @State private var selected = "brains"
     @State private var sub = "overview"
 
-    private var brains: [HomeNodeRegistry.Brain] { registry.value?.brains ?? [] }
-    private var allowed: [ModelAccessEntry] { (policy.value?.models ?? []).filter(\.enabled) }
-
-    private var items: [NodeItem] {
+    private var views: [NodeItem] {
+        let brains = registry.value?.brains ?? []
         let ready = brains.filter(\.available).count
-        let total = brains.count
-        let allowedCount = allowed.count
-        let b = sourceStatus(registry) { _ in (ready > 0 ? Tone.ok : Tone.idle, "\(ready) of \(total) ready") }
+        let allowedCount = (policy.value?.models ?? []).filter(\.enabled).count
+        let b = sourceStatus(registry) { _ in (ready > 0 ? Tone.ok : Tone.idle, "\(ready) of \(brains.count) ready") }
         let m = sourceStatus(policy) { _ in (allowedCount == 0 ? Tone.idle : Tone.ok, "\(allowedCount) allowed") }
         return [
             NodeItem(id: "brains", label: "Brains", title: "AI brains", icon: "sparkles",
@@ -345,47 +405,51 @@ struct IntegrationsPage: View {
             NodeItem(id: "models", label: "Models", title: "Models", icon: "square.stack.3d.up",
                      detail: "Allowing a model lets Jarvis choose it; it never selects a model for a running request.", tone: m.0, status: m.1),
             ibkrItem(ibkr, now: loadedAt),
-            .planned("codex", "Codex", "Codex", icon: "terminal", detail: "Core does not report the Codex broker status to the app yet."),
-            .planned("github", "GitHub", "GitHub", icon: "arrow.triangle.branch", detail: "Core does not report a GitHub connection to the app yet."),
-            .planned("sandbox", "Sandbox", "OpenSandbox", icon: "shippingbox", detail: "Core does not report OpenSandbox status to the app yet."),
         ]
     }
 
+    private static let later: [NodeItem] = [
+        .planned("codex", "Codex", "Codex", icon: "terminal", detail: "Core does not report the Codex broker status to the app yet."),
+        .planned("github", "GitHub", "GitHub", icon: "arrow.triangle.branch", detail: "Core does not report a GitHub connection to the app yet."),
+        .planned("sandbox", "Sandbox", "OpenSandbox", icon: "shippingbox", detail: "Core does not report OpenSandbox status to the app yet."),
+    ]
+
     var body: some View {
-        NodeScaffold(title: "Integrations", subtitle: "Brains, models and tools", items: items, selection: $selected) {
-            if let current = items.first(where: { $0.id == selected }) {
+        PageScaffold(title: "Integrations", subtitle: "Brains, models and tools") {
+            SegmentedControl(label: "Integrations", items: views, selection: $selected)
+            if let current = views.first(where: { $0.id == selected }) {
                 switch selected {
                 case "brains":
                     NodePanel(item: current)
-                    ChipRow(chips: [ChipRow.Chip(id: "overview", label: "Overview", symbol: "doc.text"),
-                                    ChipRow.Chip(id: "tools", label: "Host tools", symbol: "shippingbox")],
-                            selection: $sub, compact: true)
-                    if let state = UnavailableState.forSource(registry, title: "Home Node registry", symbol: "sparkles") { state }
-                    if sub == "overview" {
-                        ActivityList(rows: brains.map { brain in
-                            ActivityRow(id: brain.id, symbol: "sparkles", title: brain.label,
-                                        detail: [costLabel(brain.cost), brain.note ?? ""].filter { !$0.isEmpty }.joined(separator: " · "),
-                                        tone: brain.available ? .ok : .idle, toneLabel: brain.available ? "Ready" : "Not set up")
-                        }, emptyText: registry.value?.brains == nil ? "This Core does not report brains yet." : "No brains found.")
-                    } else {
-                        ActivityList(rows: softwareRows(registry.value?.software ?? []), emptyText: "No host tools reported.")
+                    SegmentedControl(label: "Brains", pairs: [("overview", "Overview"), ("tools", "Host tools")], selection: $sub)
+                    Loaded(source: registry, title: "Home Node registry", symbol: "sparkles", retry: load) { value in
+                        if sub == "overview" {
+                            ActivityList(rows: (value.brains ?? []).map { brain in
+                                ActivityRow(id: brain.id, symbol: "sparkles", title: brain.label,
+                                            detail: [costLabel(brain.cost), brain.note ?? ""].filter { !$0.isEmpty }.joined(separator: " · "),
+                                            tone: brain.available ? .ok : .idle, toneLabel: brain.available ? "Ready" : "Not set up")
+                            }, emptyText: value.brains == nil ? "This Core does not report brains yet." : "No brains found.")
+                        } else {
+                            ActivityList(rows: softwareRows(value.software), emptyText: "No host tools reported.")
+                        }
                     }
                 case "models":
                     NodePanel(item: current) {
                         PanelButton(title: "Manage models", symbol: "slider.horizontal.3") { navigate(.models) }
                     }
-                    if let state = UnavailableState.forSource(policy, title: "Model policy", symbol: "square.stack.3d.up") { state }
-                    Eyebrow(text: "Allowed models")
-                    ActivityList(rows: allowed.map {
-                        ActivityRow(id: $0.id, symbol: "square.stack.3d.up", title: $0.model, detail: $0.provider, tone: .ok, toneLabel: "Allowed")
-                    }, emptyText: "No models are allowed.")
-                case "ibkr":
-                    IbkrPanel(source: ibkr, loadedAt: loadedAt)
+                    Loaded(source: policy, title: "Model policy", symbol: "square.stack.3d.up", retry: load) { value in
+                        ListSection(title: "Allowed models") {
+                            ActivityList(rows: value.models.filter(\.enabled).map {
+                                ActivityRow(id: $0.id, symbol: "square.stack.3d.up", title: $0.model, detail: $0.provider,
+                                            tone: .ok, toneLabel: "Allowed", badge: false)
+                            }, emptyText: "No models are allowed.")
+                        }
+                    }
                 default:
-                    NodePanel(item: current)
-                    UnavailableState(title: current.title, detail: current.detail, symbol: current.icon)
+                    IbkrPanel(source: ibkr, loadedAt: loadedAt, retry: load)
                 }
             }
+            LaterList(items: Self.later)
         }
         .onChange(of: selected) { _, _ in sub = "overview" }
         .refreshable { await load() }
@@ -416,21 +480,24 @@ func ibkrItem(_ source: Availability<IbkrPortfolio>, now: Date) -> NodeItem {
 struct IbkrPanel: View {
     let source: Availability<IbkrPortfolio>
     let loadedAt: Date
+    var retry: (() async -> Void)? = nil
 
     var body: some View {
         let item = ibkrItem(source, now: loadedAt)
         NodePanel(item: item)
         if case .error(.unavailable) = source {
-            UnavailableState(title: "Interactive Brokers", kind: .error, detail: ibkrNotSynced, symbol: "chart.line.uptrend.xyaxis")
-        } else if let state = UnavailableState.forSource(source, title: "Interactive Brokers", symbol: "chart.line.uptrend.xyaxis") { state }
-        if let portfolio = source.value {
-            let synced = relativeTime(portfolio.asOf, now: loadedAt)
-            TileGrid(tiles: [
-                TileData(label: "Connection", value: item.status, symbol: "link"),
-                TileData(label: "Last sync", value: synced.isEmpty ? "—" : synced, symbol: "clock"),
-                TileData(label: "Positions", value: String(portfolio.positions.count), symbol: "chart.line.uptrend.xyaxis"),
-                TileData(label: "Orders", value: "Read-only", symbol: "lock"),
-            ])
+            UnavailableState(title: "Interactive Brokers", kind: .error, detail: ibkrNotSynced, symbol: "chart.line.uptrend.xyaxis",
+                             action: retry.map { UnavailableState.Action(label: "Try again", run: $0) })
+        } else {
+            Loaded(source: source, title: "Interactive Brokers", symbol: "chart.line.uptrend.xyaxis", rows: 1, retry: retry) { portfolio in
+                let synced = relativeTime(portfolio.asOf, now: loadedAt)
+                TileGrid(tiles: [
+                    TileData(label: "Connection", value: item.status),
+                    TileData(label: "Last sync", value: synced.isEmpty ? "—" : synced),
+                    TileData(label: "Positions", value: String(portfolio.positions.count)),
+                    TileData(label: "Orders", value: "Read-only"),
+                ])
+            }
         }
     }
 }
@@ -447,7 +514,7 @@ struct TradingPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                IbkrPanel(source: ibkr, loadedAt: loadedAt)
+                IbkrPanel(source: ibkr, loadedAt: loadedAt, retry: load)
                 UnavailableState(title: "Trading dashboard",
                                  detail: "Pots, proposals and mandates are coming to the iPhone app. Nothing here can place an order.",
                                  symbol: "chart.line.uptrend.xyaxis")
@@ -499,7 +566,7 @@ struct HealthPage: View {
         _selected = State(initialValue: node)
     }
 
-    private var items: [NodeItem] {
+    private var views: [NodeItem] {
         let core: (Tone, String) = !probed ? (Tone.idle, "Checking…") : readyz != nil ? (Tone.ok, "Running") : (Tone.error, "Unreachable")
         let node = sourceStatus(registry) { value in
             value.liveHost.map { live in (Tone.ok, "Up \(formatUptime(live.uptimeSeconds))") } ?? (Tone.idle, "No live vitals")
@@ -519,88 +586,87 @@ struct HealthPage: View {
                      detail: "The machine Jarvis runs on: hardware inventory, live load and installed tools.", tone: node.0, status: node.1),
             NodeItem(id: "usage", label: "Usage", title: "Usage", icon: "chart.line.uptrend.xyaxis",
                      detail: "Monthly spend against the hard budget, with token use per backend.", tone: spend.0, status: spend.1),
-            NodeItem(id: "models", label: "Models", title: "Models", icon: "square.stack.3d.up",
-                     detail: "Owner-controlled model access. Allowing a model never selects it for a running request.",
-                     tone: .idle, status: "Owner policy"),
-            NodeItem(id: "services", label: "Services", title: "Services & disk", icon: "internaldrive",
+            NodeItem(id: "services", label: "Services", title: "Services and disks", icon: "internaldrive",
                      detail: "The Jarvis services on your Home Node and the free space on its disks.", tone: svc.0, status: svc.1),
         ]
     }
 
     var body: some View {
-        NodeScaffold(title: "System health", subtitle: "Core, Home Node and usage", items: items, selection: $selected) {
-            if let current = items.first(where: { $0.id == selected }) {
+        PageScaffold(title: "System health", subtitle: "Core, Home Node and usage") {
+            SegmentedControl(label: "System health", items: views, selection: $selected)
+            if let current = views.first(where: { $0.id == selected }) {
+                NodePanel(item: current)
                 switch selected {
                 case "core":
-                    NodePanel(item: current)
                     TileGrid(tiles: [
-                        TileData(label: "Liveness", value: probeLabel(livez), symbol: "heart"),
-                        TileData(label: "Readiness", value: probeLabel(readyz), symbol: "checkmark.seal"),
-                        TileData(label: "Environment", value: readyz?.environment ?? "—", symbol: "server.rack"),
-                        TileData(label: "Checked", value: checkedAt.map { $0.formatted(date: .omitted, time: .shortened) } ?? "—", symbol: "clock"),
+                        TileData(label: "Liveness", value: probeLabel(livez)),
+                        TileData(label: "Readiness", value: probeLabel(readyz)),
+                        TileData(label: "Environment", value: readyz?.environment ?? "—"),
+                        TileData(label: "Checked", value: checkedAt.map { $0.formatted(date: .omitted, time: .shortened) } ?? "—"),
                     ])
-                    Eyebrow(text: "Security events")
-                    if let state = UnavailableState.forSource(audit, title: "Security events", symbol: "shield") { state }
-                    ActivityList(rows: auditRows, emptyText: "No security events recorded.")
+                    ListSection(title: "Security events") {
+                        Loaded(source: audit, title: "Security events", symbol: "shield", retry: load) { entries in
+                            ActivityList(rows: securityRows(entries), emptyText: "No security events recorded.")
+                        }
+                    }
                 case "node":
-                    NodePanel(item: current)
-                    ChipRow(chips: [ChipRow.Chip(id: "overview", label: "Overview", symbol: "doc.text"),
-                                    ChipRow.Chip(id: "software", label: "Software", symbol: "square.stack.3d.up")],
-                            selection: $sub, compact: true)
-                    if let state = UnavailableState.forSource(registry, title: "Home Node", symbol: "house") { state }
-                    if let value = registry.value {
+                    SegmentedControl(label: "Home Node", pairs: [("overview", "Overview"), ("software", "Software")], selection: $sub)
+                    Loaded(source: registry, title: "Home Node", symbol: "house", retry: load) { value in
                         if sub == "overview" { TileGrid(tiles: nodeTiles(value)) }
                         else { ActivityList(rows: softwareRows(value.software), emptyText: "No software reported.") }
                     }
                 case "usage":
-                    NodePanel(item: current)
-                    if let state = UnavailableState.forSource(usage, title: "Usage", symbol: "chart.line.uptrend.xyaxis") { state }
-                    if let u = usage.value {
+                    Loaded(source: usage, title: "Usage", symbol: "chart.line.uptrend.xyaxis", retry: load) { u in
                         TileGrid(tiles: [
-                            TileData(label: "Spent this month", value: formatEuro(u.spent_eur), symbol: "eurosign.circle"),
-                            TileData(label: "Budget", value: formatEuro(u.budget_eur), symbol: "gauge"),
-                            TileData(label: "Remaining", value: formatEuro(u.remaining_eur ?? max(0, u.budget_eur - u.spent_eur)), symbol: "banknote"),
-                            TileData(label: "Reserved", value: u.reserved_eur.map(formatEuro) ?? "—", symbol: "lock"),
-                            TileData(label: "Requests", value: u.requests.map { "\($0)" } ?? "—", symbol: "arrow.up.arrow.down"),
-                            TileData(label: "Tokens", value: u.total_tokens.map(formatCompact) ?? "—", symbol: "number"),
-                            TileData(label: "Latency p95", value: formatMs(u.latency_p95_ms), symbol: "timer"),
+                            TileData(label: "Spent this month", value: formatEuro(u.spent_eur)),
+                            TileData(label: "Budget", value: formatEuro(u.budget_eur)),
+                            TileData(label: "Remaining", value: formatEuro(u.remaining_eur ?? max(0, u.budget_eur - u.spent_eur))),
+                            TileData(label: "Reserved", value: u.reserved_eur.map(formatEuro) ?? "—"),
+                            TileData(label: "Requests", value: u.requests.map { "\($0)" } ?? "—"),
+                            TileData(label: "Tokens", value: u.total_tokens.map(formatCompact) ?? "—"),
+                            TileData(label: "Latency p95", value: formatMs(u.latency_p95_ms)),
                         ])
-                        Eyebrow(text: "By backend")
-                        ActivityList(rows: (u.by_backend ?? []).map { backend in
-                            ActivityRow(id: backend.backend, symbol: "sparkles", title: backend.backend,
-                                        detail: backend.total_tokens.map { "\(formatCompact($0)) tokens" },
-                                        time: formatEuro(backend.spent_eur), tone: .ok, toneLabel: "Used this month")
-                        }, emptyText: "No usage this month.")
-                    }
-                case "models":
-                    NodePanel(item: current) {
-                        PanelButton(title: "Manage models", symbol: "slider.horizontal.3") { navigate(.models) }
+                        ListSection(title: "By backend") {
+                            ActivityList(rows: (u.by_backend ?? []).map { backend in
+                                ActivityRow(id: backend.backend, symbol: "sparkles", title: backend.backend,
+                                            detail: backend.total_tokens.map { "\(formatCompact($0)) tokens" },
+                                            time: formatEuro(backend.spent_eur), tone: .ok, toneLabel: "Used this month", badge: false)
+                            }, emptyText: "No usage this month.")
+                        }
                     }
                 default:
-                    NodePanel(item: current)
-                    if let state = UnavailableState.forSource(services, title: "Services & disk", symbol: "internaldrive") { state }
-                    if let value = services.value {
-                        Eyebrow(text: "Services")
-                        ActivityList(rows: value.services.map { service in
-                            let (tone, label) = serviceState(service.state)
-                            return ActivityRow(id: service.unit, symbol: "cpu", title: service.label, detail: service.unit,
-                                               time: label, tone: tone, toneLabel: label)
-                        }, emptyText: "No services reported.")
-                        Eyebrow(text: "Disks")
-                        ActivityList(rows: value.disks.map { disk in
-                            let (tone, label) = diskState(disk)
-                            return ActivityRow(id: disk.label, symbol: "internaldrive", title: disk.label, detail: label,
-                                               tone: tone, toneLabel: label)
-                        }, emptyText: "No disks reported.")
+                    Loaded(source: services, title: "Services and disks", symbol: "internaldrive", retry: load) { value in
+                        ListSection(title: "Services") {
+                            ActivityList(rows: value.services.map { service in
+                                let (tone, label) = serviceState(service.state)
+                                return ActivityRow(id: service.unit, symbol: "cpu", title: service.label, detail: service.unit,
+                                                   tone: tone, toneLabel: label)
+                            }, emptyText: "No services reported.")
+                        }
+                        ListSection(title: "Disks") {
+                            ActivityList(rows: value.disks.map { disk in
+                                let (tone, label) = diskState(disk)
+                                return ActivityRow(id: disk.label, symbol: "internaldrive", title: disk.label, detail: label,
+                                                   tone: tone, toneLabel: diskBadge(tone))
+                            }, emptyText: "No disks reported.")
+                        }
                     }
                 }
+            }
+            ListSection(title: "More") {
+                Button { navigate(.models) } label: {
+                    ListRow(title: HubRoute.models.title, symbol: HubRoute.models.symbol,
+                            detail: "Owner-controlled model access. Allowing a model never selects it for a running request.")
+                }
+                .buttonStyle(.plain)
+                .jvCard(padding: 0)
             }
         }
         .onChange(of: selected) { _, _ in sub = "overview" }
         .refreshable { await load() }
         .task { await load() }
         .task(id: selected == "node" && scenePhase == .active) {
-            // Live vitals refresh while the Home Node tab is open and the app is active.
+            // Live vitals refresh while the Home Node view is open and the app is active.
             guard selected == "node", scenePhase == .active else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
@@ -618,23 +684,22 @@ struct HealthPage: View {
     private func nodeTiles(_ value: HomeNodeRegistry) -> [TileData] {
         var tiles: [TileData] = []
         if let live = value.liveHost {
-            tiles.append(TileData(label: "CPU usage", value: live.cpuPercent.map { String(format: "%.1f%%", $0) } ?? "First reading…", symbol: "cpu"))
-            tiles.append(TileData(label: "Memory in use", value: "\(formatGiB(live.memoryUsedBytes)) / \(formatGiB(live.memoryTotalBytes))",
-                                  symbol: "memorychip"))
-            tiles.append(TileData(label: "Uptime", value: formatUptime(live.uptimeSeconds), symbol: "clock"))
+            tiles.append(TileData(label: "CPU usage", value: live.cpuPercent.map { String(format: "%.1f%%", $0) } ?? "First reading…"))
+            tiles.append(TileData(label: "Memory in use", value: "\(formatGiB(live.memoryUsedBytes)) / \(formatGiB(live.memoryTotalBytes))"))
+            tiles.append(TileData(label: "Uptime", value: formatUptime(live.uptimeSeconds)))
         }
-        tiles.append(TileData(label: "Processor", value: "\(value.host.cpu) · \(value.host.cpuCores) cores", symbol: "cpu"))
-        tiles.append(TileData(label: "GPU", value: value.host.gpu, symbol: "display"))
-        tiles.append(TileData(label: "System", value: "\(value.host.os) · \(value.host.arch)", symbol: "server.rack"))
+        tiles.append(TileData(label: "Processor", value: "\(value.host.cpu) · \(value.host.cpuCores) cores"))
+        tiles.append(TileData(label: "GPU", value: value.host.gpu))
+        tiles.append(TileData(label: "System", value: "\(value.host.os) · \(value.host.arch)"))
         return tiles
     }
 
-    private var auditRows: [ActivityRow] {
+    private func securityRows(_ entries: [SystemAuditEntry]) -> [ActivityRow] {
         let now = Date()
-        return (audit.value ?? []).prefix(20).enumerated().map { index, entry in
+        return entries.prefix(20).enumerated().map { index, entry in
             let good = ["ok", "success", "approved", "allowed"].contains(entry.outcome.lowercased())
             return ActivityRow(id: "\(entry.ts)-\(index)", symbol: entry.event.hasPrefix("auth") ? "key" : "shield",
-                               title: entry.event, detail: entry.outcome, time: relativeTime(entry.ts, now: now),
+                               title: entry.event, time: relativeTime(entry.ts, now: now),
                                tone: good ? .ok : .warn, toneLabel: entry.outcome)
         }
     }
@@ -662,9 +727,10 @@ struct HealthPage: View {
 
 // MARK: - Memory
 
+/// D-Memory. Core has no browsable memory store yet: the page says so and lists
+/// the categories under Later.
 struct MemoryPage: View {
     @ObservedObject var model: JarvisAppModel
-    @State private var selected = "people"
 
     private static let items: [NodeItem] = [
         .planned("people", "People", "People", icon: "person.2", detail: "Who matters and how you know them."),
@@ -676,90 +742,61 @@ struct MemoryPage: View {
     ]
 
     var body: some View {
-        NodeScaffold(title: "Memory", subtitle: "What Jarvis remembers", items: Self.items, selection: $selected) {
-            if let current = Self.items.first(where: { $0.id == selected }) {
-                NodePanel(item: current)
-                UnavailableState(title: current.title,
-                                 detail: "Core keeps your conversations but has no browsable memory store yet, so there is nothing to show here.",
-                                 symbol: current.icon)
-            }
+        PageScaffold(title: "Memory", subtitle: "What Jarvis remembers") {
+            UnavailableState(title: "No memory store yet",
+                             detail: "Core keeps your conversations but has no browsable memory store yet, so there is nothing to show here.",
+                             symbol: "brain")
+            LaterList(items: Self.items)
         }
     }
 }
 
-// MARK: - Context
+// MARK: - Devices and context
 
+/// D-Devices: the devices linked to the Home Node, Revoke for the other active
+/// ones, and the pairing requests page. Modes and sources are listed under Later.
 struct ContextPage: View {
     @ObservedObject var model: JarvisAppModel
     @State private var devices: Availability<[LinkedDevice]> = .loading
     @State private var thisDevice: String?
-    @State private var selected = "devices"
     @State private var confirming: LinkedDevice?
     @State private var revoking: String?
     @State private var revokeError: String?
 
-    private var items: [NodeItem] {
+    private static let later: [NodeItem] = [
+        .planned("work", "Work", "Work mode", icon: "briefcase", detail: "Focus on projects and code. Core does not support modes yet."),
+        .planned("focus", "Focus", "Focus mode", icon: "moon", detail: "Only what really matters. Core does not support modes yet."),
+        .planned("home", "Home", "Home mode", icon: "house", detail: "Personal life, no work pings. Core does not support modes yet."),
+        .planned("sources", "Sources", "Sources", icon: "link", detail: "Where context comes from. Core does not report context sources yet."),
+        .planned("schedule", "Schedule", "Schedule", icon: "calendar", detail: "When each mode switches on. Core does not schedule modes yet."),
+    ]
+
+    private var devicesItem: NodeItem {
         let summary = summarize(devices) { list in CardSummary(line1: "\(list.count) linked", line2: "", tone: list.isEmpty ? .idle : .ok) }
-        return [
-            .planned("work", "Work", "Work mode", icon: "briefcase", detail: "Focus on projects and code. Core does not support modes yet."),
-            .planned("focus", "Focus", "Focus mode", icon: "moon", detail: "Only what really matters. Core does not support modes yet."),
-            .planned("home", "Home", "Home mode", icon: "house", detail: "Personal life, no work pings. Core does not support modes yet."),
-            .planned("sources", "Sources", "Sources", icon: "link", detail: "Where context comes from. Core does not report context sources yet."),
-            .planned("schedule", "Schedule", "Schedule", icon: "calendar", detail: "When each mode switches on. Core does not schedule modes yet."),
-            NodeItem(id: "devices", label: "Devices", title: "Devices", icon: "desktopcomputer",
-                     detail: "The desktop and mobile apps linked to your Home Node.", tone: summary.tone, status: summary.line1),
-        ]
+        return NodeItem(id: "devices", label: "Devices", title: "Devices", icon: "desktopcomputer",
+                        detail: "The desktop and mobile apps linked to your Home Node.", tone: summary.tone, status: summary.line1)
     }
 
     var body: some View {
-        NodeScaffold(title: "Context", subtitle: "Where and how Jarvis helps", items: items, selection: $selected) {
-            if let current = items.first(where: { $0.id == selected }) {
-                NodePanel(item: current)
-                if selected == "devices" {
-                    if let state = UnavailableState.forSource(devices, title: "Devices", symbol: "desktopcomputer") { state }
-                    if let list = devices.value {
-                        let platforms = Set(list.map(\.platform)).sorted().joined(separator: ", ")
-                        TileGrid(tiles: [
-                            TileData(label: "Linked devices", value: "\(list.count)", symbol: "desktopcomputer"),
-                            TileData(label: "Platforms", value: platforms.isEmpty ? "—" : platforms, symbol: "square.grid.2x2"),
-                            TileData(label: "This device", value: list.first { $0.id.lowercased() == thisDevice }?.name ?? "Unknown", symbol: "iphone"),
-                            TileData(label: "Active", value: "\(list.filter { $0.status == "active" }.count)", symbol: "checkmark.circle"),
-                        ])
-                        NavigationLink(value: HubRoute.pairingApprovals) {
-                            Label("Pairing requests", systemImage: "person.badge.key")
-                                .font(JV.font(15, .medium))
-                        }
-                        Eyebrow(text: "Linked devices")
-                        ActivityList(rows: list.map { device in
-                            let mobile = device.platform.lowercased().contains("ios") || device.platform.lowercased().contains("android")
-                            return ActivityRow(id: device.id, symbol: mobile ? "iphone" : "desktopcomputer",
-                                               title: device.id.lowercased() == thisDevice ? "\(device.name) (this device)" : device.name,
-                                               detail: device.platform,
-                                               time: device.created_at.map { "linked \(relativeTime(Date(timeIntervalSince1970: $0), now: Date()))" },
-                                               tone: device.status == "active" ? .ok : .idle, toneLabel: device.status)
-                        }, emptyText: "No devices linked.")
-                        // Nothing is offered until this device's own id is known.
-                        let others = thisDevice == nil ? [] : list.filter { $0.status == "active" && $0.id.lowercased() != thisDevice }
-                        if !others.isEmpty {
-                            Eyebrow(text: "Revoke a device")
-                            ForEach(others) { device in
-                                Button(role: .destructive) { confirming = device } label: {
-                                    Label {
-                                        Text(verbatim: revoking == device.id ? "Revoking…" : "Revoke \(PairingFingerprint.displayName(device.name, max: 40))")
-                                    } icon: { Image(systemName: "xmark.circle") }
-                                        .font(JV.font(15, .medium))
-                                }
-                                .disabled(revoking != nil)
-                            }
-                        }
-                        if let revokeError {
-                            Text(verbatim: revokeError).font(JV.font(13)).foregroundStyle(JV.dangerText)
-                        }
-                    }
-                } else {
-                    UnavailableState(title: current.title, detail: current.detail, symbol: current.icon)
+        PageScaffold(title: "Devices and context", subtitle: "Where and how Jarvis helps") {
+            NodePanel(item: devicesItem)
+            Loaded(source: devices, title: "Devices", symbol: "desktopcomputer", retry: load) { list in
+                let platforms = Set(list.map(\.platform)).sorted().joined(separator: ", ")
+                TileGrid(tiles: [
+                    TileData(label: "Linked devices", value: "\(list.count)"),
+                    TileData(label: "Platforms", value: platforms.isEmpty ? "—" : PairingFingerprint.displayName(platforms, max: 64)),
+                    TileData(label: "This device",
+                             value: list.first { $0.id.lowercased() == thisDevice }.map { PairingFingerprint.displayName($0.name, max: 64) } ?? "Unknown"),
+                    TileData(label: "Active", value: "\(list.filter { $0.status == "active" }.count)"),
+                ])
+                RouteList(routes: [.pairingApprovals])
+                ListSection(title: "Linked devices") { deviceList(list) }
+                if let revokeError {
+                    Text(verbatim: revokeError).font(JV.font(13)).foregroundStyle(JV.dangerText)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            LaterList(items: Self.later)
         }
         .refreshable { await load() }
         .task { await load() }
@@ -771,6 +808,23 @@ struct ContextPage: View {
             let short = UUID(uuidString: device.id).map(AuthService.shortId) ?? "unknown"
             let linked = device.created_at.map { ", linked \(Date(timeIntervalSince1970: $0).formatted(date: .abbreviated, time: .omitted))" } ?? ""
             Text(verbatim: "\"\(PairingFingerprint.displayName(device.name, max: 40))\" (\(PairingFingerprint.displayName(device.platform, max: 16))), device \(short)\(linked), is signed out at once and must be paired again to use Jarvis.")
+        }
+    }
+
+    @ViewBuilder private func deviceList(_ list: [LinkedDevice]) -> some View {
+        // Nothing is offered until this device's own id is known.
+        let revocable = Set(revocableDevices(list, thisDevice: thisDevice).map(\.id))
+        if list.isEmpty {
+            UnavailableState(title: "No devices linked", kind: .empty, symbol: "desktopcomputer")
+        } else {
+            VStack(spacing: 0) {
+                ForEach(Array(list.enumerated()), id: \.element.id) { index, device in
+                    if index > 0 { ListDivider(inset: 0) }
+                    DeviceRow(device: device, isThis: device.id.lowercased() == thisDevice, revocable: revocable.contains(device.id),
+                              revoking: revoking) { confirming = device }
+                }
+            }
+            .jvCard(padding: 0)
         }
     }
 
@@ -795,20 +849,79 @@ struct ContextPage: View {
     }
 }
 
+/// One linked device: name, platform and link date, badges, and Revoke when
+/// it may be revoked. Revoke asks for confirmation first (ContextPage).
+private struct DeviceRow: View {
+    let device: LinkedDevice
+    let isThis: Bool
+    let revocable: Bool
+    let revoking: String?
+    let revoke: () -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var name: String { PairingFingerprint.displayName(device.name, max: 64) }
+    private var mobile: Bool {
+        let platform = device.platform.lowercased()
+        return platform.contains("ios") || platform.contains("android")
+    }
+    private var line: String {
+        let linked = device.created_at.map { "linked \(relativeTime(Date(timeIntervalSince1970: $0), now: Date()))" }
+        return [PairingFingerprint.displayName(device.platform, max: 32), linked].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    var body: some View {
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10)) : AnyLayout(HStackLayout(spacing: 12))
+        layout {
+            HStack(spacing: 12) {
+                if !stacked { IconBadge(symbol: mobile ? "iphone" : "desktopcomputer", size: 36, style: .neutral) }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(verbatim: name).font(JV.font(15, .medium)).foregroundStyle(JV.textPrimary)
+                    Text(verbatim: line).font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) { badges }
+                        VStack(alignment: .leading, spacing: 6) { badges }
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            if !stacked { Spacer(minLength: 4) }
+            if revocable {
+                Button(role: .destructive, action: revoke) {
+                    Text(revoking == device.id ? "Revoking…" : "Revoke")
+                }
+                .buttonStyle(JVButtonStyle(kind: .secondary, size: .large))
+                .disabled(revoking != nil)
+                .accessibilityLabel(Text(verbatim: (revoking == device.id ? "Revoking " : "Revoke ") + name))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+    }
+
+    @ViewBuilder private var badges: some View {
+        if isThis { Badge(text: "This device", style: .accent, dot: false) }
+        if device.status == "active" {
+            Badge(text: "Active", style: .positive)
+        } else {
+            Badge(text: PairingFingerprint.displayName(device.status, max: 16))
+        }
+    }
+}
+
 // MARK: - Pairing approvals
 
-/// Pending new-device pairing requests (Context › Devices).
+/// Pending new-device pairing requests (Devices and context).
 struct PairingApprovalsPage: View {
     @ObservedObject var model: JarvisAppModel
     @State private var refresh = 0
 
     var body: some View {
-        ScrollView {
+        PageScaffold(title: "Pairing requests", subtitle: "New devices waiting for you") {
             PairingRequestsSection(model: model, refresh: refresh)
-                .padding(16)
         }
-        .background(JV.bgPage)
-        .jarvisNavigationBar(title: "Pairing requests", subtitle: "New devices waiting for you")
         .refreshable { refresh += 1 }
     }
 }
@@ -828,6 +941,7 @@ struct PairingRequestsSection: View {
     @State private var biometrics = BiometricLock.biometricsAvailable
     @State private var busy: UUID?
     @State private var decisionError: String?
+    @Environment(\.dynamicTypeSize) private var typeSize
     /// Shared by every instance (Activity and the page): list reads share Core's
     /// five-per-minute pairing budget per IP with candidates creating requests,
     /// so all reads stay at least 30 s apart, as on Android.
@@ -837,21 +951,24 @@ struct PairingRequestsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if !biometrics {
-                UnavailableState(title: "Biometrics required", kind: .error, detail: BiometricLock.biometricsRequired, symbol: "faceid")
+                UnavailableState(title: "Biometrics required", kind: .error, detail: BiometricLock.biometricsRequired, symbol: "faceid",
+                                 errorLabel: "Approve and Deny are off on this iPhone")
             }
+            // No Try again: Core rate-limits this list and the 30-second poll retries.
             if let state = UnavailableState.forSource(requests, title: "Pairing requests", symbol: "person.badge.key") { state }
             // Reads are spaced 30 s apart, so the first one on a page can take a moment.
             if case .loading = requests {
-                ProgressView("Loading pairing requests\u{2026}")
-                    .font(JV.font(13))
-                    .foregroundStyle(JV.textSecondary)
-                    .frame(maxWidth: .infinity)
+                LoadingState(label: "Loading pairing requests", rows: 1)
             }
             if let decisionError {
                 Text(verbatim: decisionError).font(JV.font(13)).foregroundStyle(JV.dangerText)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let list = requests.value {
-                if list.isEmpty && showsEmpty { ActivityList(rows: [], emptyText: "No devices are waiting for approval.") }
+                if list.isEmpty && showsEmpty {
+                    UnavailableState(title: "No devices waiting", kind: .empty,
+                                     detail: "When a new device asks to pair, it shows up here.", symbol: "person.badge.key")
+                }
                 ForEach(list) { item in card(item) }
             }
         }
@@ -875,14 +992,24 @@ struct PairingRequestsSection: View {
         }
     }
 
+    /// D-Approvals card: device and request, unverified hints, the fingerprint
+    /// in a well, then Deny and Approve.
     private func card(_ item: PairingApprovalItem) -> some View {
         let checked = Result { try PairingFingerprint.verified(item) }
         let fingerprint = try? checked.get()
-        return VStack(alignment: .leading, spacing: 8) {
-            Text(verbatim: PairingFingerprint.displayName(item.device_name, max: 128))
-                .font(JV.font(15, .semibold))
-                .foregroundStyle(JV.textPrimary)
-            VStack(alignment: .leading, spacing: 4) {
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                IconBadge(symbol: "person.badge.key", size: 36, style: .negative)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: PairingFingerprint.displayName(item.device_name, max: 128))
+                        .font(JV.font(15, .semibold))
+                        .foregroundStyle(JV.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Asks to pair with your Home Node").font(JV.font(13)).foregroundStyle(JV.textSecondary)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            VStack(alignment: .leading, spacing: 6) {
                 detail("Platform", PairingFingerprint.displayName(item.platform, max: 32))
                 if let warning = PairingFingerprint.approverWarning(platform: item.platform) {
                     Text(verbatim: warning)
@@ -899,48 +1026,80 @@ struct PairingRequestsSection: View {
                     detail("Expires in", pairingCountdown(item.expires_at, now: context.date))
                 }
             }
-            Eyebrow(text: "Key fingerprint")
-            switch checked {
-            case let .success(value):
-                Text(verbatim: PairingFingerprint.grouped(value))
-                    .font(.system(.footnote, design: .monospaced))
-                    .foregroundStyle(JV.textPrimary)
-                    .textSelection(.enabled)
-                Text("Compare it with the fingerprint the new device shows. Model, version, IP address and user agent are unverified hints.")
-                    .font(JV.font(13))
-                    .foregroundStyle(JV.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            case let .failure(error):
-                Text(verbatim: (error as? LocalizedError)?.errorDescription ?? "Invalid fingerprint.")
-                    .font(JV.font(13))
-                    .foregroundStyle(JV.dangerText)
+            VStack(alignment: .leading, spacing: 6) {
+                Eyebrow(text: "Key fingerprint")
+                switch checked {
+                case let .success(value):
+                    Text(verbatim: PairingFingerprint.grouped(value))
+                        .font(JV.mono(13, relativeTo: .footnote))
+                        .foregroundStyle(JV.textPrimary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
+                    Text("Compare it with the fingerprint the new device shows. Model, version, IP address and user agent are unverified hints.")
+                        .font(JV.font(13))
+                        .foregroundStyle(JV.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                case let .failure(error):
+                    Text(verbatim: (error as? LocalizedError)?.errorDescription ?? "Invalid fingerprint.")
+                        .font(JV.font(13))
+                        .foregroundStyle(JV.dangerText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             if biometrics {
-                HStack(spacing: 10) {
-                    Button("Deny", role: .destructive) { Task { await decide(item, approve: false) } }
-                        .buttonStyle(JVButtonStyle(kind: .secondary, size: .large))
-                    Spacer()
-                    Button(busy == item.id ? "Verifying…" : "Approve") { Task { await decide(item, approve: true) } }
-                        .buttonStyle(JVButtonStyle(size: .large))
-                        .disabled(fingerprint == nil)
+                // Side by side when they fit, stacked otherwise (narrow width, large text).
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) {
+                        denyButton(item, fill: false)
+                        Spacer()
+                        approveButton(item, enabled: fingerprint != nil, fill: false)
+                    }
+                    VStack(spacing: 10) {
+                        denyButton(item, fill: true)
+                        approveButton(item, enabled: fingerprint != nil, fill: true)
+                    }
                 }
                 .disabled(busy != nil)
             }
         }
-        .jvCard(padding: 12, border: JV.negativeSolid)
+        .jvCard(padding: 16, border: JV.negativeSolid)
     }
 
+    private func denyButton(_ item: PairingApprovalItem, fill: Bool) -> some View {
+        Button(role: .destructive) { Task { await decide(item, approve: false) } } label: {
+            Text("Deny").frame(maxWidth: fill ? .infinity : nil)
+        }
+        .buttonStyle(JVButtonStyle(kind: .secondary, size: .large))
+    }
+
+    private func approveButton(_ item: PairingApprovalItem, enabled: Bool, fill: Bool) -> some View {
+        Button { Task { await decide(item, approve: true) } } label: {
+            Text(busy == item.id ? "Verifying…" : "Approve").frame(maxWidth: fill ? .infinity : nil)
+        }
+        .buttonStyle(JVButtonStyle(size: .large))
+        .disabled(!enabled)
+    }
+
+    /// Label and value side by side, stacked at accessibility text sizes.
     private func detail(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
+        return layout {
             Text(label)
                 .font(JV.font(13))
                 .foregroundStyle(JV.textSecondary)
-                .frame(width: 96, alignment: .leading)
+                .frame(width: typeSize.isAccessibilitySize ? nil : 96, alignment: .leading)
             Text(verbatim: value)
                 .font(JV.font(13))
                 .foregroundStyle(JV.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .accessibilityElement(children: .combine)
     }
 
     private func decide(_ item: PairingApprovalItem, approve: Bool) async {
@@ -981,15 +1140,8 @@ func pairingCountdown(_ expiresAt: Int64, now: Date) -> String {
 /// (Settings › Voice).
 struct VoicePage: View {
     var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                JarvisOrb(size: 160, mood: .idle)
-                    .padding(.top, 48)
-                UnavailableState(title: "Push-to-talk", detail: "Push-to-talk arrives in milestone 2. This build does not request microphone access. Spoken replies can be turned on in Settings › Voice.", symbol: "mic")
-            }
-            .padding(16)
+        PageScaffold(title: "Voice", subtitle: "Talk to Jarvis") {
+            UnavailableState(title: "Push-to-talk", detail: "Push-to-talk arrives in milestone 2. This build does not request microphone access. Spoken replies can be turned on in Settings › Voice.", symbol: "mic")
         }
-        .background(JV.bgPage)
-        .jarvisNavigationBar(title: "Voice", subtitle: "Talk to Jarvis")
     }
 }

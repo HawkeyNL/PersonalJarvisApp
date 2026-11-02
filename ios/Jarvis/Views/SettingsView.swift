@@ -81,27 +81,8 @@ struct SettingsView: View {
 
     /// Light, Dark or System with 44 pt segments; the selected one has a 3:1 outline.
     private var appearancePicker: some View {
-        HStack(spacing: 4) {
-            ForEach(Appearance.allCases) { option in
-                let selected = option == appearance
-                let shape = RoundedRectangle(cornerRadius: JV.Radius.md - 2, style: .continuous)
-                Button { appearance = option } label: {
-                    Text(option.label)
-                        .font(JV.font(14, selected ? .semibold : .medium))
-                        .foregroundStyle(selected ? JV.textPrimary : JV.textSecondary)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(selected ? JV.bgRaised : Color.clear, in: shape)
-                        .overlay { if selected { shape.strokeBorder(JV.borderStrong, lineWidth: 1) } }
-                        .contentShape(shape)
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selected ? .isSelected : [])
-            }
-        }
-        .padding(4)
-        .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md + 2, style: .continuous))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Appearance")
+        SegmentedControl(label: "Appearance", options: Appearance.allCases.map { SegmentedControl<Appearance>.Option(id: $0, label: $0.label) },
+                         selection: $appearance)
     }
 
     private var connectionValue: String {
@@ -128,7 +109,7 @@ private struct HomeNodeSettingsView: View {
             if let notice = model.notice { Section("Status") { Text(notice) } }
         }
         .navigationTitle("Connection")
-        .settingsBackground()
+        .instrumentList()
     }
 
     @ViewBuilder private var connectionLabel: some View {
@@ -163,7 +144,7 @@ private struct VoiceSettingsView: View {
             }
         }
         .navigationTitle("Voice")
-        .settingsBackground()
+        .instrumentList()
         .task { model.refreshLocalVoices() }
     }
 }
@@ -176,7 +157,7 @@ private struct SecuritySettingsView: View {
     var body: some View {
         Form {
             Section("Device security") {
-                Text("The device key, pairing nonce, device ID, and session token are stored in the device-only Keychain and are never synchronized through iCloud.").font(.footnote)
+                Text("The device key, pairing nonce, device ID, and session token are stored in the device-only Keychain and are never synchronized through iCloud.").font(JV.font(13, relativeTo: .footnote)).foregroundStyle(JV.textSecondary)
                 if model.isAuthenticated {
                     NavigationLink { PasswordChangeView(model: model) } label: { Text("Change account password") }
                     NavigationLink { PasswordResetView(model: model) } label: { Text("Forgot password?") }
@@ -187,7 +168,7 @@ private struct SecuritySettingsView: View {
             }
         }
         .navigationTitle("Security")
-        .settingsBackground()
+        .instrumentList()
         .confirmationDialog("Log out of Jarvis?", isPresented: $showLogoutConfirmation, titleVisibility: .visible) {
             Button("Log out", role: .destructive) { Task { await model.logout() } }
             Button("Cancel", role: .cancel) { }
@@ -238,7 +219,7 @@ private struct PasswordChangeView: View {
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled()
         .navigationTitle("Account password")
-        .settingsBackground()
+        .instrumentList()
     }
 
     private func change() async {
@@ -270,7 +251,7 @@ private struct PasswordResetView: View {
                 Section {
                     Text("Run this on the Home Node within 15 minutes:")
                     Text(verbatim: "sudo jarvis account recovery confirm \(requestId.uuidString.lowercased())")
-                        .font(.system(.footnote, design: .monospaced))
+                        .font(JV.mono(13, relativeTo: .footnote))
                         .textSelection(.enabled)
                 } header: {
                     Text("Confirm on the Home Node")
@@ -295,7 +276,7 @@ private struct PasswordResetView: View {
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled()
         .navigationTitle("Reset password")
-        .settingsBackground()
+        .instrumentList()
     }
 
     private func reset() async {
@@ -329,7 +310,7 @@ private struct ResourcesSettingsView: View {
                         LabeledContent("Uptime", value: "\(live.uptimeSeconds / 3600) h \((live.uptimeSeconds % 3600) / 60) min")
                         LabeledContent("Last reading", value: Date(timeIntervalSince1970: TimeInterval(live.sampledAt)).formatted(date: .omitted, time: .standard))
                     } else {
-                        Text("This Home Node version does not provide live hardware readings.").foregroundStyle(.secondary)
+                        Text("This Home Node version does not provide live hardware readings.").foregroundStyle(JV.textSecondary)
                     }
                 }
                 Section("Hardware") {
@@ -346,10 +327,10 @@ private struct ResourcesSettingsView: View {
                     }
                 }
             } else if loading { ProgressView("Loading resources…") }
-            if let error { Section("Status") { Text(error).foregroundStyle(.secondary) } }
+            if let error { Section("Status") { Text(error).foregroundStyle(JV.textSecondary) } }
         }
         .navigationTitle("Resources")
-        .settingsBackground()
+        .instrumentList()
         .refreshable { await reload() }
         .task {
             while !Task.isCancelled {
@@ -375,13 +356,4 @@ private struct ResourcesSettingsView: View {
     }
 
     private func gib(_ bytes: Int64) -> String { String(format: "%.1f GiB", Double(bytes) / 1_073_741_824) }
-}
-
-private extension View {
-    func settingsBackground() -> some View {
-        scrollContentBackground(.hidden)
-            .background(JV.bgPage)
-            .toolbarBackground(JV.bgPage, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-    }
 }
