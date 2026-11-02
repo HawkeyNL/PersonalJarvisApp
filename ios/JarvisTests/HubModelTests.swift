@@ -227,6 +227,22 @@ final class HubModelTests: XCTestCase {
         }
     }
 
+    /// Onboarding progress follows the real connection and enrollment states.
+    func testOnboardingStepFollowsConnectionAndEnrollment() {
+        let enrollments: [EnrollmentState] = [.notStarted, .needsPassword, .needsActivation, .requesting,
+                                              .awaitingApproval(expiresAt: now), .authenticating, .authenticated,
+                                              .signedOut, .failed("no")]
+        for connection in [ConnectionState.unconfigured, .checking, .unreachable("offline")] {
+            for enrollment in enrollments {
+                XCTAssertEqual(OnboardingStep(connection: connection, enrollment: enrollment), .connect)
+            }
+        }
+        let reachable = enrollments.map { OnboardingStep(connection: .reachable, enrollment: $0) }
+        XCTAssertEqual(reachable, [.signIn, .signIn, .signIn, .signIn, .approve, .finish, .finish, .signIn, .signIn])
+        XCTAssertEqual(OnboardingStep.allCases.map(\.label), ["Connect", "Sign in", "Approve", "Finish"])
+        XCTAssertEqual(OnboardingStep.approve.accessibilityLabel, "Step 3 of 4, Approve")
+    }
+
     func testEveryRouteIsReachableFromATab() {
         XCTAssertEqual(AppTab.allCases.map(\.title), ["Jarvis", "Trading", "Activity", "Settings"])
         XCTAssertEqual(HubRoute.allCases.count, 13)

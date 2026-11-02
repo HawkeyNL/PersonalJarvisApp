@@ -130,7 +130,7 @@ struct ListRow: View {
     var value: String? = nil
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: JV.Space.sm) {
             IconBadge(symbol: symbol, size: 32)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(JV.font(15, .medium)).foregroundStyle(JV.textPrimary)
@@ -147,7 +147,7 @@ struct ListRow: View {
                 .foregroundStyle(JV.textSecondary)
                 .accessibilityHidden(true)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, JV.Space.md)
         .padding(.vertical, 10)
         .frame(minHeight: 52)
         .contentShape(Rectangle())
@@ -188,8 +188,8 @@ struct ListSection<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Eyebrow(text: title).padding(.horizontal, 4)
+        VStack(alignment: .leading, spacing: JV.Space.xs) {
+            Eyebrow(text: title).padding(.horizontal, JV.Space.xxs)
             content
         }
     }
@@ -268,7 +268,7 @@ struct TitleBadgeRow: View {
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: JV.Space.xs) {
                 heading
                 Spacer(minLength: 8)
                 badge
@@ -301,7 +301,7 @@ struct NodePanel<Accessory: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: JV.Space.xs) {
             TitleBadgeRow(title: item.title, badge: Badge(text: item.status, style: item.tone.badge))
             if !item.detail.isEmpty {
                 Text(verbatim: item.detail)
@@ -313,7 +313,7 @@ struct NodePanel<Accessory: View>: View {
             accessory
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .jvCard(padding: 16)
+        .jvCard(padding: JV.Space.md)
     }
 }
 
@@ -365,7 +365,7 @@ struct TileGrid: View {
     }
 
     private func cell(_ tile: TileData) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: JV.Space.xxs) {
             Text(verbatim: tile.label)
                 .font(JV.font(13))
                 .foregroundStyle(JV.textSecondary)
@@ -376,7 +376,7 @@ struct TileGrid: View {
                 .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .jvCard(padding: 16)
+        .jvCard(padding: JV.Space.md)
         .accessibilityElement(children: .combine)
     }
 }
@@ -402,7 +402,7 @@ struct ActivityRowView: View {
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
-        HStack(spacing: 12) {
+        HStack(spacing: JV.Space.sm) {
             if !stacked {
                 IconBadge(symbol: row.symbol, size: 36, style: .neutral)
             }
@@ -417,14 +417,14 @@ struct ActivityRowView: View {
                         .foregroundStyle(JV.textSecondary)
                         .lineLimit(stacked ? nil : 2)
                 }
-                if stacked { trailing(alignment: .leading).padding(.top, 4) }
+                if stacked { trailing(alignment: .leading).padding(.top, JV.Space.xxs) }
             }
             if !stacked {
                 Spacer(minLength: 4)
                 trailing(alignment: .trailing)
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, JV.Space.md)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
         .background(row.selected ? JV.bgSelected : Color.clear)
@@ -434,7 +434,7 @@ struct ActivityRowView: View {
     }
 
     private func trailing(alignment: HorizontalAlignment) -> some View {
-        VStack(alignment: alignment, spacing: 4) {
+        VStack(alignment: alignment, spacing: JV.Space.xxs) {
             if row.badge { Badge(text: row.toneLabel, style: row.tone.badge) }
             if let time = row.time, !time.isEmpty {
                 Text(verbatim: time).font(JV.number(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
@@ -456,8 +456,8 @@ struct ActivityList: View {
                     .font(JV.font(15))
                     .foregroundStyle(JV.textSecondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 20)
+                    .padding(.horizontal, JV.Space.md)
+                    .padding(.vertical, JV.Space.lg)
                     .frame(maxWidth: .infinity, minHeight: 58)
             }
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
@@ -491,7 +491,7 @@ struct LaterList: View {
                             .foregroundStyle(JV.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, JV.Space.md)
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
                     .accessibilityElement(children: .combine)
@@ -550,15 +550,15 @@ struct UnavailableState: View {
             .accessibilityElement(children: .combine)
             actionButton
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 32)
+        .padding(.horizontal, JV.Space.xl)
+        .padding(.vertical, JV.Space.xxl)
         .frame(maxWidth: .infinity)
         .jvCard(padding: 0)
     }
 
     private var errorCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: JV.Space.sm) {
+            VStack(alignment: .leading, spacing: JV.Space.xs) {
                 HStack(spacing: 10) {
                     IconBadge(symbol: "exclamationmark.triangle", size: 36, style: .negative)
                     VStack(alignment: .leading, spacing: 2) {
@@ -582,7 +582,7 @@ struct UnavailableState: View {
             actionButton
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .jvCard(padding: 16)
+        .jvCard(padding: JV.Space.md)
     }
 
     @ViewBuilder private var actionButton: some View {
@@ -626,16 +626,28 @@ extension UnavailableState {
     }
 }
 
-/// One placeholder row (.skel): sunken bars the size of the row that replaces it.
+/// One placeholder row (.skel): sunken bars the size of the row that replaces
+/// it. It pulses gently and holds still with Reduce Motion.
 struct SkeletonRow: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dim = false
+
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: JV.Space.sm) {
             bar(width: 36, height: 36, radius: JV.Radius.md)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: JV.Space.xs) {
                 bar(width: 150, height: 14)
                 bar(width: 96, height: 12)
             }
             Spacer(minLength: 0)
+        }
+        .opacity(dim ? 0.55 : 1)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { dim = true }
+        }
+        .onChange(of: reduceMotion) { _, on in
+            if on { withAnimation(nil) { dim = false } }
         }
     }
 
@@ -644,35 +656,24 @@ struct SkeletonRow: View {
     }
 }
 
-/// Loading state: a list card of placeholder rows that pulses gently and holds
-/// still with Reduce Motion. VoiceOver reads `label`.
+/// Loading state: a list card of pulsing placeholder rows. VoiceOver reads `label`.
 struct LoadingState: View {
     let label: String
     var rows = 3
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var dim = false
 
     var body: some View {
         VStack(spacing: 0) {
             ForEach(0..<rows, id: \.self) { index in
                 if index > 0 { ListDivider(inset: 0) }
                 SkeletonRow()
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, JV.Space.md)
                     .padding(.vertical, 11)
                     .frame(minHeight: 58)
             }
         }
-        .opacity(dim ? 0.55 : 1)
         .jvCard(padding: 0)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { dim = true }
-        }
-        .onChange(of: reduceMotion) { _, on in
-            if on { withAnimation(nil) { dim = false } }
-        }
     }
 }
 
@@ -711,13 +712,13 @@ struct PageScaffold<Content: View>: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: JV.Space.md) {
                     content
                 }
                 .id(Self.topID)
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 32)
+                .padding(.horizontal, JV.Space.md)
+                .padding(.top, JV.Space.sm)
+                .padding(.bottom, JV.Space.xxl)
             }
             .onChange(of: top) { _, _ in
                 withAnimation(reduceMotion ? nil : JV.Motion.easeOut(JV.Motion.enter)) { proxy.scrollTo(Self.topID, anchor: .top) }
@@ -766,6 +767,29 @@ extension View {
             .toolbarBackground(JV.bgPage, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
     }
+
+    /// Rows of one `instrumentList()` section: surface background and hairline separators.
+    func instrumentRows() -> some View {
+        listRowBackground(JV.bgSurface).listRowSeparatorTint(JV.separator)
+    }
+
+    /// Instrument text input: surface, 3:1 outline, focus ring while editing.
+    /// A tap anywhere in the 44 pt box runs `focus`.
+    func jvInput(focused: Bool, focus: @escaping () -> Void) -> some View {
+        let shape = RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous)
+        return font(JV.font(15))
+            .foregroundStyle(JV.textPrimary)
+            .padding(.horizontal, JV.Space.sm)
+            .frame(minHeight: 44)
+            // The tap sits behind the field, so text editing keeps its own gestures.
+            .background { shape.fill(JV.bgSurface).onTapGesture(perform: focus) }
+            .overlay(shape.strokeBorder(focused ? JV.focusRing : JV.borderStrong, lineWidth: focused ? 2 : 1).allowsHitTesting(false))
+    }
+}
+
+/// Footer of a system List section in Plex.
+@MainActor func listFooter(_ text: String) -> some View {
+    Text(verbatim: text).font(JV.font(13, relativeTo: .footnote)).foregroundStyle(JV.textSecondary)
 }
 
 /// Section header of a system List in Plex.

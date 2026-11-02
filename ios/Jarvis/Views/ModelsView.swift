@@ -112,7 +112,7 @@ struct ModelsView: View {
                         .disabled(busy || policy?.mutable != true)
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, JV.Space.xxs)
             }
             if catalog.total == 0 { Text("No models found.").foregroundStyle(JV.textSecondary) }
             HStack {

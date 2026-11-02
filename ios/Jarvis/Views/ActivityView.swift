@@ -19,7 +19,7 @@ struct ActivityView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: JV.Space.lg) {
                 ListSection(title: "Waiting on you") {
                     ForEach(unlocks) { item in
                         UnlockRow(item: item, now: now) { openUnlock(item) }
@@ -50,7 +50,7 @@ struct ActivityView: View {
                     }
                 }
             }
-            .padding(16)
+            .padding(JV.Space.md)
         }
         .background(JV.bgPage)
         .navigationTitle(AppTab.activity.title)
@@ -111,7 +111,7 @@ struct PendingActionRow: View {
                     .foregroundStyle(JV.textSecondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .jvCard(padding: 16, border: JV.negativeSolid)
+            .jvCard(padding: JV.Space.md, border: JV.negativeSolid)
             .contentShape(RoundedRectangle(cornerRadius: JV.Radius.lg, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -143,7 +143,7 @@ struct UnlockRow: View {
                     .foregroundStyle(JV.textSecondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .jvCard(padding: 16, border: JV.negativeSolid)
+            .jvCard(padding: JV.Space.md, border: JV.negativeSolid)
             .contentShape(RoundedRectangle(cornerRadius: JV.Radius.lg, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -217,9 +217,9 @@ struct AgentApprovalSheet: View {
                             Color.clear.preference(key: ReviewEndKey.self, value: proxy.frame(in: .named(Self.space)).minY)
                         })
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, JV.Space.lg)
                 .padding(.top, 28)
-                .padding(.bottom, 16)
+                .padding(.bottom, JV.Space.md)
             }
             .coordinateSpace(.named(Self.space))
             .background(GeometryReader { proxy in
@@ -246,7 +246,7 @@ struct AgentApprovalSheet: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: JV.Space.sm) {
             IconBadge(symbol: approvable ? "doc.text" : "exclamationmark.triangle", size: 40)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: approvable ? "Write a file?" : PairingFingerprint.displayName(item.action, max: 40))
@@ -277,17 +277,17 @@ struct AgentApprovalSheet: View {
     }
 
     private func field(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: JV.Space.xxs) {
             Eyebrow(text: label)
             // Strictly left-to-right: each line isolated at display time only.
             Text(verbatim: AgentReview.ltrLines(value))
                 .environment(\.layoutDirection, .leftToRight)
                 .multilineTextAlignment(.leading)
-                .font(.system(.footnote, design: .monospaced))
+                .font(JV.mono(13, relativeTo: .footnote))
                 .foregroundStyle(JV.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
+                .padding(JV.Space.sm)
                 .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
         }
     }
@@ -316,8 +316,8 @@ struct AgentApprovalSheet: View {
         }
         // The bar must leave room to read the details at the largest text sizes.
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .padding(.horizontal, JV.Space.lg)
+        .padding(.vertical, JV.Space.sm)
         .background(JV.bgSurface)
         .overlay(alignment: .top) { Rectangle().fill(JV.separator).frame(height: 1) }
     }
@@ -368,7 +368,7 @@ struct UnlockSheet: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: JV.Space.lg) {
                 IconBadge(symbol: "lock", size: 64)
                 if let outcome {
                     Text(verbatim: outcome)
@@ -383,9 +383,9 @@ struct UnlockSheet: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, 24)
-            .padding(.top, 32)
-            .padding(.bottom, 24)
+            .padding(.horizontal, JV.Space.xl)
+            .padding(.top, JV.Space.xxl)
+            .padding(.bottom, JV.Space.xl)
         }
         .background(JV.bgSurface)
         .presentationBackground(JV.bgSurface)
@@ -421,7 +421,7 @@ struct UnlockSheet: View {
                 .foregroundStyle(JV.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(spacing: 12))
+            let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: JV.Space.sm)) : AnyLayout(HStackLayout(spacing: JV.Space.sm))
             layout {
                 ForEach(choices, id: \.self) { choice in
                     Button { Task { await pick(choice) } } label: {

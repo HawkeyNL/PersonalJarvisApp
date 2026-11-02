@@ -63,14 +63,14 @@ struct ChatView: View {
                             MessageView(message: message).id(message.id)
                         }
                         if model.isSending {
-                            HStack(spacing: 8) {
+                            HStack(spacing: JV.Space.xs) {
                                 ProgressView().controlSize(.small).tint(JV.textSecondary)
                                 Text("Jarvis is thinking…").font(JV.font(13)).foregroundStyle(JV.textSecondary)
                             }
                             .accessibilityElement(children: .combine)
                         }
                     }
-                    .padding(16)
+                    .padding(JV.Space.md)
                 }
                 .background(JV.bgPage)
                 .scrollDismissesKeyboard(.interactively)
@@ -84,7 +84,7 @@ struct ChatView: View {
 
     private var composer: some View {
         let shape = RoundedRectangle(cornerRadius: JV.Radius.lg, style: .continuous)
-        return HStack(alignment: .bottom, spacing: 8) {
+        return HStack(alignment: .bottom, spacing: JV.Space.xs) {
             TextField("Ask Jarvis anything…", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(JV.font(16))
@@ -108,12 +108,12 @@ struct ChatView: View {
             .accessibilityLabel("Send message")
         }
         .padding(.leading, 14)
-        .padding(.trailing, 4)
-        .padding(.vertical, 4)
+        .padding(.trailing, JV.Space.xxs)
+        .padding(.vertical, JV.Space.xxs)
         .background(JV.bgSurface, in: shape)
         .overlay(shape.strokeBorder(JV.borderStrong, lineWidth: 1))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.horizontal, JV.Space.md)
+        .padding(.vertical, JV.Space.xs)
         .background(JV.bgPage)
         .overlay(alignment: .top) { Rectangle().fill(JV.separator).frame(height: 1) }
     }
@@ -138,7 +138,7 @@ private struct MessageView: View {
 
     /// Your message: an accent bubble on the right, its time under it.
     private var mine: some View {
-        VStack(alignment: .trailing, spacing: 4) {
+        VStack(alignment: .trailing, spacing: JV.Space.xxs) {
             Text(verbatim: message.content)
                 .font(JV.font(16))
                 .foregroundStyle(JV.textOnAccent)
@@ -161,8 +161,8 @@ private struct MessageView: View {
 
     /// Jarvis: a name line with the tile, then the answer as plain text.
     private var assistant: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: JV.Space.xs) {
+            HStack(spacing: JV.Space.xs) {
                 IconBadge(symbol: "sparkles", size: 24)
                 Text("Jarvis").font(JV.font(12, .medium, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
                 if let time {
@@ -177,7 +177,7 @@ private struct MessageView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.trailing, 32)
+        .padding(.trailing, JV.Space.xxl)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text(verbatim: "Jarvis: " + message.content))
         .accessibilityValue(Text(verbatim: time ?? ""))

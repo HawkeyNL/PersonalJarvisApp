@@ -30,10 +30,7 @@ struct RootView: View {
                         // to configure the Home Node address.
                         NavigationStack(path: $enrollmentPath) {
                             EnrollmentView(model: model)
-                                .navigationTitle("Jarvis")
-                                .navigationBarTitleDisplayMode(.inline)
-                                .toolbarBackground(JV.bgPage, for: .navigationBar)
-                                .toolbarBackground(.visible, for: .navigationBar)
+                                .jarvisNavigationBar(title: "Jarvis")
                                 .toolbar { ToolbarItem(placement: .topBarTrailing) { ProfileButton() } }
                                 .navigationDestination(for: HubRoute.self) { route in
                                     if route == .settings { SettingsView(model: model) }
