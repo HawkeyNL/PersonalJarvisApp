@@ -95,7 +95,7 @@ struct HomeView: View {
                 header
                 waitingCard
                 UpdateNotice(model: model)
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: JV.Space.xs) {
                     Eyebrow(text: "Jarvis")
                     // Chat and Voice open from the ask bar.
                     RouteList(routes: AppTab.jarvis.links.filter { $0 != .chat && $0 != .voice }) { route in
@@ -107,9 +107,9 @@ struct HomeView: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 24)
+            .padding(.horizontal, JV.Space.md)
+            .padding(.top, JV.Space.xs)
+            .padding(.bottom, JV.Space.xl)
         }
         .background(JV.bgPage)
         .safeAreaInset(edge: .bottom, spacing: 0) { askBar }
@@ -131,7 +131,7 @@ struct HomeView: View {
             Text(now.formatted(.dateTime.weekday(.wide).day().month(.wide)))
                 .font(JV.font(13, relativeTo: .subheadline))
                 .foregroundStyle(JV.textSecondary)
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: JV.Space.sm) {
                 Text("Jarvis")
                     .font(JV.font(30, .semibold, relativeTo: .largeTitle))
                     .foregroundStyle(JV.textPrimary)
@@ -140,7 +140,7 @@ struct HomeView: View {
                 StatusLabel(tone: status.tone, text: online == true ? "Core online" : status.label)
             }
         }
-        .padding(.horizontal, 4)
+        .padding(.horizontal, JV.Space.xxs)
     }
 
     /// Unlock requests and agent approvals; pairing requests are read on
@@ -151,7 +151,7 @@ struct HomeView: View {
             + actions.map(pendingTitle)
         if !lines.isEmpty {
             Button(action: openActivity) {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: JV.Space.xs) {
                     HStack(spacing: 10) {
                         IconBadge(symbol: "checkmark.shield", size: 30)
                         Text("Waiting on you").font(JV.font(15, .semibold)).foregroundStyle(JV.textPrimary)
@@ -159,7 +159,7 @@ struct HomeView: View {
                         Text(verbatim: "\(lines.count)")
                             .font(JV.number(13, .semibold))
                             .foregroundStyle(JV.accentText)
-                            .padding(.horizontal, 8)
+                            .padding(.horizontal, JV.Space.xs)
                             .padding(.vertical, 2)
                             .background(JV.accentSubtle, in: Capsule())
                     }
@@ -171,7 +171,7 @@ struct HomeView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .jvCard(padding: 16, border: JV.accentBorder)
+                .jvCard(padding: JV.Space.md, border: JV.accentBorder)
                 .contentShape(RoundedRectangle(cornerRadius: JV.Radius.lg, style: .continuous))
             }
             .buttonStyle(.plain)
@@ -181,7 +181,7 @@ struct HomeView: View {
     }
 
     private var askBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: JV.Space.xs) {
             NavigationLink(value: HubRoute.chat) {
                 Text("Ask Jarvis anything…")
                     .font(JV.font(16))
@@ -202,10 +202,10 @@ struct HomeView: View {
             .accessibilityLabel("Voice")
         }
         .buttonStyle(.plain)
-        .padding(4)
+        .padding(JV.Space.xxs)
         .background(JV.bgSunken, in: Capsule())
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.horizontal, JV.Space.md)
+        .padding(.vertical, JV.Space.xs)
         .background(JV.bgSurface)
         .overlay(alignment: .top) { Rectangle().fill(JV.separator).frame(height: 1) }
     }
@@ -243,13 +243,13 @@ struct UpdateNotice: View {
                 }
                 // One row when it fits, stacked otherwise (narrow width, large text).
                 ViewThatFits {
-                    HStack(spacing: 8) { links(update) }
-                    VStack(alignment: .leading, spacing: 8) { links(update) }
+                    HStack(spacing: JV.Space.xs) { links(update) }
+                    VStack(alignment: .leading, spacing: JV.Space.xs) { links(update) }
                 }
                 // Large: 48 pt targets (regular is 40 pt, under the 44 pt minimum).
                 .buttonStyle(JVButtonStyle(kind: .secondary, size: .large))
             }
-            .jvCard(padding: 12)
+            .jvCard(padding: JV.Space.sm)
         }
     }
 

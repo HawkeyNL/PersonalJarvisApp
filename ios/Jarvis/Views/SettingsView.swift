@@ -9,7 +9,7 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: JV.Space.lg) {
                 ListSection(title: "Appearance") { appearancePicker }
                 ListSection(title: "Home Node") {
                     VStack(spacing: 0) {
@@ -56,7 +56,7 @@ struct SettingsView: View {
                             .font(JV.mono(13))
                             .foregroundStyle(JV.textSecondary)
                     }
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, JV.Space.sm)
                     .frame(minHeight: 52)
                     .jvCard(padding: 0)
                     .accessibilityElement(children: .combine)
@@ -67,11 +67,11 @@ struct SettingsView: View {
                             .font(JV.font(15))
                             .foregroundStyle(JV.textPrimary)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .jvCard(padding: 12)
+                            .jvCard(padding: JV.Space.sm)
                     }
                 }
             }
-            .padding(16)
+            .padding(JV.Space.md)
         }
         .background(JV.bgPage)
         .navigationTitle(AppTab.settings.title)
@@ -100,22 +100,28 @@ private struct HomeNodeSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Home Node address") {
+            Section {
                 TextField("https://jarvis.local", text: $model.endpointText)
                     .textInputAutocapitalization(.never).keyboardType(.URL).autocorrectionDisabled()
+                    .accessibilityLabel("Home Node address")
                 Button("Save and test connection") { Task { _ = await model.saveEndpoint() } }
                 connectionLabel
+            } header: { listHeader("Home Node address") }
+            .instrumentRows()
+            if let notice = model.notice {
+                Section { Text(notice) } header: { listHeader("Status") }
+                    .instrumentRows()
             }
-            if let notice = model.notice { Section("Status") { Text(notice) } }
         }
+        .font(JV.font(15))
         .navigationTitle("Connection")
         .instrumentList()
     }
 
     @ViewBuilder private var connectionLabel: some View {
         switch model.connectionState {
-        case .unconfigured: Label("Not configured", systemImage: "circle")
-        case .checking: Label("Checking", systemImage: "clock")
+        case .unconfigured: Label("Not configured", systemImage: "circle").foregroundStyle(JV.textSecondary)
+        case .checking: Label("Checking", systemImage: "clock").foregroundStyle(JV.textSecondary)
         case .reachable: Label("Reachable", systemImage: "checkmark.circle.fill").foregroundStyle(JV.positiveText)
         case let .unreachable(message): Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(JV.negativeText)
         }
@@ -127,7 +133,7 @@ private struct VoiceSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Local voice") {
+            Section {
                 Toggle("Speak replies on this active device", isOn: $model.voiceEnabled)
                 Picker("System voice", selection: $model.selectedVoice) {
                     Text("Local system default").tag("")
@@ -141,8 +147,10 @@ private struct VoiceSettingsView: View {
                 Slider(value: $model.voiceRate, in: 0.5...2, step: 0.25)
                     .accessibilityLabel("Speech rate for subsequent phrases")
                 Button("Stop current speech") { model.stopSpeaking() }
-            }
+            } header: { listHeader("Local voice") }
+            .instrumentRows()
         }
+        .font(JV.font(15))
         .navigationTitle("Voice")
         .instrumentList()
         .task { model.refreshLocalVoices() }
@@ -156,8 +164,7 @@ private struct SecuritySettingsView: View {
 
     var body: some View {
         Form {
-            Section("Device security") {
-                Text("The device key, pairing nonce, device ID, and session token are stored in the device-only Keychain and are never synchronized through iCloud.").font(JV.font(13, relativeTo: .footnote)).foregroundStyle(JV.textSecondary)
+            Section {
                 if model.isAuthenticated {
                     NavigationLink { PasswordChangeView(model: model) } label: { Text("Change account password") }
                     NavigationLink { PasswordResetView(model: model) } label: { Text("Forgot password?") }
@@ -165,8 +172,15 @@ private struct SecuritySettingsView: View {
                     Button("Log out") { showLogoutConfirmation = true }
                 }
                 Button("Reset this device", role: .destructive) { showResetConfirmation = true }
+                    .foregroundStyle(JV.dangerText)
+            } header: {
+                listHeader("Device security")
+            } footer: {
+                listFooter("The device key, pairing nonce, device ID, and session token are stored in the device-only Keychain and are never synchronized through iCloud.")
             }
+            .instrumentRows()
         }
+        .font(JV.font(15))
         .navigationTitle("Security")
         .instrumentList()
         .confirmationDialog("Log out of Jarvis?", isPresented: $showLogoutConfirmation, titleVisibility: .visible) {
@@ -208,14 +222,17 @@ private struct PasswordChangeView: View {
                 SecureField("New password (at least 15 characters)", text: $new).textContentType(.newPassword)
                 SecureField("Repeat new password", text: $repeated).textContentType(.newPassword)
             } footer: {
-                Text("Confirmed with Face ID or Touch ID. Every device is signed out after the change; sign in again with the new password.")
+                listFooter("Confirmed with Face ID or Touch ID. Every device is signed out after the change; sign in again with the new password.")
             }
-            if let error { Section { Text(verbatim: error).foregroundStyle(JV.dangerText) } }
+            .instrumentRows()
+            if let error { Section { Text(verbatim: error).foregroundStyle(JV.dangerText) }.instrumentRows() }
             Section {
                 Button(busy ? "Verifying…" : "Change password") { Task { await change() } }
                     .disabled(busy || current.isEmpty || new.isEmpty)
             }
+            .instrumentRows()
         }
+        .font(JV.font(15))
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled()
         .navigationTitle("Account password")
@@ -254,25 +271,29 @@ private struct PasswordResetView: View {
                         .font(JV.mono(13, relativeTo: .footnote))
                         .textSelection(.enabled)
                 } header: {
-                    Text("Confirm on the Home Node")
+                    listHeader("Confirm on the Home Node")
                 } footer: {
-                    Text("Check that the request id matches. After confirming, every device is signed out; sign in with the new password.")
+                    listFooter("Check that the request id matches. After confirming, every device is signed out; sign in with the new password.")
                 }
-                Section { Button("Done") { model.pendingPasswordReset = nil } }
+                .instrumentRows()
+                Section { Button("Done") { model.pendingPasswordReset = nil } }.instrumentRows()
             } else {
                 Section {
                     SecureField("New password (at least 15 characters)", text: $new).textContentType(.newPassword)
                     SecureField("Repeat new password", text: $repeated).textContentType(.newPassword)
                 } footer: {
-                    Text("Confirmed with Face ID or Touch ID, then by the owner as root on the Home Node. Nothing changes until then.")
+                    listFooter("Confirmed with Face ID or Touch ID, then by the owner as root on the Home Node. Nothing changes until then.")
                 }
-                if let error { Section { Text(verbatim: error).foregroundStyle(JV.dangerText) } }
+                .instrumentRows()
+                if let error { Section { Text(verbatim: error).foregroundStyle(JV.dangerText) }.instrumentRows() }
                 Section {
                     Button(busy ? "Verifying…" : "Reset password") { Task { await reset() } }
                         .disabled(busy || new.isEmpty)
                 }
+                .instrumentRows()
             }
         }
+        .font(JV.font(15))
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled()
         .navigationTitle("Reset password")
@@ -303,7 +324,7 @@ private struct ResourcesSettingsView: View {
     var body: some View {
         List {
             if let registry {
-                Section("Live Home Node") {
+                Section {
                     if let live = registry.liveHost {
                         LabeledContent("CPU usage", value: live.cpuPercent.map { String(format: "%.1f%%", $0) } ?? "First reading…")
                         LabeledContent("Memory in use", value: "\(gib(live.memoryUsedBytes)) / \(gib(live.memoryTotalBytes))")
@@ -312,23 +333,36 @@ private struct ResourcesSettingsView: View {
                     } else {
                         Text("This Home Node version does not provide live hardware readings.").foregroundStyle(JV.textSecondary)
                     }
-                }
-                Section("Hardware") {
+                } header: { listHeader("Live Home Node") }
+                .instrumentRows()
+                Section {
                     LabeledContent("Processor", value: registry.host.cpu)
                     LabeledContent("Cores", value: String(registry.host.cpuCores))
                     LabeledContent("Memory", value: "\(registry.host.memTotalGB.formatted()) GB")
                     LabeledContent("GPU", value: registry.host.gpu)
                     LabeledContent("Operating system", value: registry.host.os)
                     LabeledContent("Architecture", value: registry.host.arch)
-                }
-                Section("Software") {
+                } header: { listHeader("Hardware") }
+                .instrumentRows()
+                Section {
                     ForEach(registry.software, id: \.name) { item in
                         LabeledContent(item.name, value: item.present ? (item.version ?? "Available") : "Unavailable")
                     }
+                } header: { listHeader("Software") }
+                .instrumentRows()
+            } else if loading {
+                Section {
+                    SkeletonRow().accessibilityElement(children: .ignore).accessibilityLabel("Loading resources")
+                    SkeletonRow()
                 }
-            } else if loading { ProgressView("Loading resources…") }
-            if let error { Section("Status") { Text(error).foregroundStyle(JV.textSecondary) } }
+                .instrumentRows()
+            }
+            if let error {
+                Section { Text(error).foregroundStyle(JV.textSecondary) } header: { listHeader("Status") }
+                    .instrumentRows()
+            }
         }
+        .font(JV.font(15))
         .navigationTitle("Resources")
         .instrumentList()
         .refreshable { await reload() }

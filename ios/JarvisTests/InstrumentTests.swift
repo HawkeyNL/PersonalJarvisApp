@@ -87,6 +87,31 @@ final class InstrumentTests: XCTestCase {
         XCTAssertEqual([Tone.ok, .idle, .warn, .error].map(\.badge), [.positive, .neutral, .negative, .danger])
     }
 
+    /// Colours come from tokens: no raw colours or gradients outside Instrument.swift.
+    func testNoRawColoursOrGradientsOutsideInstrument() throws {
+        let app = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Jarvis")
+        let files = try XCTUnwrap(FileManager.default.enumerator(at: app, includingPropertiesForKeys: nil))
+            .compactMap { $0 as? URL }
+            .filter { $0.pathExtension == "swift" && $0.lastPathComponent != "Instrument.swift" }
+        XCTAssertGreaterThan(files.count, 20, "app sources not found at \(app.path)")
+        let banned = try NSRegularExpression(pattern: #"Color(\.init)?\(\s*(red|hex)\s*:|\b(Linear|Radial)Gradient\b"#)
+        for file in files {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            for match in banned.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                let source = text as NSString
+                let line = source.substring(to: match.range.location).filter { $0 == "\n" }.count + 1
+                XCTFail("\(file.lastPathComponent):\(line): \(source.substring(with: match.range))")
+            }
+        }
+        // The guard itself matches what it must reject.
+        for sample in ["Color(red: 1, green: 0, blue: 0)", "UIColor(red: 1, green: 0, blue: 0, alpha: 1)",
+                       "Color(hex: 0xFF0000)", "Color.init(red: 1, green: 0, blue: 0)", "LinearGradient(colors: [])",
+                       "RadialGradient(colors: [])"] {
+            XCTAssertNotNil(banned.firstMatch(in: sample, range: NSRange(sample.startIndex..., in: sample)), sample)
+        }
+    }
+
     /// Stored raw values are persisted; changing them would reset the owner's choice.
     func testAppearanceValuesAndStyles() {
         XCTAssertEqual(Appearance.storageKey, "jarvis.appearance")

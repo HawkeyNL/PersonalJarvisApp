@@ -136,6 +136,18 @@ enum JV {
         static let xl: CGFloat = 20
     }
 
+    /// Spacing on the canvas 4 pt grid. The canvas also uses a few optical
+    /// half steps (2, 6, 10, 14, 18 pt); those stay literal where they appear.
+    enum Space {
+        static let xxs: CGFloat = 4
+        static let xs: CGFloat = 8
+        static let sm: CGFloat = 12
+        static let md: CGFloat = 16
+        static let lg: CGFloat = 20
+        static let xl: CGFloat = 24
+        static let xxl: CGFloat = 32
+    }
+
     /// Durations in seconds (--d-*) and the --ease-out curve.
     enum Motion {
         static let press = 0.15
@@ -241,7 +253,7 @@ private extension UIColor {
 extension View {
     /// Instrument card: surface, 14 pt corners and the hairline border shadow.
     /// `border` replaces the hairline, e.g. for a card that waits on the owner.
-    func jvCard(padding: CGFloat = 20, border: Color? = nil) -> some View {
+    func jvCard(padding: CGFloat = JV.Space.lg, border: Color? = nil) -> some View {
         modifier(CardSurface(padding: padding, border: border))
     }
 }

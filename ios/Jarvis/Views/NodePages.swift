@@ -96,7 +96,7 @@ struct ConversationsPage: View {
                     .font(JV.font(13))
                     .foregroundStyle(JV.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 4)
+                    .padding(.horizontal, JV.Space.xxs)
             }
             searchField
             list
@@ -110,7 +110,7 @@ struct ConversationsPage: View {
 
     private var searchField: some View {
         let shape = RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous)
-        return HStack(spacing: 8) {
+        return HStack(spacing: JV.Space.xs) {
             Image(systemName: "magnifyingglass").foregroundStyle(JV.textSecondary).accessibilityHidden(true)
             TextField("Search conversations", text: $query)
                 .font(JV.font(15))
@@ -119,7 +119,7 @@ struct ConversationsPage: View {
                 .autocorrectionDisabled()
                 .submitLabel(.search)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, JV.Space.sm)
         .frame(minHeight: 44)
         .background(JV.bgSurface, in: shape)
         .overlay(shape.strokeBorder(JV.borderStrong, lineWidth: 1))
@@ -314,7 +314,7 @@ struct TasksPage: View {
             .font(JV.font(13))
             .foregroundStyle(JV.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 4)
+            .padding(.horizontal, JV.Space.xxs)
         Loaded(source: pending, title: "Approvals", symbol: "exclamationmark.triangle",
                forbidden: "Agent actions are turned off in Core.", rows: 2, retry: load) { list in
             if list.isEmpty {
@@ -513,13 +513,13 @@ struct TradingPage: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: JV.Space.md) {
                 IbkrPanel(source: ibkr, loadedAt: loadedAt, retry: load)
                 UnavailableState(title: "Trading dashboard",
                                  detail: "Pots, proposals and mandates are coming to the iPhone app. Nothing here can place an order.",
                                  symbol: "chart.line.uptrend.xyaxis")
             }
-            .padding(16)
+            .padding(JV.Space.md)
         }
         .background(JV.bgPage)
         .navigationTitle(AppTab.trading.title)
@@ -871,11 +871,11 @@ private struct DeviceRow: View {
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
-        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10)) : AnyLayout(HStackLayout(spacing: 12))
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10)) : AnyLayout(HStackLayout(spacing: JV.Space.sm))
         layout {
-            HStack(spacing: 12) {
+            HStack(spacing: JV.Space.sm) {
                 if !stacked { IconBadge(symbol: mobile ? "iphone" : "desktopcomputer", size: 36, style: .neutral) }
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: JV.Space.xxs) {
                     Text(verbatim: name).font(JV.font(15, .medium)).foregroundStyle(JV.textPrimary)
                     Text(verbatim: line).font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
                     ViewThatFits(in: .horizontal) {
@@ -896,7 +896,7 @@ private struct DeviceRow: View {
                 .accessibilityLabel(Text(verbatim: (revoking == device.id ? "Revoking " : "Revoke ") + name))
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, JV.Space.md)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
     }
@@ -997,8 +997,8 @@ struct PairingRequestsSection: View {
     private func card(_ item: PairingApprovalItem) -> some View {
         let checked = Result { try PairingFingerprint.verified(item) }
         let fingerprint = try? checked.get()
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
+        return VStack(alignment: .leading, spacing: JV.Space.sm) {
+            HStack(spacing: JV.Space.sm) {
                 IconBadge(symbol: "person.badge.key", size: 36, style: .negative)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(verbatim: PairingFingerprint.displayName(item.device_name, max: 128))
@@ -1037,7 +1037,7 @@ struct PairingRequestsSection: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
+                        .padding(.vertical, JV.Space.sm)
                         .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
                     Text("Compare it with the fingerprint the new device shows. Model, version, IP address and user agent are unverified hints.")
                         .font(JV.font(13))
@@ -1066,7 +1066,7 @@ struct PairingRequestsSection: View {
                 .disabled(busy != nil)
             }
         }
-        .jvCard(padding: 16, border: JV.negativeSolid)
+        .jvCard(padding: JV.Space.md, border: JV.negativeSolid)
     }
 
     private func denyButton(_ item: PairingApprovalItem, fill: Bool) -> some View {
