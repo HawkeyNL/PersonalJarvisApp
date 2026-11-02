@@ -60,8 +60,8 @@ internal fun SettingsScreen(
     LaunchedEffect(Unit) { onRefresh() }
     var voiceMenu by remember { mutableStateOf(false) }
     Column(
-        Modifier.fillMaxSize().imePadding().testTag("settings").verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
+        Modifier.fillMaxSize().imePadding().testTag("settings").verticalScroll(rememberScrollState()).padding(JvSpace.lg),
+        verticalArrangement = Arrangement.spacedBy(JvSpace.xl),
     ) {
         TabTitle("Settings")
         ThemeChooser(state.themeMode, actions::setThemeMode)
@@ -76,7 +76,7 @@ internal fun SettingsScreen(
                     label = { Text("Home Node address") },
                     singleLine = true,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
                     ActionButton("Save", actions::saveEndpoint, Modifier.weight(1f))
                     ActionButton("Test", actions::checkConnection, Modifier.weight(1f))
                 }
@@ -119,7 +119,7 @@ internal fun SettingsScreen(
                             DropdownMenuItem(text = { Text(voice.label) }, onClick = { actions.selectLocalVoice(voice.id); voiceMenu = false })
                         }
                         if (state.availableVoices.isEmpty()) {
-                            Text("No offline voices installed", Modifier.padding(16.dp), color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.bodySmall)
+                            Text("No offline voices installed", Modifier.padding(JvSpace.lg), color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
@@ -172,7 +172,7 @@ private fun ThemeChooser(mode: ThemeMode, onChange: (ThemeMode) -> Unit) {
     val c = JvTheme.colors
     ListSection("Appearance") {
         Row(
-            Modifier.fillMaxWidth().padding(JvSpace.md).clip(JvShapes.md).background(c.bgSunken).padding(3.dp).selectableGroup(),
+            Modifier.fillMaxWidth().padding(JvSpace.md).clip(JvShapes.md).background(c.bgSunken).padding(JvSpace.xxs).selectableGroup(),
             horizontalArrangement = Arrangement.spacedBy(JvSpace.xxs),
         ) {
             for ((option, label) in listOf(ThemeMode.LIGHT to "Light", ThemeMode.DARK to "Dark", ThemeMode.SYSTEM to "System")) {

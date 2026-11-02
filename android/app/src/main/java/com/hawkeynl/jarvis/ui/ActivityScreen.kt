@@ -12,7 +12,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import com.hawkeynl.jarvis.network.map
 import com.hawkeynl.jarvis.network.valueOrNull
 import com.hawkeynl.jarvis.security.AgentApprovalService
@@ -28,14 +27,14 @@ fun ActivityScreen(data: CoreData, onNavigate: (Screen) -> Unit, onRefresh: () -
     val actions = data.pending.valueOrNull?.pending
     val pairing = data.pairing.valueOrNull?.requests.orEmpty()
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(JvSpace.lg),
+        verticalArrangement = Arrangement.spacedBy(JvSpace.xl),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TabTitle("Activity", "What waits for you and what agents did", Modifier.weight(1f))
             GhostButton("Refresh", onRefresh)
         }
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
             SectionLabel("Waiting on you")
             Loaded(data.pending, "Agent approvals", JvIcon.ALERT, "Loading approvals…", "Agent is turned off in Core.") {
                 PendingActions(it.pending, now, agentApprovals, onRefresh)
