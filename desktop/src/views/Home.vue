@@ -1,33 +1,27 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import { getJson, ApiError } from "../api";
 import { currentAuthStatus, currentShellMode, login, clearSession, listDevices, PairingPending, AccountPasswordRequired, AccountActivationRequired, bootstrapFirstDevice, ownKeyFingerprint } from "../auth";
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
 import { shownShellMode } from "../lock";
 import JarvisConsole from "../components/JarvisConsole.vue";
-import JvCommandBar from "../components/jv/JvCommandBar.vue";
-import JvOrb from "../components/jv/JvOrb.vue";
-import JvModuleCard from "../components/jv/JvModuleCard.vue";
-import JvStatusDot from "../components/jv/JvStatusDot.vue";
+import ConversationList from "../components/chat/ConversationList.vue";
 import NavIcon, { type IconName } from "../components/NavIcon.vue";
 import { accountFailure } from "../accountFailure";
-import { thinking } from "../assistant";
 import { conversations, loadConversations } from "../conversations";
-import { wakePulse } from "../voicewake";
 import { agentCount, loadOptional, useCoreStatus } from "../coreStatus";
 import { createSerialPoller } from "../serialPoller";
 import { useAppStore } from "../stores/app";
-import { useFitScale } from "../fitScale";
 import {
-  agentsCard, availabilityFromError, contextCard, conversationsCard, deriveMood, healthCard, integrationsCard, originHost,
-  statusPill, tasksCard,
+  agentsCard, approvalsCard, availabilityFromError, contextCard, failureText, healthCard, integrationsCard, originHost, runsCard,
   type Availability, type CardSummary, type CodingSession, type LiveHost, type SoftwareItem,
 } from "../hubModel";
 
-// The hub: the living orb with the seven modules around it. Backend health and
-// device-bound login run in the background exactly as before, so the chat
-// always has a valid session; the onboarding forms take over the centre until
-// the device is connected and signed in.
+// The chat home (canvas D-Home): the conversation list with a compact system
+// status, and the chat. Backend health and device-bound login run in the
+// background exactly as before, so the chat always has a valid session; the
+// onboarding forms take over the page until the device is connected and
+// signed in, and nothing app-like shows before that.
 const backend = ref<"unconfigured" | "checking" | "ok" | "fout">("checking");
 const auth = ref<"checking" | "in" | "uit" | "wachten" | "fout">("checking");
 
@@ -170,15 +164,15 @@ async function refreshAuth() {
   }
 }
 
-// --- Hub data (owner endpoints; an older Core degrades per card) ----------
-const conversationsState = ref<Availability<{ updated_at: string }[]>>({ state: "loading" });
+// --- Home data (owner endpoints; an older Core degrades per entry) ----------
+const conversationsState = ref<Availability<true>>({ state: "loading" });
 const devices = ref<Availability<{ devices: unknown[] }>>({ state: "loading" });
 const pending = ref<Availability<{ pending: unknown[] }>>({ state: "loading" });
 const sessions = ref<Availability<{ sessions: CodingSession[] }>>({ state: "loading" });
 const registry = ref<Availability<{ software: SoftwareItem[]; live_host?: LiveHost }>>({ state: "loading" });
 const now = ref(Date.now());
 
-async function refreshHub() {
+async function refreshHome() {
   if (document.hidden) return;
   const [d, p, c, r] = await Promise.all([
     loadOptional<{ devices: unknown[] }>("/v1/devices"),
@@ -186,81 +180,53 @@ async function refreshHub() {
     loadOptional<{ sessions: CodingSession[] }>("/v1/coding/sessions"),
     loadOptional<{ software: SoftwareItem[]; live_host?: LiveHost }>("/v1/system/registry"),
     loadConversations()
-      .then(() => { conversationsState.value = { state: "ok", value: conversations.value }; })
+      .then(() => { conversationsState.value = { state: "ok", value: true }; })
       .catch((error) => { conversationsState.value = availabilityFromError(error); }),
   ]);
   devices.value = d; pending.value = p; sessions.value = c; registry.value = r;
   now.value = Date.now();
 }
-const hubPoller = createSerialPoller(refreshHub, 60_000);
-watch(auth, (value) => { if (value === "in") hubPoller.start(); else hubPoller.stop(); }, { immediate: true });
-// Realtime events keep the shared conversation list fresh between polls.
-watch(conversations, (list) => {
-  if (conversationsState.value.state === "ok") conversationsState.value = { state: "ok", value: list };
+const homePoller = createSerialPoller(refreshHome, 60_000);
+watch(auth, (value) => { if (value === "in") homePoller.start(); else homePoller.stop(); }, { immediate: true });
+
+const listError = computed(() => {
+  const state = conversationsState.value;
+  // A list already on screen (realtime, an earlier poll) stays usable.
+  if (conversations.value.length || state.state === "ok" || state.state === "loading") return null;
+  return state.state === "unsupported" ? "Conversations need a newer Core." : failureText(state.reason);
 });
 
 const online = computed(() => (backend.value === "ok" ? true : backend.value === "fout" ? false : null));
 const pick = <T, K extends keyof T>(source: Availability<T>, key: K): Availability<T[K]> =>
   source.state === "ok" ? { state: "ok", value: source.value[key] } : source;
 
-// Re-reads the agent count on every hub visit (the top bar used to).
+// The live counts the old hub cards showed, each a link to its page. Agents,
+// Integrations and System health are only reachable from here.
 useCoreStatus();
-type Card = { key: string; to: string; icon: IconName; title: string; summary: CardSummary };
-const cards = computed<Card[]>(() => [
-  { key: "chat", to: "/conversations", icon: "chat", title: "Conversations", summary: conversationsCard(conversationsState.value, now.value) },
-  { key: "agents", to: "/agents", icon: "agents", title: "Agents", summary: agentsCard(agentCount.value) },
-  { key: "memory", to: "/memory", icon: "memory", title: "Memory", summary: { lines: ["Not yet available", "Needs Core support"], tone: "idle" } },
-  { key: "tasks", to: "/runs", icon: "tasks", title: "Tasks", summary: tasksCard(pick(sessions.value, "sessions"), pick(pending.value, "pending")) },
-  { key: "integrations", to: "/integrations", icon: "integrations", title: "Integrations", summary: integrationsCard(registry.value) },
-  { key: "context", to: "/devices", icon: "context", title: "Context", summary: contextCard(pick(devices.value, "devices")) },
-  { key: "health", to: "/health", icon: "health", title: "System Health", summary: healthCard(online.value, registry.value) },
+type StatusLink = { key: string; to: string; icon: IconName; label: string; summary: CardSummary };
+const statusLinks = computed<StatusLink[]>(() => [
+  { key: "approvals", to: "/approvals", icon: "approve", label: "Approvals", summary: approvalsCard(pick(pending.value, "pending")) },
+  { key: "runs", to: "/runs", icon: "runs", label: "Runs", summary: runsCard(pick(sessions.value, "sessions")) },
+  { key: "agents", to: "/agents", icon: "agents", label: "Agents", summary: agentsCard(agentCount.value) },
+  { key: "integrations", to: "/integrations", icon: "integrations", label: "Integrations", summary: integrationsCard(registry.value) },
+  { key: "devices", to: "/devices", icon: "monitor", label: "Devices", summary: contextCard(pick(devices.value, "devices")) },
+  { key: "health", to: "/health", icon: "health", label: "System health", summary: healthCard(online.value, registry.value) },
 ]);
-// No module links before sign-in: the cards lead into app pages. While a
-// stored session is checked, say so instead of "Loading…".
-const shownCards = computed(() => shownShellMode.value !== "app" ? [] : cards.value.map((card): Card =>
-  auth.value === "in" || card.key === "health" || card.key === "memory"
-    ? card
-    : { ...card, summary: { lines: [auth.value === "checking" ? "Loading…" : "Sign-in required", ""], tone: "idle" } },
-));
 
-// --- Chat overlay + orb mood ------------------------------------------------
+// The gate (setup and sign-in forms) wins; the app layout needs the app shell.
+const gate = computed(() => backend.value === "unconfigured" || changingOrigin.value || (!!accountMode.value && backend.value === "ok"));
+const inApp = computed(() => shownShellMode.value === "app" && !gate.value);
+const footerHost = computed(() => originHost(homeNodeConfig.value.origin));
+
+// Ctrl/⌘K (App.vue) and New focus the composer. The chat mounts once the
+// session is confirmed, so a request made before that waits for it.
 const app = useAppStore();
 const consoleRef = ref<InstanceType<typeof JarvisConsole> | null>(null);
-const mood = computed(() => deriveMood({ thinking: thinking.value, listening: !!consoleRef.value?.listening }));
-const pill = computed(() => statusPill(mood.value, online.value));
-let returnFocus: HTMLElement | null = null;
-watch(() => app.consoleOpen, async (open) => {
-  if (open) {
-    returnFocus = document.activeElement as HTMLElement | null;
-    await nextTick();
-    consoleRef.value?.focusInput();
-  } else {
-    returnFocus?.focus?.();
-  }
-}, { immediate: true });
-function openConsole(listen = false) {
-  app.consoleOpen = true;
-  if (listen) consoleRef.value?.startListening();
-}
-// "Hey Jarvis" already starts the mic inside the console; show it.
-watch(wakePulse, () => { app.consoleOpen = true; });
-
-// Compact (mobile-like) layout below ~1100x760.
-const compactQuery = window.matchMedia("(max-width: 1099px), (max-height: 759px)");
-const compact = ref(compactQuery.matches);
-const onCompact = (event: MediaQueryListEvent) => { compact.value = event.matches; };
-compactQuery.addEventListener("change", onCompact);
-// The hub always fills the window: the stage scales into the room between
-// the top bar and the footer (grows on large screens, shrinks on small ones).
-const fitRoom = ref<HTMLElement | null>(null);
-const fitContent = ref<HTMLElement | null>(null);
-const scale = useFitScale(fitRoom, fitContent, () => (compact.value ? 1 : 1.75));
-const footerHost = computed(() => originHost(homeNodeConfig.value.origin));
-// Round satellites around the compact orb (offsets from the export).
-const ORBIT: Record<string, [number, number]> = {
-  chat: [0, -124], memory: [98, -76], integrations: [120, 30], health: [62, 107],
-  context: [-62, 107], tasks: [-120, 30], agents: [-98, -76],
-};
+watch([() => app.consoleOpen, consoleRef], ([requested, chat]) => {
+  if (!requested || !chat) return;
+  chat.focusInput();
+  app.consoleOpen = false;
+}, { immediate: true, flush: "post" });
 
 onMounted(async () => {
   const config = await loadHomeNodeConfig();
@@ -277,8 +243,7 @@ onBeforeUnmount(() => {
   document.removeEventListener("visibilitychange", hidePasswordOnBackground);
   passwordVisible.value = false;
   clearInterval(pollTimer);
-  hubPoller.stop();
-  compactQuery.removeEventListener("change", onCompact);
+  homePoller.stop();
   app.consoleOpen = false;
   password.value = "";
   activationCode.value = "";
@@ -286,16 +251,47 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="hub" :class="{ compact }">
-    <header class="pagehead hub-head">
-      <h1>Jarvis</h1>
-      <JvCommandBar class="hub-command" :disabled="auth !== 'in'" @open="openConsole()" @mic="openConsole(true)" />
-    </header>
+  <section class="home" :class="{ app: inApp }">
+    <h1 class="brand" :class="{ 'sr-only': inApp }">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="3.5" /><circle cx="12" cy="12" r="9" /></svg>
+      {{ inApp ? "Chat with Jarvis" : "Jarvis" }}
+    </h1>
 
-    <!-- Onboarding / sign-in take over the centre until the device is ready. -->
-    <div v-if="backend === 'unconfigured' || changingOrigin || (accountMode && backend === 'ok')" class="gate">
-      <JvOrb class="gate-orb" :size="182" :label="false" />
-      <form v-if="backend === 'unconfigured' || changingOrigin" class="connection-setup" @submit.prevent="saveHomeNode">
+    <template v-if="inApp">
+      <ConversationList :loading="conversationsState.state === 'loading'" :error="listError" :now="now"
+        @new="consoleRef?.focusInput()">
+        <template #footer>
+          <nav class="strip" aria-labelledby="strip-title">
+            <h2 id="strip-title" class="strip-title t-xs t-2">System</h2>
+            <ul>
+              <li v-for="link in statusLinks" :key="link.key">
+                <RouterLink :to="link.to" class="strip-link" :title="link.summary.lines.filter(Boolean).join(' · ')">
+                  <NavIcon :name="link.icon" />
+                  <span class="strip-label">{{ link.label }}</span>
+                  <span class="strip-value t-xs t-2"><span class="dot" :class="link.summary.tone" aria-hidden="true"></span>{{ link.summary.lines[0] }}</span>
+                </RouterLink>
+              </li>
+            </ul>
+          </nav>
+        </template>
+      </ConversationList>
+      <div class="pane">
+        <p v-if="authError" class="notice err" role="alert">{{ authError }}</p>
+        <p v-else-if="backend === 'fout'" class="notice err" role="status">
+          Home Node unreachable at {{ homeNodeConfig.origin }}. Check the network and try again.
+        </p>
+        <!-- Mounted while signed in, so wake word and realtime chat keep working. -->
+        <JarvisConsole v-if="auth === 'in'" ref="consoleRef" />
+        <p v-else-if="backend !== 'fout' && !authError" class="empty connecting" role="status">
+          <span class="spinner" aria-hidden="true"></span>Connecting to your Home Node…
+        </p>
+      </div>
+    </template>
+
+    <template v-else>
+      <!-- Onboarding / sign-in take over until the device is ready. -->
+      <div v-if="gate" class="gate">
+      <form v-if="backend === 'unconfigured' || changingOrigin" class="connection-setup card" @submit.prevent="saveHomeNode">
         <h2>Connect to your Home Node</h2>
         <p>Enter the HTTPS origin of your Home Node. Jarvis stores only this address locally, never credentials.</p>
         <label for="home-node-origin">Home Node origin</label>
@@ -315,7 +311,7 @@ onBeforeUnmount(() => {
         <p class="setup-hint">Plain HTTP on localhost is only allowed in a development build.</p>
         <button v-if="changingOrigin" type="button" class="btn btn-secondary" @click="cancelOriginChange">Cancel</button>
       </form>
-      <form v-else-if="accountMode && backend === 'ok'" class="connection-setup" @submit.prevent="submitAccount">
+      <form v-else-if="accountMode && backend === 'ok'" class="connection-setup card" @submit.prevent="submitAccount">
         <h2>{{ accountMode === "activate" ? "Activate your first device" : "Sign in to Jarvis" }}</h2>
         <p v-if="accountMode === 'activate'">Use the one-time activation code from your Home Node and choose an account password of at least 15 characters.</p>
         <label v-if="accountMode === 'activate'" for="activation-code">Activation code</label>
@@ -330,261 +326,83 @@ onBeforeUnmount(() => {
         <button type="submit" class="btn btn-primary" :disabled="accountBusy">{{ accountBusy ? "Working…" : "Continue" }}</button>
         <p v-if="accountError" class="config-error" role="alert">{{ accountError }}</p>
       </form>
-    </div>
-
-    <div v-else ref="fitRoom" class="body" :style="{ '--fit': scale }">
-      <p v-if="auth === 'wachten'" class="pairing-wait" role="status">
-        Waiting for approval from your phone, a Mac or the Home Node.
-        <template v-if="ownFingerprint"><br />Check that it shows this key fingerprint: <code>{{ ownFingerprint }}</code></template>
-      </p>
-      <p v-else-if="authError" class="connection-error" role="alert">{{ authError }}</p>
-      <p v-else-if="backend === 'fout'" class="connection-error" role="status">
-        Home Node unreachable at {{ homeNodeConfig.origin }}. Check the network and try again.
-      </p>
-
-      <!-- Desktop hub: orb in the middle, seven modules around it. -->
-      <div v-if="!compact" ref="fitContent" class="stage">
-        <svg class="wires" viewBox="0 0 1060 740" aria-hidden="true">
-          <defs>
-            <radialGradient id="hubPlanet" cx="35%" cy="30%" r="70%">
-              <stop offset="0" stop-color="#d7ffea" /><stop offset=".5" stop-color="#3fe39b" /><stop offset="1" stop-color="#0b5d3c" />
-            </radialGradient>
-          </defs>
-          <g transform="translate(-199 -125)">
-            <circle cx="725" cy="473" r="196" fill="none" class="ring" stroke-width="1.5" />
-            <circle cx="725" cy="473" r="208" fill="none" class="a22" stroke-width="1" />
-            <circle cx="725" cy="473" r="250" fill="none" class="a30" stroke-width="1" stroke-dasharray="1 6" />
-            <ellipse cx="725" cy="473" rx="330" ry="74" transform="rotate(9 725 473)" fill="none" class="ring" stroke-width="1" />
-            <path d="M724 222V282" class="a60" stroke-width="1" />
-            <path d="M552 373L478 332M897 373L970 332M536 539L443 563M912 539L1007 563M622 641L574 701M826 641L875 703" class="a55" stroke-width="1" />
-            <g class="fill-accent"><circle cx="724" cy="222" r="2.5" /><circle cx="478" cy="332" r="2.5" /><circle cx="970" cy="332" r="2.5" /><circle cx="443" cy="563" r="2.5" /><circle cx="1007" cy="563" r="2.5" /><circle cx="574" cy="701" r="2.5" /><circle cx="875" cy="703" r="2.5" /></g>
-            <g class="hub-node" stroke-width="1.4"><circle cx="552" cy="373" r="6.5" /><circle cx="897" cy="373" r="6.5" /><circle cx="536" cy="539" r="6.5" /><circle cx="912" cy="539" r="6.5" /><circle cx="622" cy="641" r="6.5" /><circle cx="826" cy="641" r="6.5" /></g>
-            <g class="fill-accent"><circle cx="552" cy="373" r="2" /><circle cx="897" cy="373" r="2" /><circle cx="536" cy="539" r="2" /><circle cx="912" cy="539" r="2" /><circle cx="622" cy="641" r="2" /><circle cx="826" cy="641" r="2" /></g>
-            <circle cx="397" cy="459" r="11" fill="url(#hubPlanet)" class="ring" stroke-width="1" />
-            <circle cx="941" cy="500" r="6" fill="url(#hubPlanet)" class="ring" stroke-width="1" />
-          </g>
-        </svg>
-        <JvOrb class="orb" :size="346" :mood="mood" />
-        <JvModuleCard v-for="card in shownCards" :key="card.key" :class="'card-' + card.key" :to="card.to"
-          :icon="card.icon" :title="card.title" :lines="card.summary.lines" :tone="card.summary.tone" />
-        <div class="pill" role="status">
-          <span class="pill-dot"><JvStatusDot :tone="pill.tone" /></span>
-          <span class="pill-label">{{ pill.label }}</span>
-          <span class="pill-sep" aria-hidden="true"></span>
-          <span class="pill-hint">{{ pill.hint }}</span>
-        </div>
       </div>
-
-      <!-- Compact hub (core-mobile): small orb with round links + a card grid. -->
-      <div v-else ref="fitContent" class="compact-body">
-        <div class="compact-orb">
-          <JvOrb :size="182" :mood="mood" />
-          <RouterLink v-for="card in shownCards" :key="card.key" :to="card.to" class="orbit-link"
-            :aria-label="card.title" :style="{ transform: `translate(${ORBIT[card.key][0]}px, ${ORBIT[card.key][1]}px)` }">
-            <NavIcon :name="card.icon" />
-          </RouterLink>
-        </div>
-        <div class="compact-side">
-          <div class="pill" role="status">
-            <span class="pill-dot"><JvStatusDot :tone="pill.tone" /></span>
-            <span class="pill-label">{{ pill.label }}</span>
-            <span class="pill-sep" aria-hidden="true"></span>
-            <span class="pill-hint">{{ pill.hint }}</span>
-          </div>
-          <h2 class="eyebrow">YOUR SYSTEM</h2>
-          <div class="grid">
-            <JvModuleCard v-for="card in shownCards" :key="card.key" class="compact" :to="card.to"
-              :icon="card.icon" :title="card.title" :lines="card.summary.lines" :tone="card.summary.tone" />
-          </div>
-        </div>
+      <div v-else class="gate">
+        <p v-if="auth === 'wachten'" class="notice" role="status">
+          Waiting for approval from your phone, a Mac or the Home Node.
+          <template v-if="ownFingerprint"><br />Check that it shows this key fingerprint: <code>{{ ownFingerprint }}</code></template>
+        </p>
+        <p v-else-if="authError" class="notice err" role="alert">{{ authError }}</p>
+        <p v-else-if="backend === 'fout'" class="notice err" role="status">
+          Home Node unreachable at {{ homeNodeConfig.origin }}. Check the network and try again.
+        </p>
+        <p v-else class="empty connecting" role="status"><span class="spinner" aria-hidden="true"></span>Connecting to your Home Node…</p>
       </div>
-    </div>
-
-    <!-- Decorative taglines + footer. -->
-    <div class="tagline left" aria-hidden="true">THINK<br />BUILD<br />AUTOMATE<br />FURTHER</div>
-    <div class="tagline right" aria-hidden="true">A MORE<br />CAPABLE<br />YOU</div>
-    <footer class="footer">
-      <div class="node">
-        <span class="node-icon" aria-hidden="true"><NavIcon name="target" /></span>
-        <span class="node-text">
-          <span>{{ footerHost || "No Home Node set" }}</span>
-          <span class="node-state" :class="{ off: online === false }">{{ online ? "ONLINE" : online === false ? "OFFLINE" : "CONNECTING" }}</span>
-          <button v-if="shownShellMode !== 'app' && backend !== 'unconfigured' && !changingOrigin" type="button"
-            class="btn btn-secondary btn-sm change-origin" @click="changingOrigin = true">Change Home Node</button>
-        </span>
-      </div>
-      <div class="motto" aria-hidden="true">“IDEAS COMPOUND HERE”<span class="bar"></span></div>
-      <div class="tagline-foot" aria-hidden="true">HIGHER<br />INTELLIGENCE<br />CLOSER</div>
-    </footer>
-
-    <!-- Chat overlay: Ctrl/⌘K, the command bar or "Hey Jarvis". The console
-         stays mounted while signed in, exactly as before, so wake word and
-         realtime chat keep working when the overlay is closed. -->
-    <div
-      v-if="auth === 'in'"
-      v-show="app.consoleOpen"
-      class="console-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Chat with Jarvis"
-      @keydown.esc="app.consoleOpen = false"
-      @click.self="app.consoleOpen = false"
-    >
-      <div class="console-frame">
-        <button type="button" class="console-close" aria-label="Close chat" @click="app.consoleOpen = false">×</button>
-        <JarvisConsole ref="consoleRef" :force-open="app.consoleOpen" />
-      </div>
-    </div>
+      <footer class="footer">
+        <span class="dot" :class="online ? 'ok' : online === false ? 'error' : 'idle'" aria-hidden="true"></span>
+        <span class="t-sm">{{ footerHost || "No Home Node set" }}</span>
+        <span v-if="footerHost" class="t-sm t-2">{{ online ? "Online" : online === false ? "Offline" : "Connecting" }}</span>
+        <button v-if="shownShellMode !== 'app' && backend !== 'unconfigured' && !changingOrigin" type="button"
+          class="btn btn-secondary btn-sm" @click="changingOrigin = true">Change Home Node</button>
+      </footer>
+    </template>
   </section>
 </template>
 
 <style scoped>
-.hub { position: relative; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
-.body, .gate { position: relative; z-index: 1; }
-/* Canvas page head (.pagehead); the hub keeps its own full-height stage below. */
-.hub-head { position: relative; z-index: 5; align-items: center; padding: 28px 36px 0; }
-.hub-head h1 { margin: 0; }
-.hub-command { width: min(584px, 44vw); }
-.tagline { z-index: 1; }
-
-/* --- Desktop stage (export coordinates, offset by 199/125) --- */
-/* The room for the stage: the space between top bar and footer. Its size
-   sets --fit (see useFitScale); the stage keeps its design coordinates. */
-.body { flex: 1; min-height: 0; margin: 8px 0 76px; }
-.stage { position: absolute; left: 50%; top: 50%; width: 1060px; height: 740px; transform: translate(-50%, -50%) scale(var(--fit, 1)); }
-.wires { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.a22 { stroke: rgba(var(--accent-rgb), 0.22); }
-.a30 { stroke: rgba(var(--accent-rgb), 0.3); }
-.a55 { stroke: rgba(var(--accent-rgb), 0.55); }
-.a60 { stroke: rgba(var(--accent-rgb), 0.6); }
-.fill-accent { fill: var(--accent); }
-.ring { stroke: var(--accent-border); }
-.hub-node { fill: var(--bg-surface); stroke: var(--accent-border); }
-.orb { position: absolute !important; left: 353px; top: 175px; }
-.stage .jv-card { position: absolute; max-width: 270px; }
-.card-chat { left: 528px; top: 6px; min-width: 249px; transform: translateX(-50%); }
-.card-agents { right: 781px; top: 138px; min-width: 214px; min-height: 90px; }
-.card-memory { left: 779px; top: 139px; min-width: 218px; min-height: 94px; }
-.card-tasks { right: 824px; top: 397px; min-width: 227px; min-height: 94px; }
-.card-integrations { left: 819px; top: 400px; min-width: 232px; min-height: 94px; }
-.card-context { right: 675px; top: 571px; min-width: 222px; min-height: 91px; }
-.card-health { left: 674px; top: 571px; min-width: 255px; min-height: 90px; }
-
-.pill {
-  display: flex; align-items: center; gap: 22px; height: 44px; box-sizing: border-box; padding: 0 20px 0 14px;
-  border-radius: var(--r-22); border: 1px solid var(--border); background: var(--bg-surface);
-  white-space: nowrap;
+.home { position: relative; height: 100%; display: flex; flex-direction: column; }
+.home.app { flex-direction: row; }
+.brand { margin: 0; padding: 28px 36px 0; display: flex; align-items: center; gap: 10px; font-size: 22px; }
+.brand svg { color: var(--accent-text); }
+.pane { flex: 999 1 520px; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.notice {
+  margin: 16px 32px 0; padding: 12px 16px; border-radius: var(--r-md);
+  background: var(--bg-surface); box-shadow: var(--shadow-border); font-size: 14px; color: var(--text-primary);
 }
-.stage .pill { position: absolute; left: 525px; top: 690px; min-width: 354px; transform: translateX(-50%); }
-.pill-dot {
-  width: 28px; height: 28px; flex: none; box-sizing: border-box; display: grid; place-items: center;
-  border-radius: 50%; border: 1.5px solid rgba(var(--accent-rgb), 0.6);
+.notice.err { color: var(--danger-text); }
+.connecting { flex: 1 1 auto; flex-direction: row; justify-content: center; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
-.pill-label { font-size: 13.5px; font-weight: 600; letter-spacing: 0.08em; color: var(--accent); }
-.pill-sep { width: 1px; height: 16px; background: var(--border); }
-.pill-hint { font-size: 11px; letter-spacing: 0.05em; color: var(--text-4); }
 
-.pairing-wait, .connection-error {
-  position: absolute; z-index: 3; top: 6px; left: 50%; transform: translateX(-50%);
-  width: min(34rem, calc(100% - 2rem)); margin: 0; padding: 0.75rem 1rem; box-sizing: border-box;
-  border-radius: var(--r-12); text-align: center; font-size: var(--fs-13);
+/* Compact system status under the conversation list. */
+.strip { flex: none; padding-top: 10px; border-top: 1px solid var(--separator); }
+.strip-title { margin: 0; padding: 0 10px 4px; font-weight: 500; }
+.strip ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.strip-link {
+  display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 0 10px; border-radius: var(--r-md);
+  color: var(--text-primary); font-size: 13px; text-decoration: none; transition: background-color var(--d-hover) ease;
 }
-.pairing-wait { border: 1px solid var(--line-a45); background: var(--bg-surface); color: var(--text-1); }
-.connection-error { border: 1px solid var(--danger-text); background: var(--bg-surface); color: var(--danger-text); }
+.strip-link :deep(svg) { flex: none; width: 16px; height: 16px; color: var(--text-secondary); }
+.strip-label { flex: none; }
+.strip-value { margin-left: auto; min-width: 0; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; }
+@media (hover: hover) and (pointer: fine) {
+  .strip-link:hover { background: var(--bg-hover); }
+}
+.strip-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.dot { flex: none; width: 8px; height: 8px; border-radius: var(--r-pill); background: var(--text-disabled); }
+.dot.ok { background: var(--positive-solid); }
+.dot.warn { background: var(--negative-solid); }
+.dot.error { background: var(--danger-solid); }
 
 /* --- Onboarding gate --- */
 /* A tall sign-in form scrolls inside the gate; `safe` keeps its top reachable. */
 .gate {
   flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; justify-content: safe center; gap: 28px; padding: 24px 16px 96px;
+  justify-content: center; justify-content: safe center; gap: 20px; padding: 24px 16px;
 }
-.connection-setup {
-  width: min(32rem, 100%); box-sizing: border-box; padding: 22px 24px;
-  border-radius: var(--r-22); border: 1.5px solid var(--line-a55); background: var(--panel-bg);
-  box-shadow: 0 0 30px rgba(var(--accent-rgb), 0.18);
-}
-.connection-setup h2 { margin: 0 0 8px; font-size: var(--fs-20); font-weight: 500; letter-spacing: 0.04em; color: var(--text-0); }
-.connection-setup p { color: var(--text-3); font-size: var(--fs-13); line-height: 1.5; }
-.connection-setup label { display: block; margin: 1rem 0 0.4rem; font-size: var(--fs-12); color: var(--text-4); }
-.connection-setup input { width: 100%; box-sizing: border-box; margin-bottom: 0.8rem; border-color: var(--line-a30); background: var(--field-bg); }
-.password-input { display: flex; align-items: stretch; gap: 8px; margin-bottom: .8rem; }
+.gate .notice { margin: 0; width: min(34rem, 100%); text-align: center; }
+.connection-setup { width: min(32rem, 100%); padding: 24px; border-radius: var(--r-xl); }
+.connection-setup h2 { margin: 0 0 8px; }
+.connection-setup p { margin: 0 0 8px; color: var(--text-secondary); font-size: 14px; line-height: 1.5; }
+.connection-setup label { display: block; margin: 16px 0 6px; font-size: 13px; font-weight: 500; }
+.connection-setup input { width: 100%; min-height: 40px; margin-bottom: 12px; }
+.connection-setup .btn + .btn { margin-left: 8px; }
+.password-input { display: flex; align-items: stretch; gap: 8px; margin-bottom: 12px; }
 .password-input input { flex: 1; min-width: 0; margin-bottom: 0; }
 .password-toggle { min-width: 44px; min-height: 44px; display: grid; place-items: center; }
 .config-error { color: var(--danger-text) !important; }
-.setup-hint { color: var(--muted) !important; font-size: 0.82rem !important; }
-
-/* --- Decorations --- */
-.tagline { position: absolute; top: 150px; font-size: 10px; letter-spacing: 0.32em; line-height: 16.5px; color: var(--text-4); }
-.tagline.left { left: 66px; }
-.tagline.left::before { content: ""; position: absolute; left: -23px; top: 2px; width: 2px; height: 92px; background: linear-gradient(180deg, var(--border), rgba(var(--accent-rgb), 0.15)); }
-.tagline.left::after { content: ""; position: absolute; left: -10px; top: 105px; width: 15px; height: 1px; background: var(--border); }
-.tagline.right { right: 57px; top: 158px; text-align: right; }
-.tagline.right::after { content: ""; position: absolute; right: -18px; top: 4px; width: 1px; height: 40px; background: var(--border); }
-.footer {
-  position: absolute; z-index: 1; left: 33px; right: 36px; bottom: 24px;
-  display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; pointer-events: none;
-}
-.node { display: flex; align-items: center; gap: 20px; }
-.node-icon {
-  width: 40px; height: 40px; box-sizing: border-box; display: grid; place-items: center; border-radius: 50%;
-  border: 1.5px solid var(--border); background: var(--bg-surface); color: var(--accent);
-}
-.node-icon :deep(svg) { width: 18px; height: 18px; }
-.node-text { display: flex; flex-direction: column; font-size: 11px; letter-spacing: 0.16em; line-height: 16px; color: var(--text-2); }
-.node-state { font-size: 11px; font-weight: 600; letter-spacing: 0.22em; color: var(--accent); }
-.node-state.off { color: var(--danger); }
-.change-origin { pointer-events: auto; margin-top: 6px; align-self: flex-start; }
-.motto { display: flex; flex-direction: column; align-items: center; gap: 16px; font-size: 11.5px; letter-spacing: 0.5em; padding-left: 0.5em; color: var(--text-1); }
-.motto .bar { width: 36px; height: 2px; margin-left: -0.5em; background: var(--border-strong); }
-.tagline-foot { justify-self: end; text-align: right; font-size: 11px; letter-spacing: 0.28em; line-height: 15px; color: var(--text-4); }
-@media (max-width: 1299px) { .tagline { display: none; } }
-@media (max-width: 1099px), (max-height: 759px) {
-  .hub-head { padding: 16px 16px 0; }
-  .hub-command { flex: 1 1 280px; width: auto; }
-}
-
-/* --- Compact hub --- */
-.compact .body { margin: 0; }
-.compact-body {
-  width: 100%; box-sizing: border-box; padding: 16px 16px 20px; transform: scale(var(--fit, 1)); transform-origin: top center;
-  display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 16px 48px;
-}
-.compact-orb { position: relative; width: 320px; height: 320px; display: grid; place-items: center; flex: none; }
-.compact-orb::before {
-  content: ""; position: absolute; inset: 36px; border-radius: 50%;
-  border: 1.3px solid var(--border); box-shadow: 0 0 0 10px rgba(var(--accent-rgb), 0.06);
-}
-.orbit-link {
-  position: absolute; left: calc(50% - 23px); top: calc(50% - 23px); width: 46px; height: 46px; box-sizing: border-box;
-  display: grid; place-items: center; border-radius: 50%; border: 1.5px solid rgba(var(--accent-rgb), 0.6);
-  background: var(--bg-surface); color: var(--accent);
-}
-.orbit-link :deep(svg) { width: 20px; height: 20px; }
-.compact-side { width: min(560px, 100%); display: flex; flex-direction: column; gap: 18px; }
-.compact-side .pill { align-self: flex-start; }
-.eyebrow { margin: 0 0 -8px; font-size: 11px; font-weight: 400; letter-spacing: 0.3em; color: var(--text-5); }
-.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.grid .jv-card:last-child { grid-column: span 2; }
-.compact .footer, .compact .tagline { display: none; }
-
-/* --- Chat overlay --- */
-.console-overlay {
-  position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 24px;
-  background: var(--bg-scrim);
-}
-.console-frame {
-  position: relative; width: min(780px, 100%); height: min(78vh, 720px);
-  border-radius: var(--r-26); border: 1.5px solid var(--line-a55); background: var(--panel-bg);
-  box-shadow: 0 0 40px rgba(var(--accent-rgb), 0.2);
-}
-.console-close {
-  position: absolute; top: 12px; right: 14px; z-index: 3; width: 36px; height: 36px; padding: 0;
-  border-radius: 50%; border: 1px solid var(--line-a30); background: transparent; color: var(--text-2);
-  font-size: 22px; line-height: 1; font-weight: 400;
-}
-.console-frame :deep(.stack) { left: 24px; right: 24px; top: 56px; bottom: 132px; width: auto; justify-content: flex-end; }
-.console-frame :deep(.transcript) { max-height: none; min-height: 0; flex: 0 1 auto; }
-.console-frame :deep(.zone) { width: 100%; height: auto; padding: 0 24px 24px; }
-.console-frame :deep(.peek) { display: none; }
-.console-frame :deep(.row) { flex-wrap: wrap; }
+.setup-hint { font-size: 13px !important; }
+.footer { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 16px 36px 24px; }
 </style>

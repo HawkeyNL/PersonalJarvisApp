@@ -3,22 +3,20 @@ import test from "node:test";
 
 import {
   agentsCard,
+  approvalsCard,
   availabilityFromError,
   failureText,
   fitScale,
   contextCard,
-  conversationsCard,
   countSince,
   deepLinkRoute,
-  deriveMood,
   formatUptime,
   healthCard,
   integrationsCard,
   moodFactor,
   originHost,
   relativeTime,
-  statusPill,
-  tasksCard,
+  runsCard,
 } from "../src/hubModel.ts";
 
 const NOW = Date.parse("2026-10-04T12:00:00Z");
@@ -26,10 +24,7 @@ const ago = (ms) => new Date(NOW - ms).toISOString();
 const MIN = 60_000;
 const DAY = 86_400_000;
 
-test("mood: thinking wins over listening, and sets the animation speed", () => {
-  assert.equal(deriveMood({ thinking: true, listening: true }), "thinking");
-  assert.equal(deriveMood({ thinking: false, listening: true }), "listening");
-  assert.equal(deriveMood({ thinking: false, listening: false }), "idle");
+test("orb mood sets the animation speed", () => {
   assert.deepEqual(["idle", "listening", "thinking"].map(moodFactor), [1, 0.7, 0.4]);
 });
 
@@ -86,15 +81,14 @@ test("cards never invent numbers for missing data", () => {
   assert.deepEqual(agentsCard({ state: "ok", value: 0 }), { lines: ["0 agents", "None configured"], tone: "idle" });
 });
 
-test("conversation, task, integration and context summaries", () => {
-  const conversations = { state: "ok", value: [{ updated_at: ago(4 * MIN) }, { updated_at: ago(2 * DAY) }, { updated_at: ago(9 * DAY) }] };
-  assert.deepEqual(conversationsCard(conversations, NOW), { lines: ["2 this week", "Last: 4m ago"], tone: "ok" });
-  assert.equal(conversationsCard({ state: "ok", value: [] }, NOW).lines[0], "No conversations yet");
-
+test("run, approval, integration and context summaries", () => {
   const sessions = { state: "ok", value: [{ state: "active" }, { state: "active" }, { state: "completed" }] };
-  assert.deepEqual(tasksCard(sessions, { state: "ok", value: [{}] }), { lines: ["2 active", "1 awaiting approval"], tone: "warn" });
-  assert.deepEqual(tasksCard(sessions, { state: "unsupported" }).lines, ["2 active", "Approvals unavailable"]);
-  assert.equal(tasksCard({ state: "unsupported" }, { state: "ok", value: [] }).lines[0], "Requires newer Core");
+  assert.deepEqual(runsCard(sessions), { lines: ["2 active", ""], tone: "ok" });
+  assert.equal(runsCard({ state: "ok", value: [{ state: "completed" }] }).tone, "idle");
+  assert.deepEqual(runsCard({ state: "unsupported" }).lines, ["Requires newer Core", ""]);
+  assert.deepEqual(approvalsCard({ state: "ok", value: [{}] }), { lines: ["1 waiting", ""], tone: "warn" });
+  assert.deepEqual(approvalsCard({ state: "ok", value: [] }), { lines: ["0 waiting", ""], tone: "idle" });
+  assert.equal(approvalsCard({ state: "error", reason: "network" }).lines[0], "Unavailable");
 
   const registry = { state: "ok", value: { software: [{ name: "git", present: true }, { name: "ollama", present: false }] } };
   assert.deepEqual(integrationsCard(registry), { lines: ["1 of 2 present", "1 missing"], tone: "warn" });
@@ -102,14 +96,11 @@ test("conversation, task, integration and context summaries", () => {
   assert.deepEqual(contextCard({ state: "ok", value: [{}, {}] }).lines, ["2 devices linked", "Modes not yet available"]);
 });
 
-test("health card and status pill follow Core reachability", () => {
+test("health card follows Core reachability", () => {
   assert.equal(healthCard(false, { state: "loading" }).tone, "error");
   assert.deepEqual(healthCard(true, { state: "ok", value: {} }).lines, ["Core ready", "Live vitals need newer Core"]);
   const live = { cpu_percent: 12.4, memory_total_bytes: 1, memory_used_bytes: 1, uptime_seconds: 90_000 };
   assert.deepEqual(healthCard(true, { state: "ok", value: { live_host: live } }).lines, ["Up 1d 1h", "Core ready · CPU 12%"]);
-  assert.equal(statusPill("thinking", true).label, "Thinking");
-  assert.equal(statusPill("idle", false).label, "Offline");
-  assert.equal(statusPill("listening", null).label, "Connecting");
 });
 
 test("footer shows only the origin host", () => {

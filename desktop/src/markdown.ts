@@ -28,6 +28,11 @@ md.renderer.rules.image = (tokens, idx, options, env, self) => {
   return `<a href="${md.utils.escapeHtml(src)}">${md.utils.escapeHtml(label)}</a>`;
 };
 
+// Tables take the Instrument table style, in a card that scrolls sideways
+// when a wide table does not fit the chat column.
+md.renderer.rules.table_open = () => '<div class="card md-table"><table class="tbl">\n';
+md.renderer.rules.table_close = () => "</table></div>\n";
+
 /** Render Markdown to sanitized HTML for `v-html`. */
 export function renderMarkdown(src: string): string {
   return md.render(src ?? "");

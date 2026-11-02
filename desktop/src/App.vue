@@ -36,7 +36,7 @@ watch(currentShellMode, (value, previous) => {
 const main = ref<HTMLElement | null>(null);
 const skipToContent = () => main.value?.focus();
 
-// Ctrl/⌘K opens the chat overlay from anywhere; it lives on the hub.
+// Ctrl/⌘K from anywhere: go to the chat home, which focuses the composer.
 function onShortcut(event: KeyboardEvent) {
   if (mode.value !== "app") return;
   if (event.key.toLowerCase() !== "k" || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
