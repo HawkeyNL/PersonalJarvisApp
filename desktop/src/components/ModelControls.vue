@@ -92,7 +92,7 @@ onMounted(reload);
 
 <style scoped>
 .model-controls { width: 100%; min-width: 0; }
-.model-controls p { color: var(--muted); overflow-wrap: anywhere; }
+.model-controls p { color: var(--text-secondary); overflow-wrap: anywhere; }
 .model-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 input { flex: 1; min-width: 120px; padding: 10px; }
 select { padding: 10px; min-width: 150px; }

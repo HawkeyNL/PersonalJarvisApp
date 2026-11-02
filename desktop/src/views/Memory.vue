@@ -1,30 +1,25 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import NodePage, { type NodeItem } from "../components/jv/NodePage.vue";
-import JvPanel from "../components/jv/JvPanel.vue";
-import JvUnavailable from "../components/jv/JvUnavailable.vue";
+import NavIcon from "../components/NavIcon.vue";
+import PageShell from "../components/PageShell.vue";
 
-// Memory: Core keeps conversations but has no browsable memory store yet, so
-// every category says so plainly; no sample data.
-const planned = (id: string, title: string, icon: NodeItem["icon"], description: string): NodeItem =>
-  ({ id, label: title, title, icon, description, tone: "idle", status: "Not yet available" });
-const items: NodeItem[] = [
-  planned("people", "People", "people", "Who matters and how you know them"),
-  planned("projects", "Projects", "context", "Everything about what you build"),
-  planned("preferences", "Preferences", "heart", "How you like things done"),
-  planned("knowledge", "Knowledge", "book", "Notes, clips and saved insights"),
-  planned("routines", "Routines", "repeat", "Your habits and recurring days"),
-  planned("ideas", "Ideas", "bulb", "Sparks worth coming back to"),
-];
-const selected = ref("people");
-const current = computed(() => items.find((item) => item.id === selected.value)!);
+// Memory (canvas D-Memory): Core keeps conversations but has no browsable
+// memory store yet, so the page says so plainly and shows no sample data.
 </script>
 
 <template>
-  <NodePage v-model="selected" title="Memory" subtitle="What Jarvis knows about your world" :items="items">
-    <JvPanel :icon="current.icon" :title="current.title" tone="idle" :status="current.status" :description="current.description">
-      <JvUnavailable :title="current.title" :icon="current.icon"
-        detail="Jarvis keeps your conversations, but your Core does not have a browsable memory store yet. Nothing is shown until it does." />
-    </JvPanel>
-  </NodePage>
+  <PageShell title="Memory" subtitle="What Jarvis remembers about you">
+    <section class="card empty" aria-labelledby="memory-empty">
+      <span class="tile acc" aria-hidden="true"><NavIcon name="memory" /></span>
+      <h2 id="memory-empty">No memory store yet</h2>
+      <p class="t-sm">
+        Jarvis keeps your conversations on your Home Node, but your Core has no browsable memory store yet.
+        Facts Jarvis remembers will show here once it does, and you will be able to make it forget any of them.
+      </p>
+    </section>
+  </PageShell>
 </template>
+
+<style scoped>
+.empty h2 { margin: 0; font-size: 15px; line-height: 1.4; color: var(--text-primary); }
+.empty p { margin: 0; max-width: 460px; }
+</style>

@@ -36,76 +36,9 @@
 }
 
 :root {
-  /* Legacy names, aliased onto the Instrument tokens in tokens.css so existing
-     screens follow the light/dark theme. New code uses the token names. */
-  --accent: var(--accent-text); /* foreground role; fills use --accent-solid */
-  --accent-2: var(--accent-text);
-  --accent-rgb: 28, 101, 200; /* --accent-solid in sRGB, for rgba() tints */
-
-  /* Surface + text */
-  --bg: var(--bg-page);
-  --text-0: var(--text-primary);
-  --text-1: var(--text-primary);
-  --text-2: var(--text-primary);
-  --text-3: var(--text-secondary);
-  --text-4: var(--text-secondary);
-  --text-5: var(--text-secondary);
-  --idle: var(--text-secondary);
-  --warn: var(--negative-text);
-  --danger: var(--danger-text);
-
-  /* Fills */
-  --card-bg: var(--bg-surface);
-  --sat-bg: var(--bg-surface);
-  --sel-bg: var(--bg-selected);
-  --panel-bg: var(--bg-surface);
-  --tile-bg: var(--bg-surface);
-  --field-bg: var(--bg-surface);
-
-  /* Lines */
-  --line: var(--border-subtle);
-  --line-a18: var(--border);
-  --line-a30: var(--border);
-  --line-a45: var(--accent-border);
-  --line-a55: var(--accent-border);
-
-  /* Glow (none in Instrument) */
-  --glow-sm: none;
-
-  /* Radii */
-  --r-8: 8px;
-  --r-10: 10px;
-  --r-12: 12px;
-  --r-14: 14px;
-  --r-16: 16px;
-  --r-22: 22px;
-  --r-24: 24px;
-  --r-26: 26px;
-
-  /* Type */
-  --font-body: var(--font-sans);
-  --font-display: var(--font-sans);
-  --fs-11: 11px;
-  --fs-12: 12.5px;
-  --fs-13: 13px;
-  --fs-14: 14px;
-  --fs-15: 15.5px;
-  --fs-20: 20px;
-  --fs-23: 23px;
-
-  /* Legacy aliases used by existing views (--border is a token itself) */
-  --panel: var(--tile-bg);
-  --text: var(--text-1);
-  --muted: var(--text-5);
-  --mono: var(--font-mono);
-
-  color: var(--text);
-  background: var(--bg);
+  color: var(--text-primary);
+  background: var(--bg-page);
   -webkit-font-smoothing: antialiased;
-}
-
-:root[data-theme="dark"] {
-  --accent-rgb: 51, 112, 199;
 }
 
 * {
@@ -120,8 +53,8 @@ body,
 }
 
 body {
-  background: var(--bg);
-  color: var(--text);
+  background: var(--bg-page);
+  color: var(--text-primary);
 }
 
 .app {
@@ -143,30 +76,10 @@ body {
   outline-offset: 2px;
 }
 
-.view {
-  max-width: 720px;
-  margin: 0 auto;
-}
-
-.view h1 {
-  margin: 0 0 12px;
-}
-
-.muted {
-  color: var(--muted);
-  line-height: 1.6;
-}
-
-.greet {
-  display: flex;
-  gap: 8px;
-  margin: 20px 0 8px;
-}
-
 input {
-  background: var(--panel);
+  background: var(--bg-surface);
   border: 1px solid var(--border-strong);
-  color: var(--text);
+  color: var(--text-primary);
   border-radius: 8px;
   padding: 8px 12px;
   font: inherit;
@@ -175,7 +88,7 @@ input {
 
 input:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--accent-text);
 }
 
 /* Neutral reset: no fill. Filled actions opt in with .btn .btn-primary. */
@@ -189,31 +102,11 @@ button {
   cursor: pointer;
 }
 
-.greet-msg {
-  color: var(--accent-2);
-}
-
 code {
   background: var(--bg-sunken);
   border-radius: 4px;
   padding: 1px 5px;
   font-size: 0.9em;
-}
-
-.status-list {
-  list-style: none;
-  padding: 0;
-  margin: 20px 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.status-list li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--muted);
 }
 
 .dot {
@@ -233,102 +126,4 @@ code {
 
 .dot-err {
   background: var(--danger-solid);
-}
-
-.holding-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 16px 0;
-}
-
-.holding-form input {
-  min-width: 110px;
-  flex: 1;
-}
-
-.total {
-  margin-bottom: 14px;
-  color: var(--muted);
-}
-
-.holding-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.holding-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.holding-head .sym {
-  font-weight: 600;
-}
-
-.holding-head .cost {
-  margin-left: auto;
-}
-
-.del {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--muted);
-  padding: 2px 9px;
-  border-radius: 6px;
-  font-size: 13px;
-}
-
-.del:hover {
-  color: var(--accent-2);
-  border-color: var(--accent-2);
-}
-
-.bar {
-  height: 6px;
-  background: var(--bg-sunken);
-  border-radius: 4px;
-  margin-top: 8px;
-  overflow: hidden;
-}
-
-.bar-fill {
-  height: 100%;
-  background: var(--accent-solid);
-}
-
-.weight {
-  font-size: 12px;
-  margin-top: 3px;
-}
-
-/* Module page content: tile grid on the left, list on the right, buttons. */
-.node-split { display: grid; grid-template-columns: minmax(0, 544px) minmax(0, 1fr); gap: 20px; align-items: start; }
-.node-tiles { min-width: 0; padding-right: 17px; border-right: 1px solid var(--line-a30); }
-.node-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
-.eyebrow { margin: 0 0 12px; }
-.ghost-btn, .link-btn { font: inherit; font-size: var(--fs-13); font-weight: 400; cursor: pointer; }
-.ghost-btn {
-  height: 40px; padding: 0 20px; border-radius: var(--r-10); border: 1px solid var(--border-strong);
-  background: var(--bg-surface); color: var(--text-1); display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
-}
-.ghost-btn.sm { height: 30px; padding: 0 12px; font-size: 12px; }
-.ghost-btn.danger { border-color: var(--danger-text); color: var(--danger); }
-.ghost-btn:hover { filter: none; border-color: var(--accent); }
-.ghost-btn:disabled { opacity: 0.5; cursor: default; }
-.ghost-btn svg { width: 16px; height: 16px; color: var(--accent); }
-.link-btn { background: transparent; border: none; padding: 0; color: var(--text-2); font-size: 12px; text-decoration: none; }
-.node-search {
-  width: 100%; height: 38px; margin-bottom: 12px; padding: 0 14px; border-radius: var(--r-10);
-  background: var(--field-bg); border: 1px solid var(--line-a30); color: var(--text-1);
-}
-@media (max-width: 1099px), (max-height: 759px) {
-  .node-split { grid-template-columns: minmax(0, 1fr); }
-  .node-tiles { padding-right: 0; border-right: none; }
 }

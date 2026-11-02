@@ -26,7 +26,7 @@ defineProps<{ title: string; subtitle?: string }>();
 
 <style scoped>
 .head { min-width: 0; display: flex; flex-direction: column; }
-.title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; } /* canvas: badges sit on the h1 baseline */
 h1 { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
 .sub { margin-top: 4px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }

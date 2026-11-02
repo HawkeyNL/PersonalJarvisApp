@@ -36,8 +36,8 @@ const signer = computed(() => platformCapabilities.value.supportsBiometricSignin
 <style scoped>
 .request { max-width: 440px; overflow-wrap: anywhere; }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 6px 0; }
-dt { color: var(--muted); }
+dt { color: var(--text-secondary); }
 dd { margin: 0; }
-.fingerprint { font-family: var(--mono); }
+.fingerprint { font-family: var(--font-mono); }
 .error { color: var(--danger-text); }
 </style>

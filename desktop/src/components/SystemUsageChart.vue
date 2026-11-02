@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { BarController, BarElement, CategoryScale, Chart, Legend, LinearScale, Tooltip } from "chart.js";
 import { onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { themeChartColors } from "./trading/chartColors";
 
 type DailyUsage = { day: string; spent_eur: number; total_tokens: number; input_tokens?: number; output_tokens?: number; cache_read_tokens?: number; cache_write_tokens?: number };
 const props = defineProps<{ rows: DailyUsage[]; mode: "cost" | "tokens" }>();
@@ -9,19 +10,16 @@ let chart: Chart<"bar", number[], string> | undefined;
 Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip, Legend);
 const euro = new Intl.NumberFormat("en", { style: "currency", currency: "EUR", maximumFractionDigits: 4 });
 const integer = new Intl.NumberFormat("en");
-// sRGB values of tokens.css (--chart-accent, --accent-border, --border-strong,
-// --text-secondary, --separator); Chart.js cannot read CSS variables.
-const PALETTE = {
-  light: { series: ["#1c65c8", "#acc6ec", "#82878c", "#565b62"], text: "#565b62", grid: "#e4e6e9" },
-  dark: { series: ["#70a6f5", "#345687", "#6d7279", "#b3b8be"], text: "#b3b8be", grid: "#23272b" },
-};
 
 function render() {
   chart?.destroy();
   chart = undefined;
   if (!canvas.value || !props.rows.length) return;
   const cost = props.mode === "cost";
-  const { series, text, grid } = PALETTE[document.documentElement.dataset.theme === "dark" ? "dark" : "light"];
+  // Chart.js cannot read CSS variables: the theme's tokens, read at draw time.
+  const c = themeChartColors();
+  const series = [c.accent, c.soft, c.strong, c.text];
+  const { text, grid } = c;
   const split = props.rows.every(row => row.input_tokens != null && row.output_tokens != null && row.cache_read_tokens != null && row.cache_write_tokens != null);
   const datasets = cost
     ? [{ label: "Cost", data: props.rows.map(row => row.spent_eur), backgroundColor: series[0] }]
@@ -64,14 +62,14 @@ onBeforeUnmount(() => {
 <template>
   <div class="usage-chart"><canvas ref="canvas" role="img" :aria-label="mode === 'cost' ? 'Cost per day' : 'Tokens per day'" /></div>
   <details>
-    <summary>Dagwaarden bekijken</summary>
+    <summary>Show daily values</summary>
     <ul><li v-for="row in rows" :key="row.day">{{ row.day }} · {{ mode === 'cost' ? euro.format(row.spent_eur) : integer.format(row.total_tokens) + ' tokens' }}</li></ul>
   </details>
 </template>
 
 <style scoped>
 .usage-chart { height: 260px; position: relative; min-width: 0; }
-details { margin-top: 12px; color: var(--muted); font-size: 12px; }
+details { margin-top: 12px; color: var(--text-secondary); font-size: 12px; }
 summary { cursor: pointer; }
 ul { padding-left: 18px; line-height: 1.8; }
 </style>

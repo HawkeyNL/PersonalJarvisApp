@@ -11,31 +11,30 @@ onMounted(() => dialog.value?.focus());
 
 <template>
   <div ref="dialog" class="lock" role="dialog" aria-modal="true" aria-labelledby="lock-title" aria-describedby="lock-sub" tabindex="-1">
-    <div class="lock-card">
-      <div class="mark">
-        <span class="ring"></span>
-        <span class="glyph">J</span>
-      </div>
+    <div class="lock-card card">
+      <span class="tile acc mark" aria-hidden="true">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3.5" /><circle cx="12" cy="12" r="9" /></svg>
+      </span>
       <h1 id="lock-title">Jarvis is locked</h1>
       <!-- Windows: the session is ending; the sign-in screen asks for the account password. -->
       <template v-if="lockMode === 'password'">
         <p id="lock-sub" class="sub">Sign in again with your account password.</p>
-        <button class="primary" :disabled="unlocking" @click="signOutFromLock">
+        <button type="button" class="btn btn-primary btn-lg btn-block primary" :disabled="unlocking" @click="signOutFromLock">
           {{ unlocking ? "Signing out…" : "Sign in" }}
         </button>
       </template>
       <template v-else>
         <p id="lock-sub" class="sub">Unlock with Touch ID or your computer password.</p>
 
-        <button class="primary" :disabled="unlocking" @click="biometricUnlock">
+        <button type="button" class="btn btn-primary btn-lg btn-block primary" :disabled="unlocking" @click="biometricUnlock">
           {{ unlocking ? "Verifying…" : "Unlock" }}
         </button>
 
-        <button class="ghost" :disabled="unlocking" @click="signOutFromLock">Sign out instead</button>
-        <p class="hint">Signing in again needs your account password.</p>
+        <button type="button" class="btn btn-secondary btn-block" :disabled="unlocking" @click="signOutFromLock">Sign out instead</button>
+        <p class="hint t-xs t-2">Signing in again needs your account password.</p>
       </template>
 
-      <p v-if="lockError" class="err">{{ lockError }}</p>
+      <p v-if="lockError" class="err" role="alert">{{ lockError }}</p>
     </div>
   </div>
 </template>
@@ -49,105 +48,22 @@ onMounted(() => dialog.value?.focus());
   place-items: center;
   padding: 24px;
   background: var(--bg-page);
-  backdrop-filter: blur(26px) saturate(1.2);
-  -webkit-backdrop-filter: blur(26px) saturate(1.2);
 }
 .lock:focus {
   outline: none;
 }
 .lock-card {
-  width: min(360px, 92vw);
+  width: min(400px, 100%);
+  padding: 32px;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
   gap: 12px;
 }
-.mark {
-  position: relative;
-  width: 78px;
-  height: 78px;
-  display: grid;
-  place-items: center;
-  margin-bottom: 4px;
-}
-.mark .ring {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 1.5px solid var(--accent);
-  box-shadow: 0 0 26px rgba(var(--accent-rgb), 0.4), inset 0 0 18px rgba(var(--accent-rgb), 0.25);
-  animation: pulse 2.6s ease-in-out infinite;
-}
-.mark .glyph {
-  font-family: var(--mono);
-  font-size: 30px;
-  font-weight: 700;
-  color: var(--accent);
-  text-shadow: 0 0 14px rgba(var(--accent-rgb), 0.6);
-}
-h1 {
-  font-size: 19px;
-  margin: 0;
-  letter-spacing: 0.02em;
-}
-.sub {
-  margin: 0 0 6px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.primary,
-.ghost {
-  width: 100%;
-  border-radius: 12px;
-  padding: 12px 16px;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.primary {
-  background: var(--accent-solid);
-  color: var(--text-on-accent);
-  border: none;
-}
-.primary:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-.ghost {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text);
-  font-weight: 500;
-}
-.ghost:hover {
-  border-color: var(--accent);
-}
-
-.ghost:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-.hint {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-.err {
-  color: var(--danger-text);
-  font-size: 12px;
-  margin: 4px 0 0;
-}
-
-@keyframes pulse {
-  0%, 100% { box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.28), inset 0 0 14px rgba(var(--accent-rgb), 0.2); }
-  50% { box-shadow: 0 0 34px rgba(var(--accent-rgb), 0.55), inset 0 0 22px rgba(var(--accent-rgb), 0.32); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .mark .ring {
-    animation: none;
-  }
-}
+.mark { width: 52px; height: 52px; border-radius: var(--r-lg); margin-bottom: 4px; }
+h1 { margin: 0; font-size: 22px; }
+p { margin: 0; }
+.sub { margin-bottom: 8px; color: var(--text-secondary); font-size: 14px; }
+.err { justify-content: center; margin-top: 4px; overflow-wrap: anywhere; }
 </style>

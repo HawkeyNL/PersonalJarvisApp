@@ -119,8 +119,9 @@ onBeforeUnmount(() => {
 /* Hidden until focused; the first Tab stop on every page. */
 .skip {
   position: absolute; left: 12px; top: 12px; z-index: 300; padding: 8px 14px; border-radius: var(--r-md);
-  background: var(--bg-surface); color: var(--text-primary); box-shadow: var(--shadow-pop); text-decoration: none;
+  background: var(--bg-surface); color: var(--text-primary); text-decoration: none;
   transform: translateY(calc(-100% - 16px));
 }
-.skip:focus-visible { transform: none; }
+/* The shadow only while shown, so the hidden link leaves no smudge. */
+.skip:focus-visible { transform: none; box-shadow: var(--shadow-pop); }
 </style>

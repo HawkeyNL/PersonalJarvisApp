@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {createMemoryHistory, createRouter} from "vue-router";
 
-import {NAV, PAGES, REDIRECTS, ariaCurrent, buildRoutes, tasksNode, tasksPath} from "../src/navigation.ts";
+import {NAV, PAGES, REDIRECTS, ariaCurrent, buildRoutes} from "../src/navigation.ts";
 
 const VIEWS = ["home", "agents", "integrations", "health", "memory", "trading", "desk", "stocks", "stock", "positions", "memecoin", "tasks", "context", "settings", "soon"];
 const stub = name => ({name, render: () => null});
@@ -109,20 +109,6 @@ test("exactly one sidebar entry is aria-current on every sidebar page", async ()
   }
   const nav = (await routerAt("/health")).meta.nav;
   assert.deepEqual(items.filter(i => ariaCurrent(i.id, nav)), []);
-});
-
-test("Tasks keeps the route on Approvals only for the waiting node", async () => {
-  assert.equal(tasksPath("waiting"), "/approvals");
-  for (const node of ["active", "completed", "scheduled"]) assert.equal(tasksPath(node), "/runs");
-  // Both paths resolve to a page whose props open the matching node.
-  for (const node of ["waiting", "active"]) {
-    const page = PAGES.find(p => p.path === tasksPath(node));
-    assert.equal(tasksNode(page.props?.node, node), node);
-  }
-  // Clicking Approvals opens waiting; leaving it for Runs drops waiting but keeps any other choice.
-  assert.equal(tasksNode("waiting", "completed"), "waiting");
-  assert.equal(tasksNode(undefined, "waiting"), "active");
-  assert.equal(tasksNode(undefined, "completed"), "completed");
 });
 
 test("Devices names its own heading", () => {

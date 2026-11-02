@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import NodePage, { type NodeItem } from "../components/jv/NodePage.vue";
-import JvPanel from "../components/jv/JvPanel.vue";
 import JvSegmented, { type SegmentItem } from "../components/jv/JvSegmented.vue";
-import JvTile from "../components/jv/JvTile.vue";
-import JvActivityList, { type ActivityItem } from "../components/jv/JvActivityList.vue";
-import JvUnavailable from "../components/jv/JvUnavailable.vue";
+import RowList, { type Row } from "../components/RowList.vue";
+import ActivityState from "../components/activity/ActivityState.vue";
 import NavIcon from "../components/NavIcon.vue";
 import { loadOptional } from "../coreStatus";
 import type { Availability, Tone } from "../hubModel";
@@ -52,139 +50,116 @@ function status<T>(source: Availability<T>, ok: (value: T) => [Tone, string]): [
   if (source.state === "loading") return ["idle", "Loading…"];
   return source.state === "unsupported" ? ["idle", "Requires newer Core"] : ["warn", "Unavailable"];
 }
-const planned = (id: string, label: string, title: string, icon: NodeItem["icon"], description: string): NodeItem =>
-  ({ id, label, title, icon, description, tone: "idle", status: "Not yet available" });
+const planned = (id: string, title: string, icon: NodeItem["icon"], description: string): NodeItem =>
+  ({ id, title, icon, description, tone: "idle", status: "Not yet available" });
 const items = computed<NodeItem[]>(() => {
   const b = status(registry.value, () => [brains.value.some((x) => x.available) ? "ok" : "idle", `${countOf(brains.value, (x) => x.available)} ready`]);
   const m = status(policy.value, () => [allowed.value.length ? "ok" : "idle", `${allowed.value.length} allowed`]);
   const i = ibkrLinkState(ibkr.value);
   return [
-    { id: "brains", label: "Brains", title: "AI brains", icon: "spark", description: "Who does the thinking, and how it is paid", tone: b[0], status: b[1] },
-    { id: "models", label: "Models", title: "Models", icon: "layers", description: "Which models Jarvis may use", tone: m[0], status: m[1] },
-    { id: "ibkr", label: "IBKR", title: "Interactive Brokers", icon: "trend", description: "Read-only broker link for trading", tone: i[0], status: i[1] },
-    planned("codex", "Codex", "Codex", "terminal", "Second opinion, behind the broker"),
-    planned("github", "GitHub", "GitHub", "branch", "Repos, PRs and releases"),
-    planned("sandbox", "Sandbox", "OpenSandbox", "sandbox", "Disposable space for code runs"),
+    {
+      id: "brains", title: "AI brains", icon: "spark", tone: b[0], status: b[1],
+      description: "The brains Core found on your Home Node. Ready means it is set up, not that it is in use.",
+      meta: reg.value.active_brain ? `Active brain: ${reg.value.active_brain}` : undefined,
+    },
+    {
+      id: "models", title: "Models", icon: "layers", tone: m[0], status: m[1],
+      description: "Allowing a model lets Jarvis choose it; it never selects a model for a running request.",
+    },
+    {
+      id: "ibkr", title: "Interactive Brokers", icon: "trend", tone: i[0], status: i[1],
+      description: "Core's read-only link to Interactive Brokers. Jarvis only reads; it never places orders.",
+    },
+    planned("codex", "Codex", "terminal", "Core does not report the Codex broker status to the app yet."),
+    planned("github", "GitHub", "branch", "Core does not report a GitHub connection to the app yet."),
+    planned("sandbox", "OpenSandbox", "sandbox", "Core does not report OpenSandbox status to the app yet."),
   ];
 });
 const selected = ref("brains");
 const sub = ref("overview");
 watch(selected, () => { sub.value = "overview"; });
-const current = computed(() => items.value.find((item) => item.id === selected.value)!);
 const SUB_TABS: Record<string, SegmentItem[]> = {
-  brains: [{ id: "overview", label: "Overview", icon: "doc" }, { id: "tools", label: "Host tools", icon: "sandbox" }],
-  models: [{ id: "overview", label: "Overview", icon: "doc" }, { id: "catalog", label: "Catalog", icon: "layers" }],
+  brains: [{ id: "overview", label: "Overview" }, { id: "tools", label: "Host tools" }],
+  models: [{ id: "overview", label: "Overview" }, { id: "catalog", label: "Catalog" }],
 };
-
 const subTabs = computed(() => SUB_TABS[selected.value] ?? []);
 
-const DETAILS: Record<string, string> = {
-  brains: "The brains Core found on your Home Node. Ready means it is set up, not that it is in use.",
-  models: "Allowing a model lets Jarvis choose it; it never selects a model for a running request.",
-  ibkr: "Core's read-only link to Interactive Brokers. Jarvis only reads; it never places orders.",
-  codex: "Core does not report the Codex broker status to the app yet.",
-  github: "Core does not report a GitHub connection to the app yet.",
-  sandbox: "Core does not report OpenSandbox status to the app yet.",
-};
-
 const COST: Record<string, string> = { plan: "Subscription", metered: "Pay per use", local: "Local", cheap: "Cheap", mid: "Mid", pricey: "Pricey" };
-const brainRows = computed<ActivityItem[]>(() => brains.value.map((b) => ({
-  id: b.id, icon: "spark", title: b.label, detail: [COST[b.cost] ?? b.cost, b.note].filter(Boolean).join(" · "),
-  tone: b.available ? "ok" : "idle", toneLabel: b.available ? "Ready" : "Not set up",
+const brainRows = computed<Row[]>(() => brains.value.map((b) => ({
+  id: b.id, title: b.label, detail: [COST[b.cost] ?? b.cost, b.note].filter(Boolean).join(" · "),
+  tone: b.available ? "ok" : "idle", status: b.available ? "Ready" : "Not set up",
 })));
-const toolRows = computed<ActivityItem[]>(() => software.value.map((s) => ({
-  id: s.name, icon: "sandbox", title: s.name + (s.version ? ` ${s.version}` : ""), detail: s.detail ?? undefined,
-  tone: s.present ? "ok" : "idle", toneLabel: s.present ? "Present" : "Missing",
+const toolRows = computed<Row[]>(() => software.value.map((s) => ({
+  id: s.name, title: s.name + (s.version ? ` ${s.version}` : ""), detail: s.detail ?? undefined,
+  tone: s.present ? "ok" : "idle", status: s.present ? "Present" : "Missing",
 })));
-const allowedRows = computed<ActivityItem[]>(() => allowed.value.map((m) => ({
-  id: `${m.provider}/${m.model}`, icon: "layers", title: m.model, detail: m.provider + (m.route ? ` · route ${m.route}` : ""),
-  tone: "ok", toneLabel: "Allowed",
+const allowedRows = computed<Row[]>(() => allowed.value.map((m) => ({
+  id: `${m.provider}/${m.model}`, title: m.model, detail: m.provider + (m.route ? ` · route ${m.route}` : ""), tone: "ok", status: "Allowed",
 })));
-const catalogRows = computed<ActivityItem[]>(() => catalog.value.map((m) => ({
-  id: `${m.backend}/${m.id}`, icon: "layers", title: m.id, detail: `${m.backend} · ${m.class} · ${COST[m.cost] ?? m.cost}`,
-  tone: m.available ? "ok" : "idle", toneLabel: m.available ? "Provider set up" : "Provider not set up",
+const catalogRows = computed<Row[]>(() => catalog.value.map((m) => ({
+  id: `${m.backend}/${m.id}`, title: m.id, detail: `${m.backend} · ${m.class} · ${COST[m.cost] ?? m.cost}`,
+  tone: m.available ? "ok" : "idle", status: m.available ? "Provider set up" : "Provider not set up",
 })));
+const readyOf = (cost: string) => `${countOf(brains.value.filter((b) => b.cost === cost), (b) => b.available)} ready`;
 </script>
 
 <template>
   <NodePage v-model="selected" title="Integrations" subtitle="The systems Jarvis can reach" :items="items">
-    <JvPanel :icon="current.icon" :title="current.title" :tone="current.tone" :status="current.status" :description="DETAILS[current.id]"
-      :quote="current.id === 'brains' && reg.active_brain ? `Active brain: ${reg.active_brain}` : undefined">
-      <template #action>
-        <RouterLink v-if="current.id === 'models'" to="/health?node=models" class="ghost-btn">Manage access<NavIcon name="arrow-right" /></RouterLink>
-        <RouterLink v-else-if="current.id === 'ibkr'" to="/trading" class="ghost-btn">Open trading desk<NavIcon name="arrow-right" /></RouterLink>
-        <button v-else-if="current.id === 'brains'" type="button" class="ghost-btn" @click="load">Refresh</button>
-      </template>
+    <template v-if="['brains', 'models', 'ibkr'].includes(selected)" #actions>
+      <RouterLink v-if="selected === 'models'" to="/health?node=models" class="btn btn-secondary btn-sm">Manage access<NavIcon name="arrow-right" /></RouterLink>
+      <RouterLink v-else-if="selected === 'ibkr'" to="/trading" class="btn btn-secondary btn-sm">Open trading desk<NavIcon name="arrow-right" /></RouterLink>
+      <button v-else type="button" class="btn btn-secondary btn-sm" @click="load">Refresh</button>
+    </template>
 
-      <JvSegmented v-if="subTabs.length" v-model="sub" :items="subTabs" :label="`${current.title} sections`" />
+    <JvSegmented v-if="subTabs.length" v-model="sub" class="np-seg" :items="subTabs" :label="`${items.find((i) => i.id === selected)?.title} sections`" />
 
-      <!-- AI brains + host tools (registry) -->
-      <template v-if="current.id === 'brains'">
-        <JvUnavailable v-if="registry.state === 'unsupported' || registry.state === 'error'" title="Registry"
-          :kind="registry.state === 'unsupported' ? 'core-update' : 'error'" icon="spark" />
-        <p v-else-if="registry.state === 'loading'" class="muted" role="status">Loading registry…</p>
-        <div v-else-if="sub === 'overview'" class="node-split">
-          <section class="node-tiles" aria-label="Brains">
-            <h3 class="eyebrow">AT A GLANCE</h3>
-            <div class="node-grid">
-              <JvTile icon="spark" label="Active brain" :value="reg.active_brain || 'Not reported'" />
-              <JvTile icon="health" label="Brains ready" :value="countOf(brains, (b) => b.available)" />
-              <JvTile icon="user" label="Subscription" :value="countOf(brains.filter((b) => b.cost === 'plan'), (b) => b.available) + ' ready'" />
-              <JvTile icon="trend" label="Pay per use" :value="countOf(brains.filter((b) => b.cost === 'metered'), (b) => b.available) + ' ready'" />
-              <JvTile icon="home" label="Local" :value="countOf(brains.filter((b) => b.cost === 'local'), (b) => b.available) + ' ready'" />
-              <JvTile icon="sandbox" label="Host tools" :value="countOf(software, (s) => s.present) + ' present'" />
-            </div>
-          </section>
-          <JvActivityList title="Brains" :items="brainRows" empty="Core reported no brains." />
+    <!-- AI brains + host tools (registry) -->
+    <ActivityState v-if="selected === 'brains'" :state="registry" what="the registry" @retry="load">
+      <div v-if="sub === 'overview'" class="np-cols">
+        <dl class="np-facts" aria-label="Brains at a glance">
+          <div><dt>Active brain</dt><dd>{{ reg.active_brain || "Not reported" }}</dd></div>
+          <div><dt>Brains ready</dt><dd>{{ countOf(brains, (b) => b.available) }}</dd></div>
+          <div><dt>Subscription</dt><dd>{{ readyOf("plan") }}</dd></div>
+          <div><dt>Pay per use</dt><dd>{{ readyOf("metered") }}</dd></div>
+          <div><dt>Local</dt><dd>{{ readyOf("local") }}</dd></div>
+          <div><dt>Host tools</dt><dd>{{ countOf(software, (s) => s.present) }} present</dd></div>
+        </dl>
+        <RowList title="Brains" :rows="brainRows" empty="Core reported no brains." />
+      </div>
+      <RowList v-else title="Host tools" :rows="toolRows" empty="Core reported no host tools." />
+    </ActivityState>
+
+    <!-- Models: owner policy + catalog -->
+    <template v-else-if="selected === 'models'">
+      <ActivityState v-if="sub === 'overview'" :state="policy" what="the model policy" @retry="load">
+        <div class="np-cols">
+          <dl class="np-facts" aria-label="Owner policy">
+            <div><dt>Allowed</dt><dd>{{ allowed.length }}</dd></div>
+            <div><dt>Blocked</dt><dd>{{ policyCount - allowed.length }}</dd></div>
+            <div><dt>In catalog</dt><dd>{{ registry.state === "ok" ? catalog.length : "Unavailable" }}</dd></div>
+            <div><dt>Changes</dt><dd>Under System health</dd></div>
+          </dl>
+          <RowList title="Allowed models" :rows="allowedRows" empty="No model is allowed yet." />
         </div>
-        <JvActivityList v-else title="Host tools" :items="toolRows" empty="Core reported no host tools." />
+      </ActivityState>
+      <template v-else>
+        <p class="np-note">Set up means Core has a key or local install for the provider. Whether Jarvis may use a model is the owner policy.</p>
+        <ActivityState :state="registry" what="the model catalog" @retry="load">
+          <RowList title="Catalog" :rows="catalogRows" empty="Core reported no models." />
+        </ActivityState>
       </template>
+    </template>
 
-      <!-- Models: owner policy + catalog -->
-      <template v-else-if="current.id === 'models'">
-        <template v-if="sub === 'overview'">
-          <JvUnavailable v-if="policy.state === 'unsupported' || policy.state === 'error'" title="Model policy"
-            :kind="policy.state === 'unsupported' ? 'core-update' : 'error'" icon="layers" />
-          <p v-else-if="policy.state === 'loading'" class="muted" role="status">Loading model policy…</p>
-          <div v-else class="node-split">
-            <section class="node-tiles" aria-label="Model access">
-              <h3 class="eyebrow">OWNER POLICY</h3>
-              <div class="node-grid">
-                <JvTile icon="health" label="Allowed" :value="String(allowed.length)" />
-                <JvTile icon="shield" label="Blocked" :value="String(policyCount - allowed.length)" />
-                <JvTile icon="layers" label="In catalog" :value="registry.state === 'ok' ? String(catalog.length) : 'Unavailable'" />
-                <JvTile icon="key" label="Changes" value="Under System Health" />
-              </div>
-            </section>
-            <JvActivityList title="Allowed models" :items="allowedRows" empty="No model is allowed yet." />
-          </div>
-        </template>
-        <template v-else>
-          <p class="muted small">Set up means Core has a key or local install for the provider. Whether Jarvis may use a model is the owner policy.</p>
-          <JvUnavailable v-if="registry.state === 'unsupported' || registry.state === 'error'" title="Model catalog"
-            :kind="registry.state === 'unsupported' ? 'core-update' : 'error'" icon="layers" />
-          <JvActivityList v-else title="Catalog" :items="catalogRows" :empty="registry.state === 'loading' ? 'Loading…' : 'Core reported no models.'" />
-        </template>
-      </template>
+    <!-- IBKR -->
+    <TradingStatus v-else-if="selected === 'ibkr'" :state="ibkr" what="the IBKR link" compact @retry="reloadIbkr" v-slot="{ data }">
+      <dl class="np-facts" aria-label="IBKR link">
+        <div><dt>Connection</dt><dd>{{ ibkrLinkState(ibkr)[1] }}</dd></div>
+        <div><dt>Last sync</dt><dd>{{ asOfText(data.as_of) }}</dd></div>
+        <div><dt>Positions</dt><dd>{{ data.positions.length }}</dd></div>
+        <div><dt>Access</dt><dd>Read-only</dd></div>
+      </dl>
+    </TradingStatus>
 
-      <!-- IBKR -->
-      <template v-else-if="current.id === 'ibkr'">
-        <TradingStatus :state="ibkr" what="the IBKR link" @retry="reloadIbkr" v-slot="{ data }">
-          <div class="node-grid ibkr">
-            <JvTile icon="link-2" label="Connection" :value="current.status" />
-            <JvTile icon="clock" label="Last sync" :value="asOfText(data.as_of)" />
-            <JvTile icon="trend" label="Positions" :value="String(data.positions.length)" />
-            <JvTile icon="shield" label="Access" value="Read-only" />
-          </div>
-        </TradingStatus>
-      </template>
-
-      <JvUnavailable v-else :title="current.title" :icon="current.icon" :detail="DETAILS[current.id]" />
-    </JvPanel>
+    <p v-else class="np-empty"><strong>Not yet available</strong>Nothing to show until Core reports it.</p>
   </NodePage>
 </template>
-
-<style scoped>
-.small { font-size: var(--fs-12); margin: 0; }
-.ibkr { max-width: 544px; }
-</style>
