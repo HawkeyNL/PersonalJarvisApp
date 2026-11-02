@@ -1,5 +1,6 @@
 package com.hawkeynl.jarvis.ui
 
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -8,11 +9,14 @@ import org.junit.Test
 class ColorLiteralsTest {
     @Test
     fun `no colour or brush literals outside InstrumentTheme`() {
-        val theme = JvColorsTest.repoFile("android/app/src/main/java/com/hawkeynl/jarvis/ui/InstrumentTheme.kt")
-        val android = theme.path.removeSuffix("app/src/main/java/com/hawkeynl/jarvis/ui/InstrumentTheme.kt")
-        val sources = java.io.File(android).walkTopDown()
-            .filter { it.isFile && it.extension == "kt" && "${java.io.File.separator}src${java.io.File.separator}main${java.io.File.separator}" in it.path }
-            .toList()
+        // Unit tests run in android/app; walk up to the android/ directory.
+        val android = generateSequence(File("").absoluteFile) { it.parentFile }
+            .map { File(it, "android") }
+            .first { File(it, "app/src/main").isDirectory }
+        val theme = File(android, "app/src/main/java/com/hawkeynl/jarvis/ui/InstrumentTheme.kt")
+        assertTrue("$theme is missing", theme.isFile)
+        val sources = listOf("app/src/main", "realtime-core/src/main")
+            .flatMap { File(android, it).walkTopDown().filter { f -> f.isFile && f.extension == "kt" }.toList() }
         assertTrue("found only ${sources.size} main sources under $android", sources.size > 20)
         val offenders = sources.filter { it.canonicalPath != theme.canonicalPath }.flatMap { file ->
             file.readLines().mapIndexedNotNull { i, line ->

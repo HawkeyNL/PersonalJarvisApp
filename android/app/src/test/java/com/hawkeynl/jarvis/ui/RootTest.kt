@@ -39,7 +39,16 @@ class RootTest {
         assertEquals(1, onboardingStep(JarvisUiState(endpoint = endpoint), editingEndpoint = false))
         assertEquals(1, onboardingStep(JarvisUiState(endpoint = endpoint, activationRequired = true), editingEndpoint = false))
         assertEquals(1, onboardingStep(JarvisUiState(endpoint = endpoint, deviceKeyLost = true), editingEndpoint = false))
+        assertEquals(1, onboardingStep(JarvisUiState(endpoint = endpoint, deviceKeyLost = true, pairingPending = true), editingEndpoint = false))
         assertEquals(2, onboardingStep(JarvisUiState(endpoint = endpoint, pairingPending = true), editingEndpoint = false))
         assertEquals(0, onboardingStep(JarvisUiState(endpoint = endpoint, pairingPending = true), editingEndpoint = true))
+    }
+
+    @Test
+    fun `saving the same Home Node ends the edit`() {
+        assertEquals(true, savesSameEndpoint("https://jarvis.example.test/", endpoint))
+        assertEquals(false, savesSameEndpoint("https://other.example.test", endpoint))
+        assertEquals(false, savesSameEndpoint("not a url", endpoint))
+        assertEquals(false, savesSameEndpoint("https://jarvis.example.test", null))
     }
 }

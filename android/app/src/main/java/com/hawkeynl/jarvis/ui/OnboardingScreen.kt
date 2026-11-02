@@ -1,5 +1,6 @@
 package com.hawkeynl.jarvis.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +30,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +53,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.hawkeynl.jarvis.R
 import com.hawkeynl.jarvis.network.ConnectionState
+import com.hawkeynl.jarvis.network.EndpointValidation
+import com.hawkeynl.jarvis.network.HomeNodeEndpoint
 import com.hawkeynl.jarvis.security.DeviceKeyInvalidatedException
 import java.time.Instant
 import java.time.ZoneId
@@ -76,8 +80,18 @@ internal fun OnboardingScreen(state: JarvisUiState, actions: JarvisViewModel) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     // Local only: the user opened the Home Node step again from a later step.
-    var editingEndpoint by remember { mutableStateOf(false) }
+    var editingEndpoint by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(state.endpoint) { editingEndpoint = false }
+    fun saveEndpoint() {
+        // A changed endpoint ends the edit through the effect above; the same one would not.
+        if (savesSameEndpoint(state.endpointDraft, state.endpoint)) editingEndpoint = false
+        actions.saveEndpoint()
+    }
+    fun cancelEndpointEdit() {
+        state.endpoint?.let { actions.editEndpoint(it.baseUrl) }
+        editingEndpoint = false
+    }
+    BackHandler(enabled = editingEndpoint && state.endpoint != null) { cancelEndpointEdit() }
     val step = onboardingStep(state, editingEndpoint)
     LazyColumn(
         modifier = Modifier.fillMaxSize().imePadding().testTag("onboarding"),
@@ -111,17 +125,14 @@ internal fun OnboardingScreen(state: JarvisUiState, actions: JarvisViewModel) {
                             placeholder = { Text("https://jarvis.local") },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(onDone = { actions.saveEndpoint() }),
+                            keyboardActions = KeyboardActions(onDone = { saveEndpoint() }),
                         )
                         if (endpoint != null) ConnectionLine(state.connection)
                         Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
                             if (endpoint != null) {
-                                GhostButton("Back", {
-                                    actions.editEndpoint(endpoint.baseUrl)
-                                    editingEndpoint = false
-                                })
+                                GhostButton("Cancel", ::cancelEndpointEdit)
                             }
-                            ActionButton("Save and check", actions::saveEndpoint, Modifier.weight(1f), enabled = !state.busy)
+                            ActionButton("Save and check", ::saveEndpoint, Modifier.weight(1f), enabled = !state.busy)
                         }
                     }
                 } else {
@@ -198,7 +209,13 @@ internal fun OnboardingScreen(state: JarvisUiState, actions: JarvisViewModel) {
                             )
                         }
                     }
-                    HomeNodeRow(endpoint.baseUrl, state.connection) { editingEndpoint = true }
+                    HomeNodeRow(endpoint.baseUrl, state.connection) {
+                        // Typed secrets are meant for the old Home Node, never the new one.
+                        password = ""
+                        activationCode = ""
+                        passwordVisible = false
+                        editingEndpoint = true
+                    }
                 }
                 state.error?.let { error -> ErrorText(error, Modifier.testTag("error")) }
             }
@@ -207,11 +224,16 @@ internal fun OnboardingScreen(state: JarvisUiState, actions: JarvisViewModel) {
 }
 
 /** Steps the sign-in flow really has; signing in opens the app, so there is no "done" step. */
+/** True when saving [draft] keeps the Home Node that is already [saved]. */
+internal fun savesSameEndpoint(draft: String, saved: HomeNodeEndpoint?): Boolean =
+    saved != null && (HomeNodeEndpoint.parse(draft) as? EndpointValidation.Valid)?.endpoint == saved
+
 internal val ONBOARDING_STEPS = listOf("Home Node", "Sign in", "Approve")
 
 /** Index into [ONBOARDING_STEPS]; only reads state, never changes the flow. */
 internal fun onboardingStep(state: JarvisUiState, editingEndpoint: Boolean): Int = when {
     editingEndpoint || state.endpoint == null -> 0
+    state.deviceKeyLost -> 1
     state.pairingPending -> 2
     else -> 1
 }
@@ -228,7 +250,7 @@ private fun StepProgress(step: Int) {
     ) {
         ONBOARDING_STEPS.forEachIndexed { i, label ->
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(JvSpace.xs)) {
-                Box(Modifier.fillMaxWidth().height(4.dp).clip(JvShapes.pill).background(if (i <= step) c.accentSolid else c.bgSunken))
+                Box(Modifier.fillMaxWidth().height(4.dp).clip(JvShapes.pill).background(if (i <= step) c.accentSolid else c.border))
                 Text(
                     label,
                     color = if (i <= step) c.textPrimary else c.textSecondary,
@@ -260,6 +282,7 @@ private fun HomeNodeRow(address: String, connection: ConnectionState, onChange: 
         horizontalArrangement = Arrangement.spacedBy(JvSpace.sm),
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(JvSpace.xxs)) {
+            Text("Home Node", color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.labelSmall)
             Text(address, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             ConnectionLine(connection)
         }
