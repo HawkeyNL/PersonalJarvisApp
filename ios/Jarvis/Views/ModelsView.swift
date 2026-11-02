@@ -6,6 +6,7 @@ struct ModelsView: View {
     @State private var selected: ModelAccessEntry?
     @State private var confirming = false
     @State private var busy = false
+    @State private var loadFailed = false
     @State private var notice: String?
     @State private var search = ""
     @State private var page = 0
@@ -32,12 +33,12 @@ struct ModelsView: View {
             .listRowBackground(JV.bgSurface)
             if policy == nil {
                 Section {
-                    if busy {
+                    if loadFailed {
+                        Text("Could not load the model policy. Check the connection, then Refresh.").foregroundStyle(JV.dangerText)
+                    } else {
                         SkeletonRow().accessibilityElement(children: .ignore).accessibilityLabel("Loading models")
                         SkeletonRow()
                         SkeletonRow()
-                    } else {
-                        Text("Could not load the model policy. Check the connection, then Refresh.").foregroundStyle(JV.dangerText)
                     }
                 }
                 .listRowBackground(JV.bgSurface)
@@ -134,10 +135,11 @@ struct ModelsView: View {
         defer { busy = false }
         do {
             policy = try await model.loadModelPolicy()
+            loadFailed = false
             if !provider.isEmpty && !providers.contains(provider) { provider = "" }
             page = catalog.index
         }
-        catch { notice = error.localizedDescription; policy = nil }
+        catch { notice = error.localizedDescription; policy = nil; loadFailed = true }
     }
 
     private func price(_ value: Double?) -> String {

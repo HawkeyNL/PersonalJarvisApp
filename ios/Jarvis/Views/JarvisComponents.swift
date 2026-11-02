@@ -178,7 +178,7 @@ struct ListDivider: View {
     @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
-        Rectangle().fill(contrast == .increased ? JV.border : JV.separator).frame(height: 1).padding(.leading, inset)
+        Rectangle().fill(contrast == .increased ? JV.borderStrong : JV.separator).frame(height: 1).padding(.leading, inset)
     }
 }
 
@@ -428,9 +428,8 @@ struct ActivityRowView: View {
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
         .background(row.selected ? JV.bgSelected : Color.clear)
+        // A hidden badge is hidden because it repeats on every row; VoiceOver skips it too.
         .accessibilityElement(children: .combine)
-        // A shown badge is already read as part of the row.
-        .accessibilityValue(Text(verbatim: row.badge ? "" : row.toneLabel))
         .accessibilityAddTraits(row.selected ? .isSelected : [])
     }
 
@@ -522,6 +521,8 @@ struct UnavailableState: View {
     var detail: String? = nil
     var symbol = "sparkles"
     var action: Action? = nil
+    /// The line under an error's title; the default fits a failed read.
+    var errorLabel = "Could not load"
     @State private var running = false
 
     var body: some View {
@@ -565,7 +566,8 @@ struct UnavailableState: View {
                             .font(JV.font(15, .semibold))
                             .foregroundStyle(JV.textPrimary)
                             .accessibilityAddTraits(.isHeader)
-                        Text("Could not load").font(JV.font(13, .medium)).foregroundStyle(JV.dangerText)
+                        Text(verbatim: errorLabel).font(JV.font(13, .medium)).foregroundStyle(JV.dangerText)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 if let detail {
@@ -667,6 +669,9 @@ struct LoadingState: View {
         .onAppear {
             guard !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { dim = true }
+        }
+        .onChange(of: reduceMotion) { _, on in
+            if on { withAnimation(nil) { dim = false } }
         }
     }
 }

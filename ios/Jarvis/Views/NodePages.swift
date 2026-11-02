@@ -784,8 +784,9 @@ struct ContextPage: View {
                 let platforms = Set(list.map(\.platform)).sorted().joined(separator: ", ")
                 TileGrid(tiles: [
                     TileData(label: "Linked devices", value: "\(list.count)"),
-                    TileData(label: "Platforms", value: platforms.isEmpty ? "—" : platforms),
-                    TileData(label: "This device", value: list.first { $0.id.lowercased() == thisDevice }?.name ?? "Unknown"),
+                    TileData(label: "Platforms", value: platforms.isEmpty ? "—" : PairingFingerprint.displayName(platforms, max: 64)),
+                    TileData(label: "This device",
+                             value: list.first { $0.id.lowercased() == thisDevice }.map { PairingFingerprint.displayName($0.name, max: 64) } ?? "Unknown"),
                     TileData(label: "Active", value: "\(list.filter { $0.status == "active" }.count)"),
                 ])
                 RouteList(routes: [.pairingApprovals])
@@ -892,7 +893,7 @@ private struct DeviceRow: View {
                 }
                 .buttonStyle(JVButtonStyle(kind: .secondary, size: .large))
                 .disabled(revoking != nil)
-                .accessibilityLabel(Text(verbatim: "Revoke \(name)"))
+                .accessibilityLabel(Text(verbatim: (revoking == device.id ? "Revoking " : "Revoke ") + name))
             }
         }
         .padding(.horizontal, 16)
@@ -950,7 +951,8 @@ struct PairingRequestsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if !biometrics {
-                UnavailableState(title: "Biometrics required", kind: .error, detail: BiometricLock.biometricsRequired, symbol: "faceid")
+                UnavailableState(title: "Biometrics required", kind: .error, detail: BiometricLock.biometricsRequired, symbol: "faceid",
+                                 errorLabel: "Approve and Deny are off on this iPhone")
             }
             // No Try again: Core rate-limits this list and the 30-second poll retries.
             if let state = UnavailableState.forSource(requests, title: "Pairing requests", symbol: "person.badge.key") { state }
@@ -1052,13 +1054,13 @@ struct PairingRequestsSection: View {
                 // Side by side when they fit, stacked otherwise (narrow width, large text).
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 10) {
-                        denyButton(item)
+                        denyButton(item, fill: false)
                         Spacer()
-                        approveButton(item, enabled: fingerprint != nil)
+                        approveButton(item, enabled: fingerprint != nil, fill: false)
                     }
                     VStack(spacing: 10) {
-                        approveButton(item, enabled: fingerprint != nil)
-                        denyButton(item)
+                        denyButton(item, fill: true)
+                        approveButton(item, enabled: fingerprint != nil, fill: true)
                     }
                 }
                 .disabled(busy != nil)
@@ -1067,16 +1069,16 @@ struct PairingRequestsSection: View {
         .jvCard(padding: 16, border: JV.negativeSolid)
     }
 
-    private func denyButton(_ item: PairingApprovalItem) -> some View {
+    private func denyButton(_ item: PairingApprovalItem, fill: Bool) -> some View {
         Button(role: .destructive) { Task { await decide(item, approve: false) } } label: {
-            Text("Deny").frame(maxWidth: typeSize.isAccessibilitySize ? .infinity : nil)
+            Text("Deny").frame(maxWidth: fill ? .infinity : nil)
         }
         .buttonStyle(JVButtonStyle(kind: .secondary, size: .large))
     }
 
-    private func approveButton(_ item: PairingApprovalItem, enabled: Bool) -> some View {
+    private func approveButton(_ item: PairingApprovalItem, enabled: Bool, fill: Bool) -> some View {
         Button { Task { await decide(item, approve: true) } } label: {
-            Text(busy == item.id ? "Verifying…" : "Approve").frame(maxWidth: typeSize.isAccessibilitySize ? .infinity : nil)
+            Text(busy == item.id ? "Verifying…" : "Approve").frame(maxWidth: fill ? .infinity : nil)
         }
         .buttonStyle(JVButtonStyle(size: .large))
         .disabled(!enabled)
