@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The onboarding steps that exist on iOS (D-Onboarding): connect to the Home
 /// Node, sign in (the first device also activates), approve this device on a
@@ -189,7 +190,9 @@ struct EnrollmentView: View {
         // An invalid address stays on this card with its reason instead of
         // leaving for the unreachable state, which has no address field.
         do { _ = try EndpointNormalizer.normalize(model.endpointText) } catch {
-            addressError = (error as? LocalizedError)?.errorDescription ?? "Enter a valid Home Node URL."
+            let message = (error as? LocalizedError)?.errorDescription ?? "Enter a valid Home Node URL."
+            addressError = message
+            UIAccessibility.post(notification: .announcement, argument: message)
             return
         }
         addressFocused = false
