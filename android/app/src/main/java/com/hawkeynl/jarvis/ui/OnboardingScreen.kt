@@ -30,7 +30,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -80,7 +79,7 @@ internal fun OnboardingScreen(state: JarvisUiState, actions: JarvisViewModel) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     // Local only: the user opened the Home Node step again from a later step.
-    var editingEndpoint by rememberSaveable { mutableStateOf(false) }
+    var editingEndpoint by remember { mutableStateOf(false) }
     LaunchedEffect(state.endpoint) { editingEndpoint = false }
     fun saveEndpoint() {
         // A changed endpoint ends the edit through the effect above; the same one would not.
@@ -223,11 +222,11 @@ internal fun OnboardingScreen(state: JarvisUiState, actions: JarvisViewModel) {
     }
 }
 
-/** Steps the sign-in flow really has; signing in opens the app, so there is no "done" step. */
 /** True when saving [draft] keeps the Home Node that is already [saved]. */
 internal fun savesSameEndpoint(draft: String, saved: HomeNodeEndpoint?): Boolean =
     saved != null && (HomeNodeEndpoint.parse(draft) as? EndpointValidation.Valid)?.endpoint == saved
 
+/** Steps the sign-in flow really has; signing in opens the app, so there is no "done" step. */
 internal val ONBOARDING_STEPS = listOf("Home Node", "Sign in", "Approve")
 
 /** Index into [ONBOARDING_STEPS]; only reads state, never changes the flow. */
