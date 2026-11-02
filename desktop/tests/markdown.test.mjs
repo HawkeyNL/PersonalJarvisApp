@@ -20,3 +20,10 @@ test("raw HTML and script URLs stay inert", () => {
   const html = renderMarkdown('<img src=x onerror=alert(1)> [x](javascript:alert(1)) ![y](javascript:alert(1))');
   assert.doesNotMatch(html, /<img|href="javascript/i);
 });
+
+test("tables get the Instrument table style in a scrolling card", () => {
+  const html = renderMarkdown("| Instrument | Today |\n| --- | ---: |\n| MES | +42.10 |");
+  assert.match(html, /^<div class="card md-table"><table class="tbl">/);
+  assert.match(html, /<\/table><\/div>\n$/);
+  assert.match(html, /<td style="text-align:right">\+42\.10<\/td>/);
+});

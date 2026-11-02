@@ -4,7 +4,7 @@ import {createMemoryHistory, createRouter} from "vue-router";
 
 import {NAV, PAGES, REDIRECTS, ariaCurrent, buildRoutes, tasksNode, tasksPath} from "../src/navigation.ts";
 
-const VIEWS = ["home", "conversations", "agents", "integrations", "health", "memory", "trading", "desk", "stocks", "stock", "positions", "memecoin", "tasks", "context", "settings", "soon"];
+const VIEWS = ["home", "agents", "integrations", "health", "memory", "trading", "desk", "stocks", "stock", "positions", "memecoin", "tasks", "context", "settings", "soon"];
 const stub = name => ({name, render: () => null});
 
 async function routerAt(path) {
@@ -51,7 +51,7 @@ test("pages map onto the existing views", async () => {
   assert.equal(await view("/approvals"), "tasks");
   assert.equal(await view("/settings"), "settings");
   assert.equal(await view("/devices"), "context");
-  for (const path of ["/conversations", "/agents", "/integrations", "/health"]) {
+  for (const path of ["/agents", "/integrations", "/health"]) {
     assert.equal(await view(path), path.slice(1), path);
   }
   // Approvals opens the Tasks view on the waiting node; Runs on its default.
@@ -62,7 +62,10 @@ test("pages map onto the existing views", async () => {
 test("sub-paths and hub-only pages highlight their parent entry", async () => {
   assert.equal((await routerAt("/trading/ibkr")).meta.nav, "dashboard");
   assert.equal((await routerAt("/trading/holdings")).meta.nav, "dashboard");
-  assert.equal((await routerAt("/conversations")).meta.nav, "chat");
+  // The old conversations page is the chat home now.
+  const conversations = await routerAt("/conversations?q=x#y");
+  assert.equal(conversations.path, "/");
+  assert.equal(conversations.meta.nav, "chat");
   assert.equal((await routerAt("/agents")).meta.nav, undefined);
 });
 

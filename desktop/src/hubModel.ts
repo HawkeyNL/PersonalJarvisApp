@@ -46,14 +46,6 @@ export function moodFactor(mood: Mood): number {
   return mood === "thinking" ? 0.4 : mood === "listening" ? 0.7 : 1;
 }
 
-/** Orb mood from what the app already knows: a reply in progress wins over
- *  an open microphone. */
-export function deriveMood(state: { thinking: boolean; listening: boolean }): Mood {
-  if (state.thinking) return "thinking";
-  if (state.listening) return "listening";
-  return "idle";
-}
-
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -108,15 +100,6 @@ export function summarize<T>(source: Availability<T>, ok: (value: T) => CardSumm
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-export function conversationsCard(source: Availability<{ updated_at: string }[]>, now: number): CardSummary {
-  return summarize(source, (items) => {
-    if (!items.length) return { lines: ["No conversations yet", "Start one above"], tone: "idle" };
-    const newest = items.reduce((a, b) => (Date.parse(b.updated_at) > Date.parse(a.updated_at) ? b : a));
-    const last = relativeTime(newest.updated_at, now);
-    return { lines: [`${countSince(items, 7, now)} this week`, last ? `Last: ${last}` : ""], tone: "ok" };
-  });
-}
-
 export function agentsCard(source: Availability<number>): CardSummary {
   return summarize(source, (count) => ({
     lines: [plural(count, "agent"), count ? "Configured on Core" : "None configured"],
@@ -125,15 +108,15 @@ export function agentsCard(source: Availability<number>): CardSummary {
 }
 
 export type CodingSession = { state: string };
-export function tasksCard(sessions: Availability<CodingSession[]>, pending: Availability<unknown[]>): CardSummary {
-  return summarize(sessions, (list) => {
+export function runsCard(source: Availability<CodingSession[]>): CardSummary {
+  return summarize(source, (list) => {
     const active = list.filter((s) => s.state === "active").length;
-    const waiting = pending.state === "ok" ? pending.value.length : null;
-    return {
-      lines: [`${active} active`, waiting === null ? "Approvals unavailable" : `${waiting} awaiting approval`],
-      tone: waiting ? "warn" : active ? "ok" : "idle",
-    };
+    return { lines: [`${active} active`, ""], tone: active ? "ok" : "idle" };
   });
+}
+
+export function approvalsCard(source: Availability<unknown[]>): CardSummary {
+  return summarize(source, (list) => ({ lines: [`${list.length} waiting`, ""], tone: list.length ? "warn" : "idle" }));
 }
 
 export type SoftwareItem = { name: string; present: boolean };
@@ -164,15 +147,6 @@ export function healthCard(online: boolean | null, registry: Availability<{ live
   if (!live) return { lines: ["Core ready", "Live vitals need newer Core"], tone: "ok" };
   const cpu = live.cpu_percent === null ? "" : ` · CPU ${Math.round(live.cpu_percent)}%`;
   return { lines: [`Up ${formatUptime(live.uptime_seconds)}`, `Core ready${cpu}`], tone: "ok" };
-}
-
-/** Text of the status pill under the orb. */
-export function statusPill(mood: Mood, online: boolean | null): { label: string; hint: string; tone: Tone } {
-  if (online === false) return { label: "Offline", hint: "Home Node unreachable", tone: "error" };
-  if (online === null) return { label: "Connecting", hint: "Reaching your Home Node…", tone: "idle" };
-  if (mood === "thinking") return { label: "Thinking", hint: "Working on your request…", tone: "ok" };
-  if (mood === "listening") return { label: "Listening", hint: "Speak now…", tone: "ok" };
-  return { label: "Ready", hint: "Type or talk to begin", tone: "ok" };
 }
 
 /** Host part of the Home Node origin for the footer; "" when not configured. */

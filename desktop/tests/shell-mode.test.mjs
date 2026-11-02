@@ -6,7 +6,7 @@ import {createMemoryHistory, createRouter} from "vue-router";
 import {PAGES, buildRoutes} from "../src/navigation.ts";
 import {latestWins, shellGuard, shellMode} from "../src/shellMode.ts";
 
-const VIEWS = ["home", "conversations", "agents", "integrations", "health", "memory", "trading", "desk", "stocks", "stock", "positions", "memecoin", "tasks", "context", "settings", "soon"];
+const VIEWS = ["home", "agents", "integrations", "health", "memory", "trading", "desk", "stocks", "stock", "positions", "memecoin", "tasks", "context", "settings", "soon"];
 const stub = name => ({name, render: () => null});
 
 function guardedRouter(read) {
