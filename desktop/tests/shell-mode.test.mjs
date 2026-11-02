@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import {createMemoryHistory, createRouter} from "vue-router";
 
 import {PAGES, buildRoutes} from "../src/navigation.ts";
-import {latestWins, shellGuard, shellMode} from "../src/shellMode.ts";
+import {latestWins, onboardingStep, shellGuard, shellMode} from "../src/shellMode.ts";
 
 const VIEWS = ["home", "agents", "integrations", "health", "memory", "trading", "desk", "stocks", "stock", "positions", "memecoin", "tasks", "context", "settings", "soon"];
 const stub = name => ({name, render: () => null});
@@ -98,4 +98,19 @@ test("the shell renders navigation only in app mode and the router uses the guar
   assert.doesNotMatch(home, /to="'?\/settings/);
   const router = await readFile(new URL("../src/router/index.ts", import.meta.url), "utf8");
   assert.match(router, /router\.beforeEach\(shellGuard\(/);
+});
+
+test("onboarding step: the forms win, then the approval wait; otherwise no step", () => {
+  const base = {backend: "ok", changingOrigin: false, accountMode: null, auth: "checking"};
+  assert.equal(onboardingStep({...base, backend: "unconfigured"}), 0);
+  assert.equal(onboardingStep({...base, changingOrigin: true, auth: "in"}), 0);
+  assert.equal(onboardingStep({...base, changingOrigin: true, accountMode: "login"}), 0);
+  assert.equal(onboardingStep({...base, accountMode: "login"}), 1);
+  assert.equal(onboardingStep({...base, accountMode: "activate"}), 1);
+  // The account form needs a reachable Home Node.
+  assert.equal(onboardingStep({...base, accountMode: "login", backend: "fout"}), null);
+  assert.equal(onboardingStep({...base, auth: "wachten"}), 2);
+  assert.equal(onboardingStep({...base, auth: "wachten", backend: "fout"}), 2);
+  for (const auth of ["checking", "in", "uit", "fout"]) assert.equal(onboardingStep({...base, auth}), null, auth);
+  assert.equal(onboardingStep({...base, backend: "fout", auth: "fout"}), null);
 });

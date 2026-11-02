@@ -143,6 +143,7 @@ const services = ref<Availability<{ services: Service[]; disks: Disk[] }>>({ sta
 const servicesBusy = ref(false);
 async function loadServices() {
   servicesBusy.value = true;
+  services.value = { state: "loading" };
   services.value = await loadOptional<{ services: Service[]; disks: Disk[] }>("/v1/system/services");
   servicesBusy.value = false;
 }
@@ -315,11 +316,11 @@ onUnmounted(() => {
           <div><dt>Last check</dt><dd>{{ checkedAt ? checkedAt.toLocaleTimeString() : "Checking…" }}</dd></div>
           <div><dt>Last error</dt><dd>{{ error ?? "None" }}</dd></div>
         </dl>
-        <ActivityState :state="audit" what="security events" @retry="loadAudit">
+        <ActivityState nested :state="audit" what="security events" @retry="loadAudit">
           <RowList title="Recent events" :rows="auditItems.slice(0, 5)" empty="No security events recorded." />
         </ActivityState>
       </div>
-      <ActivityState v-else :state="audit" what="security events" @retry="loadAudit">
+      <ActivityState v-else nested :state="audit" what="security events" @retry="loadAudit">
         <RowList title="Security events" :rows="auditItems" empty="No security events recorded." />
       </ActivityState>
     </template>
@@ -439,7 +440,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Services & disk -->
-    <ActivityState v-else :state="services" what="services" @retry="loadServices" v-slot="{ data }">
+    <ActivityState v-else nested :state="services" what="services" @retry="loadServices" v-slot="{ data }">
       <div class="np-cols">
         <div class="stack">
           <h3>Disks</h3>

@@ -7,7 +7,6 @@ export type Tone = "ok" | "idle" | "warn" | "error";
 /** Canvas badge class per tone (a neutral badge for idle). */
 export const TONE_BADGE: Record<Tone, string> = { ok: "pos", idle: "", warn: "neg", error: "dng" };
 
-
 /** Why an optional Core read failed. */
 export type LoadFailure = "signin" | "forbidden" | "network" | "failed";
 

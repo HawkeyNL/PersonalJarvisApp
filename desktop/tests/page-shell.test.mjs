@@ -57,7 +57,7 @@ test("account administration leaves revoking to the Devices page", () => {
 });
 
 test("the page title row sits on the text baseline", () => {
-  assert.match(read("components/PageShell.vue"), /\.title \{ display: flex; align-items: baseline;/);
+  assert.match(read("components/PageShell.vue"), /\.title \{[^}]*align-items: baseline/);
 });
 
 test("onboarding is a step card; setup and sign-in logic stay as they were", () => {

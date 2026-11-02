@@ -5,6 +5,7 @@ import { currentAuthStatus, currentShellMode, login, clearSession, listDevices, 
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
 import { locked, shownShellMode } from "../lock";
 import { composerFocus } from "../lockPolicy";
+import { onboardingStep } from "../shellMode";
 import JarvisConsole from "../components/JarvisConsole.vue";
 import ConversationList from "../components/chat/ConversationList.vue";
 import NavIcon, { type IconName } from "../components/NavIcon.vue";
@@ -221,11 +222,9 @@ const inApp = computed(() => shownShellMode.value === "app" && !gate.value);
 // app has no theme or done step): connect, sign in, and for a new device the
 // approval on another device. null: no step to show (connecting, an error).
 const STEPS = ["Connect", "Sign in", "Confirm"] as const;
-const step = computed<number | null>(() => {
-  if (backend.value === "unconfigured" || changingOrigin.value) return 0;
-  if (accountMode.value && backend.value === "ok") return 1;
-  return auth.value === "wachten" ? 2 : null;
-});
+const step = computed(() => onboardingStep({
+  backend: backend.value, changingOrigin: changingOrigin.value, accountMode: accountMode.value, auth: auth.value,
+}));
 const footerHost = computed(() => originHost(homeNodeConfig.value.origin));
 
 // Ctrl/⌘K (App.vue) and New focus the composer. The chat mounts once the
@@ -314,7 +313,7 @@ onBeforeUnmount(() => {
           <ol class="steps" aria-label="Setup steps">
             <li v-for="(label, i) in STEPS" :key="label" :class="{ reached: i <= step }" :aria-current="i === step ? 'step' : undefined">
               <span class="steps-bar" aria-hidden="true"></span>
-              <span class="t-xs">{{ label }}</span>
+              <span class="t-xs">{{ label }}<span v-if="i < step" class="sr-only"> (done)</span></span>
             </li>
           </ol>
 

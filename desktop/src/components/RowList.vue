@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useId } from "vue";
 import { TONE_BADGE, type Tone } from "../hubModel";
 
 // A titled list in a section body: one row per item with its detail, an
@@ -6,12 +7,13 @@ import { TONE_BADGE, type Tone } from "../hubModel";
 // "actions" slot, a heading action in "action".
 export type Row = { id: string; title: string; detail?: string; time?: string; tone: Tone; status: string };
 defineProps<{ title: string; rows: Row[]; empty: string }>();
+const headingId = useId();
 </script>
 
 <template>
-  <section class="rl" :aria-label="title">
+  <section class="rl" :aria-labelledby="headingId">
     <div class="rl-head">
-      <h3>{{ title }}</h3>
+      <h3 :id="headingId">{{ title }}</h3>
       <slot name="action" />
     </div>
     <ul v-if="rows.length" class="rl-rows">

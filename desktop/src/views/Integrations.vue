@@ -114,7 +114,7 @@ const readyOf = (cost: string) => `${countOf(brains.value.filter((b) => b.cost =
     <JvSegmented v-if="subTabs.length" v-model="sub" class="np-seg" :items="subTabs" :label="`${items.find((i) => i.id === selected)?.title} sections`" />
 
     <!-- AI brains + host tools (registry) -->
-    <ActivityState v-if="selected === 'brains'" :state="registry" what="the registry" @retry="load">
+    <ActivityState v-if="selected === 'brains'" nested :state="registry" what="the registry" @retry="load">
       <div v-if="sub === 'overview'" class="np-cols">
         <dl class="np-facts" aria-label="Brains at a glance">
           <div><dt>Active brain</dt><dd>{{ reg.active_brain || "Not reported" }}</dd></div>
@@ -131,7 +131,7 @@ const readyOf = (cost: string) => `${countOf(brains.value.filter((b) => b.cost =
 
     <!-- Models: owner policy + catalog -->
     <template v-else-if="selected === 'models'">
-      <ActivityState v-if="sub === 'overview'" :state="policy" what="the model policy" @retry="load">
+      <ActivityState v-if="sub === 'overview'" nested :state="policy" what="the model policy" @retry="load">
         <div class="np-cols">
           <dl class="np-facts" aria-label="Owner policy">
             <div><dt>Allowed</dt><dd>{{ allowed.length }}</dd></div>
@@ -144,7 +144,7 @@ const readyOf = (cost: string) => `${countOf(brains.value.filter((b) => b.cost =
       </ActivityState>
       <template v-else>
         <p class="np-note">Set up means Core has a key or local install for the provider. Whether Jarvis may use a model is the owner policy.</p>
-        <ActivityState :state="registry" what="the model catalog" @retry="load">
+        <ActivityState nested :state="registry" what="the model catalog" @retry="load">
           <RowList title="Catalog" :rows="catalogRows" empty="Core reported no models." />
         </ActivityState>
       </template>
