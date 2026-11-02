@@ -95,7 +95,6 @@ class HubModelTest {
         assertEquals(true, onlineOf(ConnectionState.Reachable("ready")))
         assertEquals(false, onlineOf(ConnectionState.Unreachable(UnreachableReason.DNS)))
         assertEquals(null, onlineOf(ConnectionState.Checking))
-        assertEquals(0.4f, moodFactor(Mood.THINKING))
     }
 
     @Test

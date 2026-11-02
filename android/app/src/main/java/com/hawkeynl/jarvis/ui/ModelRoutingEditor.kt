@@ -54,7 +54,7 @@ fun ModelRoutingEditor(controller: ModelControlService) {
     val editable = mode == RoutingMode.EDITABLE && reported != null && !busy
     val enabled = current?.models?.filter { it.enabled }?.map { "${it.provider}/${it.model}" }?.toSet().orEmpty()
 
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
         SectionLabel("Model routing")
         when {
             loadFailed -> Unavailable("Model routing", JvIcon.LAYERS, kind = UnavailableKind.ERROR,
@@ -85,7 +85,7 @@ fun ModelRoutingEditor(controller: ModelControlService) {
 
                 if (canApply) issue?.let { ErrorText(it, live = false) }
                 if (notice.isNotEmpty()) MutedText(notice)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
                     GhostButton("Refresh", { reload() }, enabled = !busy)
                     GhostButton("Discard", { draft = reported ?: Routing() }, enabled = editable && dirty)
                 }
@@ -96,15 +96,31 @@ fun ModelRoutingEditor(controller: ModelControlService) {
 
     if (confirming) {
         val relaxed = relaxation(current?.let(::currentRouting), draft)
-        AlertDialog(onDismissRequest = { confirming = false }, title = { Text("Replace model routing?") },
+        AlertDialog(onDismissRequest = { confirming = false }, title = { Text("Replace model routing?", style = MaterialTheme.typography.titleLarge) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("This replaces the routing for all devices${if (!draft.paidApiAllowed) " and turns paid APIs off" else ""}" +
-                        "${if (draft.researchWebSearch) ". Research may use web search" else ""}. Running requests are not cancelled.")
-                    Tier.entries.forEach { tier ->
-                        Text("${tier.label}: ${draft.tiers[tier]?.chain?.joinToString(" → ") { it.label } ?: "built-in order"}")
+                Column(verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+                    Text(
+                        "This replaces the routing for all devices${if (!draft.paidApiAllowed) " and turns paid APIs off" else ""}" +
+                            "${if (draft.researchWebSearch) ". Research may use web search" else ""}. Running requests are not cancelled.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Column(
+                        Modifier.fillMaxWidth().background(JvTheme.colors.bgSunken, JvShapes.md).padding(JvSpace.md),
+                        verticalArrangement = Arrangement.spacedBy(JvSpace.xs),
+                    ) {
+                        Tier.entries.forEach { tier ->
+                            Text(
+                                "${tier.label}: ${draft.tiers[tier]?.chain?.joinToString(" → ") { it.label } ?: "built-in order"}",
+                                color = JvTheme.colors.textPrimary, style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                     }
-                    if (relaxed.any()) Text("This can increase cost or use web search, so Android asks you to authenticate again.")
+                    if (relaxed.any()) {
+                        Text(
+                            "This can increase cost or use web search, so Android asks you to authenticate again.",
+                            color = JvTheme.colors.negativeText, style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                 }
             },
             dismissButton = { TextButton(onClick = { confirming = false }) { Text("Cancel") } },
@@ -130,7 +146,7 @@ fun ModelRoutingEditor(controller: ModelControlService) {
 
 @Composable
 private fun SwitchRow(title: String, detail: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(JvSpace.md)) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleSmall)
             MutedText(detail)
@@ -145,9 +161,9 @@ private fun TierEditor(
     options: List<ModelEntry>, menuOpen: Boolean, setMenu: (Boolean) -> Unit, onChange: (TierRoute?) -> Unit,
 ) {
     Column(
-        Modifier.fillMaxWidth().background(JvTheme.colors.bgSunken, JvShapes.md).padding(14.dp)
+        Modifier.fillMaxWidth().background(JvTheme.colors.bgSunken, JvShapes.md).padding(JvSpace.md)
             .semantics { contentDescription = "${tier.label} tier" },
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(JvSpace.sm),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -159,7 +175,7 @@ private fun TierEditor(
         }
         if (route == null) { MutedText("Built-in order."); return@Column }
         route.chain.forEachIndexed { i, entry ->
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(JvSpace.xs)) {
                 Text("${i + 1}", Modifier.width(18.dp), color = JvTheme.colors.accentText, style = MaterialTheme.typography.bodySmall.tabular())
                 Column(Modifier.weight(1f)) {
                     Text(entry.model, style = MaterialTheme.typography.bodySmall)

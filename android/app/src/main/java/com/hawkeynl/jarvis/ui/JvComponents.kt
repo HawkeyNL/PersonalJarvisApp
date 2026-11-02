@@ -195,51 +195,6 @@ fun GhostButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier
     }
 }
 
-/** Detail panel of a node page: header with icon, title, status, description,
- *  secondary detail line and optional action, then the body. */
-@Composable
-fun Panel(
-    icon: JvIcon,
-    title: String,
-    tone: Tone,
-    status: String,
-    modifier: Modifier = Modifier,
-    description: String? = null,
-    quote: String? = null,
-    action: (@Composable () -> Unit)? = null,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    val c = JvTheme.colors
-    Column(
-        modifier
-            .fillMaxWidth()
-            .shadowBorder(JvShapes.lg)
-            .clip(JvShapes.lg)
-            .background(c.bgSurface)
-            .padding(JvSpace.lg),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).clip(JvShapes.md).background(c.accentSubtle), contentAlignment = Alignment.Center) {
-                JvIconView(icon, tint = c.accentText, size = 22.dp)
-            }
-            Spacer(Modifier.width(JvSpace.md))
-            Column(Modifier.weight(1f)) {
-                Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-                StatusDot(tone, status, modifier = Modifier.padding(top = JvSpace.xs))
-            }
-        }
-        if (description != null || quote != null) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                description?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                quote?.let { Text(it, color = c.textSecondary, style = MaterialTheme.typography.bodySmall) }
-            }
-        }
-        action?.invoke()
-        content()
-    }
-}
-
 data class ActivityItem(
     val id: String,
     val icon: JvIcon,
@@ -547,19 +502,6 @@ fun Unavailable(
             }
         }
         onRetry?.let { GhostButton("Try again", it) }
-    }
-}
-
-/** Jarvis name with its ring, as in the hub's top-left corner. */
-@Composable
-fun Wordmark(modifier: Modifier = Modifier) {
-    Row(modifier.semantics(mergeDescendants = true) { contentDescription = "Jarvis" }, verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(24.dp).border(3.dp, JvTheme.colors.accentSolid, CircleShape))
-        Spacer(Modifier.width(10.dp))
-        Column {
-            Text("Jarvis", style = MaterialTheme.typography.titleLarge)
-            Text("Your second mind", color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.labelSmall)
-        }
     }
 }
 
