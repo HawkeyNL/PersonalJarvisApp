@@ -1,11 +1,11 @@
-// Pure presentation helpers for the redesigned shell (hub, node pages).
+// Pure presentation helpers for the shell (home, node pages).
 // No Vue or Tauri imports, so behavioral tests can load this file directly.
 
 /** Status colour of a dot/label. Every tone is always paired with text. */
 export type Tone = "ok" | "idle" | "warn" | "error";
 
-/** What the orb shows. */
-export type Mood = "idle" | "listening" | "thinking";
+/** Canvas badge class per tone (a neutral badge for idle). */
+export const TONE_BADGE: Record<Tone, string> = { ok: "pos", idle: "", warn: "neg", error: "dng" };
 
 /** Why an optional Core read failed. */
 export type LoadFailure = "signin" | "forbidden" | "network" | "failed";
@@ -39,11 +39,6 @@ export function failureText(reason: LoadFailure, forbidden = "Turned off in Core
     case "network": return "Check the connection to your Home Node.";
     case "failed": return "Core returned an error. Try again later.";
   }
-}
-
-/** Animation-duration multiplier per mood (export: x1 / x0.7 / x0.4). */
-export function moodFactor(mood: Mood): number {
-  return mood === "thinking" ? 0.4 : mood === "listening" ? 0.7 : 1;
 }
 
 const MINUTE = 60_000;
@@ -160,11 +155,3 @@ export function deepLinkRoute(url: string): string | null {
   return null;
 }
 
-/** Scale factor that fits a box laid out at `design` size into `room`,
- *  clamped to [min, max]; 1 while either size is unknown (not laid out). */
-export function fitScale(
-  room: { width: number; height: number }, design: { width: number; height: number }, max = 1, min = 0.4,
-): number {
-  if (!(room.width > 0 && room.height > 0 && design.width > 0 && design.height > 0)) return 1;
-  return Math.min(max, Math.max(min, Math.min(room.width / design.width, room.height / design.height)));
-}

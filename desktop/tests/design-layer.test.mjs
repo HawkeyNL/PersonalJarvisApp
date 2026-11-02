@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -45,4 +45,33 @@ test("bare button rules stay neutral: no global fill", () => {
 test("component layer uses token variables, not colour literals", () => {
   const css = stripComments(sheets["components.css"]);
   assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b|\b(rgba?|hsla?|oklch|oklab|lab|lch)\(/i);
+});
+
+// Colours come from tokens.css only. DevDataToggle is dev-build chrome, kept
+// plain on purpose so it never reads as part of the design.
+const COLOUR_ALLOWED = new Set(["tokens.css", join("components", "trading", "DevDataToggle.vue")]);
+const colourLiteral = /(^|[^\w&/])#[0-9a-f]{3,8}(?![\w-])|\b(rgba?|hsla?)\(/i;
+
+test("no hex or rgb colour literals outside tokens.css", () => {
+  for (const f of sources) {
+    if (COLOUR_ALLOWED.has(f)) continue;
+    const text = stripComments(readFileSync(join(srcDir, f), "utf8")).replace(/<!--[\s\S]*?-->/g, "");
+    assert.doesNotMatch(text, colourLiteral, f);
+  }
+  // The check itself catches what it should.
+  for (const bad of ["color: #fff;", "a{background:#1c65c8}", "x: rgba(0, 0, 0, .2)", "rgb(0 0 0 / 20%)", "hsl(0 0% 0%)"]) assert.match(bad, colourLiteral, bad);
+  for (const ok of ['href="#main"', "#app {", "&#8203;", "var(--accent-solid)"]) assert.doesNotMatch(ok, colourLiteral, ok);
+});
+
+test("the legacy aliases are gone: neither defined nor used", () => {
+  const legacy = /--(accent-rgb|accent-2|text-[0-5]|line-a\d+|r-(8|10|12|14|16|22|24|26)|fs-\d+|font-display|font-body|muted|panel|panel-bg|tile-bg|card-bg|sat-bg|sel-bg|field-bg|glow-sm|idle|warn|danger|text|mono|bg|line|accent)\b(?!-)/;
+  for (const f of sources) assert.doesNotMatch(stripComments(readFileSync(join(srcDir, f), "utf8")), legacy, f);
+});
+
+test("the orb-era components are retired and nothing imports them", () => {
+  const retired = ["JvOrb", "JvPanel", "JvTile", "JvActivityList", "JvUnavailable", "JvStatusDot"];
+  for (const name of retired) assert.equal(existsSync(join(srcDir, "components", "jv", `${name}.vue`)), false, name);
+  assert.equal(existsSync(join(srcDir, "fitScale.ts")), false);
+  const code = readdirSync(srcDir, { recursive: true }).filter((f) => /\.(ts|vue)$/.test(f));
+  for (const f of code) assert.doesNotMatch(readFileSync(join(srcDir, f), "utf8"), new RegExp(`${retired.join("|")}|fitScale|moodFactor`), f);
 });

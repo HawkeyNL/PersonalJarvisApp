@@ -2,7 +2,6 @@
 import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getJsonAuth } from "../api";
-import JvUnavailable from "./jv/JvUnavailable.vue";
 import { platformCapabilities } from "../platform";
 import {
   MAX_CHAIN, TIERS, canonicalRouting, candidates, isMetered, isSubscription, meteredAfterSubscription, moveEntry,
@@ -89,11 +88,9 @@ onMounted(reload);
 
 <template>
   <section class="routing">
-    <JvUnavailable v-if="loadFailed" title="Model routing" kind="error" icon="branch"
-      detail="Model policy unreachable. Check the connection and session." />
+    <p v-if="loadFailed" class="state" role="alert"><strong>Could not load model routing</strong>Model policy unreachable. Check the connection and session.</p>
     <p v-else-if="!policy" class="muted" role="status">Loading routing…</p>
-    <JvUnavailable v-else-if="mode === 'unsupported'" title="Model routing" kind="core-update" icon="branch"
-      detail="This Core cannot change routing from the app. Update Core to choose the model order per tier." />
+    <p v-else-if="mode === 'unsupported'" class="state" role="status"><strong>Requires a newer Core</strong>This Core cannot change routing from the app. Update Core to choose the model order per tier.</p>
     <template v-else>
       <p class="muted small">
         Routing only orders models per tier. A model still has to be allowed, within budget and healthy;
@@ -191,29 +188,31 @@ onMounted(reload);
 <style scoped>
 .routing { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .routing p { margin: 0; overflow-wrap: anywhere; }
-.muted { color: var(--text-4); }
-.small, small { font-size: var(--fs-12); line-height: 1.5; }
-small { display: block; color: var(--text-5); }
-.warn { color: var(--warn); }
-.err { color: var(--danger); }
+.muted { color: var(--text-secondary); }
+.state { padding: 16px; border-radius: var(--r-md); background: var(--bg-sunken); font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+.state strong { display: block; margin-bottom: 2px; color: var(--text-primary); }
+.small, small { font-size: 12px; line-height: 1.5; }
+small { display: block; color: var(--text-secondary); }
+.warn { color: var(--negative-text); }
+.err { color: var(--danger-text); }
 .switch, .check { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
-.switch input, .check input { margin-top: 3px; accent-color: var(--accent); }
+.switch input, .check input { margin-top: 3px; accent-color: var(--accent-solid); }
 .tiers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-.tier { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--line-a30); border-radius: var(--r-12); background: var(--tile-bg); }
+.tier { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-surface); }
 .tier header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
-h4 { margin: 0; font-size: var(--fs-14); font-weight: 600; color: var(--text-0); }
+h4 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-primary); }
 ol { list-style: none; margin: 0; padding: 0; }
-li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line-a18); }
-.pos { flex: none; width: 22px; color: var(--accent); font-variant-numeric: tabular-nums; }
-.name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-13); }
+li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.pos { flex: none; width: 22px; color: var(--accent-text); font-variant-numeric: tabular-nums; }
+.name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
 li button { flex: none; }
 .add { display: flex; gap: 8px; }
 .add select { flex: 1; min-width: 0; padding: 8px; }
 .actions { display: flex; gap: 12px; flex-wrap: wrap; }
 .model-confirm { position: fixed; inset: 0; z-index: 100; background: var(--bg-scrim); display: grid; place-items: center; padding: 20px; }
 .model-confirm > div { max-width: 560px; background: var(--bg-raised); border: 1px solid var(--border); padding: 24px; border-radius: 12px; }
-.model-confirm p, .summary { color: var(--text-4); overflow-wrap: anywhere; }
-.summary { padding-left: 18px; font-size: var(--fs-12); }
+.model-confirm p, .summary { color: var(--text-secondary); overflow-wrap: anywhere; }
+.summary { padding-left: 18px; font-size: 12px; }
 .summary li { display: list-item; border: none; padding: 2px 0; }
 @media (max-width: 1099px) { .tiers { grid-template-columns: minmax(0, 1fr); } }
 </style>

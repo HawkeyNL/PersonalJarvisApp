@@ -25,6 +25,18 @@ export function shellGuard(read: () => Promise<ShellState>) {
   };
 }
 
+/** The onboarding step on the home gate (canvas D-Onboarding): 0 connect,
+ *  1 sign in or activate, 2 waiting for approval on another device; null when
+ *  no step shows (connecting, or an error notice). The setup and sign-in
+ *  forms win, as the gate always did. */
+export function onboardingStep(state: {
+  backend: string; changingOrigin: boolean; accountMode: string | null; auth: string;
+}): 0 | 1 | 2 | null {
+  if (state.backend === "unconfigured" || state.changingOrigin) return 0;
+  if (state.accountMode && state.backend === "ok") return 1;
+  return state.auth === "wachten" ? 2 : null;
+}
+
 /** For async reads that can resolve out of order: a value lands only when no
  *  read or write begun after it has landed already. */
 export function latestWins<T>(set: (value: T) => void) {

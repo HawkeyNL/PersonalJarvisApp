@@ -67,7 +67,7 @@ const two = (n: number) => String(n).padStart(2, "0");
   border-radius: 18px;
   padding: 14px 16px 12px;
   background: var(--bg-surface);
-  border: 1px solid var(--accent);
+  border: 1px solid var(--accent-text);
   box-shadow: var(--shadow-pop);
   backdrop-filter: blur(22px) saturate(1.3);
   -webkit-backdrop-filter: blur(22px) saturate(1.3);
@@ -76,10 +76,10 @@ const two = (n: number) => String(n).padStart(2, "0");
   display: flex;
   align-items: center;
   gap: 8px;
-  font-family: var(--mono);
+  font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.16em;
-  color: var(--accent);
+  color: var(--accent-text);
   margin-bottom: 10px;
 }
 .lead :deep(svg) {
@@ -94,12 +94,12 @@ const two = (n: number) => String(n).padStart(2, "0");
 }
 .who {
   font-size: 14px;
-  color: var(--text);
+  color: var(--text-primary);
 }
 .who .plat {
-  font-family: var(--mono);
+  font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--muted);
+  color: var(--text-secondary);
   margin: 0 4px;
 }
 .actions {
@@ -125,7 +125,7 @@ const two = (n: number) => String(n).padStart(2, "0");
 .deny {
   background: transparent;
   border: 1px solid var(--border);
-  color: var(--muted);
+  color: var(--text-secondary);
   font-weight: 500;
 }
 .deny:hover:not(:disabled) {
@@ -139,7 +139,7 @@ const two = (n: number) => String(n).padStart(2, "0");
 }
 .pick p {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--text-secondary);
   margin: 6px 0 8px;
 }
 .choices {
@@ -150,12 +150,12 @@ const two = (n: number) => String(n).padStart(2, "0");
   flex: 1;
   border-radius: 11px;
   padding: 10px 0;
-  font-family: var(--mono);
+  font-family: var(--font-mono);
   font-size: 22px;
   font-weight: 700;
   background: transparent;
-  border: 1px solid var(--accent);
-  color: var(--text);
+  border: 1px solid var(--accent-text);
+  color: var(--text-primary);
   cursor: pointer;
 }
 .err {
@@ -164,7 +164,7 @@ const two = (n: number) => String(n).padStart(2, "0");
   margin: 6px 0 0;
 }
 .hint {
-  color: var(--muted);
+  color: var(--text-secondary);
   font-size: 11px;
   margin: 8px 0 0;
 }

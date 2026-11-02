@@ -28,17 +28,6 @@ export function sessionState(state: string): [Tone, string] {
   return Object.prototype.hasOwnProperty.call(SESSION_STATES, state) ? SESSION_STATES[state] : ["idle", state || "Unknown"];
 }
 
-/** Open (running or paused) vs finished coding sessions, order kept. */
-export function splitSessions<T extends { state: string }>(list: T[]): { open: T[]; finished: T[] } {
-  const open = list.filter((s) => s.state === "active" || s.state === "suspended");
-  return { open, finished: list.filter((s) => !open.includes(s)) };
-}
-
-/** Tone of an agent audit outcome ("ok", "denied", "error", …). */
-export function outcomeTone(outcome: string): Tone {
-  return outcome === "ok" ? "ok" : outcome === "error" ? "error" : outcome === "denied" ? "warn" : "idle";
-}
-
 // --- Integrations --------------------------------------------------------------
 
 /** "3 of 9" style count of items with a truthy flag. */

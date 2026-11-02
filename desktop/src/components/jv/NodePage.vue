@@ -1,132 +1,96 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import NavIcon, { type IconName } from "../NavIcon.vue";
 import PageShell from "../PageShell.vue";
-import JvOrb from "./JvOrb.vue";
-import JvStatusDot from "./JvStatusDot.vue";
-import type { Mood, Tone } from "../../hubModel";
-import { useFitScale } from "../../fitScale";
+import { TONE_BADGE, type Tone } from "../../hubModel";
 
-// Shared layout of every module page: small orb with three satellites on each
-// side and the detail panel (default slot) for the selected satellite. The
-// page fills the window: the stage scales into the room left above the
-// panel, and only the panel body scrolls.
-export type NodeItem = { id: string; label: string; title: string; icon: IconName; tone: Tone; status: string; description: string };
-const props = withDefaults(defineProps<{ title: string; subtitle: string; items: NodeItem[]; modelValue: string; mood?: Mood }>(), {
-  mood: "idle",
-});
-const emit = defineEmits<{ "update:modelValue": [id: string] }>();
-const selected = computed({ get: () => props.modelValue, set: (id: string) => emit("update:modelValue", id) });
-const room = ref<HTMLElement | null>(null);
-const stage = ref<HTMLElement | null>(null);
-const scale = useFitScale(room, stage, () => 1.6);
+// Shared layout of the module pages (Agents, Integrations, System health), as
+// the Settings page: the sections with their status on the left, the selected
+// section as a card on the right. A page with nothing to select shows only its
+// content (the default slot).
+export type NodeItem = { id: string; title: string; icon: IconName; tone: Tone; status: string; description: string; meta?: string };
+const props = defineProps<{ title: string; subtitle: string; items: NodeItem[] }>();
+const selected = defineModel<string>({ required: true });
+const current = computed(() => props.items.find((item) => item.id === selected.value));
 </script>
 
 <template>
-  <PageShell class="node-page" :title="title" :subtitle="subtitle">
+  <PageShell :title="title" :subtitle="subtitle">
+    <div v-if="current" class="np-layout">
+      <nav class="np-sections" :aria-label="`${title} sections`">
+        <button v-for="item in items" :key="item.id" type="button" class="np-section"
+          :aria-current="item.id === selected ? 'true' : undefined" @click="selected = item.id">
+          <span class="tile" :class="{ acc: item.id === selected }" aria-hidden="true"><NavIcon :name="item.icon" /></span>
+          <span class="np-section-text">
+            <span class="np-section-title">{{ item.title }}</span>
+            <span class="np-section-status t-xs t-2"><span class="np-dot" :class="item.tone" aria-hidden="true"></span>{{ item.status }}</span>
+          </span>
+        </button>
+      </nav>
 
-    <div ref="room" class="stage-room" :style="{ '--fit': scale }">
-      <div ref="stage" class="stage">
-        <svg v-if="items.length" class="wires" viewBox="0 0 981 363" aria-hidden="true">
-          <g transform="translate(-234 -97)">
-            <circle cx="725" cy="288" r="168" fill="none" class="ring" stroke-width="1.5" />
-            <circle cx="725" cy="288" r="180" fill="none" class="a20" stroke-width="1" />
-            <circle cx="725" cy="288" r="212" fill="none" class="a22" stroke-width="1" stroke-dasharray="1 6" />
-            <path d="M596.1 180.2L538 150M557.0 284.8L512 268M578.5 370.2L527 396M853.5 179.7L912 150M893.0 285.8L934 268M871.5 370.3L920 398M725 456V462" class="a55" stroke-width="1" />
-            <g class="fill-accent"><circle cx="538" cy="150" r="2.5" /><circle cx="512" cy="268" r="2.5" /><circle cx="527" cy="396" r="2.5" /><circle cx="912" cy="150" r="2.5" /><circle cx="934" cy="268" r="2.5" /><circle cx="920" cy="398" r="2.5" /></g>
-            <g class="hub-node" stroke-width="1.4"><circle cx="596.1" cy="180.2" r="6.5" /><circle cx="557" cy="284.8" r="6.5" /><circle cx="578.5" cy="370.2" r="6.5" /><circle cx="853.5" cy="179.7" r="6.5" /><circle cx="893" cy="285.8" r="6.5" /><circle cx="871.5" cy="370.3" r="6.5" /><circle cx="725" cy="456" r="5" /></g>
-            <g class="fill-accent"><circle cx="596.1" cy="180.2" r="2" /><circle cx="557" cy="284.8" r="2" /><circle cx="578.5" cy="370.2" r="2" /><circle cx="853.5" cy="179.7" r="2" /><circle cx="893" cy="285.8" r="2" /><circle cx="871.5" cy="370.3" r="2" /><circle cx="725" cy="456" r="1.6" /></g>
-          </g>
-        </svg>
-        <JvOrb class="orb" :size="290" :mood="mood" />
-
-        <div class="sats" role="group" :aria-label="title">
-          <button
-            v-for="(item, i) in items.slice(0, 6)"
-            :key="item.id"
-            type="button"
-            class="sat"
-            :class="['s' + i, { on: item.id === selected }]"
-            :aria-current="item.id === selected ? 'true' : undefined"
-            @click="selected = item.id"
-          >
-            <span class="icon" aria-hidden="true"><NavIcon :name="item.icon" /></span>
-            <span class="text">
-              <span class="name">{{ item.title }}</span>
-              <JvStatusDot :tone="item.tone" :label="item.status" :size="11" class="status" />
-              <span class="desc">{{ item.description }}</span>
-            </span>
-          </button>
-        </div>
-      </div>
+      <section class="card np-panel" aria-labelledby="np-panel-title">
+        <header class="np-head">
+          <div class="np-head-text">
+            <div class="np-title">
+              <h2 id="np-panel-title">{{ current.title }}</h2>
+              <span class="badge" :class="TONE_BADGE[current.tone]">{{ current.status }}</span>
+            </div>
+            <p class="t-sm t-2">{{ current.description }}</p>
+            <p v-if="current.meta" class="t-xs t-2 np-meta">{{ current.meta }}</p>
+          </div>
+          <div v-if="$slots.actions" class="np-actions"><slot name="actions" /></div>
+        </header>
+        <slot />
+      </section>
     </div>
-
-    <div class="detail">
-      <slot />
-    </div>
+    <slot v-else />
   </PageShell>
 </template>
 
 <style scoped>
-.node-page { height: 100%; overflow: hidden; }
-
-/* The stage keeps its design coordinates and is scaled into this room. */
-.stage-room { position: relative; flex: none; height: clamp(240px, 37vh, 600px); }
-.stage { position: absolute; left: 50%; top: 50%; width: 981px; height: 363px; transform: translate(-50%, -50%) scale(var(--fit, 1)); }
-.wires { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.a20 { stroke: rgba(var(--accent-rgb), 0.2); }
-.a22 { stroke: rgba(var(--accent-rgb), 0.22); }
-.a55 { stroke: rgba(var(--accent-rgb), 0.55); }
-.fill-accent { fill: var(--accent); }
-.ring { stroke: var(--accent-border); }
-.hub-node { fill: var(--bg-surface); stroke: var(--accent-border); }
-.orb { position: absolute !important; left: 346px; top: 46px; }
-
-.sat {
-  position: absolute; width: 277px; height: 102px; box-sizing: border-box;
-  display: flex; align-items: center; gap: 24px; padding: 0 22px 0 20px; text-align: left;
-  border-radius: var(--r-24); border: 1px solid var(--line-a45); background: var(--sat-bg);
-  box-shadow: 0 0 22px rgba(var(--accent-rgb), 0.12); color: var(--text-primary); font: inherit; font-weight: 400; cursor: pointer;
+.np-layout { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+.np-sections { flex: 0 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.np-section {
+  display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 10px; border-radius: var(--r-md);
+  color: var(--text-primary); text-align: left; transition: background-color var(--d-hover) ease;
 }
-.sat:hover { filter: none; border-color: rgba(var(--accent-rgb), 0.7); }
-.sat.on { border: 2px solid var(--accent); background: var(--sel-bg); box-shadow: 0 0 28px rgba(var(--accent-rgb), 0.45), inset 0 0 18px rgba(var(--accent-rgb), 0.12); }
-.s0 { left: 25px; top: 0; }
-.s1 { left: 0; top: 119px; }
-.s2 { left: 11px; top: 238px; }
-.s3 { left: 682px; top: 0; }
-.s4 { left: 704px; top: 120px; }
-.s5 { left: 694px; top: 238px; }
-.icon {
-  width: 66px; height: 66px; flex: none; box-sizing: border-box; display: grid; place-items: center;
-  border-radius: 50%; border: 1.5px solid rgba(var(--accent-rgb), 0.7); color: var(--accent);
-  box-shadow: inset 0 0 14px rgba(var(--accent-rgb), 0.18);
+.np-section[aria-current="true"] { background: var(--bg-selected); }
+.np-section[aria-current="true"] .np-section-title { color: var(--accent-text); font-weight: 600; }
+.np-section:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) {
+  .np-section:not([aria-current="true"]):hover { background: var(--bg-hover); }
 }
-.on .icon { border-color: rgba(var(--accent-rgb), 0.85); }
-.icon :deep(svg) { width: 30px; height: 30px; stroke-width: 1.6; }
-.text { min-width: 0; display: flex; flex-direction: column; }
-.name { font-size: var(--fs-15); font-weight: 500; letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.status { margin-top: 5px; font-size: var(--fs-13); }
-.desc { margin-top: 6px; font-size: var(--fs-12); line-height: 1.35; color: var(--text-3); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.np-section .tile :deep(svg) { width: 18px; height: 18px; }
+.np-section-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.np-section-title { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-section-status { display: flex; align-items: center; gap: 6px; overflow-wrap: anywhere; }
+.np-dot { flex: none; width: 6px; height: 6px; border-radius: var(--r-pill); background: var(--text-disabled); }
+.np-dot.ok { background: var(--positive-solid); }
+.np-dot.warn { background: var(--negative-solid); }
+.np-dot.error { background: var(--danger-solid); }
 
-.sat:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.np-panel { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+.np-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.np-head-text { min-width: 0; flex: 1 1 320px; display: flex; flex-direction: column; gap: 6px; }
+.np-head-text p { margin: 0; max-width: 72ch; }
+.np-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.np-title h2 { margin: 0; overflow-wrap: anywhere; }
+.np-meta { overflow-wrap: anywhere; }
+.np-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+</style>
 
-.detail {
-  flex: 1; min-height: 0; display: flex; flex-direction: column;
-  width: min(max(1148px, 62vw), 100%); margin: 0 auto;
-}
-/* The panel shrinks to the space left; its body scrolls (see JvPanel). */
-.detail > :deep(*) { flex: 0 1 auto; min-height: 0; }
-
-@media (max-width: 1099px), (max-height: 759px) {
-  .stage-room { height: auto; margin: 0; }
-  .stage { position: static; width: auto; height: auto; padding: 18px 16px 0; transform: none; }
-  .wires, .orb { display: none; }
-  .sats { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
-  .sat { position: static; width: auto; height: auto; min-height: 76px; padding: 10px 14px; gap: 12px; border-radius: var(--r-16); }
-  .icon { width: 44px; height: 44px; }
-  .icon :deep(svg) { width: 22px; height: 22px; }
-  .name { font-size: 14px; }
-  .desc { display: none; }
-  .detail { width: auto; margin: 0; }
-}
+<style>
+/* Shared by the node pages' section bodies (Agents, Integrations, Health). */
+.np-facts { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+.np-facts > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: var(--r-md); background: var(--bg-sunken); }
+.np-facts dt { font-size: 12px; line-height: 1.4; color: var(--text-secondary); }
+.np-facts dd { margin: 0; font-size: 14px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.np-seg { align-self: flex-start; max-width: 100%; }
+.np-seg.jv-seg > button { flex: 0 0 auto; }
+.np-cols { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.np-cols > * { flex: 1 1 320px; min-width: 0; }
+.np-note { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-secondary); max-width: 72ch; }
+.np-note.err { color: var(--danger-text); overflow-wrap: anywhere; }
+.np-empty { margin: 0; padding: 16px; border-radius: var(--r-md); background: var(--bg-sunken); font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+.np-empty strong { display: block; margin-bottom: 2px; font-weight: 600; color: var(--text-primary); }
 </style>

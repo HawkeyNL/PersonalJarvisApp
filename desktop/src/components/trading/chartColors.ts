@@ -6,6 +6,7 @@
 /** Chart role -> design token. */
 export const CHART_TOKENS = {
   accent: "--chart-accent",
+  soft: "--accent-border",
   up: "--positive-solid",
   down: "--negative-solid",
   ma: "--chart-ma",

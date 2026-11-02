@@ -106,13 +106,6 @@ export const REDIRECTS: Record<string, string> = {
 /** aria-current for a sidebar entry, given the route's meta.nav. */
 export const ariaCurrent = (itemId: string, nav: unknown) => (itemId === nav ? "page" : undefined);
 
-/** Tasks serves two entries: its waiting node is Approvals, every other node is Runs. */
-export const tasksPath = (node: string) => (node === "waiting" ? "/approvals" : "/runs");
-/** Node to show once the Tasks route changes: the route's own node, else the
- *  current choice, except that leaving Approvals leaves the waiting node. */
-export const tasksNode = (routeNode: string | undefined, selected: string) =>
-  routeNode ?? (selected === "waiting" ? "active" : selected);
-
 export function buildRoutes(views: Record<View, RouteComponent>): RouteRecordRaw[] {
   return [
     ...PAGES.map(({ path, name, view, nav, props }): RouteRecordRaw =>

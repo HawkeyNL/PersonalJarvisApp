@@ -1,22 +1,19 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onBeforeUnmount } from "vue";
-import { accountStatus, listDevices, revokeDevice, setAccountPassword, type DeviceItem } from "../auth";
+import { accountStatus, setAccountPassword } from "../auth";
 import { platformCapabilities } from "../platform";
-// Only a Mac signs account changes, behind Touch ID; other desktops list devices.
+// Only a Mac signs account changes, behind Touch ID. Devices are revoked on the
+// Devices page, which also refuses this device and the last approver.
 const signer = computed(() => platformCapabilities.value.supportsBiometricSigning);
-const devices = ref<DeviceItem[]>([]);
 const passwordRequired = ref(true);
 const currentPassword = ref("");
 const newPassword = ref("");
-const confirmation = ref<DeviceItem | null>(null);
 const busy = ref(false);
 const message = ref("");
 async function refresh() {
   try {
-    const [account, knownDevices] = await Promise.all([accountStatus(), listDevices()]);
-    passwordRequired.value = account.password_required;
-    devices.value = knownDevices;
-  } catch { message.value = "Sign in to see your devices."; }
+    passwordRequired.value = (await accountStatus()).password_required;
+  } catch { message.value = "Sign in to manage your account."; }
 }
 async function changePassword() {
   busy.value = true;
@@ -27,22 +24,8 @@ async function changePassword() {
   newPassword.value = "";
   try {
     await setAccountPassword(next, previous || undefined);
-    devices.value = [];
     message.value = "Password changed. Sign in again on your devices.";
   } catch { message.value = "Change not completed. Check your password and confirm with Touch ID."; }
-  finally { busy.value = false; }
-}
-async function confirmRevoke() {
-  const device = confirmation.value;
-  if (!device) return;
-  busy.value = true;
-  message.value = "";
-  try {
-    await revokeDevice(device.id);
-    devices.value = devices.value.filter(item => item.id !== device.id);
-    message.value = "Device revoked. Its sessions have ended.";
-    confirmation.value = null;
-  } catch { message.value = "Revocation not completed. Confirm with Touch ID and try again."; }
   finally { busy.value = false; }
 }
 onMounted(refresh);
@@ -50,41 +33,31 @@ onBeforeUnmount(() => { currentPassword.value = ""; newPassword.value = ""; });
 </script>
 
 <template>
-  <section class="card account-administration">
-    <h2>Account and devices</h2>
+  <section class="card account-administration" aria-labelledby="account-admin-heading">
+    <h2 id="account-admin-heading">Account password</h2>
     <template v-if="signer">
-      <p>A password never replaces the signed approval of a trusted device. Every change asks for Touch ID.</p>
+      <p class="t-sm t-2">A password never replaces the signed approval of a trusted device. Every change asks for Touch ID.</p>
       <form @submit.prevent="changePassword">
-        <label v-if="passwordRequired">Current password
-          <input v-model="currentPassword" type="password" autocomplete="current-password" maxlength="1024" required />
-        </label>
-        <label>New account password
-          <input v-model="newPassword" type="password" autocomplete="new-password" minlength="15" maxlength="1024" required />
-        </label>
-        <button class="btn btn-primary" :disabled="busy">Set and sign password</button>
+        <div v-if="passwordRequired" class="field">
+          <label class="label" for="account-current-password">Current password</label>
+          <input id="account-current-password" v-model="currentPassword" class="input" type="password" autocomplete="current-password" maxlength="1024" required />
+        </div>
+        <div class="field">
+          <label class="label" for="account-new-password">New account password</label>
+          <input id="account-new-password" v-model="newPassword" class="input" type="password" autocomplete="new-password" minlength="15" maxlength="1024" required />
+        </div>
+        <div><button class="btn btn-primary" :disabled="busy">Set and sign password</button></div>
       </form>
     </template>
-    <p v-else>Change the account password or revoke a device on a Mac with Touch ID. On the Home Node, <code>sudo jarvis devices revoke &lt;id&gt;</code> also revokes a device.</p>
-    <h3>Trusted devices</h3>
-    <button class="btn btn-secondary btn-sm" :disabled="busy" @click="refresh">Refresh</button>
-    <ul>
-      <li v-for="device in devices" :key="device.id">
-        <span>{{ device.name }} · {{ device.platform }} · {{ device.status }} · <code>{{ device.id }}</code></span>
-        <button v-if="signer && device.status === 'active'" class="btn btn-secondary btn-sm" :disabled="busy" @click="confirmation = device">Revoke…</button>
-      </li>
-    </ul>
-    <div v-if="signer && confirmation" role="alertdialog" aria-label="Revoke device">
-      <p>Revoke {{ confirmation.name }}? This ends that device's sessions.</p>
-      <button class="btn btn-secondary" :disabled="busy" @click="confirmation = null">Cancel</button>
-      <button class="btn btn-danger" :disabled="busy" @click="confirmRevoke">Confirm with Touch ID</button>
-    </div>
-    <p v-if="message" role="status">{{ message }}</p>
+    <p v-else class="t-sm t-2">Change the account password on a Mac with Touch ID.</p>
+    <p class="t-sm t-2">Trusted devices are listed, and revoked on a Mac, on the <RouterLink to="/devices">Devices</RouterLink> page.</p>
+    <p v-if="message" class="t-sm" role="status">{{ message }}</p>
   </section>
 </template>
 
 <style scoped>
-.account-administration { overflow-wrap: anywhere; }
-label { display: block; margin-block: .8rem; }
-input { display: block; width: min(100%, 28rem); box-sizing: border-box; }
-li { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin-block: .5rem; }
+.account-administration { display: flex; flex-direction: column; gap: 14px; overflow-wrap: anywhere; }
+h2, p { margin: 0; }
+form { display: flex; flex-direction: column; gap: 14px; max-width: 28rem; }
+a { color: var(--accent-text); }
 </style>

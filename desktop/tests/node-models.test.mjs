@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   agentStatus, canSignApproval, countOf, diskState, filterConversations, formatMs, groupAgents, isTrader, measuredCount,
-  outcomeTone, serviceState, servicesSummary, sessionState, splitSessions,
+  serviceState, servicesSummary, sessionState,
 } from "../src/nodeModels.ts";
 
 const NOW = Date.parse("2026-10-04T12:00:00Z");
@@ -22,23 +22,12 @@ test("conversation filter matches the title case-insensitively and by period", (
   assert.deepEqual(filterConversations(list, "review", 7, NOW).map((c) => c.id), ["a"]);
 });
 
-test("coding sessions split into open and finished with honest labels", () => {
-  const list = [{ state: "active" }, { state: "completed" }, { state: "suspended" }, { state: "archived" }, { state: "weird" }];
-  const { open, finished } = splitSessions(list);
-  assert.deepEqual(open.map((s) => s.state), ["active", "suspended"]);
-  assert.deepEqual(finished.map((s) => s.state), ["completed", "archived", "weird"]);
+test("coding session states have honest labels", () => {
   assert.deepEqual(sessionState("active"), ["ok", "Running"]);
   assert.deepEqual(sessionState("suspended"), ["warn", "Paused"]);
   assert.deepEqual(sessionState("weird"), ["idle", "weird"]);
   assert.deepEqual(sessionState("constructor"), ["idle", "constructor"]);
   assert.deepEqual(sessionState(""), ["idle", "Unknown"]);
-});
-
-test("agent audit outcomes map to tones", () => {
-  assert.equal(outcomeTone("ok"), "ok");
-  assert.equal(outcomeTone("denied"), "warn");
-  assert.equal(outcomeTone("error"), "error");
-  assert.equal(outcomeTone("pending"), "idle");
 });
 
 test("countOf counts items with a truthy flag", () => {

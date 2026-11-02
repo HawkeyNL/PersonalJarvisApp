@@ -5,6 +5,7 @@ import { currentAuthStatus, currentShellMode, login, clearSession, listDevices, 
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
 import { locked, shownShellMode } from "../lock";
 import { composerFocus } from "../lockPolicy";
+import { onboardingStep } from "../shellMode";
 import JarvisConsole from "../components/JarvisConsole.vue";
 import ConversationList from "../components/chat/ConversationList.vue";
 import NavIcon, { type IconName } from "../components/NavIcon.vue";
@@ -217,6 +218,13 @@ const statusLinks = computed<StatusLink[]>(() => [
 // The gate (setup and sign-in forms) wins; the app layout needs the app shell.
 const gate = computed(() => backend.value === "unconfigured" || changingOrigin.value || (!!accountMode.value && backend.value === "ok"));
 const inApp = computed(() => shownShellMode.value === "app" && !gate.value);
+// The onboarding steps that exist here (canvas D-Onboarding has four; this
+// app has no theme or done step): connect, sign in, and for a new device the
+// approval on another device. null: no step to show (connecting, an error).
+const STEPS = ["Connect", "Sign in", "Confirm"] as const;
+const step = computed(() => onboardingStep({
+  backend: backend.value, changingOrigin: changingOrigin.value, accountMode: accountMode.value, auth: auth.value,
+}));
 const footerHost = computed(() => originHost(homeNodeConfig.value.origin));
 
 // Ctrl/⌘K (App.vue) and New focus the composer. The chat mounts once the
@@ -299,49 +307,86 @@ onBeforeUnmount(() => {
     </template>
 
     <template v-else>
-      <!-- Onboarding / sign-in take over until the device is ready. -->
-      <div v-if="gate" class="gate">
-      <form v-if="backend === 'unconfigured' || changingOrigin" class="connection-setup card" @submit.prevent="saveHomeNode">
-        <h2>Connect to your Home Node</h2>
-        <p>Enter the HTTPS origin of your Home Node. Jarvis stores only this address locally, never credentials.</p>
-        <label for="home-node-origin">Home Node origin</label>
-        <input
-          id="home-node-origin"
-          v-model.trim="originInput"
-          type="url"
-          inputmode="url"
-          autocomplete="url"
-          placeholder="https://jarvis.home.example"
-          required
-        />
-        <button type="submit" class="btn btn-primary" :disabled="configBusy">
-          {{ configBusy ? "Connecting…" : "Connect and pair" }}
-        </button>
-        <p v-if="configError" class="config-error" role="alert">{{ configError }}</p>
-        <p class="setup-hint">Plain HTTP on localhost is only allowed in a development build.</p>
-        <button v-if="changingOrigin" type="button" class="btn btn-secondary" @click="cancelOriginChange">Cancel</button>
-      </form>
-      <form v-else-if="accountMode && backend === 'ok'" class="connection-setup card" @submit.prevent="submitAccount">
-        <h2>{{ accountMode === "activate" ? "Activate your first device" : "Sign in to Jarvis" }}</h2>
-        <p v-if="accountMode === 'activate'">Use the one-time activation code from your Home Node and choose an account password of at least 15 characters.</p>
-        <label v-if="accountMode === 'activate'" for="activation-code">Activation code</label>
-        <input v-if="accountMode === 'activate'" id="activation-code" v-model="activationCode" type="text" autocomplete="off" autocapitalize="off" :spellcheck="false" maxlength="256" required />
-        <label for="account-password">Account password</label>
-        <div class="password-input">
-          <input id="account-password" v-model="password" :type="passwordVisible ? 'text' : 'password'" :autocomplete="accountMode === 'activate' ? 'new-password' : 'current-password'" autocapitalize="off" :spellcheck="false" :minlength="accountMode === 'activate' ? 15 : undefined" maxlength="1024" required />
-          <button type="button" class="btn btn-secondary password-toggle" :aria-label="passwordVisible ? 'Hide password' : 'Show password'" :aria-pressed="passwordVisible" aria-controls="account-password" @click="passwordVisible = !passwordVisible">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path v-if="passwordVisible" d="m3 3 18 18"/></svg>
-          </button>
+      <!-- Onboarding / sign-in take over until the device is ready (canvas D-Onboarding). -->
+      <div class="gate">
+        <div v-if="step !== null" class="wizard card">
+          <ol class="steps" aria-label="Setup steps">
+            <li v-for="(label, i) in STEPS" :key="label" :class="{ reached: i <= step }" :aria-current="i === step ? 'step' : undefined">
+              <span class="steps-bar" aria-hidden="true"></span>
+              <span class="t-xs">{{ label }}<span v-if="i < step" class="sr-only"> (done)</span></span>
+            </li>
+          </ol>
+
+          <form v-if="step === 0" class="step" @submit.prevent="saveHomeNode">
+            <div class="step-head">
+              <h2>Connect to your Home Node</h2>
+              <p class="t-2">Enter the HTTPS origin of your Home Node. Jarvis stores only this address locally, never credentials.</p>
+            </div>
+            <div class="field">
+              <label class="label" for="home-node-origin">Home Node origin</label>
+              <input
+                id="home-node-origin"
+                v-model.trim="originInput"
+                class="input"
+                type="url"
+                inputmode="url"
+                autocomplete="url"
+                placeholder="https://jarvis.home.example"
+                aria-describedby="home-node-origin-help"
+                required
+              />
+              <span id="home-node-origin-help" class="help">Plain HTTP on localhost is only allowed in a development build.</span>
+            </div>
+            <p v-if="configError" class="err" role="alert">{{ configError }}</p>
+            <div class="step-actions">
+              <button v-if="changingOrigin" type="button" class="btn btn-ghost" @click="cancelOriginChange">Cancel</button>
+              <span v-else></span>
+              <button type="submit" class="btn btn-primary btn-lg" :disabled="configBusy">
+                <span v-if="configBusy" class="spinner" aria-hidden="true"></span>{{ configBusy ? "Connecting…" : "Connect and pair" }}
+              </button>
+            </div>
+          </form>
+
+          <form v-else-if="step === 1" class="step" @submit.prevent="submitAccount">
+            <div class="step-head">
+              <h2>{{ accountMode === "activate" ? "Activate your first device" : "Sign in to Jarvis" }}</h2>
+              <p v-if="accountMode === 'activate'" class="t-2">Use the one-time activation code from your Home Node and choose an account password of at least 15 characters.</p>
+              <p v-else class="t-2">Enter your account password.</p>
+            </div>
+            <div v-if="accountMode === 'activate'" class="field">
+              <label class="label" for="activation-code">Activation code</label>
+              <input id="activation-code" v-model="activationCode" class="input mono" type="text" autocomplete="off" autocapitalize="off" :spellcheck="false" maxlength="256" required />
+            </div>
+            <div class="field">
+              <label class="label" for="account-password">Account password</label>
+              <div class="password-input">
+                <input id="account-password" v-model="password" class="input" :type="passwordVisible ? 'text' : 'password'" :autocomplete="accountMode === 'activate' ? 'new-password' : 'current-password'" autocapitalize="off" :spellcheck="false" :minlength="accountMode === 'activate' ? 15 : undefined" maxlength="1024" required />
+                <button type="button" class="btn btn-secondary password-toggle" :aria-label="passwordVisible ? 'Hide password' : 'Show password'" :aria-pressed="passwordVisible" aria-controls="account-password" @click="passwordVisible = !passwordVisible">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path v-if="passwordVisible" d="m3 3 18 18"/></svg>
+                </button>
+              </div>
+            </div>
+            <p v-if="accountError" class="err" role="alert">{{ accountError }}</p>
+            <div class="step-actions">
+              <span></span>
+              <button type="submit" class="btn btn-primary btn-lg" :disabled="accountBusy">
+                <span v-if="accountBusy" class="spinner" aria-hidden="true"></span>{{ accountBusy ? "Working…" : "Continue" }}
+              </button>
+            </div>
+          </form>
+
+          <div v-else class="step" role="status">
+            <div class="step-head">
+              <h2>Confirm on another device</h2>
+              <p class="t-2">Approve this device from your phone, a Mac or the Home Node.</p>
+            </div>
+            <template v-if="ownFingerprint">
+              <p class="t-sm t-2">Check that it shows this key fingerprint:</p>
+              <code class="fingerprint">{{ ownFingerprint }}</code>
+            </template>
+            <p class="waiting t-sm t-2"><span class="spinner" aria-hidden="true"></span>Waiting for approval…</p>
+          </div>
         </div>
-        <button type="submit" class="btn btn-primary" :disabled="accountBusy">{{ accountBusy ? "Working…" : "Continue" }}</button>
-        <p v-if="accountError" class="config-error" role="alert">{{ accountError }}</p>
-      </form>
-      </div>
-      <div v-else class="gate">
-        <p v-if="auth === 'wachten'" class="notice" role="status">
-          Waiting for approval from your phone, a Mac or the Home Node.
-          <template v-if="ownFingerprint"><br />Check that it shows this key fingerprint: <code>{{ ownFingerprint }}</code></template>
-        </p>
         <p v-else-if="authError" class="notice err" role="alert">{{ authError }}</p>
         <p v-else-if="backend === 'fout'" class="notice err" role="status">
           Home Node unreachable at {{ homeNodeConfig.origin }}. Check the network and try again.
@@ -396,23 +441,30 @@ onBeforeUnmount(() => {
 .dot.warn { background: var(--negative-solid); }
 .dot.error { background: var(--danger-solid); }
 
-/* --- Onboarding gate --- */
-/* A tall sign-in form scrolls inside the gate; `safe` keeps its top reachable. */
+/* --- Onboarding gate (canvas D-Onboarding) --- */
+/* A tall form scrolls inside the gate; `safe` keeps its top reachable. */
 .gate {
   flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center;
   justify-content: center; justify-content: safe center; gap: 20px; padding: 24px 16px;
 }
 .gate .notice { margin: 0; width: min(34rem, 100%); text-align: center; }
-.connection-setup { width: min(32rem, 100%); padding: 24px; border-radius: var(--r-xl); }
-.connection-setup h2 { margin: 0 0 8px; }
-.connection-setup p { margin: 0 0 8px; color: var(--text-secondary); font-size: 14px; line-height: 1.5; }
-.connection-setup label { display: block; margin: 16px 0 6px; font-size: 13px; font-weight: 500; }
-.connection-setup input { width: 100%; min-height: 40px; margin-bottom: 12px; }
-.connection-setup .btn + .btn { margin-left: 8px; }
-.password-input { display: flex; align-items: stretch; gap: 8px; margin-bottom: 12px; }
-.password-input input { flex: 1; min-width: 0; margin-bottom: 0; }
+.wizard { width: min(640px, 100%); padding: 36px; display: flex; flex-direction: column; gap: 24px; }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; gap: 8px; }
+.steps li { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary); }
+.steps-bar { height: 4px; border-radius: 2px; background: var(--bg-sunken); }
+.steps li.reached { color: var(--text-primary); }
+.steps li.reached .steps-bar { background: var(--accent-solid); }
+.steps li[aria-current="step"] { font-weight: 600; }
+.step { display: flex; flex-direction: column; gap: 18px; }
+.step-head { display: flex; flex-direction: column; gap: 6px; }
+.step h2 { margin: 0; font-size: 26px; line-height: 1.2; letter-spacing: -0.02em; }
+.step p { margin: 0; line-height: 1.5; }
+.step-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 4px; }
+.password-input { display: flex; align-items: stretch; gap: 8px; }
+.password-input .input { flex: 1; min-width: 0; }
 .password-toggle { min-width: 44px; min-height: 44px; display: grid; place-items: center; }
-.config-error { color: var(--danger-text) !important; }
-.setup-hint { font-size: 13px !important; }
+.fingerprint { align-self: flex-start; padding: 10px 14px; font-size: 15px; letter-spacing: 0.04em; overflow-wrap: anywhere; }
+.waiting { display: flex; align-items: center; gap: 8px; }
+@media (max-width: 560px) { .wizard { padding: 24px; } }
 .footer { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 16px 36px 24px; }
 </style>

@@ -6,13 +6,11 @@ import {
   approvalsCard,
   availabilityFromError,
   failureText,
-  fitScale,
   contextCard,
   deepLinkRoute,
   formatUptime,
   healthCard,
   integrationsCard,
-  moodFactor,
   originHost,
   relativeTime,
   runsCard,
@@ -22,10 +20,6 @@ const NOW = Date.parse("2026-10-04T12:00:00Z");
 const ago = (ms) => new Date(NOW - ms).toISOString();
 const MIN = 60_000;
 const DAY = 86_400_000;
-
-test("orb mood sets the animation speed", () => {
-  assert.deepEqual(["idle", "listening", "thinking"].map(moodFactor), [1, 0.7, 0.4]);
-});
 
 test("relative time", () => {
   assert.equal(relativeTime(ago(10_000), NOW), "just now");
@@ -117,12 +111,3 @@ test("deep links: only the two supported links map to a route", () => {
   assert.equal(deepLinkRoute("not a url"), null);
 });
 
-test("fit scale: the stage fits the room on both axes, within bounds", () => {
-  const design = { width: 1060, height: 740 };
-  assert.equal(fitScale({ width: 1060, height: 740 }, design, 1.75), 1);
-  assert.equal(fitScale({ width: 2000, height: 370 }, design, 1.75), 0.5); // height limits
-  assert.equal(fitScale({ width: 530, height: 2000 }, design, 1.75), 0.5); // width limits
-  assert.equal(fitScale({ width: 5000, height: 5000 }, design, 1.75), 1.75); // grows, capped
-  assert.equal(fitScale({ width: 100, height: 100 }, design, 1.75), 0.4); // never collapses
-  assert.equal(fitScale({ width: 0, height: 0 }, design, 1.75), 1); // not laid out yet
-});
