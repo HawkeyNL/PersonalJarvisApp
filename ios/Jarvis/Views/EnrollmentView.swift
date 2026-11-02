@@ -36,6 +36,7 @@ struct EnrollmentView: View {
     @State private var ownFingerprint: String?
     @FocusState private var addressFocused: Bool
     @State private var connecting = false
+    @State private var addressError: String?
 
     var body: some View {
         ScrollView {
@@ -103,7 +104,9 @@ struct EnrollmentView: View {
 
     @ViewBuilder private var actions: some View {
         switch model.connectionState {
-        case .unconfigured, .unreachable:
+        case .unconfigured:
+            // First setup only: nothing is paired yet. Changing a saved address
+            // clears the pairing, so that stays a deliberate step in Settings.
             VStack(alignment: .leading, spacing: 6) {
                 Text("Home Node address")
                     .font(JV.font(13, .medium))
@@ -120,20 +123,24 @@ struct EnrollmentView: View {
                     .jvInput(focused: addressFocused) { addressFocused = true }
                     .accessibilityLabel("Home Node address")
                     .accessibilityIdentifier("home-node-address")
-            }
-            // Retry keeps the saved address; Connect saves and tests the typed one.
-            VStack(alignment: .leading, spacing: JV.Space.sm) {
-                Button("Connect", action: connect)
-                    .disabled(connecting || model.endpointText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .buttonStyle(JVButtonStyle(size: .large))
-                if model.connectionState != .unconfigured {
-                    Button("Retry") { Task { _ = await model.checkConnection() } }
-                        .disabled(connecting)
-                        .buttonStyle(JVButtonStyle(kind: .secondary, size: .large))
+                    .onChange(of: model.endpointText) { _, _ in addressError = nil }
+                if let addressError {
+                    Text(verbatim: addressError)
+                        .font(JV.font(13, relativeTo: .footnote))
+                        .foregroundStyle(JV.dangerText)
                 }
             }
+            Button("Connect", action: connect)
+                .disabled(connecting || model.endpointText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .buttonStyle(JVButtonStyle(size: .large))
         case .checking:
             BusyLine(label: "Checking…")
+        case .unreachable:
+            Button("Retry") { Task { _ = await model.checkConnection() } }
+                .buttonStyle(JVButtonStyle(size: .large))
+            Text("To change the address, open Settings with the profile button.")
+                .font(JV.font(13, relativeTo: .footnote))
+                .foregroundStyle(JV.textSecondary)
         case .reachable:
             switch model.enrollmentState {
             case .awaitingApproval:
@@ -179,6 +186,12 @@ struct EnrollmentView: View {
 
     private func connect() {
         guard !connecting, !model.endpointText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // An invalid address stays on this card with its reason instead of
+        // leaving for the unreachable state, which has no address field.
+        do { _ = try EndpointNormalizer.normalize(model.endpointText) } catch {
+            addressError = (error as? LocalizedError)?.errorDescription ?? "Enter a valid Home Node URL."
+            return
+        }
         addressFocused = false
         connecting = true
         Task {

@@ -781,10 +781,9 @@ extension View {
             .foregroundStyle(JV.textPrimary)
             .padding(.horizontal, JV.Space.sm)
             .frame(minHeight: 44)
-            .background(JV.bgSurface, in: shape)
+            // The tap sits behind the field, so text editing keeps its own gestures.
+            .background { shape.fill(JV.bgSurface).onTapGesture(perform: focus) }
             .overlay(shape.strokeBorder(focused ? JV.focusRing : JV.borderStrong, lineWidth: focused ? 2 : 1).allowsHitTesting(false))
-            .contentShape(shape)
-            .onTapGesture(perform: focus)
     }
 }
 
