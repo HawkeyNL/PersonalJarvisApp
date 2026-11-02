@@ -13,9 +13,10 @@ import {
 } from "../assistant";
 import { conversations, currentId, deleteConversation } from "../conversations";
 import { renderMarkdown, handleMarkdownClick } from "../markdown";
-import { dayOf } from "../chatList";
+import { askedIn, dayOf, replyIsHere, type AskedIn } from "../chatList";
 import { useMic } from "../useMic";
 import { wakePulse } from "../voicewake";
+import { locked } from "../lock";
 import { consoleActive } from "../updates";
 import {
   voiceEnabled,
@@ -54,10 +55,13 @@ watch(
 );
 onUnmounted(() => { consoleActive.value = false; });
 
-// A verified "Hey Jarvis" starts listening.
+// A verified "Hey Jarvis" starts listening, never behind the app lock.
 watch(wakePulse, () => {
-  if (!mic.listening.value) mic.toggle();
+  if (!locked.value && !mic.listening.value) mic.toggle();
 });
+// The lock turns the mic off and drops what it has not recognised yet, also
+// when the mic opened just as the lock came up.
+watch(() => locked.value && mic.listening.value, (both) => { if (both) mic.stop(true); }, { flush: "sync" });
 
 const current = computed(() => conversations.value.find((c) => c.id === currentId.value) ?? null);
 const day = computed(() => (current.value ? dayOf(current.value.updated_at, Date.now()) : null));
@@ -88,23 +92,19 @@ watch(logEl, (el) => { if (el) scrollToBottom(); }, { flush: "post" });
 // would flood them). This status line says when Jarvis starts a reply and
 // reads the reply once it is complete, for the conversation it was asked in.
 const announcement = ref("");
-let askedIn: string | null = null;
+let asked: AskedIn = { conversation: null, message: null };
 const plain = (markdown: string) =>
   new DOMParser().parseFromString(renderMarkdown(markdown), "text/html").body.textContent?.trim() ?? "";
-// A reply that starts a new conversation belongs to the id Core gives it.
-watch(currentId, (id, previous) => {
-  if (thinking.value && askedIn === null && previous === null) askedIn = id;
-});
 watch(thinking, (busy, before) => {
   if (busy) {
-    askedIn = currentId.value;
+    asked = askedIn(currentId.value, messages.value);
     announcement.value = "Jarvis is replying…";
     return;
   }
   if (!before) return;
   const reply = last.value;
-  const same = askedIn === null || askedIn === currentId.value;
-  announcement.value = same && reply?.role === "jarvis" && reply.text ? `Jarvis: ${plain(reply.text)}` : "";
+  const here = replyIsHere(asked, currentId.value, messages.value);
+  announcement.value = here && reply?.role === "jarvis" && reply.text ? `Jarvis: ${plain(reply.text)}` : "";
 });
 
 const canSend = computed(() => !!text.value.trim() && !thinking.value);

@@ -29,3 +29,22 @@ export function groupConversations<T extends { title: string; updated_at: string
   }
   return groups.filter((g) => g.items.length);
 }
+
+/** The turn a reply answers: the conversation it was asked in, and the user
+ *  message that asked it. */
+export type AskedIn = { conversation: string | null; message: number | null };
+
+export function askedIn(conversation: string | null, messages: { id: number; role: string }[]): AskedIn {
+  let message: number | null = null;
+  for (const m of messages) if (m.role === "user") message = m.id;
+  return { conversation, message };
+}
+
+/** Whether a finished reply belongs to the conversation on screen. A new
+ *  conversation has no id until Core assigns one, so it is followed by the
+ *  message that asked: Core's id keeps that message on screen, while opening
+ *  another thread replaces the messages. */
+export function replyIsHere(asked: AskedIn, conversation: string | null, messages: { id: number }[]): boolean {
+  if (asked.conversation !== null) return asked.conversation === conversation;
+  return asked.message !== null && messages.some((m) => m.id === asked.message);
+}

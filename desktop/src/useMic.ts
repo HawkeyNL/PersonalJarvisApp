@@ -85,18 +85,24 @@ export function useMic(onTranscript: (said: string) => void) {
     analyser.fftSize = 512;
     src.connect(analyser);
     data = new Uint8Array(analyser.frequencyBinCount);
-    listening.value = true;
     armSilence();
     loop();
     startRecognition();
+    // Last: a watcher that stops the mic on this change (the app lock) then
+    // also stops the recognition.
+    listening.value = true;
   }
 
-  function stop() {
+  /** `discard`: drop speech not yet recognised (abort) instead of returning it (stop). */
+  function stop(discard = false) {
     clearTimeout(silence);
     cancelAnimationFrame(raf);
     if (recog) {
       try {
-        recog.stop();
+        if (discard) {
+          recog.onresult = null;
+          recog.abort();
+        } else recog.stop();
       } catch {
         /* ignore */
       }
@@ -121,7 +127,7 @@ export function useMic(onTranscript: (said: string) => void) {
     else start();
   }
 
-  onBeforeUnmount(stop);
+  onBeforeUnmount(() => stop());
 
   return { available, listening, level, toggle, stop };
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAppStore } from "./stores/app";
 import AppLock from "./components/AppLock.vue";
@@ -7,6 +7,7 @@ import AppSidebar from "./components/AppSidebar.vue";
 import UnlockApprovals from "./components/UnlockApprovals.vue";
 import PairingApprovals from "./components/PairingApprovals.vue";
 import { locked, shownShellMode as mode, initLock, noteActivity } from "./lock";
+import { acceptsShortcuts } from "./lockPolicy";
 import { startApprovalPolling, stopApprovalPolling } from "./unlockApprovals";
 import { startPairingPolling, stopPairingPolling } from "./pairingApprovals";
 import { maybeStartWake, stopWake } from "./voicewake";
@@ -36,9 +37,21 @@ watch(currentShellMode, (value, previous) => {
 const main = ref<HTMLElement | null>(null);
 const skipToContent = () => main.value?.focus();
 
+// The lock stops the wake word listener (no capture behind it); unlocking
+// resumes it and puts focus on the page, never on the composer.
+watch(locked, (isLocked, was) => {
+  if (isLocked) {
+    void stopWake();
+  } else if (was) {
+    maybeStartWake();
+    void nextTick(() => main.value?.focus());
+  }
+});
+
 // Ctrl/⌘K from anywhere: go to the chat home, which focuses the composer.
+// Ignored behind the app lock.
 function onShortcut(event: KeyboardEvent) {
-  if (mode.value !== "app") return;
+  if (!acceptsShortcuts(mode.value, locked.value)) return;
   if (event.key.toLowerCase() !== "k" || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
   event.preventDefault();
   app.consoleOpen = true;
@@ -62,7 +75,7 @@ onMounted(async () => {
   if (await initLock()) return; // Windows sign-out reload is under way
   startApprovalPolling(); // other devices' unlock requests (a Mac approves them)
   startPairingPolling();
-  maybeStartWake(); // resume "Hey Jarvis" if it was enabled
+  if (!locked.value) maybeStartWake(); // resume "Hey Jarvis" if it was enabled; unlocking starts it otherwise
   window.addEventListener("pointerdown", noteActivity, { passive: true });
   window.addEventListener("keydown", noteActivity);
 });
@@ -77,7 +90,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app">
+  <!-- Behind the lock the app is inert: no focus, input or clicks reach it. -->
+  <div class="app" :inert="locked">
     <a v-if="mode === 'app'" class="skip" href="#main" @click.prevent="skipToContent">Skip to content</a>
     <p v-if="mode !== 'app' && app.notice" class="notice" role="status">
       {{ app.notice }} <button type="button" class="btn btn-secondary btn-sm" @click="app.notice = null">Dismiss</button>
@@ -92,9 +106,9 @@ onBeforeUnmount(() => {
     <!-- Other devices' unlock and pairing requests; a Mac approves them. -->
     <UnlockApprovals />
     <PairingApprovals />
-    <!-- Full-screen lock: Touch ID on macOS; on Windows the session ends and sign-in needs the account password. -->
-    <AppLock v-if="locked" />
   </div>
+  <!-- Full-screen lock: Touch ID on macOS; on Windows the session ends and sign-in needs the account password. -->
+  <AppLock v-if="locked" />
 </template>
 
 <style scoped>

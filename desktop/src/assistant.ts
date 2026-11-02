@@ -15,6 +15,7 @@ import { mergeCanonical, appendVisualDelta } from "./realtimeProjection";
 import { PendingRuns } from "./pendingRuns";
 import { chatSession } from "./chatSession";
 import { currentAuthStatus } from "./auth";
+import { locked } from "./lock";
 import { postJsonAuth, getJsonAuth } from "./api";
 import {
   currentId,
@@ -189,8 +190,10 @@ async function reloadConversation(id:string):Promise<void> {
   }>(`/v1/conversations/${encodeURIComponent(id)}`);
   if(currentId.value!==id || !chatSession.current(epoch)) return;
   thinking.value=res.assistant_running===true;
+  // Rows already on screen keep their local id (a reload after a reconnect).
+  const known=new Map(messages.value.filter(m=>m.canonicalId).map(m=>[m.canonicalId,m.id]));
   messages.value = res.messages.map((m) => ({
-    id: idc++,
+    id: (m.id ? known.get(m.id) : undefined) ?? idc++,
     role: m.role === "assistant" ? "jarvis" : "user",
     text: m.content,
     ts: m.at?.slice(11) || stamp(), // "YYYY-MM-DD HH:MM" → "HH:MM"
@@ -240,7 +243,8 @@ export async function initChat(): Promise<void> {
 export async function send(input: string): Promise<void> {
   const epoch=chatSession.capture();
   const t = input.trim();
-  if (!t || thinking.value) return;
+  // Nothing is sent from behind the app lock (a voice transcript, a stray Enter).
+  if (!t || thinking.value || locked.value) return;
   if(realtimeAvailable && pending.full) {
     push("jarvis","Too many unconfirmed requests. Restore the connection first; nothing is resent.");
     return;

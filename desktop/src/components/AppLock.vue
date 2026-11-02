@@ -1,27 +1,31 @@
 <script setup lang="ts">
+import { onMounted, ref } from "vue";
 import { biometricUnlock, lockMode, unlocking, lockError, signOutFromLock } from "../lock";
 
 // Locking only shows this screen. The OS prompt starts when the owner presses
-// a button, so an idle lock never pops a dialog over other apps.
+// a button, so an idle lock never pops a dialog over other apps. Focus moves
+// to this dialog, off the (inert) app behind it; Enter alone starts nothing.
+const dialog = ref<HTMLElement | null>(null);
+onMounted(() => dialog.value?.focus());
 </script>
 
 <template>
-  <div class="lock">
+  <div ref="dialog" class="lock" role="dialog" aria-modal="true" aria-labelledby="lock-title" aria-describedby="lock-sub" tabindex="-1">
     <div class="lock-card">
       <div class="mark">
         <span class="ring"></span>
         <span class="glyph">J</span>
       </div>
-      <h1>Jarvis is locked</h1>
+      <h1 id="lock-title">Jarvis is locked</h1>
       <!-- Windows: the session is ending; the sign-in screen asks for the account password. -->
       <template v-if="lockMode === 'password'">
-        <p class="sub">Sign in again with your account password.</p>
+        <p id="lock-sub" class="sub">Sign in again with your account password.</p>
         <button class="primary" :disabled="unlocking" @click="signOutFromLock">
           {{ unlocking ? "Signing out…" : "Sign in" }}
         </button>
       </template>
       <template v-else>
-        <p class="sub">Unlock with Touch ID or your computer password.</p>
+        <p id="lock-sub" class="sub">Unlock with Touch ID or your computer password.</p>
 
         <button class="primary" :disabled="unlocking" @click="biometricUnlock">
           {{ unlocking ? "Verifying…" : "Unlock" }}
@@ -40,13 +44,16 @@ import { biometricUnlock, lockMode, unlocking, lockError, signOutFromLock } from
 .lock {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  z-index: 400; /* above everything in the app, the skip link included */
   display: grid;
   place-items: center;
   padding: 24px;
   background: var(--bg-page);
   backdrop-filter: blur(26px) saturate(1.2);
   -webkit-backdrop-filter: blur(26px) saturate(1.2);
+}
+.lock:focus {
+  outline: none;
 }
 .lock-card {
   width: min(360px, 92vw);
