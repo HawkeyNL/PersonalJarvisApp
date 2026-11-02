@@ -68,8 +68,12 @@ async function decide(id: string, approve: boolean) {
   } catch (error) {
     decisionError.value = `${approve ? "Approval" : "Rejection"} failed: ${error instanceof Error ? error.message : String(error)}`;
   } finally {
-    deciding.value = null;
-    await props.reload();
+    // Buttons stay off until the list is fresh, so a decided item cannot be decided twice.
+    try {
+      await props.reload();
+    } finally {
+      deciding.value = null;
+    }
   }
 }
 
