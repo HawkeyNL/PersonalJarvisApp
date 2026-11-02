@@ -774,14 +774,17 @@ extension View {
     }
 
     /// Instrument text input: surface, 3:1 outline, focus ring while editing.
-    func jvInput(focused: Bool) -> some View {
+    /// A tap anywhere in the 44 pt box runs `focus`.
+    func jvInput(focused: Bool, focus: @escaping () -> Void) -> some View {
         let shape = RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous)
         return font(JV.font(15))
             .foregroundStyle(JV.textPrimary)
             .padding(.horizontal, JV.Space.sm)
             .frame(minHeight: 44)
             .background(JV.bgSurface, in: shape)
-            .overlay(shape.strokeBorder(focused ? JV.focusRing : JV.borderStrong, lineWidth: focused ? 2 : 1))
+            .overlay(shape.strokeBorder(focused ? JV.focusRing : JV.borderStrong, lineWidth: focused ? 2 : 1).allowsHitTesting(false))
+            .contentShape(shape)
+            .onTapGesture(perform: focus)
     }
 }
 

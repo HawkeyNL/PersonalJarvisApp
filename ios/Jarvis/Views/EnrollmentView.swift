@@ -35,6 +35,7 @@ struct EnrollmentView: View {
     @State private var activationCode = ""
     @State private var ownFingerprint: String?
     @FocusState private var addressFocused: Bool
+    @State private var connecting = false
 
     var body: some View {
         ScrollView {
@@ -102,7 +103,7 @@ struct EnrollmentView: View {
 
     @ViewBuilder private var actions: some View {
         switch model.connectionState {
-        case .unconfigured:
+        case .unconfigured, .unreachable:
             VStack(alignment: .leading, spacing: 6) {
                 Text("Home Node address")
                     .font(JV.font(13, .medium))
@@ -116,21 +117,23 @@ struct EnrollmentView: View {
                     .focused($addressFocused)
                     .submitLabel(.go)
                     .onSubmit(connect)
-                    .jvInput(focused: addressFocused)
+                    .jvInput(focused: addressFocused) { addressFocused = true }
                     .accessibilityLabel("Home Node address")
                     .accessibilityIdentifier("home-node-address")
             }
-            Button("Connect", action: connect)
-                .disabled(model.endpointText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .buttonStyle(JVButtonStyle(size: .large))
+            // Retry keeps the saved address; Connect saves and tests the typed one.
+            VStack(alignment: .leading, spacing: JV.Space.sm) {
+                Button("Connect", action: connect)
+                    .disabled(connecting || model.endpointText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .buttonStyle(JVButtonStyle(size: .large))
+                if model.connectionState != .unconfigured {
+                    Button("Retry") { Task { _ = await model.checkConnection() } }
+                        .disabled(connecting)
+                        .buttonStyle(JVButtonStyle(kind: .secondary, size: .large))
+                }
+            }
         case .checking:
             BusyLine(label: "Checking…")
-        case .unreachable:
-            Button("Retry") { Task { _ = await model.checkConnection() } }
-                .buttonStyle(JVButtonStyle(size: .large))
-            Text("To change the address, open Settings with the profile button.")
-                .font(JV.font(13, relativeTo: .footnote))
-                .foregroundStyle(JV.textSecondary)
         case .reachable:
             switch model.enrollmentState {
             case .awaitingApproval:
@@ -175,9 +178,13 @@ struct EnrollmentView: View {
     }
 
     private func connect() {
-        guard !model.endpointText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !connecting, !model.endpointText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         addressFocused = false
-        Task { _ = await model.saveEndpoint() }
+        connecting = true
+        Task {
+            _ = await model.saveEndpoint()
+            connecting = false
+        }
     }
 }
 
@@ -196,7 +203,7 @@ private struct BusyLine: View {
 }
 
 /// Step bars with labels (D-Onboarding); done and current steps are accent.
-/// At accessibility text sizes one line names the current step instead.
+/// At the largest text sizes one line names the current step instead.
 private struct StepProgress: View {
     let current: OnboardingStep
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -211,7 +218,7 @@ private struct StepProgress: View {
                         Capsule()
                             .fill(reached ? JV.accentSolid : contrast == .increased ? JV.borderStrong : JV.bgSunken)
                             .frame(height: 4)
-                        if !typeSize.isAccessibilitySize {
+                        if !compact {
                             Text(step.label)
                                 .font(JV.font(12, step == current ? .semibold : .regular, relativeTo: .caption))
                                 .foregroundStyle(reached ? JV.textPrimary : JV.textSecondary)
@@ -222,7 +229,7 @@ private struct StepProgress: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            if typeSize.isAccessibilitySize {
+            if compact {
                 Text(current.accessibilityLabel)
                     .font(JV.font(12, .semibold, relativeTo: .caption))
                     .foregroundStyle(JV.textPrimary)
@@ -231,6 +238,9 @@ private struct StepProgress: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(current.accessibilityLabel)
     }
+
+    /// Four labels no longer fit a phone row from xxxLarge up.
+    private var compact: Bool { typeSize >= .xxxLarge }
 }
 
 // Keep text inputs outside ContentUnavailableView's action presentation.
@@ -265,7 +275,7 @@ struct EnrollmentCredentialsForm: View {
                         .onSubmit { focused = .password }
                         .accessibilityIdentifier("activation-code")
                         .privacySensitive()
-                        .jvInput(focused: focused == .activation)
+                        .jvInput(focused: focused == .activation) { focused = .activation }
                 }
             }
             VStack(alignment: .leading, spacing: 6) {
@@ -293,12 +303,13 @@ struct EnrollmentCredentialsForm: View {
                         Image(systemName: passwordVisible ? "eye.slash" : "eye")
                             .foregroundStyle(JV.textSecondary)
                             .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(passwordVisible ? "Hide password" : "Show password")
                     .accessibilityIdentifier("password-visibility")
                 }
-                .jvInput(focused: focused == .password)
+                .jvInput(focused: focused == .password) { focused = .password }
             }
             Button("Continue") { passwordVisible = false; focused = nil; submit() }
                 .disabled(!canSubmit)

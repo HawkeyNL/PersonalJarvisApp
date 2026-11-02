@@ -6,6 +6,14 @@ struct LockView: View {
     @ObservedObject var model: JarvisAppModel
 
     var body: some View {
+        // Scrolls only when the largest text sizes do not fit.
+        ViewThatFits(in: .vertical) {
+            column
+            ScrollView { column }
+        }
+    }
+
+    private var column: some View {
         VStack(spacing: JV.Space.md) {
             IconBadge(symbol: "lock", size: 48)
             VStack(spacing: 6) {

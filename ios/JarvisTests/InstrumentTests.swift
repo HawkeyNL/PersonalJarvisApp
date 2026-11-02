@@ -95,7 +95,7 @@ final class InstrumentTests: XCTestCase {
             .compactMap { $0 as? URL }
             .filter { $0.pathExtension == "swift" && $0.lastPathComponent != "Instrument.swift" }
         XCTAssertGreaterThan(files.count, 20, "app sources not found at \(app.path)")
-        let banned = try NSRegularExpression(pattern: #"Color(\.init)?\(\s*(red|hex)\s*:|\b(Linear|Radial)Gradient\b"#)
+        let banned = try NSRegularExpression(pattern: #"Color(\.init)?\(\s*(red|hex|white|hue)\s*:|\b(Linear|Radial|Angular|Elliptical)Gradient\b"#)
         for file in files {
             let text = try String(contentsOf: file, encoding: .utf8)
             for match in banned.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
@@ -107,7 +107,7 @@ final class InstrumentTests: XCTestCase {
         // The guard itself matches what it must reject.
         for sample in ["Color(red: 1, green: 0, blue: 0)", "UIColor(red: 1, green: 0, blue: 0, alpha: 1)",
                        "Color(hex: 0xFF0000)", "Color.init(red: 1, green: 0, blue: 0)", "LinearGradient(colors: [])",
-                       "RadialGradient(colors: [])"] {
+                       "RadialGradient(colors: [])", "Color(white: 0.5)", "AngularGradient(colors: [], center: .center)"] {
             XCTAssertNotNil(banned.firstMatch(in: sample, range: NSRange(sample.startIndex..., in: sample)), sample)
         }
     }
