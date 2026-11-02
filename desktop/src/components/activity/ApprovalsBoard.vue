@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import NavIcon from "../NavIcon.vue";
 import ActivityState from "./ActivityState.vue";
 import { approveAction, denyAction, type PendingAction } from "../../agentApprovals";
@@ -30,8 +30,10 @@ const selectedKey = computed(() => (selected.value ? reviewKey(selected.value) :
 // --- Review gate ------------------------------------------------------------------
 const gate = ref(CLOSED_GATE);
 const body = ref<HTMLElement | null>(null);
+// The box carries the key of the content it shows, so the gate opens for what is on screen.
 function measure() {
-  if (body.value && selected.value) gate.value = observeReview(gate.value, reviewKey(selected.value), body.value);
+  const key = body.value?.dataset.reviewKey;
+  if (body.value && key) gate.value = observeReview(gate.value, key, body.value);
 }
 // The details box is keyed on the review, so new content never inherits an old
 // scroll position; its size is watched so content that fits opens the gate.
@@ -40,11 +42,12 @@ watch(body, (el) => {
   resize?.disconnect();
   if (el) (resize ??= new ResizeObserver(measure)).observe(el);
 });
-watch(selectedKey, () => void nextTick(measure), { flush: "post" });
+watch(selectedKey, measure, { flush: "post" });
 onBeforeUnmount(() => resize?.disconnect());
 
 const approvable = (p: PendingAction) => signer.value && canSignApproval(p);
 const reviewed = (p: PendingAction) => reviewDone(gate.value, reviewKey(p));
+const busy = (p: PendingAction, approve: boolean) => deciding.value === p.pending_id && approving.value === approve;
 const hint = (p: PendingAction) => (!approvable(p) || reviewed(p) ? ""
   : p.pending_id === selected.value?.pending_id ? "Scroll the details to the end to approve." : "Open the details to approve.");
 
@@ -80,7 +83,7 @@ const OFF = "Agent is turned off in Core.";
 <template>
   <ActivityState v-if="view === 'pending'" :state="pending" what="approvals" :forbidden="OFF" @retry="reload">
     <p v-if="decisionError" class="err" role="alert">{{ decisionError }}</p>
-    <p v-if="!signer" class="ap-banner t-sm" role="note">
+    <p v-if="!signer && selected" class="ap-banner t-sm" role="note">
       <strong>View only on this computer.</strong> Approve on your iPhone or Android phone, or on a Mac with Touch ID. You can reject here.
     </p>
 
@@ -90,7 +93,7 @@ const OFF = "Agent is turned off in Core.";
           <div class="ap-row">
             <span class="tile acc" aria-hidden="true"><NavIcon name="shield" /></span>
             <div class="ap-text">
-              <button type="button" class="ap-title" :aria-pressed="p.pending_id === selected.pending_id" aria-controls="ap-detail"
+              <button type="button" class="ap-title" :aria-current="p.pending_id === selected.pending_id || undefined" aria-controls="ap-detail"
                 @click="selectedId = p.pending_id">{{ p.action }}</button>
               <span class="t-sm t-2">{{ relativeTime(p.created_at, now) || "Time unknown" }}</span>
             </div>
@@ -99,17 +102,20 @@ const OFF = "Agent is turned off in Core.";
           <p class="ap-summary t-sm">{{ p.preview }}</p>
           <div class="ap-actions">
             <span v-if="hint(p)" :id="`ap-hint-${p.pending_id}`" class="t-xs t-2 ap-hint">{{ hint(p) }}</span>
-            <button type="button" class="btn btn-secondary" :disabled="!!deciding" :aria-busy="deciding === p.pending_id && !approving"
-              :aria-label="`Reject ${p.action}`" @click="decide(p.pending_id, false)">
-              <span v-if="deciding === p.pending_id && !approving" class="spinner" aria-hidden="true"></span>
-              {{ deciding === p.pending_id && !approving ? "Rejecting…" : "Reject" }}
+            <!-- Busy keeps its colour (aria-busy); decide() ignores repeats while one runs. -->
+            <button type="button" class="btn btn-secondary" :disabled="!!deciding && !busy(p, false)" :aria-busy="busy(p, false)"
+              :aria-label="busy(p, false) ? undefined : `Reject ${p.action}`" @click="decide(p.pending_id, false)">
+              <span v-if="busy(p, false)" class="spinner" aria-hidden="true"></span>
+              {{ busy(p, false) ? "Rejecting…" : "Reject" }}
             </button>
             <template v-if="signer">
-              <button v-if="approvable(p)" type="button" class="btn btn-primary" :disabled="!!deciding || !reviewed(p)"
-                :aria-busy="deciding === p.pending_id && approving" :aria-describedby="hint(p) ? `ap-hint-${p.pending_id}` : undefined"
-                :aria-label="`Approve ${p.action}`" @click="decide(p.pending_id, true)">
-                <span v-if="deciding === p.pending_id && approving" class="spinner" aria-hidden="true"></span>
-                {{ deciding === p.pending_id && approving ? "Confirming…" : "Approve" }}
+              <!-- The gate uses aria-disabled so the button stays focusable and its hint is read. -->
+              <button v-if="approvable(p)" type="button" class="btn btn-primary" :disabled="!!deciding && !busy(p, true)"
+                :aria-disabled="!reviewed(p) || undefined" :aria-busy="busy(p, true)"
+                :aria-describedby="hint(p) ? `ap-hint-${p.pending_id}` : undefined"
+                :aria-label="busy(p, true) ? undefined : `Approve ${p.action}`" @click="decide(p.pending_id, true)">
+                <span v-if="busy(p, true)" class="spinner" aria-hidden="true"></span>
+                {{ busy(p, true) ? "Confirming…" : "Approve" }}
               </button>
               <span v-else class="t-sm t-2">Approve requires newer Core</span>
             </template>
@@ -130,7 +136,7 @@ const OFF = "Agent is turned off in Core.";
             <span class="t-sm ap-label">Full action</span>
             <span v-if="approvable(selected)" class="t-xs t-2">{{ reviewed(selected) ? "Read to the end" : "Scroll to the end" }}</span>
           </div>
-          <pre :key="selectedKey!" ref="body" class="ap-body mono" tabindex="0" role="region" aria-label="Full action"
+          <pre :key="selectedKey!" ref="body" :data-review-key="selectedKey" class="ap-body mono" tabindex="0" role="region" aria-label="Full action"
             @scroll="measure">{{ selected.preview }}</pre>
         </div>
         <p class="ap-banner t-sm">
@@ -143,7 +149,7 @@ const OFF = "Agent is turned off in Core.";
 
     <div v-else class="card empty">
       <span class="tile pos" aria-hidden="true"><NavIcon name="approve" /></span>
-      <h3>Nothing is waiting for you</h3>
+      <h2>Nothing is waiting for you</h2>
       <p class="t-sm">New requests from agents show up here and on your phone.</p>
     </div>
   </ActivityState>
@@ -163,7 +169,7 @@ const OFF = "Agent is turned off in Core.";
       </ul>
       <div v-else class="card empty">
         <span class="tile" aria-hidden="true"><NavIcon name="shield" /></span>
-        <h3>No agent actions yet</h3>
+        <h2>No agent actions yet</h2>
         <p class="t-sm">Approved, rejected and automatic agent actions show up here.</p>
       </div>
     </template>
@@ -171,9 +177,11 @@ const OFF = "Agent is turned off in Core.";
 </template>
 
 <style scoped>
-p, h2, h3, dl, dd { margin: 0; }
+p, h2, dl, dd { margin: 0; }
+.empty h2 { font-size: 15px; line-height: 1.4; color: var(--text-primary); }
 .ap-layout { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
-.ap-list { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+/* 360 + 20 + 320 fits the narrowest window (1024 minus sidebar and padding). */
+.ap-list { flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 .ap-card { display: flex; flex-direction: column; gap: 12px; }
 .ap-card.on { box-shadow: 0 0 0 2px var(--focus-ring); }
 .ap-row { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
@@ -191,6 +199,8 @@ p, h2, h3, dl, dd { margin: 0; }
 .ap-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .ap-hint { margin-right: auto; }
 .tile :deep(svg) { width: 20px; height: 20px; }
+/* A gated Approve keeps the disabled look on hover too. */
+.btn-primary[aria-disabled="true"]:hover { background: var(--bg-sunken); }
 
 .ap-aside { flex: 0 0 320px; min-width: 0; display: flex; flex-direction: column; gap: 14px; position: sticky; top: 20px; }
 @media (max-width: 960px) { .ap-aside { flex: 1 1 100%; position: static; } }

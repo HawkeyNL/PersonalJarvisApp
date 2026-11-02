@@ -21,18 +21,20 @@ const audit = ref<Availability<AuditLog>>({ state: "loading" });
 const now = ref(Date.now());
 const loading = ref(false);
 
+// Loads can overlap (Refresh, Try again, after a decision): only the latest one lands.
+let generation = 0;
 async function load() {
+  const mine = ++generation;
   loading.value = true;
-  try {
-    [sessions.value, pending.value, audit.value] = await Promise.all([
-      loadOptional<{ sessions: CodingSessionRow[] }>("/v1/coding/sessions"),
-      loadOptional<{ pending: PendingAction[] }>("/v1/agent/pending"),
-      loadOptional<AuditLog>("/v1/agent/audit"),
-    ]);
-    now.value = Date.now();
-  } finally {
-    loading.value = false;
-  }
+  const results = await Promise.all([
+    loadOptional<{ sessions: CodingSessionRow[] }>("/v1/coding/sessions"),
+    loadOptional<{ pending: PendingAction[] }>("/v1/agent/pending"),
+    loadOptional<AuditLog>("/v1/agent/audit"),
+  ]);
+  if (mine !== generation) return;
+  [sessions.value, pending.value, audit.value] = results;
+  now.value = Date.now();
+  loading.value = false;
 }
 onMounted(load);
 

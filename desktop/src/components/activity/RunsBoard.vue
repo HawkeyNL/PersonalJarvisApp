@@ -5,7 +5,7 @@ import ActivityState from "./ActivityState.vue";
 import type { PendingAction } from "../../agentApprovals";
 import { relativeTime, type Availability } from "../../hubModel";
 import type { CodingSessionRow } from "../../nodeModels";
-import { RUN_FILTERS, filterRuns, runBadge, runKpis, type AuditLog, type RunFilter } from "../../activity";
+import { filterRuns, runBadge, runKpis, type AuditLog, type RunFilter } from "../../activity";
 
 // D-Runs: the coding sessions Core runs, with KPIs from the reads the page
 // already makes. Core reports no agents, duration, tokens or cost per session,
@@ -26,7 +26,7 @@ const kpis = computed(() => runKpis(
   props.audit.state === "ok" ? props.audit.value : null,
 ));
 const rows = computed(() => filterRuns(list.value, filter.value));
-const filterLabel = computed(() => RUN_FILTERS.find((f) => f.id === filter.value)?.label.toLowerCase() ?? "");
+const NONE: Record<RunFilter, string> = { all: "No runs", running: "Nothing running", paused: "Nothing paused", finished: "No finished runs" };
 const when = (iso?: string) => {
   const d = iso ? new Date(iso) : null;
   return d && !Number.isNaN(d.getTime()) ? d.toLocaleString("en", { dateStyle: "medium", timeStyle: "short" }) : undefined;
@@ -67,7 +67,7 @@ const when = (iso?: string) => {
         </table>
       </div>
       <div v-else-if="list.length" class="empty">
-        <h3>No {{ filterLabel }} runs</h3>
+        <h3>{{ NONE[filter] }}</h3>
         <p class="t-sm">Nothing matches this status right now.</p>
         <button type="button" class="btn btn-secondary btn-sm" @click="filter = 'all'">Show all runs</button>
       </div>

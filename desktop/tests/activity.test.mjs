@@ -52,7 +52,9 @@ test("Approve on desktop still runs through the gate, the Mac signer and the v1 
   const board = readFileSync(new URL("../src/components/activity/ApprovalsBoard.vue", import.meta.url), "utf8");
   assert.match(board, /if \(approve && !\(approvable\(item\) && reviewed\(item\)\)\) return;/);
   assert.match(board, /const approvable = \(p: PendingAction\) => signer\.value && canSignApproval\(p\);/);
-  assert.match(board, /:disabled="!!deciding \|\| !reviewed\(p\)"/);
+  assert.match(board, /:aria-disabled="!reviewed\(p\) \|\| undefined"/);
+  // The board decides only through agentApprovals: no other network path.
+  assert.doesNotMatch(board, /from "\.\.\/\.\.\/(api|auth|coreStatus)"|invoke\(|fetch\(/);
   assert.match(board, /approveAction\(item\) : denyAction\(item\)/);
 });
 
