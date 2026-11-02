@@ -12,7 +12,7 @@ const views = [...read("router/index.ts").matchAll(/from "\.\.\/views\/(\w+\.vue
 const h1s = (source) => count(source, /<h1[\s>]/g) + count(source, /<(PageShell|NodePage)[\s>]/g);
 
 test("the router imports every view file", () => {
-  assert.ok(views.length >= 16, views.join(", "));
+  assert.ok(views.length >= 15, views.join(", "));
 });
 
 test("the old HUD chrome is gone", () => {

@@ -46,7 +46,7 @@ export const NAV: NavSection[] = [
 ];
 
 export type View =
-  | "home" | "conversations" | "agents" | "integrations" | "health" | "memory"
+  | "home" | "agents" | "integrations" | "health" | "memory"
   | "trading" | "desk" | "stocks" | "stock" | "positions" | "memecoin" | "tasks" | "context" | "settings" | "soon";
 
 /** One screen: its path, the view that renders it and the sidebar entry it highlights. */
@@ -61,7 +61,6 @@ const soon = (id: string, detail: string): Page => {
 
 export const PAGES: Page[] = [
   { path: "/", name: "home", view: "home", nav: "chat" },
-  { path: "/conversations", name: "conversations", view: "conversations", nav: "chat" },
   { path: "/memory", name: "memory", view: "memory", nav: "memory" },
 
   // Trading: the dashboard and the read-only IBKR screens (/v1/trading/*).
@@ -87,7 +86,7 @@ export const PAGES: Page[] = [
   { path: "/devices", name: "devices", view: "context", nav: "devices",
     props: { title: "Devices", subtitle: "The apps linked to Jarvis" } },
 
-  // Reached from the hub; not in the sidebar.
+  // Reached from the system status on the chat home; not in the sidebar.
   { path: "/agents", name: "agents", view: "agents" },
   { path: "/integrations", name: "integrations", view: "integrations" },
   { path: "/health", name: "health", view: "health" },
@@ -100,6 +99,8 @@ export const REDIRECTS: Record<string, string> = {
   "/broker": "/trading/ibkr",
   "/tasks": "/runs",
   "/context": "/devices",
+  // The chat home shows the conversation list.
+  "/conversations": "/",
 };
 
 /** aria-current for a sidebar entry, given the route's meta.nav. */

@@ -9,7 +9,6 @@ import TradingMemecoin from "../views/TradingMemecoin.vue";
 import Health from "../views/Health.vue";
 import Settings from "../views/Settings.vue";
 import Context from "../views/Context.vue";
-import Conversations from "../views/Conversations.vue";
 import Tasks from "../views/Tasks.vue";
 import Integrations from "../views/Integrations.vue";
 import Agents from "../views/Agents.vue";
@@ -24,7 +23,7 @@ import { shellGuard } from "../shellMode";
 export const router = createRouter({
   history: createWebHistory(),
   routes: buildRoutes({
-    home: Home, conversations: Conversations, agents: Agents, integrations: Integrations, health: Health,
+    home: Home, agents: Agents, integrations: Integrations, health: Health,
     memory: Memory, trading: Trading, desk: TradingDesk, stocks: TradingStocks, stock: TradingStock, positions: TradingPositions, memecoin: TradingMemecoin, tasks: Tasks, context: Context, settings: Settings, soon: ComingSoon,
   }),
 });
