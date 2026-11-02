@@ -59,8 +59,9 @@ onUnmounted(() => { consoleActive.value = false; });
 watch(wakePulse, () => {
   if (!locked.value && !mic.listening.value) mic.toggle();
 });
-// The lock turns the mic off, also when it opened just as the lock came up.
-watch(() => locked.value && mic.listening.value, (both) => { if (both) mic.stop(); }, { flush: "sync" });
+// The lock turns the mic off and drops what it has not recognised yet, also
+// when the mic opened just as the lock came up.
+watch(() => locked.value && mic.listening.value, (both) => { if (both) mic.stop(true); }, { flush: "sync" });
 
 const current = computed(() => conversations.value.find((c) => c.id === currentId.value) ?? null);
 const day = computed(() => (current.value ? dayOf(current.value.updated_at, Date.now()) : null));

@@ -20,10 +20,14 @@ export const lockDecided = ref(false);
  *  decided, because a Windows lock ends the session. */
 export const shownShellMode = computed(() => (lockDecided.value ? currentShellMode.value : "signin"));
 watch(locked, (value) => {
-  if (value) void invoke("revoke_model_authorization").catch(() => {
+  if (!value) return;
+  void invoke("revoke_model_authorization").catch(() => {
     // Fail closed if native revocation cannot be acknowledged.
     window.location.reload();
   });
+  // A modal <dialog> sits in the top layer, above the lock and outside the
+  // inert app: close it. Its own close handler resets its state.
+  document.querySelectorAll<HTMLDialogElement>("dialog[open]").forEach((dialog) => dialog.close());
 }, { flush: "sync" });
 export const unlocking = ref(false);
 export const lockError = ref<string | null>(null);

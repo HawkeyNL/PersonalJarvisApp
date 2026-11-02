@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAppStore } from "./stores/app";
 import AppLock from "./components/AppLock.vue";
@@ -37,6 +37,17 @@ watch(currentShellMode, (value, previous) => {
 const main = ref<HTMLElement | null>(null);
 const skipToContent = () => main.value?.focus();
 
+// The lock stops the wake word listener (no capture behind it); unlocking
+// resumes it and puts focus on the page, never on the composer.
+watch(locked, (isLocked, was) => {
+  if (isLocked) {
+    void stopWake();
+  } else if (was) {
+    maybeStartWake();
+    void nextTick(() => main.value?.focus());
+  }
+});
+
 // Ctrl/⌘K from anywhere: go to the chat home, which focuses the composer.
 // Ignored behind the app lock.
 function onShortcut(event: KeyboardEvent) {
@@ -64,7 +75,7 @@ onMounted(async () => {
   if (await initLock()) return; // Windows sign-out reload is under way
   startApprovalPolling(); // other devices' unlock requests (a Mac approves them)
   startPairingPolling();
-  maybeStartWake(); // resume "Hey Jarvis" if it was enabled
+  if (!locked.value) maybeStartWake(); // resume "Hey Jarvis" if it was enabled; unlocking starts it otherwise
   window.addEventListener("pointerdown", noteActivity, { passive: true });
   window.addEventListener("keydown", noteActivity);
 });

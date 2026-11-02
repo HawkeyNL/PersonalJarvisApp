@@ -10,7 +10,7 @@ onMounted(() => dialog.value?.focus());
 </script>
 
 <template>
-  <div ref="dialog" class="lock" role="dialog" aria-modal="true" aria-labelledby="lock-title" tabindex="-1">
+  <div ref="dialog" class="lock" role="dialog" aria-modal="true" aria-labelledby="lock-title" aria-describedby="lock-sub" tabindex="-1">
     <div class="lock-card">
       <div class="mark">
         <span class="ring"></span>
@@ -19,13 +19,13 @@ onMounted(() => dialog.value?.focus());
       <h1 id="lock-title">Jarvis is locked</h1>
       <!-- Windows: the session is ending; the sign-in screen asks for the account password. -->
       <template v-if="lockMode === 'password'">
-        <p class="sub">Sign in again with your account password.</p>
+        <p id="lock-sub" class="sub">Sign in again with your account password.</p>
         <button class="primary" :disabled="unlocking" @click="signOutFromLock">
           {{ unlocking ? "Signing out…" : "Sign in" }}
         </button>
       </template>
       <template v-else>
-        <p class="sub">Unlock with Touch ID or your computer password.</p>
+        <p id="lock-sub" class="sub">Unlock with Touch ID or your computer password.</p>
 
         <button class="primary" :disabled="unlocking" @click="biometricUnlock">
           {{ unlocking ? "Verifying…" : "Unlock" }}

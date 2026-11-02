@@ -50,7 +50,7 @@ test("App.vue: the whole app is inert while locked; only the lock screen is outs
 
 test("the lock screen is a labelled modal dialog that takes focus", () => {
   const lock = read("components/AppLock.vue");
-  assert.match(lock, /role="dialog" aria-modal="true" aria-labelledby="lock-title" tabindex="-1"/);
+  assert.match(lock, /role="dialog" aria-modal="true" aria-labelledby="lock-title" aria-describedby="lock-sub" tabindex="-1"/);
   assert.match(lock, /onMounted\(\(\) => dialog\.value\?\.focus\(\)\)/);
 });
 
@@ -59,7 +59,7 @@ test("behind the lock no message is sent and the mic stays off", () => {
   assert.match(read("voicewake.ts"), /if \(verifying \|\| locked\.value\) return;/);
   const chat = read("components/JarvisConsole.vue");
   assert.match(chat, /if \(!locked\.value && !mic\.listening\.value\) mic\.toggle\(\);/);
-  assert.match(chat, /watch\(\(\) => locked\.value && mic\.listening\.value, \(both\) => \{ if \(both\) mic\.stop\(\); \}/);
+  assert.match(chat, /watch\(\(\) => locked\.value && mic\.listening\.value, \(both\) => \{ if \(both\) mic\.stop\(true\); \}/);
   // Home drops a pending request through the same decision.
   assert.match(read("views/Home.vue"), /composerFocus\(\{ locked: isLocked, auth: state, chatReady: !!chat \}\)/);
 });
@@ -80,4 +80,30 @@ test("a reply is announced only in the conversation it was asked in", () => {
   assert.equal(replyIsHere(fresh, null, []), false);
   // Nothing asked: nothing to announce.
   assert.equal(replyIsHere(askedIn(null, []), null, []), false);
+});
+
+test("the lock closes any open modal dialog (top layer, outside the inert app)", () => {
+  const lock = read("lock.ts");
+  const watcher = lock.slice(lock.indexOf("watch(locked"), lock.indexOf('{ flush: "sync" });'));
+  assert.match(watcher, /document\.querySelectorAll<HTMLDialogElement>\("dialog\[open\]"\)\.forEach\(\(dialog\) => dialog\.close\(\)\)/);
+});
+
+test("the mic reports listening only once speech recognition runs, so a lock stops both", () => {
+  const mic = read("useMic.ts");
+  const start = mic.slice(mic.indexOf("async function start()"), mic.indexOf("function stop()"));
+  assert.ok(start.indexOf("startRecognition();") < start.indexOf("listening.value = true;"), "listening is set last");
+  // The lock's stop discards: no late transcript from the aborted recogniser.
+  assert.match(mic, /if \(discard\) \{\s*recog\.onresult = null;\s*recog\.abort\(\);/);
+});
+
+test("the wake listener is off behind the lock; unlocking focuses the page, not the composer", () => {
+  const app = read("App.vue");
+  assert.match(app, /if \(isLocked\) \{\s*void stopWake\(\);/);
+  assert.match(app, /void nextTick\(\(\) => main\.value\?\.focus\(\)\)/);
+  assert.match(app, /if \(!locked\.value\) maybeStartWake\(\);/);
+  assert.match(read("components/AppLock.vue"), /aria-describedby="lock-sub"/);
+});
+
+test("a reload keeps the local ids of rows on screen, so the announcer still finds the asking message", () => {
+  assert.match(read("assistant.ts"), /id: \(m\.id \? known\.get\(m\.id\) : undefined\) \?\? idc\+\+,/);
 });
