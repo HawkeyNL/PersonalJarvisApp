@@ -43,3 +43,18 @@ export function shouldLockOnLaunch(input: {
   if (input.mode === "off" || input.alreadyUnlocked || !input.setUp) return false;
   return input.mode === "password" || input.enabled;
 }
+
+/** Global shortcuts (Ctrl/⌘K) act only in the app shell, never behind the
+ *  app lock: the shell under the lock takes no input at all. */
+export function acceptsShortcuts(mode: string, locked: boolean): boolean {
+  return mode === "app" && !locked;
+}
+
+/** What to do with a pending Ctrl/⌘K request to focus the chat composer. It
+ *  waits while the session is checked and the chat mounts. It is dropped while
+ *  locked, and when sign-in fails or waits for approval, so a later unlock or
+ *  sign-in never pulls focus unless the user asks again. */
+export function composerFocus(input: { locked: boolean; auth: string; chatReady: boolean }): "focus" | "wait" | "drop" {
+  if (input.locked || (input.auth !== "checking" && input.auth !== "in")) return "drop";
+  return input.chatReady ? "focus" : "wait";
+}

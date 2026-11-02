@@ -15,6 +15,7 @@ import { mergeCanonical, appendVisualDelta } from "./realtimeProjection";
 import { PendingRuns } from "./pendingRuns";
 import { chatSession } from "./chatSession";
 import { currentAuthStatus } from "./auth";
+import { locked } from "./lock";
 import { postJsonAuth, getJsonAuth } from "./api";
 import {
   currentId,
@@ -240,7 +241,8 @@ export async function initChat(): Promise<void> {
 export async function send(input: string): Promise<void> {
   const epoch=chatSession.capture();
   const t = input.trim();
-  if (!t || thinking.value) return;
+  // Nothing is sent from behind the app lock (a voice transcript, a stray Enter).
+  if (!t || thinking.value || locked.value) return;
   if(realtimeAvailable && pending.full) {
     push("jarvis","Too many unconfirmed requests. Restore the connection first; nothing is resent.");
     return;

@@ -85,7 +85,7 @@ test("a session read that resolves after sign-out cannot sign the shell back in"
 test("the shell renders navigation only in app mode and the router uses the guard", async () => {
   const app = await readFile(new URL("../src/App.vue", import.meta.url), "utf8");
   assert.match(app, /<AppSidebar v-if="mode === 'app'" \/>/);
-  assert.match(app, /if \(mode\.value !== "app"\) return;/);
+  assert.match(app, /if \(!acceptsShortcuts\(mode\.value, locked\.value\)\) return;/);
   // The launch lock decides first; leaving the app closes the chat and goes back.
   const lock = await readFile(new URL("../src/lock.ts", import.meta.url), "utf8");
   assert.match(lock, /lockDecided\.value \? currentShellMode\.value : "signin"/);

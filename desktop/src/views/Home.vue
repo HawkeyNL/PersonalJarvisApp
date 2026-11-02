@@ -3,7 +3,8 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import { getJson, ApiError } from "../api";
 import { currentAuthStatus, currentShellMode, login, clearSession, listDevices, PairingPending, AccountPasswordRequired, AccountActivationRequired, bootstrapFirstDevice, ownKeyFingerprint } from "../auth";
 import { configureHomeNode, homeNodeConfig, loadHomeNodeConfig } from "../homeNode";
-import { shownShellMode } from "../lock";
+import { locked, shownShellMode } from "../lock";
+import { composerFocus } from "../lockPolicy";
 import JarvisConsole from "../components/JarvisConsole.vue";
 import ConversationList from "../components/chat/ConversationList.vue";
 import NavIcon, { type IconName } from "../components/NavIcon.vue";
@@ -222,14 +223,15 @@ const footerHost = computed(() => originHost(homeNodeConfig.value.origin));
 // session is confirmed, so a request made before that waits for it.
 const app = useAppStore();
 const consoleRef = ref<InstanceType<typeof JarvisConsole> | null>(null);
-watch([() => app.consoleOpen, consoleRef], ([requested, chat]) => {
-  if (!requested || !chat) return;
-  chat.focusInput();
+// A request made while locked, or while sign-in fails or waits for approval,
+// is dropped, so a later unlock or sign-in does not pull focus.
+watch([() => app.consoleOpen, consoleRef, auth, locked], ([requested, chat, state, isLocked]) => {
+  if (!requested) return;
+  const action = composerFocus({ locked: isLocked, auth: state, chatReady: !!chat });
+  if (action === "wait") return;
+  if (action === "focus") chat?.focusInput();
   app.consoleOpen = false;
 }, { immediate: true, flush: "post" });
-// A request made while sign-in fails or waits for approval is dropped, so a
-// later sign-in does not pull focus away from whatever the user is doing.
-watch(auth, (state) => { if (state !== "checking" && state !== "in") app.consoleOpen = false; });
 
 onMounted(async () => {
   const config = await loadHomeNodeConfig();

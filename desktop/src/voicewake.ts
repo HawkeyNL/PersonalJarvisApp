@@ -5,11 +5,12 @@
 // — every detection, manual or automatic, runs the same path.
 //
 // Security posture: wake/voice is *convenience*, never the lock. A wake reveals
-// the console (and, when a profile is enrolled, only for *your* voice); if the
-// app is locked, downstream flows still require Touch ID / phone approval.
+// the console (and, when a profile is enrolled, only for *your* voice); while
+// the app is locked every wake is ignored.
 import { ref, computed } from "vue";
 import { enrolled, verify, refreshVoiceStatus, voiceSupported } from "./voiceServer";
 import { initPlatformCapabilities, platformCapabilities } from "./platform";
+import { locked } from "./lock";
 
 const WAKE_KEY = "jarvis.wake.enabled";
 
@@ -47,7 +48,8 @@ function matchesHotkey(e: KeyboardEvent): boolean {
  * reveal the console. Only *your* voice wakes Jarvis once a profile exists.
  */
 export async function triggerWake(): Promise<void> {
-  if (verifying) return;
+  // Behind the app lock a wake does nothing: no voice check, no mic.
+  if (verifying || locked.value) return;
   verifying = true;
   wakeError.value = null;
   try {
