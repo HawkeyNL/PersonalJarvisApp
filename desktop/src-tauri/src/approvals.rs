@@ -608,6 +608,8 @@ fn account_prompt(approval: &AccountApproval, devices: &[DeviceItem]) -> Result<
             Ok("Change Jarvis account password".into())
         }
         AccountAction::PasswordSet => Err("invalid password approval target".into()),
+        // Recovery is confirmed by root on the Home Node, never signed here.
+        AccountAction::PasswordReset => Err("password reset is confirmed on the Home Node".into()),
         AccountAction::DeviceRevoke => {
             let device = devices
                 .iter()
@@ -640,7 +642,7 @@ pub(super) async fn auth_sign_account_approval(
     }
     let devices = match approval.action {
         AccountAction::DeviceRevoke => fetch::<DeviceList>(&session, "/v1/devices").await?.devices,
-        AccountAction::PasswordSet => Vec::new(),
+        AccountAction::PasswordSet | AccountAction::PasswordReset => Vec::new(),
     };
     let prompt = account_prompt(&approval, &devices)?;
     let message = account_approval_message(&approval).map_err(str::to_string)?;
@@ -932,6 +934,7 @@ mod tests {
             "Change Jarvis account password"
         );
         assert!(account_prompt(&approval("password-set", DEVICE), &[]).is_err());
+        assert!(account_prompt(&approval("password-reset", USER), &[]).is_err());
     }
 
     fn agent(action: &str) -> serde_json::Value {

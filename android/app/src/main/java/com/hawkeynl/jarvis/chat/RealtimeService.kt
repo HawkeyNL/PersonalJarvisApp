@@ -53,7 +53,7 @@ internal fun <T> ApiResult<T>.realtimeSelectedHistory(): T? =
     if (this is ApiResult.HttpError && status == 404) null else realtimeSnapshot()
 
 @Serializable private data class Capability(val protocol: Int, val asynchronous_chat: Boolean)
-@Serializable private data class Submit(val request_id: String, val conversation_id: String?, val messages: List<ChatTurn>)
+@Serializable private data class Submit(val request_id: String, val conversation_id: String?, val messages: List<ChatTurn>, val mode: String? = null)
 private fun HomeNodeEndpoint.url(path: String): String = "$baseUrl$path"
 private sealed interface VoiceCommand {
     data class Report(val payload: PlaybackReport) : VoiceCommand
@@ -110,11 +110,11 @@ class RealtimeService(private val sessions: SessionRepository) {
         }
     } catch (error: CancellationException) { throw error } catch (_: Exception) { false }
 
-    suspend fun submit(endpoint: HomeNodeEndpoint, requestId: String, conversationId: String?, history: List<ChatTurn>, text: String): RealtimeRun {
+    suspend fun submit(endpoint: HomeNodeEndpoint, requestId: String, conversationId: String?, history: List<ChatTurn>, text: String, mode: String? = null): RealtimeRun {
         val token = sessions.session().token ?: error("Session unavailable")
         return client.post(endpoint.url("/v1/assistant/runs")) {
             bearerAuth(token); contentType(ContentType.Application.Json)
-            setBody(Submit(requestId, conversationId, (history + ChatTurn("user", text)).takeLast(20)))
+            setBody(Submit(requestId, conversationId, (history + ChatTurn("user", text)).takeLast(20), mode))
         }.body()
     }
 

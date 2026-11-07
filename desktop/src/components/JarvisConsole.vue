@@ -7,6 +7,7 @@ import {
   messages,
   send,
   thinking,
+  researchOffer,
   openConversation,
   startNewConversation,
   initChat,
@@ -108,6 +109,12 @@ watch(thinking, (busy, before) => {
 });
 
 const canSend = computed(() => !!text.value.trim() && !thinking.value);
+// Only this click sends a web search; the shown question is all that leaves.
+function onResearch() {
+  const question = researchOffer.value?.question;
+  if (question && !thinking.value && !locked.value) void send(question, "research");
+}
+
 function onSend() {
   // A reply in progress keeps the draft: send() would drop it.
   if (!canSend.value) return;
@@ -230,6 +237,10 @@ onMounted(async () => {
           <div class="md" @click="handleMarkdownClick" v-html="renderMarkdown(m.text)"></div>
         </template>
       </div>
+      <div v-if="researchOffer && researchOffer.conversationId === currentId && !thinking" class="offer">
+        <button type="button" class="btn btn-secondary btn-sm" :disabled="locked" @click="onResearch">Search the web</button>
+        <span class="t-xs t-2">Sends only “{{ researchOffer.question }}” to your subscription provider, which searches the web.</span>
+      </div>
       <p v-if="waiting" class="thinking t-sm t-2"><span class="spinner" aria-hidden="true"></span>Jarvis is thinking…</p>
     </div>
     <p class="sr-only" role="status">{{ announcement }}</p>
@@ -331,6 +342,7 @@ onMounted(async () => {
 }
 .who { display: flex; align-items: center; gap: 8px; }
 .mark { width: 24px; height: 24px; border-radius: 7px; }
+.offer { align-self: flex-start; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 78%; }
 .thinking {
   margin: 0; align-self: flex-start; display: flex; align-items: center; gap: 8px;
   padding: 8px 12px; border-radius: 10px; background: var(--bg-sunken);

@@ -79,6 +79,16 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel) {
                 )
             }
             items(state.messages) { message -> Message(message) }
+            state.researchOffer?.takeIf { !state.busy && it.conversationId == state.conversationId }?.question?.let { question ->
+                item {
+                    // Only this click sends a web search; the shown question is all that leaves.
+                    Column(verticalArrangement = Arrangement.spacedBy(JvSpace.xs)) {
+                        GhostButton("Search the web", actions::searchWeb)
+                        Text("Sends only “$question” to your subscription provider, which searches the web.",
+                            color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
             if (state.busy) item { Thinking() }
         }
         Column(Modifier.fillMaxWidth().background(c.bgSurface)) {
