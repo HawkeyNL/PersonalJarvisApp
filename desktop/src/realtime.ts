@@ -15,7 +15,7 @@ type Payloads = {
   "message.created":{request_id:string;message:CanonicalMessage};
   "assistant.started":Run;
   "assistant.delta":{run:Run;text:string};
-  "assistant.completed":{run:Run;message:CanonicalMessage};
+  "assistant.completed":{run:Run;message:CanonicalMessage;research_offer?:{question:string}};
   "assistant.failed":{run:Run;reason:string};
   "voice.owner_changed":{device_id:string|null;run_id:string|null};
   "voice.started":{device_id:string;run_id:string};

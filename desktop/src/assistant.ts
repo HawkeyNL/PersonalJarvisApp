@@ -13,6 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { startRealtime, type RealtimeEvent, type CanonicalMessage } from "./realtime";
 import { mergeCanonical, appendVisualDelta } from "./realtimeProjection";
 import { PendingRuns } from "./pendingRuns";
+import { offerFrom, type ResearchOffer } from "./researchOffer";
 import { chatSession } from "./chatSession";
 import { currentAuthStatus } from "./auth";
 import { locked } from "./lock";
@@ -39,12 +40,14 @@ export interface Msg {
 
 export const messages = ref<Msg[]>([]);
 export const thinking = ref(false); // true while the brain is generating a reply
+/** A web search Core advised after the last reply; only a click sends it. */
+export const researchOffer = ref<ResearchOffer|null>(null);
 let idc = 0;
 let realtimeAvailable=false;
 const pending=new PendingRuns();
 const reconciliation=new ReconcileLoop();
 let buffered:RealtimeEvent[]=[];
-chatSession.onReset(()=>{pending.clear();messages.value=[];thinking.value=false;buffered=[];reconciliation.reset();realtimeAvailable=false;});
+chatSession.onReset(()=>{pending.clear();messages.value=[];thinking.value=false;researchOffer.value=null;buffered=[];reconciliation.reset();realtimeAvailable=false;});
 
 function upsertCanonical(message:CanonicalMessage,requestId?:string,runId?:string) {
   if(currentId.value!==message.conversation_id) return;
@@ -127,7 +130,7 @@ function receiveRealtime(event:RealtimeEvent) {
     case "assistant.completed":
       upsertCanonical(event.payload.message,undefined,event.payload.run.run_id);
       pending.delete(event.payload.run.request_id);
-      if(currentId.value===event.payload.run.conversation_id) thinking.value=false;
+      if(currentId.value===event.payload.run.conversation_id) {thinking.value=false;researchOffer.value=offerFrom(event.payload);}
       break;
     case "assistant.failed":
       pending.delete(event.payload.run.request_id);
@@ -174,6 +177,7 @@ async function ask(epoch:number): Promise<ChatReply> {
 
 /** Load a conversation's history into the view and make it the current tab. */
 export async function openConversation(id: string): Promise<void> {
+  researchOffer.value = null;
   setCurrent(id);
   await reloadConversation(id);
 }
@@ -207,6 +211,7 @@ export function startNewConversation(): void {
   setCurrent(null);
   messages.value = [];
   thinking.value = false;
+  researchOffer.value = null;
 }
 
 /** On launch, restore the tab list and reopen the last (or most recent) chat,
@@ -239,8 +244,9 @@ export async function initChat(): Promise<void> {
   }
 }
 
-/** Send a user message; Jarvis replies (and speaks if the policy allows). */
-export async function send(input: string): Promise<void> {
+/** Send a user message; Jarvis replies (and speaks if the policy allows).
+ *  `research` only ever comes from the owner's click on a Core offer. */
+export async function send(input: string, mode?: "research"): Promise<void> {
   const epoch=chatSession.capture();
   const t = input.trim();
   // Nothing is sent from behind the app lock (a voice transcript, a stray Enter).
@@ -249,6 +255,7 @@ export async function send(input: string): Promise<void> {
     push("jarvis","Too many unconfirmed requests. Restore the connection first; nothing is resent.");
     return;
   }
+  researchOffer.value = null;
   push("user", t);
   thinking.value = true;
   if(realtimeAvailable) {
@@ -256,7 +263,7 @@ export async function send(input: string): Promise<void> {
     const optimistic=messages.value[messages.value.length-1];
     optimistic.requestId=requestId;
     pending.set(requestId,{conversation:currentId.value,messageId:optimistic.id});
-    const request={request_id:requestId,conversation_id:currentId.value,messages:messages.value.slice(-MAX_TURNS).map(m=>({role:m.role==="jarvis"?"assistant":"user",content:m.text}))};
+    const request={request_id:requestId,conversation_id:currentId.value,messages:messages.value.slice(-MAX_TURNS).map(m=>({role:m.role==="jarvis"?"assistant":"user",content:m.text})),...(mode?{mode}:{})};
     try {
       const result=await postJsonAuth<{conversation_id:string;run_id:string}>("/v1/assistant/runs",request);
       if(!chatSession.current(epoch)) return;

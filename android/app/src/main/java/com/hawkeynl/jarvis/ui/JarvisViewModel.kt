@@ -82,6 +82,8 @@ data class JarvisUiState(
     val conversationTitle: String = "New conversation",
     val messages: List<ConversationMessage> = emptyList(),
     val busy: Boolean = false,
+    /** The owner's question Core advised a web search for, after the last reply. */
+    val researchOffer: String? = null,
     val appUpdate: AndroidUpdateUiState = AndroidUpdateUiState.Idle,
     val error: String? = null,
     /** A signed password reset waiting for root confirmation on the Home Node. */
@@ -220,7 +222,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     fun openConversation(id: String) {
         val endpoint = _state.value.endpoint ?: return
         viewModelScope.launch {
-            _state.update { it.copy(busy = true, error = null) }
+            _state.update { it.copy(busy = true, error = null, researchOffer = null) }
             when (val result = container.conversations.load(endpoint, id)) {
                 is ApiResult.Success -> _state.update {
                     it.copy(
@@ -243,10 +245,17 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             conversationTitle = "New conversation",
             messages = emptyList(),
             error = null,
+            researchOffer = null,
         )
     }
 
-    fun send(text: String) {
+    /** Only the owner's click on a Core offer passes [research]. */
+    fun searchWeb() {
+        val question = _state.value.researchOffer ?: return
+        if (realtimeAvailable) send(question, research = true)
+    }
+
+    fun send(text: String, research: Boolean = false) {
         val endpoint = _state.value.endpoint ?: return
         val current = _state.value
         if (current.busy || text.isBlank() || !current.authenticated || current.locked) return
@@ -257,11 +266,11 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 _state.update { it.copy(error = "Too many unconfirmed requests. Restore the connection first; nothing is sent again.") }
                 return
             }
-            _state.update { it.copy(busy = true, messages = it.messages + ConversationMessage("user", text.trim(), at = Instant.now().toString(), id = optimisticId)) }
+            _state.update { it.copy(busy = true, researchOffer = null, messages = it.messages + ConversationMessage("user", text.trim(), at = Instant.now().toString(), id = optimisticId)) }
             viewModelScope.launch {
                 try {
                     val history = current.messages.map { com.hawkeynl.jarvis.network.ChatTurn(it.role, it.content) }
-                    val run = container.realtime.submit(endpoint, requestId, current.conversationId, history, text.trim())
+                    val run = container.realtime.submit(endpoint, requestId, current.conversationId, history, text.trim(), if (research) "research" else null)
                     _state.update { if (current.conversationId == null && it.conversationId == null && it.messages.any { message -> message.id == optimisticId }) it.copy(conversationId = run.conversation_id) else it }
                 } catch (error: kotlinx.coroutines.CancellationException) { throw error } catch (_: Exception) {
                     _state.update { it.copy(busy = false, error = "Sending was not confirmed. Reconnect to check the stored history; nothing is regenerated automatically.") }
@@ -627,6 +636,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 val run = p.run ?: return; val message = p.message ?: return
                 pending.remove(run.request_id)
                 _state.update { state -> if (state.conversationId != message.conversation_id) state else state.copy(busy = false,
+                    researchOffer = p.research_offer?.question?.trim()?.takeIf { it.isNotEmpty() },
                     messages = upsertRealtime(state.messages, ConversationMessage(message.role, message.content, message.model, message.created_at, message.id), "run:${run.run_id}")) }
             }
             "assistant.failed" -> {

@@ -9,6 +9,15 @@ class RealtimeStateTest {
     private fun event(n: Long, type: String = "assistant.delta", connection: String = epoch) =
         RealtimeEvent(1, connection, n, UUID(0, n).toString(), type, RealtimePayload())
 
+    @Test fun researchOfferIsOptional() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val run = """{"run_id":"r","request_id":"q","conversation_id":"c"}"""
+        val old = json.decodeFromString<RealtimePayload>("""{"run":$run}""")
+        assertNull(old.research_offer)
+        val offered = json.decodeFromString<RealtimePayload>("""{"run":$run,"research_offer":{"question":"weer?"}}""")
+        assertEquals("weer?", offered.research_offer?.question)
+    }
+
     @Test fun duplicatesAndOutOfOrderEventsAreIgnored() {
         val cursor = RealtimeCursor()
         assertTrue(cursor.accept(event(10, "connection.ready")))
