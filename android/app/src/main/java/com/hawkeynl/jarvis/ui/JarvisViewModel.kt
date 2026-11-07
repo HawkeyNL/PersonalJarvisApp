@@ -52,6 +52,9 @@ sealed interface AndroidUpdateUiState {
     data class Failed(val message: String) : AndroidUpdateUiState
 }
 
+/** An offer is shown and sent only while its own conversation is open. */
+data class WebSearchOffer(val conversationId: String, val question: String)
+
 data class JarvisUiState(
     val activationRequired: Boolean = false,
     val voiceEnabled: Boolean = false,
@@ -82,8 +85,8 @@ data class JarvisUiState(
     val conversationTitle: String = "New conversation",
     val messages: List<ConversationMessage> = emptyList(),
     val busy: Boolean = false,
-    /** The owner's question Core advised a web search for, after the last reply. */
-    val researchOffer: String? = null,
+    /** Core's web search advice after the last reply in [WebSearchOffer.conversationId]. */
+    val researchOffer: WebSearchOffer? = null,
     val appUpdate: AndroidUpdateUiState = AndroidUpdateUiState.Idle,
     val error: String? = null,
     /** A signed password reset waiting for root confirmation on the Home Node. */
@@ -251,8 +254,9 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 
     /** Only the owner's click on a Core offer passes [research]. */
     fun searchWeb() {
-        val question = _state.value.researchOffer ?: return
-        if (realtimeAvailable) send(question, research = true)
+        val state = _state.value
+        val offer = state.researchOffer?.takeIf { it.conversationId == state.conversationId } ?: return
+        if (realtimeAvailable) send(offer.question, research = true)
     }
 
     fun send(text: String, research: Boolean = false) {
@@ -636,7 +640,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 val run = p.run ?: return; val message = p.message ?: return
                 pending.remove(run.request_id)
                 _state.update { state -> if (state.conversationId != message.conversation_id) state else state.copy(busy = false,
-                    researchOffer = p.research_offer?.question?.trim()?.takeIf { it.isNotEmpty() },
+                    researchOffer = p.research_offer?.question?.trim()?.takeIf { it.isNotEmpty() }?.let { WebSearchOffer(message.conversation_id, it) },
                     messages = upsertRealtime(state.messages, ConversationMessage(message.role, message.content, message.model, message.created_at, message.id), "run:${run.run_id}")) }
             }
             "assistant.failed" -> {

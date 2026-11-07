@@ -237,7 +237,7 @@ onMounted(async () => {
           <div class="md" @click="handleMarkdownClick" v-html="renderMarkdown(m.text)"></div>
         </template>
       </div>
-      <div v-if="researchOffer && researchOffer.conversationId === currentId && !waiting" class="offer">
+      <div v-if="researchOffer && researchOffer.conversationId === currentId && !thinking" class="offer">
         <button type="button" class="btn btn-secondary btn-sm" :disabled="locked" @click="onResearch">Search the web</button>
         <span class="t-xs t-2">Sends only “{{ researchOffer.question }}” to your subscription provider, which searches the web.</span>
       </div>

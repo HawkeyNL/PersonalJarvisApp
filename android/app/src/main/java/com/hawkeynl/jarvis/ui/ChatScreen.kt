@@ -79,7 +79,7 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel) {
                 )
             }
             items(state.messages) { message -> Message(message) }
-            state.researchOffer?.takeIf { !state.busy }?.let { question ->
+            state.researchOffer?.takeIf { !state.busy && it.conversationId == state.conversationId }?.question?.let { question ->
                 item {
                     // Only this click sends a web search; the shown question is all that leaves.
                     Column(verticalArrangement = Arrangement.spacedBy(JvSpace.xs)) {
