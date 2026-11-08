@@ -373,6 +373,7 @@ fn authenticated_api_path(path: &str) -> bool {
         "/v1/system",
         "/v1/holdings",
         "/v1/broker",
+        "/v1/trading",
         "/v1/agent/pending",
         "/v1/voice",
     ];
@@ -1121,6 +1122,11 @@ mod tests {
     fn native_authenticated_proxy_is_bounded_and_excludes_updater_routes() {
         assert!(authenticated_api_path("/v1/conversations"));
         assert!(authenticated_api_path("/v1/auth/unlock/pending?wait=20"));
+        // Trading pages: IBKR portfolio and the memecoin paper trader.
+        assert!(authenticated_api_path("/v1/trading/portfolio"));
+        assert!(authenticated_api_path("/v1/trading/meme/overview"));
+        assert!(authenticated_api_path("/v1/trading/meme/pause"));
+        assert!(!authenticated_api_path("/v1/tradingx"));
         // Only macOS signs account approvals, so only it proxies their routes.
         for path in [
             "/v1/auth/account/password/requests",
