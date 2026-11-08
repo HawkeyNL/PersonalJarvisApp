@@ -81,7 +81,10 @@ mod tests {
             device_id: Some(device),
             run_id: Some(run.run_id),
         });
-        gate.event(&Event::AssistantStarted(run.clone()));
+        gate.event(&Event::AssistantStarted {
+            run: run.clone(),
+            web_search: false,
+        });
         assert_eq!(gate.set_enabled(true), SpeechAction::Stop);
         assert!(gate
             .event(&Event::AssistantDelta {
@@ -97,7 +100,10 @@ mod tests {
             device_id: Some(device),
             run_id: Some(next.run_id),
         });
-        gate.event(&Event::AssistantStarted(next.clone()));
+        gate.event(&Event::AssistantStarted {
+            run: next.clone(),
+            web_search: false,
+        });
         assert_eq!(
             gate.event(&Event::AssistantDelta {
                 run: next,
@@ -303,7 +309,7 @@ async fn run(
                             speech.action(action);
                         }
                         match &event.event {
-                            Event::AssistantStarted(run)
+                            Event::AssistantStarted { run, .. }
                                 if owned_run == Some(run.run_id)
                                     && voice.load(Ordering::SeqCst) =>
                             {

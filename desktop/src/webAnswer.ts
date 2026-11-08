@@ -33,3 +33,8 @@ export const startsAfterReply = (rows: { role: string; text: string }[]) => {
   const last = rows[rows.length - 1];
   return last?.role === "jarvis" && !!last.text;
 };
+
+/** Core marks its automatic web search run with `web_search: true`; older
+ *  Cores do not, so a run right after a finished reply counts too. */
+export const startsWebSearch = (started: { web_search?: boolean }, rows: { role: string; text: string }[]) =>
+  started.web_search === true || startsAfterReply(rows);

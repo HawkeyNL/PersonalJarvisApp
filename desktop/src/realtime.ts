@@ -13,7 +13,7 @@ type Payloads = {
   "conversation.updated":Metadata;
   "conversation.deleted":{conversation_id:string};
   "message.created":{request_id:string;message:CanonicalMessage};
-  "assistant.started":Run;
+  "assistant.started":Run&{web_search?:boolean};
   "assistant.delta":{run:Run;text:string};
   "assistant.completed":{run:Run;message:CanonicalMessage;research_offer?:{question:string}};
   "assistant.failed":{run:Run;reason:string};

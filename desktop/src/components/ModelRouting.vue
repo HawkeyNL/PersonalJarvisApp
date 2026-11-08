@@ -20,7 +20,7 @@ const TIER_COPY: Record<Tier, [string, string]> = {
 const WEB_SEARCH_COPY: Record<WebSearch, [string, string]> = {
   off: ["Off", "Jarvis never searches the web."],
   on: ["Ask", "Jarvis offers a web search button; only your click sends the question."],
-  auto: ["Auto", "Jarvis searches by itself when a question needs current information. Set it from your phone or the Home Node."],
+  auto: ["Auto", "Jarvis searches by itself when a question needs current information."],
 };
 const policy = ref<RoutingPolicy | null>(null);
 const draft = ref<Routing>(canonicalRouting(null));
@@ -118,10 +118,9 @@ onMounted(reload);
       <fieldset class="web" :disabled="!editable">
         <legend><strong>Web search</strong>
           <small>Uses the subscription's provider-hosted web search, never a paid API. Only the question leaves the Home Node.</small></legend>
-        <!-- Auto is signed from the phone or Home Node until client-core can sign it here. -->
         <label v-for="state in WEB_SEARCH" :key="state" class="check">
           <input type="radio" name="web-search" :value="state" :checked="(draft.research_web_search ?? 'off') === state"
-            :disabled="state === 'auto'" @change="draft.research_web_search = state" />
+            @change="draft.research_web_search = state" />
           <span><strong>{{ WEB_SEARCH_COPY[state][0] }}</strong><small>{{ WEB_SEARCH_COPY[state][1] }}</small></span>
         </label>
       </fieldset>
@@ -182,7 +181,7 @@ onMounted(reload);
     <div v-if="confirming" class="model-confirm" role="dialog" aria-modal="true" aria-label="Confirm routing change" @keydown.esc="confirming = false">
       <div>
         <h3>Replace model routing?</h3>
-        <p>This replaces the routing for all devices{{ draft.paid_api === "off" ? " and turns paid APIs off" : "" }}{{ draft.research_web_search === "on" ? ". Jarvis may offer web searches" : "" }}. Running requests are not cancelled.</p>
+        <p>This replaces the routing for all devices{{ draft.paid_api === "off" ? " and turns paid APIs off" : "" }}{{ draft.research_web_search === "on" ? ". Jarvis may offer web searches" : draft.research_web_search === "auto" ? ". Jarvis may search the web by itself" : "" }}. Running requests are not cancelled.</p>
         <ul class="summary">
           <li v-for="tier in TIERS" :key="tier">
             {{ TIER_COPY[tier][0] }}: {{ draft.tiers[tier] ? draft.tiers[tier]!.chain.map(label).join(" → ") : "built-in order" }}

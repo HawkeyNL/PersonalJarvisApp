@@ -77,8 +77,6 @@ const key = (e: RouteEntry) => `${e.provider}\u0000${e.model}`;
  *  `ModelRouting::validate` plus the "every pair is discovered" check. */
 export function routingIssue(routing: Routing, discovered: RouteEntry[]): string | null {
   if (routing.version !== 1) return "Unsupported routing version";
-  // The pinned client-core signs only off and on.
-  if (routing.research_web_search === "auto") return AUTO_UNSIGNABLE;
   const known = new Set(discovered.map(key));
   for (const tier of TIERS) {
     const route = routing.tiers[tier];
@@ -99,8 +97,6 @@ export function routingIssue(routing: Routing, discovered: RouteEntry[]): string
   }
   return null;
 }
-
-export const AUTO_UNSIGNABLE = "Automatic web search can only be set from your phone or the Home Node; choose Off or Ask to apply routing here.";
 
 /** Discovered routable pairs not yet in `chain`, enabled first. */
 export function candidates<T extends RouteEntry & { enabled: boolean }>(models: T[], chain: RouteEntry[]): T[] {
