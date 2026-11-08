@@ -34,6 +34,33 @@ async fn send_pong<S: futures_util::Sink<Message> + Unpin>(
     )
 }
 
+/// `Ok(None)` is a well-formed envelope with an event type this build does not
+/// know (added by a newer Core): skip it and keep the socket. Anything else
+/// that does not decode is malformed and must disconnect.
+fn decode(text: &str) -> Result<Option<EventEnvelope>, ()> {
+    if let Ok(event) = serde_json::from_str::<EventEnvelope>(text) {
+        return Ok(Some(event));
+    }
+    // The envelope identity must still be valid; only the event body is opaque.
+    #[derive(serde::Deserialize)]
+    #[allow(dead_code)] // Decoded only to validate the envelope.
+    struct Header {
+        protocol: u16,
+        epoch: uuid::Uuid,
+        event_id: uuid::Uuid,
+        sequence: u64,
+        #[serde(rename = "type")]
+        kind: String,
+    }
+    let header = serde_json::from_str::<Header>(text).map_err(|_| ())?;
+    // A known type with a bad payload stays malformed. Asking serde about the
+    // tag alone keeps the known set in client-core instead of a copy here.
+    match serde_json::from_value::<Event>(serde_json::json!({ "type": header.kind })) {
+        Err(error) if error.to_string().starts_with("unknown variant") => Ok(None),
+        _ => Err(()),
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Runtime {
     task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
@@ -50,6 +77,71 @@ mod tests {
         realtime::{Event, RunIdentity},
         speech::SpeechAction,
     };
+
+    fn frame(sequence: u64, kind: &str, payload: serde_json::Value) -> String {
+        serde_json::json!({
+            "protocol": 1,
+            "epoch": uuid::Uuid::from_u128(9),
+            "event_id": uuid::Uuid::from_u128(sequence.into()),
+            "sequence": sequence,
+            "at": "2026-11-08T12:00:00Z",
+            "type": kind,
+            "payload": payload,
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn unknown_event_type_is_skipped_and_the_stream_continues() {
+        let mut cursor = EventCursor::default();
+        let ready = frame(
+            1,
+            "connection.ready",
+            serde_json::json!({ "device_id": uuid::Uuid::from_u128(1), "reconcile": true }),
+        );
+        assert!(cursor.accept(&decode(&ready).unwrap().unwrap()));
+        for kind in ["trading.meme.decision", "roadmap.changed"] {
+            assert_eq!(
+                decode(&frame(2, kind, serde_json::json!({ "id": 5 }))),
+                Ok(None)
+            );
+        }
+        let delta = frame(
+            3,
+            "assistant.delta",
+            serde_json::json!({
+                "run": {
+                    "run_id": uuid::Uuid::from_u128(2),
+                    "request_id": uuid::Uuid::from_u128(3),
+                    "conversation_id": uuid::Uuid::from_u128(4),
+                },
+                "text": "Hi",
+            }),
+        );
+        let delta = decode(&delta).unwrap().unwrap();
+        assert!(matches!(&delta.event, Event::AssistantDelta { text, .. } if text == "Hi"));
+        assert!(cursor.accept(&delta));
+        assert!(!cursor.accept(&delta), "sequence advanced to 3");
+    }
+
+    #[test]
+    fn malformed_frames_still_disconnect() {
+        let unknown = || -> serde_json::Value {
+            serde_json::from_str(&frame(2, "roadmap.changed", serde_json::json!({}))).unwrap()
+        };
+        let mut no_identity = unknown();
+        no_identity.as_object_mut().unwrap().remove("epoch");
+        let mut numeric_type = unknown();
+        numeric_type["type"] = 7.into();
+        for text in [
+            "{".to_owned(),
+            no_identity.to_string(),
+            numeric_type.to_string(),
+            frame(2, "assistant.delta", serde_json::json!({ "text": 5 })),
+        ] {
+            assert_eq!(decode(&text), Err(()), "{text}");
+        }
+    }
 
     #[tokio::test]
     async fn heartbeat_write_is_bounded_when_peer_stops_reading() {
@@ -292,8 +384,12 @@ async fn run(
                 };
                 match incoming {
                     Ok(Some(Ok(Message::Text(text)))) => {
-                        let Ok(event) = serde_json::from_str::<EventEnvelope>(&text) else {
-                            break;
+                        // The cursor needs only strictly increasing sequences (no
+                        // gap check), so a skipped event cannot stall later ones.
+                        let event = match decode(&text) {
+                            Ok(Some(event)) => event,
+                            Ok(None) => continue,
+                            Err(()) => break,
                         };
                         if !cursor.accept(&event) {
                             continue;

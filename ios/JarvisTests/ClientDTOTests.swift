@@ -125,6 +125,29 @@ final class RealtimeEventDeliveryTests: XCTestCase {
         try await delivery.deliver(restarted) { _ in delivered = true }
         XCTAssertTrue(delivered)
     }
+
+    @MainActor
+    func testUnknownEventTypeIsSkippedWithoutBreakingTheStream() async throws {
+        let delivery = RealtimeEventDelivery()
+        let epoch = UUID()
+        func frame(_ sequence: UInt64, _ type: String, _ payload: [String: Any]) throws -> RealtimeEvent {
+            let bytes = try JSONSerialization.data(withJSONObject: [
+                "protocol": 1, "epoch": epoch.uuidString, "sequence": sequence,
+                "event_id": UUID().uuidString, "type": type, "payload": payload
+            ])
+            return try JSONDecoder().decode(RealtimeEvent.self, from: bytes)
+        }
+        var delivered: [String] = []
+        try await delivery.deliver(frame(1, "connection.ready", [:])) { delivered.append($0.type) }
+        // Payload fields may clash with known names (id, run); they are dropped.
+        let unknown = try frame(2, "trading.meme.decision", ["id": 5, "run": "x"])
+        XCTAssertNil(unknown.payload.id)
+        try await delivery.deliver(unknown) { delivered.append($0.type) }
+        try await delivery.deliver(frame(2, "assistant.delta", [:])) { _ in XCTFail("Stale event delivered") }
+        try await delivery.deliver(frame(3, "assistant.delta", ["text": "Hi"])) { delivered.append($0.payload.text ?? "") }
+        XCTAssertEqual(delivered, ["connection.ready", "trading.meme.decision", "Hi"])
+        XCTAssertThrowsError(try frame(4, "assistant.delta", ["text": 5]))
+    }
 }
 
 final class RealtimeHeartbeatTests: XCTestCase {

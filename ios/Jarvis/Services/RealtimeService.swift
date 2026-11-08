@@ -11,14 +11,35 @@ struct RealtimeMessage: Decodable {
     }
 }
 struct RealtimePayload: Decodable {
-    let device_id: UUID?; let run_id: UUID?; let request_id: UUID?
-    let conversation_id: UUID?; let id: UUID?; let title: String?; let updated_at: String?
-    let run: RealtimeRun?; let text: String?; let message: RealtimeMessage?; let reason: String?
-    let web_search: Bool?
+    var device_id: UUID?; var run_id: UUID?; var request_id: UUID?
+    var conversation_id: UUID?; var id: UUID?; var title: String?; var updated_at: String?
+    var run: RealtimeRun?; var text: String?; var message: RealtimeMessage?; var reason: String?
+    var web_search: Bool?
 }
 struct RealtimeEvent: Decodable {
     let `protocol`: Int; let epoch: UUID; let sequence: UInt64; let event_id: UUID
     let type: String; let payload: RealtimePayload
+
+    /// Event types this app reads. Keep in sync with the receivers' switches.
+    static let knownTypes: Set<String> = [
+        "connection.ready", "conversation.created", "conversation.updated", "conversation.deleted",
+        "message.created", "assistant.started", "assistant.delta", "assistant.completed", "assistant.failed",
+        "voice.owner_changed", "voice.started", "voice.stopped", "voice.failed",
+    ]
+    private enum CodingKeys: String, CodingKey { case `protocol`, epoch, sequence, event_id, type, payload }
+
+    /// A newer Core may add event types. Their payload fields can reuse names with
+    /// other types, so it is dropped: the envelope still decodes and delivery still
+    /// validates and advances the sequence, while receivers ignore the unknown type.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        `protocol` = try c.decode(Int.self, forKey: .protocol)
+        epoch = try c.decode(UUID.self, forKey: .epoch)
+        sequence = try c.decode(UInt64.self, forKey: .sequence)
+        event_id = try c.decode(UUID.self, forKey: .event_id)
+        type = try c.decode(String.self, forKey: .type)
+        payload = try Self.knownTypes.contains(type) ? c.decode(RealtimePayload.self, forKey: .payload) : RealtimePayload()
+    }
 }
 struct RealtimeCapability: Decodable { let `protocol`: Int; let asynchronous_chat: Bool }
 struct AsyncChatRequest: Encodable { let request_id: UUID; let conversation_id: UUID?; let messages: [ChatTurn] }

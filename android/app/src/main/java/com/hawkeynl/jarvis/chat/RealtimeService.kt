@@ -158,7 +158,7 @@ class RealtimeService(private val sessions: SessionRepository) {
                         val cursor = RealtimeCursor()
                         for (frame in incoming) {
                             if (frame !is Frame.Text || frame.data.size > 256 * 1024) error("Invalid event frame")
-                            val event = json.decodeFromString<RealtimeEvent>(frame.readText())
+                            val event = decodeRealtimeEvent(json, frame.readText())
                             if (!cursor.accept(event)) continue
                             receive(event)
                         }
