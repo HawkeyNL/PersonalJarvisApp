@@ -2,6 +2,7 @@
 // the loader its page uses. Calls go through the native auth_request command
 // like every other owner endpoint; Vue never sees the session bearer.
 import { ref, watch, type Ref } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { getJsonAuth, postJsonAuth } from "./api";
 import { currentAuthStatus } from "./auth";
 import { LIST_LIMIT, memeFailure, type MemeFailure } from "./memecoin";
@@ -26,6 +27,31 @@ export const memeApi = {
     }
     await signedIn();
     return postJsonAuth<unknown>("/v1/trading/meme/pause", {});
+  },
+  strategies: () => getJsonAuth<unknown>("/v1/trading/meme/strategies"),
+  /** `id` is checked with isStrategyId before it reaches a path. */
+  strategy: (id: string) => getJsonAuth<unknown>(`/v1/trading/meme/strategies/${id}`),
+  decisions: () => getJsonAuth<unknown>(`/v1/trading/meme/decisions?limit=${LIST_LIMIT}`),
+  /** Immediate and unsigned: it only stops this strategy's entries. */
+  disable: async (id: string) => {
+    if (import.meta.env.DEV && devDataSet.value !== "live") {
+      if (devDataSet.value === "offline") throw { name: "NetworkError" };
+      if (devDataSet.value === "worst") throw { name: "ApiError", status: 503 };
+      return { strategy_id: id, enabled: false };
+    }
+    await signedIn();
+    return postJsonAuth<unknown>(`/v1/trading/meme/strategies/${id}/disable`, {});
+  },
+  /** macOS only: native code fetches the challenge, checks it is for this
+   *  strategy and version, asks for Touch ID, signs and posts. The webview
+   *  never sees the challenge or the signature. Rejects with a message. */
+  enable: async (id: string, version: number) => {
+    if (import.meta.env.DEV && devDataSet.value !== "live") {
+      if (devDataSet.value === "offline") throw "Home Node is unreachable";
+      return;
+    }
+    await signedIn();
+    await invoke("meme_enable_strategy", { strategyId: id, version });
   },
 };
 

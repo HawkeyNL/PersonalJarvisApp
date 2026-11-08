@@ -4,7 +4,7 @@ import {createMemoryHistory, createRouter} from "vue-router";
 
 import {NAV, PAGES, REDIRECTS, ariaCurrent, buildRoutes} from "../src/navigation.ts";
 
-const VIEWS = ["home", "agents", "integrations", "health", "memory", "trading", "desk", "stocks", "stock", "positions", "memecoin", "tasks", "context", "settings", "soon"];
+const VIEWS = ["home", "agents", "integrations", "health", "memory", "trading", "desk", "stocks", "stock", "positions", "memecoin", "memestrategies", "memestrategy", "tasks", "context", "settings", "soon"];
 const stub = name => ({name, render: () => null});
 
 async function routerAt(path) {
@@ -103,7 +103,7 @@ test("paths are unique and redirects never shadow or chain", () => {
 test("exactly one sidebar entry is aria-current on every sidebar page", async () => {
   const items = NAV.flatMap(s => s.items);
   for (const page of PAGES.filter(p => p.nav)) {
-    const nav = (await routerAt(page.path.replace(/:conid\(.*\)/, "265598"))).meta.nav;
+    const nav = (await routerAt(page.path.replace(/:conid\(.*\)/, "265598").replace(/:id\(.*\)/, "a-survivor-momentum"))).meta.nav;
     const current = items.filter(i => ariaCurrent(i.id, nav) === "page").map(i => i.id);
     assert.deepEqual(current, [page.nav], page.path);
   }
@@ -123,4 +123,15 @@ test("a stock detail page opens by numeric IBKR conid under Stocks", async () =>
   // Anything but digits is no instrument page.
   assert.equal((await routerAt("/trading/stocks/AAPL")).matched.length, 0);
   assert.equal((await routerAt("/portfolio")).path, "/trading/holdings");
+});
+
+test("memecoin strategy pages open under Memecoin by Core's id rule", async () => {
+  const list = await routerAt("/trading/memecoin/strategies");
+  assert.equal(list.matched[0].components.default.name, "memestrategies");
+  assert.equal(list.meta.nav, "memecoin");
+  const one = await routerAt("/trading/memecoin/strategies/a-survivor-momentum");
+  assert.equal(one.matched[0].components.default.name, "memestrategy");
+  assert.equal(one.meta.nav, "memecoin");
+  assert.equal(one.params.id, "a-survivor-momentum");
+  assert.equal((await routerAt("/trading/memecoin/strategies/a_b")).matched.length, 0);
 });

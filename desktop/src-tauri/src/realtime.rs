@@ -100,7 +100,7 @@ mod tests {
             serde_json::json!({ "device_id": uuid::Uuid::from_u128(1), "reconcile": true }),
         );
         assert!(cursor.accept(&decode(&ready).unwrap().unwrap()));
-        for kind in ["trading.meme.decision", "roadmap.changed"] {
+        for kind in ["trading.meme.future_event", "roadmap.changed"] {
             assert_eq!(
                 decode(&frame(2, kind, serde_json::json!({ "id": 5 }))),
                 Ok(None)

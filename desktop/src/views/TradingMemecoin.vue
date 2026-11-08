@@ -6,7 +6,7 @@ import DevDataToggle from "../components/trading/DevDataToggle.vue";
 import "../components/trading/trading.css";
 import { ageText, asOfText, formatDecimal, formatPrice, signTone } from "../trading";
 import {
-  EXIT_REASONS, REJECT_REASONS, RESUME_TEXT, failureText, goalPct, memeStatus, progressPct, readCandidates, readOverview,
+  EXIT_REASONS, REJECT_REASONS, RESUME_TEXT, agentStatus, failureText, goalPct, memeStatus, progressPct, readCandidates, readOverview,
   readTrades, reasonLabel, reportAge, sendPause, shortMint, stuckCount, usd, type PauseOutcome,
 } from "../memecoin";
 import { memeApi, useMemeRead } from "../memecoinApi";
@@ -35,6 +35,7 @@ const data = computed(() => {
 const status = computed(() => (data.value ? memeStatus(data.value) : null));
 const report = computed(() => data.value?.report ?? null);
 const stuck = computed(() => (data.value ? stuckCount(data.value) : 0));
+const agent = computed(() => (data.value ? agentStatus(data.value, now.value) : null));
 
 // Re-evaluate staleness while the page is open.
 const now = ref(Date.now());
@@ -215,6 +216,15 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
           </p>
           <p class="t-sm t-2">{{ RESUME_TEXT }}</p>
         </template>
+      </section>
+
+      <section v-if="agent" class="card td-col" aria-labelledby="mc-agent">
+        <div class="td-card-head">
+          <h2 id="mc-agent">Claude as strategy agent</h2>
+          <span class="badge" :class="agent.tone"><span class="dot" aria-hidden="true"></span>{{ agent.label }}<template v-if="agent.until"> until <time :datetime="agent.until">{{ asOfText(agent.until, now) }}</time></template></span>
+        </div>
+        <p class="t-sm t-2">{{ agent.detail }}</p>
+        <p class="t-sm"><RouterLink to="/trading/memecoin/strategies">Strategies and Claude's decisions</RouterLink></p>
       </section>
 
 

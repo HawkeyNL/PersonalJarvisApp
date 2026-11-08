@@ -399,11 +399,24 @@ fn parse_id(id: &str) -> Result<uuid::Uuid, String> {
 }
 
 async fn fetch<T: DeserializeOwned>(session: &Session, path: &str) -> Result<T, String> {
-    let response = session
+    request(session, reqwest::Method::GET, path).await
+}
+
+/// A bodyless GET, or a POST of `{}`, read as `T`.
+async fn request<T: DeserializeOwned>(
+    session: &Session,
+    method: reqwest::Method,
+    path: &str,
+) -> Result<T, String> {
+    let mut builder = session
         .client
-        .get(api_url(Some(&session.origin), path)?)
+        .request(method.clone(), api_url(Some(&session.origin), path)?)
         .bearer_auth(&session.token)
-        .header(reqwest::header::ACCEPT, "application/json")
+        .header(reqwest::header::ACCEPT, "application/json");
+    if method == reqwest::Method::POST {
+        builder = builder.json(&serde_json::json!({}));
+    }
+    let response = builder
         .send()
         .await
         .map_err(|_| "Home Node is unreachable")?;
@@ -588,6 +601,110 @@ pub(super) async fn auth_approve_agent(app: AppHandle, pending_id: String) -> Re
     sign_and_post(session, approval, path).await
 }
 
+/// Core's answer to `POST /v1/trading/meme/strategies/{id}/enable/challenge`.
+/// `expires_at` is not read: Core enforces it, and signing is bounded locally
+/// by `MEME_ENABLE_TTL_SECS`.
+#[derive(Deserialize)]
+struct MemeEnableChallenge {
+    strategy_id: String,
+    version: u32,
+    config_sha256: String,
+    /// The exact bytes `config_sha256` covers, hashed here before signing.
+    config_json: String,
+    nonce: String,
+    message: String,
+}
+
+/// Core keeps an enable challenge five minutes.
+const MEME_ENABLE_TTL_SECS: i64 = 300;
+
+fn meme_strategy_id(id: &str) -> Result<&str, String> {
+    let valid = (1..=32).contains(&id.len())
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    valid
+        .then_some(id)
+        .ok_or_else(|| "invalid strategy id".into())
+}
+
+/// The signed bytes and Touch ID prompt for enabling `strategy_id` at the
+/// `version` the owner reviewed, from Core's challenge. A challenge for
+/// another strategy or version, or whose parameters do not hash to its
+/// `config_sha256`, is refused before any prompt.
+fn meme_enable_approval(
+    challenge: &MemeEnableChallenge,
+    strategy_id: &str,
+    version: u32,
+    device: uuid::Uuid,
+    now: i64,
+) -> Result<Approval, String> {
+    if challenge.message != jarvis_client_core::MEME_STRATEGY_ENABLE_MESSAGE_V1 {
+        return Err("Requires newer Core".into());
+    }
+    if challenge.strategy_id != strategy_id {
+        return Err("invalid enable challenge".into());
+    }
+    if challenge.version != version {
+        return Err(
+            "The strategy has a new version since you opened it. Review it, then enable again."
+                .into(),
+        );
+    }
+    let (Some(sha), Some(nonce)) = (hex32(&challenge.config_sha256), hex32(&challenge.nonce))
+    else {
+        return Err("invalid enable challenge".into());
+    };
+    if <[u8; 32]>::from(Sha256::digest(challenge.config_json.as_bytes())) != sha {
+        return Err("invalid enable challenge".into());
+    }
+    let message = jarvis_client_core::meme_strategy_enable_message(
+        strategy_id,
+        version,
+        &sha,
+        &nonce,
+        device,
+    )
+    .map_err(|_| "invalid enable challenge")?;
+    // The id is `[a-z0-9-]` only (checked by the message builder above).
+    Ok(Approval {
+        prompt: format!(
+            "Enable paper strategy {strategy_id}, version {version} (parameters {}…)",
+            &challenge.config_sha256[..8]
+        ),
+        message,
+        expires_at: Some(now + MEME_ENABLE_TTL_SECS),
+    })
+}
+
+/// Enable a memecoin paper strategy again: fetch Core's challenge natively,
+/// check it is for the strategy and version the owner reviewed, sign
+/// `meme_strategy_enable_message` after Touch ID and post the signature.
+/// Only macOS signs; the challenge is not even requested elsewhere.
+#[tauri::command]
+pub(super) async fn meme_enable_strategy(
+    app: AppHandle,
+    strategy_id: String,
+    version: u32,
+) -> Result<(), String> {
+    if !cfg!(target_os = "macos") {
+        return Err("Enable from your Mac or phone".into());
+    }
+    let id = meme_strategy_id(&strategy_id)?;
+    let session = Session::load(app)?;
+    let device = session_device(&session)?;
+    let base = format!("/v1/trading/meme/strategies/{id}/enable");
+    let challenge: MemeEnableChallenge = request(
+        &session,
+        reqwest::Method::POST,
+        &format!("{base}/challenge"),
+    )
+    .await?;
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let approval = meme_enable_approval(&challenge, id, version, device, now)?;
+    sign_and_post(session, approval, base).await
+}
+
 #[derive(Deserialize)]
 struct DeviceList {
     devices: Vec<DeviceItem>,
@@ -679,6 +796,97 @@ mod tests {
             candidate_public_key: key,
             expires_at: 2_000_000_000,
             fingerprint_full: Some(fingerprint),
+        }
+    }
+
+    fn meme_challenge() -> MemeEnableChallenge {
+        MemeEnableChallenge {
+            strategy_id: "b-base".into(),
+            version: 1_000_002,
+            config_sha256: hex::encode(Sha256::digest(b"{}")),
+            config_json: "{}".into(),
+            nonce: NONCE.into(),
+            message: "meme-strategy-enable-v1".into(),
+        }
+    }
+
+    #[test]
+    fn meme_enable_signs_the_client_core_bytes_for_the_reviewed_version() {
+        let approval =
+            meme_enable_approval(&meme_challenge(), "b-base", 1_000_002, id(DEVICE), 100).unwrap();
+        assert_eq!(
+            hex::encode(&approval.message),
+            concat!(
+                "6a61727669732d6d656d652d73747261746567792d656e61626c652d763100",
+                "06",
+                "622d62617365",
+                "000f4242",
+                "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+                "ffeeddccbbaa99887766554433221100"
+            )
+        );
+        assert_eq!(
+            approval.prompt,
+            "Enable paper strategy b-base, version 1000002 (parameters 44136fa3…)"
+        );
+        assert_eq!(approval.expires_at, Some(400));
+    }
+
+    #[test]
+    fn meme_enable_refuses_a_challenge_it_did_not_ask_for() {
+        let device = id(DEVICE);
+        let refused = |challenge: MemeEnableChallenge, strategy: &str, version: u32| {
+            meme_enable_approval(&challenge, strategy, version, device, 0).unwrap_err()
+        };
+        let other = MemeEnableChallenge {
+            strategy_id: "c-trend".into(),
+            ..meme_challenge()
+        };
+        assert_eq!(
+            refused(other, "b-base", 1_000_002),
+            "invalid enable challenge"
+        );
+        assert!(refused(meme_challenge(), "b-base", 1_000_001).contains("new version"));
+        let tampered = MemeEnableChallenge {
+            config_json: "{\"take_profit_bps\":1}".into(),
+            ..meme_challenge()
+        };
+        assert_eq!(
+            refused(tampered, "b-base", 1_000_002),
+            "invalid enable challenge"
+        );
+        let short_nonce = MemeEnableChallenge {
+            nonce: NONCE[..62].into(),
+            ..meme_challenge()
+        };
+        assert_eq!(
+            refused(short_nonce, "b-base", 1_000_002),
+            "invalid enable challenge"
+        );
+        let older = MemeEnableChallenge {
+            message: "meme-strategy-enable-v0".into(),
+            ..meme_challenge()
+        };
+        assert_eq!(refused(older, "b-base", 1_000_002), "Requires newer Core");
+        let upper = MemeEnableChallenge {
+            strategy_id: "B-base".into(),
+            ..meme_challenge()
+        };
+        assert_eq!(
+            refused(upper, "B-base", 1_000_002),
+            "invalid enable challenge"
+        );
+    }
+
+    #[test]
+    fn meme_strategy_ids_are_checked_before_any_request() {
+        assert_eq!(
+            meme_strategy_id("a-survivor-momentum"),
+            Ok("a-survivor-momentum")
+        );
+        for bad in ["", "A", "a/../b", "a?x=1", "a b", &"a".repeat(33)] {
+            assert!(meme_strategy_id(bad).is_err(), "{bad}");
         }
     }
 
