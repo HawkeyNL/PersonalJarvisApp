@@ -139,7 +139,8 @@ struct Relaxation {
     paid_api: bool,
     paid_fallback: bool,
     paid_models: bool,
-    research_web_search: bool,
+    /// The loosened web search setting, named in the prompt.
+    research_web_search: Option<ResearchWebSearch>,
 }
 
 impl Relaxation {
@@ -152,11 +153,15 @@ impl Relaxation {
                 "; allow paid fallback after subscription",
             ),
             (self.paid_models, "; add paid API models"),
-            (self.research_web_search, "; allow research web search"),
         ] {
             if relaxed {
                 prompt.push_str(text);
             }
+        }
+        match self.research_web_search {
+            Some(ResearchWebSearch::On) => prompt.push_str("; allow research web search"),
+            Some(ResearchWebSearch::Auto) => prompt.push_str("; allow automatic web search"),
+            Some(ResearchWebSearch::Off) | None => {}
         }
         prompt
     }
@@ -176,10 +181,13 @@ fn current_routing(snapshot: &Snapshot) -> Option<RoutingDocument> {
 }
 
 fn relaxation(current: Option<&RoutingDocument>, next: &RoutingDocument) -> Relaxation {
-    // Web search sends research questions to a provider tool, whatever the
-    // paid API setting, so switching it on is always named in the prompt.
-    let research_web_search = next.research_web_search == ResearchWebSearch::On
-        && current.is_none_or(|current| current.research_web_search != ResearchWebSearch::On);
+    // Web search sends questions to a provider tool, whatever the paid API
+    // setting, so any loosening (off -> on, off -> auto, on -> auto; the enum
+    // is ordered strictest first) is always named in the prompt.
+    let current_search = current.map_or(ResearchWebSearch::Off, |current| {
+        current.research_web_search
+    });
+    let research_web_search = Some(next.research_web_search).filter(|&next| next > current_search);
     if next.paid_api == PaidApi::Off {
         // No metered backend can run at all.
         return Relaxation {
@@ -737,7 +745,7 @@ mod tests {
             paid_api,
             paid_fallback,
             paid_models,
-            research_web_search: false,
+            research_web_search: None,
         };
 
         // Relaxing: paid API back on (also from an unknown or failed-closed state).
@@ -818,32 +826,56 @@ mod tests {
     }
 
     #[test]
-    fn switching_research_web_search_on_is_always_named_in_the_prompt() {
-        let research = |paid_api: &str, on: &str| {
-            doc(serde_json::json!({"version": 1, "paid_api": paid_api, "research_web_search": on}))
+    fn loosening_web_search_is_always_named_in_the_prompt() {
+        use ResearchWebSearch::{Auto, Off, On};
+        let research = |paid_api: &str, state: ResearchWebSearch| {
+            doc(
+                serde_json::json!({"version": 1, "paid_api": paid_api, "research_web_search": state}),
+            )
         };
-        let on_only = Relaxation {
-            research_web_search: true,
+        let loosened = |state| Relaxation {
+            research_web_search: Some(state),
             ..Relaxation::default()
         };
-        // Relaxing even with paid APIs off, and from an unknown state.
-        assert_eq!(
-            relaxation(Some(&research("off", "off")), &research("off", "on")),
-            on_only
-        );
-        assert_eq!(relaxation(None, &research("off", "on")), on_only);
-        assert!(
-            relaxation(Some(&research("off", "off")), &research("off", "on"))
-                .prompt()
-                .ends_with("; allow research web search")
-        );
-        // Already on, or switched off: no research relaxation.
-        for next in [research("off", "on"), research("off", "off")] {
+        // Loosening even with paid APIs off: off -> on, off -> auto, on -> auto.
+        for (current, next) in [(Off, On), (Off, Auto), (On, Auto)] {
             assert_eq!(
-                relaxation(Some(&research("off", "on")), &next),
-                Relaxation::default()
+                relaxation(Some(&research("off", current)), &research("off", next)),
+                loosened(next),
+                "{current:?} -> {next:?}"
             );
         }
+        // From an unknown state any search counts as new.
+        assert_eq!(relaxation(None, &research("off", On)), loosened(On));
+        assert_eq!(relaxation(None, &research("off", Auto)), loosened(Auto));
+        // Unchanged or tightened: no web search relaxation.
+        for (current, next) in [
+            (Off, Off),
+            (On, On),
+            (Auto, Auto),
+            (On, Off),
+            (Auto, Off),
+            (Auto, On),
+        ] {
+            assert_eq!(
+                relaxation(Some(&research("off", current)), &research("off", next)),
+                Relaxation::default(),
+                "{current:?} -> {next:?}"
+            );
+        }
+        assert_eq!(
+            relaxation(None, &research("off", Off)),
+            Relaxation::default()
+        );
+
+        assert_eq!(
+            loosened(On).prompt(),
+            "Jarvis: replace model routing; allow research web search"
+        );
+        assert_eq!(
+            loosened(Auto).prompt(),
+            "Jarvis: replace model routing; allow automatic web search"
+        );
     }
 
     #[test]
@@ -870,12 +902,11 @@ mod tests {
         assert_eq!(current_routing(&snapshot).unwrap().paid_api, PaidApi::Off);
         snapshot.routing = Some(serde_json::json!({"version": 1, "future": true}));
         assert!(current_routing(&snapshot).is_none());
-        // Automatic web search is not signable with this client-core: unknown,
-        // so every permission counts as new, and the command refuses to sign it.
-        let auto = serde_json::json!({"version": 1, "research_web_search": "auto"});
-        assert!(serde_json::from_value::<RoutingDocument>(auto.clone()).is_err());
-        snapshot.routing = Some(auto);
-        assert!(current_routing(&snapshot).is_none());
+        snapshot.routing = Some(serde_json::json!({"version": 1, "research_web_search": "auto"}));
+        assert_eq!(
+            current_routing(&snapshot).unwrap().research_web_search,
+            ResearchWebSearch::Auto
+        );
         snapshot.routing = None;
         snapshot.routing_unavailable_reason = Some("routing_invalid".into());
         assert!(current_routing(&snapshot).is_none());

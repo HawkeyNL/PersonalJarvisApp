@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {mergeCanonical,appendVisualDelta} from "../src/realtimeProjection.ts";
+import {mergeCanonical,appendVisualDelta,dropFailedRun} from "../src/realtimeProjection.ts";
 import {readFile} from "node:fs/promises";
 
 test("canonical completion replaces stream and reconciled REST duplicate",()=>{
@@ -24,4 +24,10 @@ test("frontend receives native events, not a websocket bearer",async()=>{
   const source=await readFile(new URL("../src/realtime.ts",import.meta.url),"utf8");
   assert.doesNotMatch(source,/new WebSocket|Authorization|Bearer|token:/);
   assert.match(source,/listen<RealtimeEvent>/);
+});
+test("a failed run drops only its empty placeholder row",()=>{
+  const rows=[{id:1,text:"question"},{id:2,runId:"a",text:"answer"},{id:3,runId:"b",text:""}];
+  assert.deepEqual(dropFailedRun(rows,"b").map(r=>r.id),[1,2]);
+  assert.deepEqual(dropFailedRun(rows,"a"),rows);
+  assert.deepEqual(dropFailedRun(rows,"c"),rows);
 });

@@ -684,7 +684,7 @@ final class JarvisAppModel: ObservableObject {
             if payload.conversation_id == currentConversationId, let run = payload.run_id {
                 isSending = true
                 if !messages.contains(where: { $0.id == "run:\(run)" }) {
-                    webSearchRun = WebAnswer.startsAfterReply(messages) ? run : nil
+                    webSearchRun = (payload.web_search == true || WebAnswer.startsAfterReply(messages)) ? run : nil
                     messages.append(ConversationMessage(role: "assistant", content: "", model: nil, at: "", canonicalId: "run:\(run)"))
                 }
             }

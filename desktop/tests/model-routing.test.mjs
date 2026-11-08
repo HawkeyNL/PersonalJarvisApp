@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  AUTO_UNSIGNABLE, candidates, canonicalRouting, meteredAfterSubscription, moveEntry, routingIssue, routingMode, routingReason, sameRouting,
+  candidates, canonicalRouting, meteredAfterSubscription, moveEntry, routingIssue, routingMode, routingReason, sameRouting,
 } from "../src/modelRouting.ts";
 
 const e = (provider, model) => ({ provider, model });
@@ -47,9 +47,9 @@ test("canonical routing follows Core's field order and omits absent tiers", () =
   assert.equal(canonicalRouting({ ...loose, research_web_search: "always" }).research_web_search, undefined);
 });
 
-test("the desktop refuses to apply automatic web search it cannot sign", () => {
+test("every web search state can be applied from the desktop", () => {
   const base = { version: 1, paid_api: "allowed", tiers: {} };
-  assert.equal(routingIssue({ ...base, research_web_search: "auto" }, []), AUTO_UNSIGNABLE);
+  assert.equal(routingIssue({ ...base, research_web_search: "auto" }, []), null);
   assert.equal(routingIssue({ ...base, research_web_search: "on" }, []), null);
   assert.equal(routingIssue({ ...base, research_web_search: "off" }, []), null);
 });

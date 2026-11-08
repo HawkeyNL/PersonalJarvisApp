@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isWebModel, splitSources, startsAfterReply } from "../src/webAnswer.ts";
+import { isWebModel, splitSources, startsAfterReply, startsWebSearch } from "../src/webAnswer.ts";
 
 test("only answers stored as web:<model> are web answers", () => {
   assert.ok(isWebModel("web:claude-opus-5"));
@@ -38,4 +38,14 @@ test("a run right after a finished reply is Core's own web search", () => {
   assert.ok(!startsAfterReply([reply, user]));
   assert.ok(!startsAfterReply([user, { role: "jarvis", text: "" }]));
   assert.ok(!startsAfterReply([]));
+});
+
+test("Core's web_search marker names the search; older Cores fall back to the heuristic", () => {
+  const user = { role: "user", text: "Weer morgen?" };
+  const reply = { role: "jarvis", text: "Probably dry." };
+  assert.ok(startsWebSearch({ web_search: true }, [user]));
+  assert.ok(startsWebSearch({ web_search: true }, []));
+  assert.ok(startsWebSearch({}, [user, reply]));
+  assert.ok(!startsWebSearch({}, [user]));
+  assert.ok(!startsWebSearch({ web_search: false }, [reply, user]));
 });

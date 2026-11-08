@@ -13,6 +13,6 @@ import kotlinx.serialization.Serializable
     val conversation_id: String? = null, val id: String? = null, val title: String? = null,
     val updated_at: String? = null, val run: RealtimeRun? = null, val text: String? = null,
     val message: RealtimeMessage? = null, val reason: String? = null,
-    val research_offer: ResearchOffer? = null,
+    val research_offer: ResearchOffer? = null, val web_search: Boolean? = null,
 )
 @Serializable data class RealtimeEvent(val protocol: Int, val epoch: String, val sequence: Long, val event_id: String, val type: String, val payload: RealtimePayload)

@@ -18,6 +18,12 @@ class RealtimeStateTest {
         assertEquals("weer?", offered.research_offer?.question)
     }
 
+    @Test fun webSearchMarkerIsOptional() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        assertNull(json.decodeFromString<RealtimePayload>("""{"run_id":"r"}""").web_search)
+        assertEquals(true, json.decodeFromString<RealtimePayload>("""{"run_id":"r","web_search":true}""").web_search)
+    }
+
     @Test fun duplicatesAndOutOfOrderEventsAreIgnored() {
         val cursor = RealtimeCursor()
         assertTrue(cursor.accept(event(10, "connection.ready")))

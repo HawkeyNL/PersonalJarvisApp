@@ -7,6 +7,10 @@ export function mergeCanonical<T extends ProjectedRow>(rows:T[], row:T):T[] {
   const canonical={...row,id:rows[index].id};
   return rows.flatMap((item,i)=>i===index?[canonical]:matches(item)?[]:[item]);
 }
+/** Drops a failed run's empty placeholder row; streamed text stays. */
+export function dropFailedRun<T extends ProjectedRow>(rows:T[],runId:string):T[] {
+  return rows.filter(row=>row.runId!==runId || !!row.text);
+}
 export function appendVisualDelta<T extends ProjectedRow>(rows:T[],runId:string,text:string):T[] {
   return rows.map(row=>row.runId===runId && !row.canonicalId && row.text.length+text.length<=128*1024?{...row,text:row.text+text}:row);
 }

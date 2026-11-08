@@ -14,6 +14,7 @@ struct RealtimePayload: Decodable {
     let device_id: UUID?; let run_id: UUID?; let request_id: UUID?
     let conversation_id: UUID?; let id: UUID?; let title: String?; let updated_at: String?
     let run: RealtimeRun?; let text: String?; let message: RealtimeMessage?; let reason: String?
+    let web_search: Bool?
 }
 struct RealtimeEvent: Decodable {
     let `protocol`: Int; let epoch: UUID; let sequence: UInt64; let event_id: UUID

@@ -11,10 +11,10 @@ import { canSpeak, voiceRate, restoreVoiceChoice } from "./voice";
 import { ReconcileLoop } from "./reconcileLoop";
 import { invoke } from "@tauri-apps/api/core";
 import { startRealtime, type RealtimeEvent, type CanonicalMessage } from "./realtime";
-import { mergeCanonical, appendVisualDelta } from "./realtimeProjection";
+import { mergeCanonical, appendVisualDelta, dropFailedRun } from "./realtimeProjection";
 import { PendingRuns } from "./pendingRuns";
 import { offerFrom, type ResearchOffer } from "./researchOffer";
-import { isWebModel, startsAfterReply } from "./webAnswer";
+import { isWebModel, startsWebSearch } from "./webAnswer";
 import { chatSession } from "./chatSession";
 import { currentAuthStatus } from "./auth";
 import { locked } from "./lock";
@@ -121,7 +121,7 @@ function receiveRealtime(event:RealtimeEvent) {
       pending.acknowledge(event.payload.request_id,event.payload.conversation_id,event.payload.run_id);
       if(currentId.value===event.payload.conversation_id) {
         thinking.value=true;
-        if(!messages.value.some(m=>m.runId===event.payload.run_id)) messages.value.push({id:idc++,role:"jarvis",text:"",ts:stamp(),spoken:false,runId:event.payload.run_id,searching:startsAfterReply(messages.value)});
+        if(!messages.value.some(m=>m.runId===event.payload.run_id)) messages.value.push({id:idc++,role:"jarvis",text:"",ts:stamp(),spoken:false,runId:event.payload.run_id,searching:startsWebSearch(event.payload,messages.value)});
       }
       break;
     case "assistant.delta": {
@@ -137,10 +137,18 @@ function receiveRealtime(event:RealtimeEvent) {
       pending.delete(event.payload.run.request_id);
       if(currentId.value===event.payload.run.conversation_id) {thinking.value=false;researchOffer.value=offerFrom(event.payload);}
       break;
-    case "assistant.failed":
-      pending.delete(event.payload.run.request_id);
-      if(currentId.value===event.payload.run.conversation_id) {thinking.value=false;push("jarvis","Reply interrupted. Your message is saved; it is not regenerated automatically.");}
+    case "assistant.failed": {
+      const run=event.payload.run;
+      pending.delete(run.request_id);
+      if(currentId.value===run.conversation_id) {
+        thinking.value=false;
+        // A failed automatic web search has no question of its own to save.
+        const searching=messages.value.some(m=>m.runId===run.run_id && m.searching);
+        messages.value=dropFailedRun(messages.value,run.run_id);
+        push("jarvis",searching?"Web search unavailable.":"Reply interrupted. Your message is saved; it is not regenerated automatically.");
+      }
       break;
+    }
   }
 }
 

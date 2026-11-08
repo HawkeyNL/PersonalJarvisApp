@@ -629,7 +629,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                     if (state.conversationId != p.conversation_id || state.messages.any { it.id == "run:$run" }) state else {
                         val last = state.messages.lastOrNull()
                         state.copy(busy = true, messages = state.messages + ConversationMessage("assistant", "", at = "", id = "run:$run"),
-                            webSearchRun = run.takeIf { startsAfterReply(last?.role, last?.content) })
+                            webSearchRun = run.takeIf { p.web_search == true || startsAfterReply(last?.role, last?.content) })
                     }
                 }
             }
