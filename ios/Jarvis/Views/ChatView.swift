@@ -7,6 +7,11 @@ struct ChatView: View {
     @State private var draft = ""
     @FocusState private var composerFocused: Bool
 
+    /// Core's own run after a reply, while its placeholder row is shown.
+    private var searchingWeb: Bool {
+        model.webSearchRun.map { run in model.messages.contains { $0.id == "run:\(run)" } } ?? false
+    }
+
     private var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !model.isSending }
 
     var body: some View {
@@ -65,7 +70,7 @@ struct ChatView: View {
                         if model.isSending {
                             HStack(spacing: JV.Space.xs) {
                                 ProgressView().controlSize(.small).tint(JV.textSecondary)
-                                Text("Jarvis is thinking…").font(JV.font(13)).foregroundStyle(JV.textSecondary)
+                                Text(searchingWeb ? "Searching the web…" : "Jarvis is thinking…").font(JV.font(13)).foregroundStyle(JV.textSecondary)
                             }
                             .accessibilityElement(children: .combine)
                         }
@@ -159,27 +164,51 @@ private struct MessageView: View {
         .accessibilityValue(Text(verbatim: time ?? ""))
     }
 
-    /// Jarvis: a name line with the tile, then the answer as plain text.
+    /// A web answer shows its trailing Sources as links instead of in the text.
+    private var answer: (body: String, sources: [URL]) {
+        message.isWeb ? WebAnswer.split(message.content) : (message.content, [])
+    }
+
+    /// Jarvis: a name line with the tile, then the answer as plain text. A web answer
+    /// gets a "Web" chip and its Sources as links; nothing is loaded by itself.
     private var assistant: some View {
-        VStack(alignment: .leading, spacing: JV.Space.xs) {
-            HStack(spacing: JV.Space.xs) {
-                IconBadge(symbol: "sparkles", size: 24)
-                Text("Jarvis").font(JV.font(12, .medium, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
-                if let time {
-                    Text(verbatim: time).font(JV.number(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
+        let answer = self.answer
+        return VStack(alignment: .leading, spacing: JV.Space.xs) {
+            VStack(alignment: .leading, spacing: JV.Space.xs) {
+                HStack(spacing: JV.Space.xs) {
+                    IconBadge(symbol: "sparkles", size: 24)
+                    Text("Jarvis").font(JV.font(12, .medium, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
+                    if let time {
+                        Text(verbatim: time).font(JV.number(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
+                    }
+                    if message.isWeb {
+                        Text("Web").font(JV.font(12, .medium, relativeTo: .caption)).foregroundStyle(JV.accentText)
+                            .padding(.horizontal, JV.Space.xs).padding(.vertical, 2)
+                            .background(JV.accentSubtle, in: Capsule())
+                    }
+                }
+                Text(verbatim: answer.body)
+                    .font(JV.font(16))
+                    .foregroundStyle(JV.textPrimary)
+                    .lineSpacing(4)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text(verbatim: (message.isWeb ? "Jarvis, from the web: " : "Jarvis: ") + answer.body))
+            .accessibilityValue(Text(verbatim: time ?? ""))
+            // Outside the combined element so each source stays its own link.
+            if !answer.sources.isEmpty {
+                VStack(alignment: .leading, spacing: JV.Space.xxs) {
+                    Text("Sources").font(JV.font(12, .medium, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
+                    // Validated https URLs only (WebAnswer); Link opens them in the browser.
+                    ForEach(answer.sources, id: \.self) { url in
+                        Link(destination: url) { Text(verbatim: url.absoluteString).font(JV.font(13)).multilineTextAlignment(.leading) }
+                    }
                 }
             }
-            Text(verbatim: message.content)
-                .font(JV.font(16))
-                .foregroundStyle(JV.textPrimary)
-                .lineSpacing(4)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.trailing, JV.Space.xxl)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text(verbatim: "Jarvis: " + message.content))
-        .accessibilityValue(Text(verbatim: time ?? ""))
     }
 }

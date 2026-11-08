@@ -71,9 +71,17 @@ fun ModelRoutingEditor(controller: ModelControlService) {
                 SwitchRow("Paid APIs ${if (draft.paidApiAllowed) "allowed" else "off"}",
                     "Off: only subscriptions and local models, in every tier and the built-in order.",
                     draft.paidApiAllowed, editable) { draft = draft.copy(paidApiAllowed = it) }
-                SwitchRow("Research web search ${if (draft.researchWebSearch) "on" else "off"}",
-                    "On: explicit Research requests may use the subscription's provider-hosted web search. Never a paid API.",
-                    draft.researchWebSearch, editable) { draft = draft.copy(researchWebSearch = it) }
+                Column(verticalArrangement = Arrangement.spacedBy(JvSpace.xs)) {
+                    Text("Web search", style = MaterialTheme.typography.titleSmall)
+                    Segmented(WebSearch.entries.map { it.id to it.label }, draft.researchWebSearch.id, { id ->
+                        if (editable) draft = draft.copy(researchWebSearch = WebSearch.entries.first { it.id == id })
+                    })
+                    MutedText(when (draft.researchWebSearch) {
+                        WebSearch.OFF -> "Jarvis never searches the web."
+                        WebSearch.ON -> "Jarvis offers a web search button; only your tap sends the question."
+                        WebSearch.AUTO -> "Jarvis searches by itself when a question needs current information."
+                    } + " Uses the subscription's provider-hosted web search, never a paid API. Only the question leaves the Home Node.")
+                }
 
                 Tier.entries.forEach { tier ->
                     TierEditor(
@@ -101,7 +109,11 @@ fun ModelRoutingEditor(controller: ModelControlService) {
                 Column(verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
                     Text(
                         "This replaces the routing for all devices${if (!draft.paidApiAllowed) " and turns paid APIs off" else ""}" +
-                            "${if (draft.researchWebSearch) ". Research may use web search" else ""}. Running requests are not cancelled.",
+                            when (draft.researchWebSearch) {
+                                WebSearch.OFF -> ""
+                                WebSearch.ON -> ". Jarvis may offer web searches"
+                                WebSearch.AUTO -> ". Jarvis may search the web by itself"
+                            } + ". Running requests are not cancelled.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Column(

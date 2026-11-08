@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import com.hawkeynl.jarvis.chat.RealtimeEvent
 import com.hawkeynl.jarvis.chat.RealtimeSpeech
+import com.hawkeynl.jarvis.chat.startsAfterReply
 import com.hawkeynl.jarvis.chat.SpeechRate
 import com.hawkeynl.jarvis.chat.realtimeSnapshot
 import com.hawkeynl.jarvis.chat.realtimeSelectedHistory
@@ -87,6 +88,9 @@ data class JarvisUiState(
     val busy: Boolean = false,
     /** Core's web search advice after the last reply in [WebSearchOffer.conversationId]. */
     val researchOffer: WebSearchOffer? = null,
+    /** A run Core started itself right after a reply (its automatic web search);
+     *  only meaningful while its `run:` placeholder row is shown. */
+    val webSearchRun: String? = null,
     val appUpdate: AndroidUpdateUiState = AndroidUpdateUiState.Idle,
     val error: String? = null,
     /** A signed password reset waiting for root confirmation on the Home Node. */
@@ -621,8 +625,13 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             }
             "assistant.started" -> {
                 val run = p.run_id ?: return
-                _state.update { if (it.conversationId != p.conversation_id || it.messages.any { message -> message.id == "run:$run" }) it
-                    else it.copy(busy = true, messages = it.messages + ConversationMessage("assistant", "", at = "", id = "run:$run")) }
+                _state.update { state ->
+                    if (state.conversationId != p.conversation_id || state.messages.any { it.id == "run:$run" }) state else {
+                        val last = state.messages.lastOrNull()
+                        state.copy(busy = true, messages = state.messages + ConversationMessage("assistant", "", at = "", id = "run:$run"),
+                            webSearchRun = run.takeIf { startsAfterReply(last?.role, last?.content) })
+                    }
+                }
             }
             "assistant.delta" -> {
                 val run = p.run ?: return; val text = p.text ?: return

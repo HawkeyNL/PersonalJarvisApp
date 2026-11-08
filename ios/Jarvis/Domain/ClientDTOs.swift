@@ -166,6 +166,40 @@ struct ConversationMessage: Decodable, Identifiable, Equatable {
 
     var id: String { canonicalId ?? "\(at)-\(role)-\(content)" }
     var isAssistant: Bool { role == "assistant" || role == "jarvis" }
+    /// Core stores a Research answer with model "web:<model>".
+    var isWeb: Bool { model?.hasPrefix("web:") == true }
+}
+
+/// A web answer ends with a "Sources:" (or "Bronnen:") list of https URLs.
+enum WebAnswer {
+    /// The answer without its trailing Sources list, and that list's distinct https URLs.
+    /// Core's rule: the last line that, without `# * _ :` and spaces, reads Sources.
+    static func split(_ text: String) -> (body: String, sources: [URL]) {
+        let lines = text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        let label = CharacterSet(charactersIn: "#*_: ")
+        guard let header = lines.lastIndex(where: {
+            ["sources", "bronnen"].contains($0.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: label).lowercased())
+        }) else { return (text, []) }
+        let body = lines[..<header].joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        var seen = Set<URL>()
+        return (body, lines[(header + 1)...].compactMap(httpsSource).filter { seen.insert($0).inserted })
+    }
+
+    /// One https URL with a host and no user info, like Core's Sources filter.
+    private static func httpsSource(_ line: Substring) -> URL? {
+        let candidate = line.trimmingCharacters(in: .whitespaces).drop(while: { $0 == "-" || $0 == "*" }).drop(while: \.isWhitespace)
+        guard !candidate.isEmpty, !candidate.contains(where: \.isWhitespace),
+              let url = URL(string: String(candidate)), url.scheme?.lowercased() == "https",
+              url.host?.isEmpty == false, url.user == nil, url.password == nil else { return nil }
+        return url
+    }
+
+    /// A run that starts right after a finished Jarvis reply, with no new question
+    /// in between, is one Core started itself: its automatic web search.
+    static func startsAfterReply(_ messages: [ConversationMessage]) -> Bool {
+        guard let last = messages.last else { return false }
+        return last.isAssistant && !last.content.isEmpty
+    }
 }
 
 struct ConversationResponse: Decodable, Equatable {

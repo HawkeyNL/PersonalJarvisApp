@@ -4,8 +4,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { getJsonAuth } from "../api";
 import { platformCapabilities } from "../platform";
 import {
-  MAX_CHAIN, TIERS, canonicalRouting, candidates, isMetered, isSubscription, meteredAfterSubscription, moveEntry,
+  MAX_CHAIN, TIERS, WEB_SEARCH, canonicalRouting, candidates, isMetered, isSubscription, meteredAfterSubscription, moveEntry,
   routingIssue, routingMode, routingReason, sameRouting, type RouteEntry, type Routing, type RoutingPolicy, type Tier,
+  type WebSearch,
 } from "../modelRouting";
 
 // Owner routing per tier. The native command re-validates the document,
@@ -15,6 +16,11 @@ const TIER_COPY: Record<Tier, [string, string]> = {
   cheap: ["Cheap", "Quick, light requests"],
   default: ["Default", "Most requests"],
   hard: ["Hard", "Complex or deep work"],
+};
+const WEB_SEARCH_COPY: Record<WebSearch, [string, string]> = {
+  off: ["Off", "Jarvis never searches the web."],
+  on: ["Ask", "Jarvis offers a web search button; only your click sends the question."],
+  auto: ["Auto", "Jarvis searches by itself when a question needs current information. Set it from your phone or the Home Node."],
 };
 const policy = ref<RoutingPolicy | null>(null);
 const draft = ref<Routing>(canonicalRouting(null));
@@ -109,12 +115,16 @@ onMounted(reload);
           <small>Off: only subscriptions and local models, in every tier and the built-in order.</small></span>
       </label>
 
-      <label class="switch">
-        <input type="checkbox" :checked="draft.research_web_search === 'on'" :disabled="!editable"
-          @change="draft.research_web_search = ($event.target as HTMLInputElement).checked ? 'on' : 'off'" />
-        <span><strong>Research web search {{ draft.research_web_search === "on" ? "on" : "off" }}</strong>
-          <small>On: explicit Research requests may use the subscription's provider-hosted web search. Never a paid API.</small></span>
-      </label>
+      <fieldset class="web" :disabled="!editable">
+        <legend><strong>Web search</strong>
+          <small>Uses the subscription's provider-hosted web search, never a paid API. Only the question leaves the Home Node.</small></legend>
+        <!-- Auto is signed from the phone or Home Node until client-core can sign it here. -->
+        <label v-for="state in WEB_SEARCH" :key="state" class="check">
+          <input type="radio" name="web-search" :value="state" :checked="(draft.research_web_search ?? 'off') === state"
+            :disabled="state === 'auto'" @change="draft.research_web_search = state" />
+          <span><strong>{{ WEB_SEARCH_COPY[state][0] }}</strong><small>{{ WEB_SEARCH_COPY[state][1] }}</small></span>
+        </label>
+      </fieldset>
 
       <div class="tiers">
         <section v-for="tier in TIERS" :key="tier" class="tier" :aria-label="`${TIER_COPY[tier][0]} tier`">
@@ -172,7 +182,7 @@ onMounted(reload);
     <div v-if="confirming" class="model-confirm" role="dialog" aria-modal="true" aria-label="Confirm routing change" @keydown.esc="confirming = false">
       <div>
         <h3>Replace model routing?</h3>
-        <p>This replaces the routing for all devices{{ draft.paid_api === "off" ? " and turns paid APIs off" : "" }}{{ draft.research_web_search === "on" ? ". Research may use web search" : "" }}. Running requests are not cancelled.</p>
+        <p>This replaces the routing for all devices{{ draft.paid_api === "off" ? " and turns paid APIs off" : "" }}{{ draft.research_web_search === "on" ? ". Jarvis may offer web searches" : "" }}. Running requests are not cancelled.</p>
         <ul class="summary">
           <li v-for="tier in TIERS" :key="tier">
             {{ TIER_COPY[tier][0] }}: {{ draft.tiers[tier] ? draft.tiers[tier]!.chain.map(label).join(" → ") : "built-in order" }}
@@ -197,6 +207,8 @@ small { display: block; color: var(--text-secondary); }
 .err { color: var(--danger-text); }
 .switch, .check { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
 .switch input, .check input { margin-top: 3px; accent-color: var(--accent-solid); }
+.web { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.web legend { padding: 0; margin-bottom: 4px; }
 .tiers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .tier { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-surface); }
 .tier header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }

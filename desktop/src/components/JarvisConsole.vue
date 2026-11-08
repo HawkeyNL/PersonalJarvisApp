@@ -14,6 +14,7 @@ import {
 } from "../assistant";
 import { conversations, currentId, deleteConversation } from "../conversations";
 import { renderMarkdown, handleMarkdownClick } from "../markdown";
+import { splitSources } from "../webAnswer";
 import { askedIn, dayOf, replyIsHere, type AskedIn } from "../chatList";
 import { useMic } from "../useMic";
 import { wakePulse } from "../voicewake";
@@ -67,7 +68,9 @@ watch(() => locked.value && mic.listening.value, (both) => { if (both) mic.stop(
 const current = computed(() => conversations.value.find((c) => c.id === currentId.value) ?? null);
 const day = computed(() => (current.value ? dayOf(current.value.updated_at, Date.now()) : null));
 // An assistant row exists (empty) from the moment a run starts; show it once text streams in.
-const shown = computed(() => messages.value.filter((m) => m.role === "user" || m.text));
+// A web answer shows its trailing Sources as a list of links instead of in the text.
+const shown = computed(() => messages.value.filter((m) => m.role === "user" || m.text)
+  .map((m) => ({ ...m, ...(m.web ? splitSources(m.text) : { body: m.text, sources: [] as string[] }) })));
 const last = computed(() => messages.value[messages.value.length - 1]);
 const waiting = computed(() => thinking.value && !(last.value?.role === "jarvis" && last.value.text));
 
@@ -232,16 +235,21 @@ onMounted(async () => {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3.5" /><circle cx="12" cy="12" r="9" /></svg>
             </span>
             Jarvis<span aria-hidden="true">·</span>{{ m.ts }}<template v-if="m.spoken"><span aria-hidden="true">·</span>spoken</template>
+            <span v-if="m.web" class="badge acc" title="Answer from a web search">Web</span>
           </div>
           <!-- Jarvis speaks Markdown (sanitised in markdown.ts); the user's own text stays literal. -->
-          <div class="md" @click="handleMarkdownClick" v-html="renderMarkdown(m.text)"></div>
+          <div class="md" @click="handleMarkdownClick" v-html="renderMarkdown(m.body)"></div>
+          <div v-if="m.sources.length" class="sources t-sm" @click="handleMarkdownClick">
+            <span class="t-xs t-2">Sources</span>
+            <ul><li v-for="url in m.sources" :key="url"><a :href="url">{{ url }}</a></li></ul>
+          </div>
         </template>
       </div>
       <div v-if="researchOffer && researchOffer.conversationId === currentId && !thinking" class="offer">
         <button type="button" class="btn btn-secondary btn-sm" :disabled="locked" @click="onResearch">Search the web</button>
         <span class="t-xs t-2">Sends only “{{ researchOffer.question }}” to your subscription provider, which searches the web.</span>
       </div>
-      <p v-if="waiting" class="thinking t-sm t-2"><span class="spinner" aria-hidden="true"></span>Jarvis is thinking…</p>
+      <p v-if="waiting" class="thinking t-sm t-2"><span class="spinner" aria-hidden="true"></span>{{ last?.searching ? "Searching the web…" : "Jarvis is thinking…" }}</p>
     </div>
     <p class="sr-only" role="status">{{ announcement }}</p>
 
@@ -359,6 +367,9 @@ onMounted(async () => {
 .md :deep(a) { color: var(--accent-text); }
 .md :deep(.md-table) { margin: 0 0 0.75em; padding: 4px 8px; overflow-x: auto; }
 .md :deep(.md-table td) { overflow-wrap: normal; }
+.sources { display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+.sources ul { margin: 0; padding-left: 1.4em; }
+.sources a { color: var(--accent-text); }
 
 .composer-wrap { padding: 16px 32px 20px; display: flex; flex-direction: column; gap: 8px; }
 .composer { padding: 10px 10px 10px 16px; display: flex; flex-direction: column; gap: 8px; }

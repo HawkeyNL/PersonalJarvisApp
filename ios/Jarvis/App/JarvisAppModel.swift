@@ -16,6 +16,9 @@ final class JarvisAppModel: ObservableObject {
     @Published private(set) var currentConversationId: UUID?
     @Published private(set) var currentConversationTitle = "New conversation"
     @Published private(set) var isSending = false
+    /// A run Core started itself right after a reply (its automatic web search);
+    /// only meaningful while its `run:` placeholder row is shown.
+    @Published private(set) var webSearchRun: UUID?
     @Published var endpointText: String
     @Published var notice: String?
     /// A signed password reset waiting for root confirmation on the Home Node.
@@ -681,6 +684,7 @@ final class JarvisAppModel: ObservableObject {
             if payload.conversation_id == currentConversationId, let run = payload.run_id {
                 isSending = true
                 if !messages.contains(where: { $0.id == "run:\(run)" }) {
+                    webSearchRun = WebAnswer.startsAfterReply(messages) ? run : nil
                     messages.append(ConversationMessage(role: "assistant", content: "", model: nil, at: "", canonicalId: "run:\(run)"))
                 }
             }

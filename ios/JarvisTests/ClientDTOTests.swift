@@ -2275,3 +2275,48 @@ private final class AgentDecisionProtocol: URLProtocol {
     }
     override func stopLoading() { }
 }
+
+final class WebAnswerTests: XCTestCase {
+    private func message(_ role: String, _ content: String, model: String? = nil) -> ConversationMessage {
+        ConversationMessage(role: role, content: content, model: model, at: "")
+    }
+
+    func testOnlyAnswersStoredAsWebModelAreWebAnswers() {
+        XCTAssertTrue(message("assistant", "x", model: "web:claude-opus-5").isWeb)
+        for model in [nil, "", "claude-opus-5", "research", "Web:x", "x web:y"] {
+            XCTAssertFalse(message("assistant", "x", model: model).isWeb, model ?? "nil")
+        }
+    }
+
+    func testTrailingSourcesBecomeHttpsLinks() {
+        let split = WebAnswer.split("Rust 1.99 is out.\n\n**Sources:**\n- https://blog.rust-lang.org/a.html\n* https://example.org\nhttps://news.example\n")
+        XCTAssertEqual(split.body, "Rust 1.99 is out.")
+        XCTAssertEqual(split.sources.map(\.absoluteString), ["https://blog.rust-lang.org/a.html", "https://example.org", "https://news.example"])
+        XCTAssertEqual(WebAnswer.split("A\nSources:\n- https://a.example\n- https://a.example").sources.count, 1)
+        let dutch = WebAnswer.split("Het weer.\r\n## Bronnen\r\n- https://knmi.nl/a")
+        XCTAssertEqual(dutch.body, "Het weer.")
+        XCTAssertEqual(dutch.sources.map(\.absoluteString), ["https://knmi.nl/a"])
+    }
+
+    func testOnlyPlainHttpsUrlsWithAHostSurvive() {
+        let bad = ["http://plain.example", "javascript:alert(1)", "https://user:pw@example.org", "https://a.example b",
+                   "[x](https://a.example)", "ftp://a.example", "https://", "see https://a.example"]
+        let split = WebAnswer.split("Answer\nSources:\n" + bad.joined(separator: "\n") + "\n- https://ok.example/p?q=1")
+        XCTAssertEqual(split.sources.map(\.absoluteString), ["https://ok.example/p?q=1"])
+    }
+
+    func testTheLastHeaderCountsAndTextWithoutOneIsUntouched() {
+        XCTAssertEqual(WebAnswer.split("No list here.").body, "No list here.")
+        XCTAssertTrue(WebAnswer.split("No list here.").sources.isEmpty)
+        XCTAssertEqual(WebAnswer.split("Sources:\n- https://a.example\nMore\nSources\n- https://b.example").sources.map(\.absoluteString), ["https://b.example"])
+        XCTAssertTrue(WebAnswer.split("Our sources: many\nhttps://a.example").sources.isEmpty)
+    }
+
+    func testARunRightAfterAFinishedReplyIsCoresOwnWebSearch() {
+        XCTAssertTrue(WebAnswer.startsAfterReply([message("user", "Weer morgen?"), message("assistant", "Probably dry.")]))
+        // Our own, another device's or a tapped research run follows a question.
+        XCTAssertFalse(WebAnswer.startsAfterReply([message("user", "Weer morgen?")]))
+        XCTAssertFalse(WebAnswer.startsAfterReply([message("user", "x"), message("assistant", "")]))
+        XCTAssertFalse(WebAnswer.startsAfterReply([]))
+    }
+}

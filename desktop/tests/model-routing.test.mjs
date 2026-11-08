@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  candidates, canonicalRouting, meteredAfterSubscription, moveEntry, routingIssue, routingMode, routingReason, sameRouting,
+  AUTO_UNSIGNABLE, candidates, canonicalRouting, meteredAfterSubscription, moveEntry, routingIssue, routingMode, routingReason, sameRouting,
 } from "../src/modelRouting.ts";
 
 const e = (provider, model) => ({ provider, model });
@@ -39,6 +39,19 @@ test("canonical routing follows Core's field order and omits absent tiers", () =
   assert.equal(JSON.stringify(canonicalRouting({ ...loose, tiers: {}, research_web_search: "on" })), '{"version":1,"paid_api":"off","tiers":{},"research_web_search":"on"}');
   assert.ok(sameRouting(loose, { ...loose, research_web_search: "off" }));
   assert.ok(!sameRouting(loose, { ...loose, research_web_search: "on" }));
+  // Auto takes the same place; off and on keep their exact bytes.
+  assert.equal(JSON.stringify(canonicalRouting({ ...loose, tiers: {}, research_web_search: "auto" })), '{"version":1,"paid_api":"off","tiers":{},"research_web_search":"auto"}');
+  assert.equal(JSON.stringify(canonicalRouting({ version: 1, research_web_search: "off" })), '{"version":1,"paid_api":"allowed","tiers":{}}');
+  assert.ok(!sameRouting({ ...loose, research_web_search: "on" }, { ...loose, research_web_search: "auto" }));
+  // An unknown state is never written.
+  assert.equal(canonicalRouting({ ...loose, research_web_search: "always" }).research_web_search, undefined);
+});
+
+test("the desktop refuses to apply automatic web search it cannot sign", () => {
+  const base = { version: 1, paid_api: "allowed", tiers: {} };
+  assert.equal(routingIssue({ ...base, research_web_search: "auto" }, []), AUTO_UNSIGNABLE);
+  assert.equal(routingIssue({ ...base, research_web_search: "on" }, []), null);
+  assert.equal(routingIssue({ ...base, research_web_search: "off" }, []), null);
 });
 
 test("validation mirrors Core's routing rules", () => {

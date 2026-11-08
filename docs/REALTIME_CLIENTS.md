@@ -43,6 +43,21 @@ Mobile clients stop sockets/speech on background or lock and reconnect after
 foreground authentication. No permanent mobile foreground service, APNs, or
 background socket guarantee is introduced.
 
+## Web answers
+
+With web search on `auto`, Core may start a second run itself after a reply:
+`assistant.started`, then `assistant.completed`, in the same conversation and
+with no new user message. Clients treat a run that starts right after a
+finished reply as that search and show "Searching the web…" while its row is
+pending. Its request ID is not in the pending map, so completing it leaves the
+client's own request bookkeeping untouched. Answers stored with model
+`web:<model>` show a "Web" chip; their trailing `Sources:`/`Bronnen:` lines are
+shown as https links only, opened in the system browser on click. No client
+loads a remote image from an answer.
+
+Desktop cannot sign `auto` until its pinned client-core knows that state: it
+shows the setting and refuses to apply a routing document that contains it.
+
 ## Local voice
 
 Voice is off by default. Enabling it permits speech only when the server names

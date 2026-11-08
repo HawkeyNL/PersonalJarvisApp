@@ -10,8 +10,12 @@ export type Routing = {
   version: number;
   paid_api: "allowed" | "off";
   tiers: Partial<Record<Tier, TierRoute>>;
-  research_web_search?: "on" | "off";
+  research_web_search?: WebSearch;
 };
+/** Owner web search setting. "on" is shown as "Ask" (Core offers a search
+ *  button); "auto" lets Core search on its own. Tightest first. */
+export const WEB_SEARCH = ["off", "on", "auto"] as const;
+export type WebSearch = (typeof WEB_SEARCH)[number];
 export type RoutingPolicy = {
   models: { provider: string; model: string; enabled: boolean }[];
   routing?: Routing | null;
@@ -49,8 +53,9 @@ export function canonicalRouting(routing: Routing | null | undefined): Routing {
     };
   }
   const canonical: Routing = { version: routing?.version ?? 1, paid_api: routing?.paid_api === "off" ? "off" : "allowed", tiers };
-  // Core writes research last and only when on.
-  if (routing?.research_web_search === "on") canonical.research_web_search = "on";
+  // Core writes research last and only when not off, so off and on keep their bytes.
+  const research = routing?.research_web_search;
+  if (research === "on" || research === "auto") canonical.research_web_search = research;
   return canonical;
 }
 
@@ -72,6 +77,8 @@ const key = (e: RouteEntry) => `${e.provider}\u0000${e.model}`;
  *  `ModelRouting::validate` plus the "every pair is discovered" check. */
 export function routingIssue(routing: Routing, discovered: RouteEntry[]): string | null {
   if (routing.version !== 1) return "Unsupported routing version";
+  // The pinned client-core signs only off and on.
+  if (routing.research_web_search === "auto") return AUTO_UNSIGNABLE;
   const known = new Set(discovered.map(key));
   for (const tier of TIERS) {
     const route = routing.tiers[tier];
@@ -92,6 +99,8 @@ export function routingIssue(routing: Routing, discovered: RouteEntry[]): string
   }
   return null;
 }
+
+export const AUTO_UNSIGNABLE = "Automatic web search can only be set from your phone or the Home Node; choose Off or Ask to apply routing here.";
 
 /** Discovered routable pairs not yet in `chain`, enabled first. */
 export function candidates<T extends RouteEntry & { enabled: boolean }>(models: T[], chain: RouteEntry[]): T[] {

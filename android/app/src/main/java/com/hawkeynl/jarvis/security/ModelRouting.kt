@@ -19,12 +19,16 @@ data class RouteEntry(val provider: String, val model: String) {
 
 data class TierRoute(val chain: List<RouteEntry>, val meteredAfterSubscription: Boolean = false)
 
+/** Owner web search setting, tightest first (the order is the relaxation order).
+ *  ON is shown as "Ask": Core offers a search button. AUTO: Core searches by itself. */
+enum class WebSearch(val id: String, val label: String) { OFF("off", "Off"), ON("on", "Ask"), AUTO("auto", "Auto") }
+
 /** An absent tier is the built-in order. Equality is canonical equality. */
 data class Routing(
     val version: Int = 1,
     val paidApiAllowed: Boolean = true,
     val tiers: Map<Tier, TierRoute> = emptyMap(),
-    val researchWebSearch: Boolean = false,
+    val researchWebSearch: WebSearch = WebSearch.OFF,
 )
 
 const val ROUTING_MUTATION = "device-signed-model-route-v1"
@@ -69,11 +73,8 @@ fun parseRouting(raw: JsonElement): Routing? = try {
         "off" -> false
         else -> error("paid_api")
     }
-    val research = when (optString(doc, "research_web_search")) {
-        null, "off" -> false
-        "on" -> true
-        else -> error("research_web_search")
-    }
+    val research = optString(doc, "research_web_search")
+        ?.let { id -> WebSearch.entries.firstOrNull { it.id == id } ?: error("research_web_search") } ?: WebSearch.OFF
     val tiers = mutableMapOf<Tier, TierRoute>()
     val tiersObject = doc["tiers"]?.takeIf { it !is JsonNull }?.let { (it as JsonObject).only(*Tier.entries.map { t -> t.id }.toTypedArray()) }
     for (tier in Tier.entries) {
@@ -131,7 +132,7 @@ private fun StringBuilder.jsonString(value: String): StringBuilder {
 }
 
 /** Core's canonical routing JSON: fixed field order, absent tiers omitted,
- *  `paid_api` and `metered_after_subscription` always written, research last and only when on. */
+ *  `paid_api` and `metered_after_subscription` always written, research last and only when not off. */
 fun Routing.canonicalJson(): String = buildString {
     append("{\"version\":").append(version).append(",\"paid_api\":")
     jsonString(if (paidApiAllowed) "allowed" else "off").append(",\"tiers\":{")
@@ -148,7 +149,7 @@ fun Routing.canonicalJson(): String = buildString {
         append("],\"metered_after_subscription\":").append(route.meteredAfterSubscription).append('}')
     }
     append('}')
-    if (researchWebSearch) append(",\"research_web_search\":\"on\"")
+    if (researchWebSearch != WebSearch.OFF) append(",\"research_web_search\":").jsonString(researchWebSearch.id)
     append('}')
 }
 
@@ -225,23 +226,30 @@ fun routingRefused(status: Int) = when (status) {
 /** Ways a routing change lets Jarvis spend more than the routing it replaces. */
 data class Relaxation(
     val paidApi: Boolean = false, val paidFallback: Boolean = false,
-    val paidModels: Boolean = false, val researchWebSearch: Boolean = false,
+    val paidModels: Boolean = false,
+    /** The looser web search state this change switches to; OFF when not loosened. */
+    val researchWebSearch: WebSearch = WebSearch.OFF,
 ) {
-    fun any() = paidApi || paidFallback || paidModels || researchWebSearch
+    fun any() = paidApi || paidFallback || paidModels || researchWebSearch != WebSearch.OFF
 
     fun prompt(): String = buildString {
         append("Jarvis: replace model routing")
         if (paidApi) append("; allow paid APIs")
         if (paidFallback) append("; allow paid fallback after subscription")
         if (paidModels) append("; add paid API models")
-        if (researchWebSearch) append("; allow research web search")
+        when (researchWebSearch) {
+            WebSearch.OFF -> {}
+            WebSearch.ON -> append("; allow research web search")
+            WebSearch.AUTO -> append("; allow automatic web search")
+        }
     }
 }
 
 /** `current` null means unknown or failed closed: every paid permission is new. */
 fun relaxation(current: Routing?, next: Routing): Relaxation {
-    // Web search sends research questions to a provider tool whatever the paid API setting.
-    val research = next.researchWebSearch && current?.researchWebSearch != true
+    // Web search sends research questions to a provider tool whatever the paid API
+    // setting; off -> on, off -> auto and on -> auto all loosen it.
+    val research = next.researchWebSearch.takeIf { it > (current?.researchWebSearch ?: WebSearch.OFF) } ?: WebSearch.OFF
     if (!next.paidApiAllowed) return Relaxation(researchWebSearch = research)
     var fallback = false
     var models = false

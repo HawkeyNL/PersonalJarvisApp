@@ -870,6 +870,12 @@ mod tests {
         assert_eq!(current_routing(&snapshot).unwrap().paid_api, PaidApi::Off);
         snapshot.routing = Some(serde_json::json!({"version": 1, "future": true}));
         assert!(current_routing(&snapshot).is_none());
+        // Automatic web search is not signable with this client-core: unknown,
+        // so every permission counts as new, and the command refuses to sign it.
+        let auto = serde_json::json!({"version": 1, "research_web_search": "auto"});
+        assert!(serde_json::from_value::<RoutingDocument>(auto.clone()).is_err());
+        snapshot.routing = Some(auto);
+        assert!(current_routing(&snapshot).is_none());
         snapshot.routing = None;
         snapshot.routing_unavailable_reason = Some("routing_invalid".into());
         assert!(current_routing(&snapshot).is_none());
