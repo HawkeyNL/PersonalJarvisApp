@@ -14,6 +14,7 @@ import { startRealtime, type RealtimeEvent, type CanonicalMessage } from "./real
 import { mergeCanonical, appendVisualDelta } from "./realtimeProjection";
 import { PendingRuns } from "./pendingRuns";
 import { offerFrom, type ResearchOffer } from "./researchOffer";
+import { isWebModel, startsAfterReply } from "./webAnswer";
 import { chatSession } from "./chatSession";
 import { currentAuthStatus } from "./auth";
 import { locked } from "./lock";
@@ -36,6 +37,10 @@ export interface Msg {
   canonicalId?: string;
   runId?: string;
   requestId?: string;
+  /** A web-derived answer (stored model "web:<model>"). */
+  web?: boolean;
+  /** A pending run Core started itself after a reply: its automatic web search. */
+  searching?: boolean;
 }
 
 export const messages = ref<Msg[]>([]);
@@ -51,7 +56,7 @@ chatSession.onReset(()=>{pending.clear();messages.value=[];thinking.value=false;
 
 function upsertCanonical(message:CanonicalMessage,requestId?:string,runId?:string) {
   if(currentId.value!==message.conversation_id) return;
-  const row={id:idc++,role:(message.role==="assistant"?"jarvis":"user") as Role,text:message.content,ts:message.created_at.slice(11,16),spoken:false,canonicalId:message.id,runId,requestId};
+  const row={id:idc++,role:(message.role==="assistant"?"jarvis":"user") as Role,text:message.content,ts:message.created_at.slice(11,16),spoken:false,canonicalId:message.id,runId,requestId,web:isWebModel(message.model)};
   messages.value=mergeCanonical(messages.value,row);
 }
 
@@ -116,7 +121,7 @@ function receiveRealtime(event:RealtimeEvent) {
       pending.acknowledge(event.payload.request_id,event.payload.conversation_id,event.payload.run_id);
       if(currentId.value===event.payload.conversation_id) {
         thinking.value=true;
-        if(!messages.value.some(m=>m.runId===event.payload.run_id)) messages.value.push({id:idc++,role:"jarvis",text:"",ts:stamp(),spoken:false,runId:event.payload.run_id});
+        if(!messages.value.some(m=>m.runId===event.payload.run_id)) messages.value.push({id:idc++,role:"jarvis",text:"",ts:stamp(),spoken:false,runId:event.payload.run_id,searching:startsAfterReply(messages.value)});
       }
       break;
     case "assistant.delta": {
@@ -203,6 +208,7 @@ async function reloadConversation(id:string):Promise<void> {
     ts: m.at?.slice(11) || stamp(), // "YYYY-MM-DD HH:MM" → "HH:MM"
     spoken: false,
     canonicalId:m.id,
+    web:isWebModel(m.model),
   }));
 }
 

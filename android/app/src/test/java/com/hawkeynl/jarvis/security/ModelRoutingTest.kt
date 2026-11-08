@@ -53,14 +53,26 @@ class ModelRoutingTest {
         assertEquals(canonicalPayload, approval(parseRouting(loose)!!).canonicalPayload())
     }
 
-    @Test fun researchIsWrittenLastAndOnlyWhenOn() {
+    @Test fun researchIsWrittenLastAndOnlyWhenNotOff() {
         assertEquals("""{"version":1,"paid_api":"off","tiers":{},"research_web_search":"on"}""",
-            Routing(paidApiAllowed = false, researchWebSearch = true).canonicalJson())
+            Routing(paidApiAllowed = false, researchWebSearch = WebSearch.ON).canonicalJson())
+        assertEquals("""{"version":1,"paid_api":"off","tiers":{},"research_web_search":"auto"}""",
+            Routing(paidApiAllowed = false, researchWebSearch = WebSearch.AUTO).canonicalJson())
         assertEquals("""{"version":1,"paid_api":"allowed","tiers":{}}""", Routing().canonicalJson())
-        assertTrue(approval(vectorRouting().copy(researchWebSearch = true)).canonicalPayload()
+        assertTrue(approval(vectorRouting().copy(researchWebSearch = WebSearch.ON)).canonicalPayload()
             .endsWith("""}},"research_web_search":"on"},"expected_routing_sha256":"$sha"}"""))
         assertEquals("""{"version":1,"paid_api":"allowed","tiers":{}}""",
             parseRouting(Json.parseToJsonElement("""{"version":1,"research_web_search":"off"}"""))!!.canonicalJson())
+    }
+
+    @Test fun webSearchParsesOffOnAndAutoAndRefusesAnythingElse() {
+        fun parse(value: String) = parseRouting(Json.parseToJsonElement("""{"version":1,"research_web_search":$value}"""))
+        assertEquals(WebSearch.OFF, parse("null")!!.researchWebSearch)
+        assertEquals(WebSearch.OFF, parse("\"off\"")!!.researchWebSearch)
+        assertEquals(WebSearch.ON, parse("\"on\"")!!.researchWebSearch)
+        assertEquals(WebSearch.AUTO, parse("\"auto\"")!!.researchWebSearch)
+        assertEquals("""{"version":1,"paid_api":"allowed","tiers":{},"research_web_search":"auto"}""", parse("\"auto\"")!!.canonicalJson())
+        for (bad in listOf("\"AUTO\"", "\"live\"", "true", "1", "\"\"")) assertNull(bad, parse(bad))
     }
 
     @Test fun stringsEscapeLikeSerdeJson() {
@@ -72,7 +84,9 @@ class ModelRoutingTest {
         val original = approval().message()
         assertFalse(original.contentEquals(approval(hash = "00".repeat(32)).message()))
         assertFalse(original.contentEquals(approval(vectorRouting().copy(paidApiAllowed = true)).message()))
-        assertFalse(original.contentEquals(approval(vectorRouting().copy(researchWebSearch = true)).message()))
+        assertFalse(original.contentEquals(approval(vectorRouting().copy(researchWebSearch = WebSearch.ON)).message()))
+        assertFalse(approval(vectorRouting().copy(researchWebSearch = WebSearch.ON)).message()
+            .contentEquals(approval(vectorRouting().copy(researchWebSearch = WebSearch.AUTO)).message()))
         for (bad in listOf(approval(vectorRouting().copy(version = 2)), approval(hash = "zz"), approval(expires = 1), approval(expires = 302))) {
             assertThrows(IllegalArgumentException::class.java) { bad.message() }
         }
@@ -177,14 +191,23 @@ class ModelRoutingTest {
         assertFalse(relaxation(pinned, Routing(paidApiAllowed = false)).paidFallback)
     }
 
-    @Test fun switchingResearchWebSearchOnAlwaysNeedsAFreshPrompt() {
-        fun research(paid: Boolean, on: Boolean) = Routing(paidApiAllowed = paid, researchWebSearch = on)
-        val onOnly = Relaxation(researchWebSearch = true)
-        assertEquals(onOnly, relaxation(research(false, false), research(false, true)))
-        assertEquals(onOnly, relaxation(null, research(false, true)))
-        assertTrue(relaxation(research(false, false), research(false, true)).prompt().endsWith("; allow research web search"))
-        assertFalse(relaxation(research(false, true), research(false, true)).any())
-        assertFalse(relaxation(research(false, true), research(false, false)).any())
+    @Test fun looseningWebSearchAlwaysNeedsAFreshPrompt() {
+        fun research(paid: Boolean, state: WebSearch) = Routing(paidApiAllowed = paid, researchWebSearch = state)
+        val (off, ask, auto) = WebSearch.entries
+        val onOnly = Relaxation(researchWebSearch = ask)
+        val autoOnly = Relaxation(researchWebSearch = auto)
+        assertEquals(onOnly, relaxation(research(false, off), research(false, ask)))
+        assertEquals(onOnly, relaxation(null, research(false, ask)))
+        assertTrue(relaxation(research(false, off), research(false, ask)).prompt().endsWith("; allow research web search"))
+        // Off -> auto and ask -> auto loosen too, also from an unknown state.
+        for (current in listOf(research(false, off), research(false, ask), null)) {
+            assertEquals(autoOnly, relaxation(current, research(false, auto)))
+        }
+        assertTrue(autoOnly.any() && autoOnly.prompt().endsWith("; allow automatic web search"))
+        // Unchanged or tightened: no web search relaxation.
+        for ((current, next) in listOf(ask to ask, ask to off, auto to auto, auto to ask, auto to off, off to off)) {
+            assertFalse("$current -> $next", relaxation(research(false, current), research(false, next)).any())
+        }
     }
 
     @Test fun reasonsExplainFailClosedWithoutHidingUnknownCodes() {

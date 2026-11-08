@@ -1,6 +1,7 @@
 package com.hawkeynl.jarvis.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,14 +28,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.hawkeynl.jarvis.chat.WebAnswer
+import com.hawkeynl.jarvis.chat.isWebModel
+import com.hawkeynl.jarvis.chat.splitSources
 import com.hawkeynl.jarvis.network.ConversationMessage
 
 /** Your messages in an accent bubble with its tail corner bottom-end (D-Home). */
@@ -89,7 +95,10 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel) {
                     }
                 }
             }
-            if (state.busy) item { Thinking() }
+            if (state.busy) item {
+                val searching = state.webSearchRun?.let { run -> state.messages.any { it.id == "run:$run" } } == true
+                Thinking(if (searching) "Searching the web…" else "Jarvis is thinking…")
+            }
         }
         Column(Modifier.fillMaxWidth().background(c.bgSurface)) {
             ListDivider()
@@ -127,15 +136,34 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel) {
 private fun Message(message: ConversationMessage) {
     val c = JvTheme.colors
     if (message.role == "assistant" || message.role == "jarvis") {
-        // Jarvis answers in plain text under a small name line, without a bubble.
+        // Jarvis answers in plain text under a small name line, without a bubble. A web
+        // answer gets a "Web" chip and its Sources as links; nothing is loaded by itself.
+        val web = isWebModel(message.model)
+        val answer = if (web) splitSources(message.content) else WebAnswer(message.content, emptyList())
         Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
                 Box(Modifier.size(24.dp).clip(JvShapes.sm).background(c.accentSubtle), contentAlignment = Alignment.Center) {
                     JvIconView(JvIcon.SPARK, tint = c.accentText, size = 14.dp)
                 }
                 Text("Jarvis", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+                if (web) Text(
+                    "Web", Modifier.clip(JvShapes.pill).background(c.accentSubtle).padding(horizontal = JvSpace.sm, vertical = 2.dp),
+                    color = c.accentText, style = MaterialTheme.typography.labelSmall,
+                )
             }
-            Text(message.content, style = MaterialTheme.typography.bodyLarge)
+            Text(answer.body, style = MaterialTheme.typography.bodyLarge)
+            if (answer.sources.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(JvSpace.xs)) {
+                Text("Sources", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+                val uris = LocalUriHandler.current
+                // Validated, normalized https URLs only (WebAnswer); opened in the browser on tap.
+                // Without a browser openUri throws: the tap then does nothing.
+                answer.sources.forEach { url ->
+                    Text(
+                        url, Modifier.clickable(role = Role.Button, onClickLabel = "Open source") { runCatching { uris.openUri(url) } },
+                        color = c.accentText, style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
         }
     } else {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
@@ -154,15 +182,15 @@ private fun Message(message: ConversationMessage) {
     }
 }
 
-/** "Jarvis is thinking…" while an answer is on its way; announced once. */
+/** "Jarvis is thinking…" (or "Searching the web…") while an answer is on its way; announced once. */
 @Composable
-private fun Thinking() {
+private fun Thinking(label: String) {
     Row(
         Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(JvSpace.sm),
     ) {
         if (!rememberReduceMotion()) CircularProgressIndicator(Modifier.size(16.dp), color = JvTheme.colors.textSecondary, strokeWidth = 2.dp)
-        Text("Jarvis is thinking…", color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.bodySmall)
+        Text(label, color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.bodySmall)
     }
 }

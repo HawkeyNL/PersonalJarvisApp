@@ -170,7 +170,16 @@ enum RoutingTier: String, CaseIterable, Identifiable {
 }
 
 enum PaidApiSetting: String, Codable { case allowed, off }
-private enum OnOff: String, Codable { case on, off }
+/// Owner web search setting, tightest first (the order is the relaxation order).
+/// `.on` is shown as "Ask": Core offers a search button. `.auto`: Core searches by itself.
+enum WebSearchSetting: String, Codable, CaseIterable, Comparable, Identifiable {
+    case off, on, auto
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .off: "Off"; case .on: "Ask"; case .auto: "Auto" }
+    }
+    static func < (lhs: Self, rhs: Self) -> Bool { allCases.firstIndex(of: lhs)! < allCases.firstIndex(of: rhs)! }
+}
 
 struct RouteEntry: Codable, Equatable, Hashable, Identifiable {
     let provider: String
@@ -208,7 +217,7 @@ struct RoutingDocument: Codable, Equatable {
     var version = 1
     var paidApi: PaidApiSetting = .allowed
     var tiers: [RoutingTier: TierRoute] = [:]
-    var researchWebSearch = false
+    var researchWebSearch: WebSearchSetting = .off
 
     init() {}
     private enum CodingKeys: String, CodingKey { case version, paid_api, tiers, research_web_search }
@@ -224,7 +233,7 @@ struct RoutingDocument: Codable, Equatable {
             }
             for tier in RoutingTier.allCases { tiers[tier] = try t.decodeIfPresent(TierRoute.self, forKey: AnyKey(stringValue: tier.rawValue)!) }
         }
-        researchWebSearch = try c.decodeIfPresent(OnOff.self, forKey: .research_web_search) == .on
+        researchWebSearch = try c.decodeIfPresent(WebSearchSetting.self, forKey: .research_web_search) ?? .off
     }
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -232,12 +241,12 @@ struct RoutingDocument: Codable, Equatable {
         try c.encode(paidApi, forKey: .paid_api)
         var t = c.nestedContainer(keyedBy: AnyKey.self, forKey: .tiers)
         for tier in RoutingTier.allCases { try t.encodeIfPresent(tiers[tier], forKey: AnyKey(stringValue: tier.rawValue)!) }
-        if researchWebSearch { try c.encode(OnOff.on, forKey: .research_web_search) }
+        if researchWebSearch != .off { try c.encode(researchWebSearch, forKey: .research_web_search) }
     }
 
     /// Exactly client-core's compact serde_json output for this document: fixed field
     /// order, absent tiers omitted, `paid_api` and `metered_after_subscription` always
-    /// written, `research_web_search` last and only when on. Built by hand so it does
+    /// written, `research_web_search` last and only when not off. Built by hand so it does
     /// not depend on JSONEncoder key order or escaping.
     func canonicalJSON() -> String {
         let q = JSONText.quote
@@ -247,7 +256,7 @@ struct RoutingDocument: Codable, Equatable {
             return "\(q(tier.rawValue)):{\"chain\":[\(chain)],\"metered_after_subscription\":\(route.metered_after_subscription)}"
         }.joined(separator: ",")
         var out = "{\"version\":\(version),\"paid_api\":\(q(paidApi.rawValue)),\"tiers\":{\(tierJSON)}"
-        if researchWebSearch { out += ",\"research_web_search\":\"on\"" }
+        if researchWebSearch != .off { out += ",\"research_web_search\":\(q(researchWebSearch.rawValue))" }
         return out + "}"
     }
 }
@@ -321,14 +330,19 @@ struct RoutingRelaxation: Equatable {
     var paidApi = false
     var paidFallback = false
     var paidModels = false
-    var researchWebSearch = false
-    var any: Bool { paidApi || paidFallback || paidModels || researchWebSearch }
+    /// The looser web search setting this change switches to; `.off` when not loosened.
+    var researchWebSearch: WebSearchSetting = .off
+    var any: Bool { paidApi || paidFallback || paidModels || researchWebSearch != .off }
     var prompt: String {
         var text = "Jarvis: replace model routing"
         if paidApi { text += "; allow paid APIs" }
         if paidFallback { text += "; allow paid fallback after subscription" }
         if paidModels { text += "; add paid API models" }
-        if researchWebSearch { text += "; allow research web search" }
+        switch researchWebSearch {
+        case .off: break
+        case .on: text += "; allow research web search"
+        case .auto: text += "; allow automatic web search"
+        }
         return text
     }
 }
@@ -399,8 +413,8 @@ enum RoutingRules {
     /// nil `current` (unknown or failed closed) counts every permission as new.
     static func relaxation(current: RoutingDocument?, next: RoutingDocument) -> RoutingRelaxation {
         // Web search sends research questions to a provider tool whatever the paid API
-        // setting, so switching it on always needs a fresh prompt.
-        let research = next.researchWebSearch && !(current?.researchWebSearch ?? false)
+        // setting, so off -> on, off -> auto and on -> auto always need a fresh prompt.
+        let research = next.researchWebSearch > (current?.researchWebSearch ?? .off) ? next.researchWebSearch : .off
         // No metered backend can run at all.
         if next.paidApi == .off { return RoutingRelaxation(researchWebSearch: research) }
         var result = RoutingRelaxation(paidApi: current.map { $0.paidApi == .off } ?? true, researchWebSearch: research)

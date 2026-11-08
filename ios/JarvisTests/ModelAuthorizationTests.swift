@@ -182,14 +182,22 @@ final class ModelRoutingTests: XCTestCase {
         var changed = routing; changed.paidApi = .allowed
         XCTAssertNotEqual(try approval(changed).message(), message)
         XCTAssertNotEqual(try approval(routing, hash: String(repeating: "00", count: 32)).message(), message)
-        changed = routing; changed.researchWebSearch = true
+        changed = routing; changed.researchWebSearch = .on
         XCTAssertTrue(String(decoding: approval(changed).canonicalPayload(), as: UTF8.self)
             .hasSuffix(#"}},"research_web_search":"on"},"expected_routing_sha256":"\#(stateHash)"}"#))
         XCTAssertNotEqual(try approval(changed).message(), message)
-        // Research written last and only when on; absent tiers omitted; paid_api always written.
+        var auto = routing; auto.researchWebSearch = .auto
+        XCTAssertNotEqual(try approval(auto).message(), try approval(changed).message())
+        // Research written last and only when not off; absent tiers omitted; paid_api always written.
         XCTAssertEqual(try doc(#"{"version":1,"research_web_search":"off"}"#).canonicalJSON(), #"{"version":1,"paid_api":"allowed","tiers":{}}"#)
         XCTAssertEqual(try doc(#"{"version":1,"paid_api":"off","research_web_search":"on"}"#).canonicalJSON(),
                        #"{"version":1,"paid_api":"off","tiers":{},"research_web_search":"on"}"#)
+        XCTAssertEqual(try doc(#"{"version":1,"paid_api":"off","research_web_search":"auto"}"#).canonicalJSON(),
+                       #"{"version":1,"paid_api":"off","tiers":{},"research_web_search":"auto"}"#)
+        XCTAssertEqual(try doc(#"{"version":1,"research_web_search":null}"#).researchWebSearch, .off)
+        for bad in [#""AUTO""#, #""live""#, "true", "1"] {
+            XCTAssertThrowsError(try doc(#"{"version":1,"research_web_search":\#(bad)}"#), bad)
+        }
         XCTAssertEqual(JSONText.quote("a\"b\\c/d\u{08}\u{0C}\n\r\t\u{01}\u{1f}é😀\u{7f}"), "\"a\\\"b\\\\c/d\\b\\f\\n\\r\\t\\u0001\\u001fé😀\u{7f}\"")
         var bad = routing; bad.version = 2
         XCTAssertThrowsError(try approval(bad).message())
@@ -216,7 +224,7 @@ final class ModelRoutingTests: XCTestCase {
         let allowed = RoutingDocument()
         let withPaid = routed(.allowed, [sub, paid], true)
         func relaxed(_ api: Bool, _ fallback: Bool, _ models: Bool) -> RoutingRelaxation {
-            RoutingRelaxation(paidApi: api, paidFallback: fallback, paidModels: models, researchWebSearch: false)
+            RoutingRelaxation(paidApi: api, paidFallback: fallback, paidModels: models, researchWebSearch: .off)
         }
         XCTAssertEqual(RoutingRules.relaxation(current: off, next: allowed), relaxed(true, false, false))
         XCTAssertEqual(RoutingRules.relaxation(current: nil, next: allowed), relaxed(true, false, false))
@@ -244,14 +252,22 @@ final class ModelRoutingTests: XCTestCase {
         XCTAssertFalse(RoutingRules.relaxation(current: pinned, next: off).paidFallback)
     }
 
-    func testSwitchingResearchWebSearchOnAlwaysNeedsAFreshPrompt() throws {
-        func research(_ paidApi: String, _ on: String) throws -> RoutingDocument { try doc(#"{"version":1,"paid_api":"\#(paidApi)","research_web_search":"\#(on)"}"#) }
-        let onOnly = RoutingRelaxation(researchWebSearch: true)
+    func testLooseningWebSearchAlwaysNeedsAFreshPrompt() throws {
+        func research(_ paidApi: String, _ state: String) throws -> RoutingDocument { try doc(#"{"version":1,"paid_api":"\#(paidApi)","research_web_search":"\#(state)"}"#) }
+        let onOnly = RoutingRelaxation(researchWebSearch: .on)
+        let autoOnly = RoutingRelaxation(researchWebSearch: .auto)
         XCTAssertEqual(RoutingRules.relaxation(current: try research("off", "off"), next: try research("off", "on")), onOnly)
         XCTAssertEqual(RoutingRules.relaxation(current: nil, next: try research("off", "on")), onOnly)
         XCTAssertTrue(onOnly.prompt.hasSuffix("; allow research web search"))
-        XCTAssertFalse(RoutingRules.relaxation(current: try research("off", "on"), next: try research("off", "on")).any)
-        XCTAssertFalse(RoutingRules.relaxation(current: try research("off", "on"), next: try research("off", "off")).any)
+        // Off -> auto and ask -> auto loosen too, also from an unknown state.
+        for current in [try research("off", "off"), try research("off", "on"), nil] {
+            XCTAssertEqual(RoutingRules.relaxation(current: current, next: try research("off", "auto")), autoOnly)
+        }
+        XCTAssertTrue(autoOnly.any && autoOnly.prompt.hasSuffix("; allow automatic web search"))
+        // Unchanged or tightened: no web search relaxation.
+        for (current, next) in [("on", "on"), ("on", "off"), ("auto", "auto"), ("auto", "on"), ("auto", "off"), ("off", "off")] {
+            XCTAssertFalse(RoutingRules.relaxation(current: try research("off", current), next: try research("off", next)).any, "\(current) -> \(next)")
+        }
     }
 
     func testCurrentRoutingFailsClosedAndModeFollowsSnapshot() throws {

@@ -16,6 +16,9 @@ final class JarvisAppModel: ObservableObject {
     @Published private(set) var currentConversationId: UUID?
     @Published private(set) var currentConversationTitle = "New conversation"
     @Published private(set) var isSending = false
+    /// A run Core started itself right after a reply (its automatic web search);
+    /// only meaningful while its `run:` placeholder row is shown.
+    @Published private(set) var webSearchRun: UUID?
     @Published var endpointText: String
     @Published var notice: String?
     /// A signed password reset waiting for root confirmation on the Home Node.
@@ -681,6 +684,7 @@ final class JarvisAppModel: ObservableObject {
             if payload.conversation_id == currentConversationId, let run = payload.run_id {
                 isSending = true
                 if !messages.contains(where: { $0.id == "run:\(run)" }) {
+                    webSearchRun = WebAnswer.startsAfterReply(messages) ? run : nil
                     messages.append(ConversationMessage(role: "assistant", content: "", model: nil, at: "", canonicalId: "run:\(run)"))
                 }
             }
@@ -706,7 +710,12 @@ final class JarvisAppModel: ObservableObject {
         case "assistant.failed":
             if let run = payload.run {
                 pendingRequests.removeValue(forKey: run.request_id)
-                if currentConversationId == run.conversation_id { isSending = false; notice = "Response interrupted. Your message is saved." }
+                if currentConversationId == run.conversation_id {
+                    isSending = false; notice = "Response interrupted. Your message is saved."
+                    // Drop the run's empty placeholder row (also an automatic web search's).
+                    messages.removeAll { $0.id == "run:\(run.run_id)" && $0.content.isEmpty }
+                    webSearchRun = nil
+                }
             }
         default: break
         }

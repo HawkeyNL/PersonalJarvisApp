@@ -201,12 +201,13 @@ struct RoutingEditorView: View {
                                     .font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
                             }
                         }
-                        Toggle(isOn: $draft.researchWebSearch) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Research web search \(draft.researchWebSearch ? "on" : "off")")
-                                Text("On: explicit Research requests may use the subscription's provider-hosted web search. Never a paid API.")
-                                    .font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
-                            }
+                        VStack(alignment: .leading, spacing: JV.Space.xs) {
+                            Text("Web search")
+                            SegmentedControl(label: "Web search",
+                                             options: WebSearchSetting.allCases.map { SegmentedControl<WebSearchSetting>.Option(id: $0, label: $0.title) },
+                                             selection: $draft.researchWebSearch)
+                            Text(webSearchDetail)
+                                .font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
                         }
                     } header: { listHeader("Spending") }
                     .listRowBackground(JV.bgSurface)
@@ -316,10 +317,23 @@ struct RoutingEditorView: View {
         RoutingRules.isSubscription(provider) ? "Subscription" : RoutingRules.isMetered(provider) ? "Paid API" : "Local"
     }
 
+    private var webSearchDetail: String {
+        let detail = switch draft.researchWebSearch {
+        case .off: "Jarvis never searches the web."
+        case .on: "Jarvis offers a web search button; only your tap sends the question."
+        case .auto: "Jarvis searches by itself when a question needs current information."
+        }
+        return detail + " Uses the subscription's provider-hosted web search, never a paid API. Only the question leaves the Home Node."
+    }
+
     private var summary: String {
         var text = "This replaces the routing for all devices"
         if draft.paidApi == .off { text += " and turns paid APIs off" }
-        if draft.researchWebSearch { text += ". Research may use web search" }
+        switch draft.researchWebSearch {
+        case .off: break
+        case .on: text += ". Jarvis may offer web searches"
+        case .auto: text += ". Jarvis may search the web by itself"
+        }
         text += ". Running requests are not cancelled."
         if relaxed { text += " This change can increase spending or use web search." }
         for tier in RoutingTier.allCases {
