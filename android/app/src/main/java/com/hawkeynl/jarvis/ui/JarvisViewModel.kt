@@ -654,7 +654,9 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             }
             "assistant.failed" -> {
                 val run = p.run ?: return; pending.remove(run.request_id)
-                _state.update { if (it.conversationId == run.conversation_id) it.copy(busy = false, error = "Reply interrupted. Your message was saved.") else it }
+                // Drop the run's empty placeholder row (also an automatic web search's).
+                _state.update { if (it.conversationId == run.conversation_id) it.copy(busy = false, error = "Reply interrupted. Your message was saved.",
+                    messages = it.messages.filterNot { m -> m.id == "run:${run.run_id}" && m.content.isEmpty() }, webSearchRun = null) else it }
             }
         }
     }

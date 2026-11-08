@@ -190,8 +190,10 @@ enum WebAnswer {
         let candidate = line.trimmingCharacters(in: .whitespaces).drop(while: { $0 == "-" || $0 == "*" }).drop(while: \.isWhitespace)
         guard !candidate.isEmpty, !candidate.contains(where: \.isWhitespace),
               let url = URL(string: String(candidate)), url.scheme?.lowercased() == "https",
-              url.host?.isEmpty == false, url.user == nil, url.password == nil else { return nil }
-        return url
+              url.host?.isEmpty == false, url.user == nil, url.password == nil,
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        components.scheme = "https"
+        return components.url
     }
 
     /// A run that starts right after a finished Jarvis reply, with no new question

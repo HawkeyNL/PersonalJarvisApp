@@ -12,12 +12,15 @@ data class WebAnswer(val body: String, val sources: List<String>)
 
 private val SOURCES_HEADER = Regex("sources|bronnen", RegexOption.IGNORE_CASE)
 
-/** One https URL with a host and no user info, like Core's Sources filter. */
+/** One https URL with a host and no user info, like Core's Sources filter.
+ *  Returned normalized: lowercase scheme (Android intent matching is case-sensitive)
+ *  and ASCII only, so non-ASCII or bidi characters are shown percent-encoded. */
 private fun httpsSource(line: String): String? {
     val candidate = line.trim().trimStart('-', '*').trimStart()
     if (candidate.isEmpty() || candidate.any { it.isWhitespace() }) return null
     val uri = runCatching { URI(candidate) }.getOrNull() ?: return null
-    return candidate.takeIf { uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrEmpty() && uri.rawUserInfo == null }
+    if (!uri.scheme.equals("https", ignoreCase = true) || uri.host.isNullOrEmpty() || uri.rawUserInfo != null) return null
+    return "https" + uri.toASCIIString().substring(uri.scheme.length)
 }
 
 /** Core's rule: the last line that, without `# * _ :` and spaces, reads Sources.

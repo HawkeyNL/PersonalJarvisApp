@@ -710,7 +710,12 @@ final class JarvisAppModel: ObservableObject {
         case "assistant.failed":
             if let run = payload.run {
                 pendingRequests.removeValue(forKey: run.request_id)
-                if currentConversationId == run.conversation_id { isSending = false; notice = "Response interrupted. Your message is saved." }
+                if currentConversationId == run.conversation_id {
+                    isSending = false; notice = "Response interrupted. Your message is saved."
+                    // Drop the run's empty placeholder row (also an automatic web search's).
+                    messages.removeAll { $0.id == "run:\(run.run_id)" && $0.content.isEmpty }
+                    webSearchRun = nil
+                }
             }
         default: break
         }

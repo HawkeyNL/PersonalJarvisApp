@@ -155,10 +155,11 @@ private fun Message(message: ConversationMessage) {
             if (answer.sources.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(JvSpace.xs)) {
                 Text("Sources", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
                 val uris = LocalUriHandler.current
-                // Validated https URLs only (WebAnswer); opened in the browser on tap.
+                // Validated, normalized https URLs only (WebAnswer); opened in the browser on tap.
+                // Without a browser openUri throws: the tap then does nothing.
                 answer.sources.forEach { url ->
                     Text(
-                        url, Modifier.clickable(role = Role.Button, onClickLabel = "Open source") { uris.openUri(url) },
+                        url, Modifier.clickable(role = Role.Button, onClickLabel = "Open source") { runCatching { uris.openUri(url) } },
                         color = c.accentText, style = MaterialTheme.typography.bodySmall,
                     )
                 }

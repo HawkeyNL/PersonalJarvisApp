@@ -2293,6 +2293,7 @@ final class WebAnswerTests: XCTestCase {
         XCTAssertEqual(split.body, "Rust 1.99 is out.")
         XCTAssertEqual(split.sources.map(\.absoluteString), ["https://blog.rust-lang.org/a.html", "https://example.org", "https://news.example"])
         XCTAssertEqual(WebAnswer.split("A\nSources:\n- https://a.example\n- https://a.example").sources.count, 1)
+        XCTAssertEqual(WebAnswer.split("A\nSources:\n- HTTPS://a.example/x").sources.map(\.absoluteString), ["https://a.example/x"])
         let dutch = WebAnswer.split("Het weer.\r\n## Bronnen\r\n- https://knmi.nl/a")
         XCTAssertEqual(dutch.body, "Het weer.")
         XCTAssertEqual(dutch.sources.map(\.absoluteString), ["https://knmi.nl/a"])
