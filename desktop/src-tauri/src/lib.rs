@@ -375,6 +375,7 @@ fn authenticated_api_path(path: &str) -> bool {
         "/v1/broker",
         "/v1/agent/pending",
         "/v1/voice",
+        "/v1/roadmaps",
     ];
     shared.iter().chain(ACCOUNT_ADMIN_ROUTES).any(|prefix| {
         route == *prefix
@@ -666,13 +667,15 @@ async fn auth_request(
     let method = match method.as_str() {
         "GET" => reqwest::Method::GET,
         "POST" => reqwest::Method::POST,
+        "PATCH" => reqwest::Method::PATCH,
         "DELETE" => reqwest::Method::DELETE,
         _ => return Err("authenticated API method is invalid".to_string()),
     };
     if native_only_route(&path) || (read_only_route(&path) && method != reqwest::Method::GET) {
         return Err("authenticated API path is invalid".to_string());
     }
-    if method != reqwest::Method::POST && body.is_some() {
+    let sends_body = method == reqwest::Method::POST || method == reqwest::Method::PATCH;
+    if !sends_body && body.is_some() {
         return Err("authenticated API body is invalid".to_string());
     }
     let mut request = native_http_client()?
@@ -682,7 +685,7 @@ async fn auth_request(
         )
         .bearer_auth(token)
         .header(reqwest::header::ACCEPT, "application/json");
-    if method == reqwest::Method::POST {
+    if sends_body {
         request = request.json(&body.unwrap_or_else(|| serde_json::json!({})));
     }
     let response = request
@@ -1153,6 +1156,10 @@ mod tests {
             assert!(!authenticated_api_path(path), "{path}");
         }
         assert!(authenticated_api_path("/v1/conversations?q=a%20b"));
+        assert!(authenticated_api_path(
+            "/v1/roadmaps/0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b/items?expected_revision=3"
+        ));
+        assert!(!authenticated_api_path("/v1/roadmapsx"));
     }
 
     #[test]

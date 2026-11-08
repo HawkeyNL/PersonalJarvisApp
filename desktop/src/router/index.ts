@@ -13,6 +13,8 @@ import Tasks from "../views/Tasks.vue";
 import Integrations from "../views/Integrations.vue";
 import Agents from "../views/Agents.vue";
 import Memory from "../views/Memory.vue";
+import Roadmaps from "../views/Roadmaps.vue";
+import Roadmap from "../views/Roadmap.vue";
 import ComingSoon from "../views/ComingSoon.vue";
 import { buildRoutes } from "../navigation";
 import { currentAuthStatus } from "../auth";
@@ -24,7 +26,7 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: buildRoutes({
     home: Home, agents: Agents, integrations: Integrations, health: Health,
-    memory: Memory, trading: Trading, desk: TradingDesk, stocks: TradingStocks, stock: TradingStock, positions: TradingPositions, memecoin: TradingMemecoin, tasks: Tasks, context: Context, settings: Settings, soon: ComingSoon,
+    memory: Memory, roadmaps: Roadmaps, roadmap: Roadmap, trading: Trading, desk: TradingDesk, stocks: TradingStocks, stock: TradingStock, positions: TradingPositions, memecoin: TradingMemecoin, tasks: Tasks, context: Context, settings: Settings, soon: ComingSoon,
   }),
 });
 
