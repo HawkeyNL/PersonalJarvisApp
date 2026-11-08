@@ -46,6 +46,30 @@ class RealtimeStateTest {
         assertThrows(IllegalArgumentException::class.java) { cursor.accept(event(1, "connection.ready").copy(event_id = "not-an-id")) }
         assertThrows(IllegalArgumentException::class.java) { cursor.accept(event(0, "connection.ready")) }
     }
+    @Test fun unknownEventTypeIsSkippedWithoutBreakingTheStream() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        fun frame(n: Long, type: String, payload: String) =
+            """{"protocol":1,"epoch":"$epoch","sequence":$n,"event_id":"${UUID(0, n)}","at":"2026-11-08T12:00:00Z","type":"$type","payload":$payload}"""
+        val cursor = RealtimeCursor()
+        assertTrue(cursor.accept(decodeRealtimeEvent(json, frame(1, "connection.ready", "{}"))))
+        // Payload fields may clash with known names (id, run); they are dropped.
+        val unknown = decodeRealtimeEvent(json, frame(2, "trading.meme.decision", """{"id":5,"run":"x"}"""))
+        assertEquals(RealtimePayload(), unknown.payload)
+        assertTrue(cursor.accept(unknown))
+        assertFalse(cursor.accept(event(2)))
+        val delta = decodeRealtimeEvent(json, frame(3, "assistant.delta", """{"run":{"run_id":"r","request_id":"q","conversation_id":"c"},"text":"Hi"}"""))
+        assertEquals("Hi", delta.payload.text)
+        assertTrue(cursor.accept(delta))
+    }
+    @Test fun malformedFramesStillFail() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        for (text in listOf(
+            "{",
+            """{"protocol":1,"sequence":2,"event_id":"${UUID(0, 2)}","type":"roadmap.changed","payload":{}}""",
+            """{"protocol":1,"epoch":"$epoch","sequence":2,"event_id":"${UUID(0, 2)}","type":7,"payload":{}}""",
+            """{"protocol":1,"epoch":"$epoch","sequence":2,"event_id":"${UUID(0, 2)}","type":"assistant.delta","payload":{"text":{}}}""",
+        )) assertThrows(IllegalArgumentException::class.java) { decodeRealtimeEvent(json, text) }
+    }
     private data class Row(val id: String?, val text: String)
     @Test fun canonicalResultReplacesBothRestAndProvisionalCopiesWithoutReordering() {
         val before = listOf(Row("previous", "older"), Row("canonical", "REST copy"), Row("run:1", "partial"), Row("later", "later"))
