@@ -629,13 +629,15 @@ fn meme_strategy_id(id: &str) -> Result<&str, String> {
 }
 
 /// The signed bytes and Touch ID prompt for enabling `strategy_id` at the
-/// `version` the owner reviewed, from Core's challenge. A challenge for
-/// another strategy or version, or whose parameters do not hash to its
-/// `config_sha256`, is refused before any prompt.
+/// `version` and parameter hash `config_sha256` the owner reviewed, from
+/// Core's challenge. A challenge for another strategy, version or parameter
+/// hash, or whose parameters do not hash to its `config_sha256`, is refused
+/// before any prompt.
 fn meme_enable_approval(
     challenge: &MemeEnableChallenge,
     strategy_id: &str,
     version: u32,
+    config_sha256: &str,
     device: uuid::Uuid,
     now: i64,
 ) -> Result<Approval, String> {
@@ -658,6 +660,12 @@ fn meme_enable_approval(
     if <[u8; 32]>::from(Sha256::digest(challenge.config_json.as_bytes())) != sha {
         return Err("invalid enable challenge".into());
     }
+    if hex32(config_sha256) != Some(sha) {
+        return Err(
+            "The strategy's parameters changed since you opened it. Review them, then enable again."
+                .into(),
+        );
+    }
     let message = jarvis_client_core::meme_strategy_enable_message(
         strategy_id,
         version,
@@ -678,7 +686,8 @@ fn meme_enable_approval(
 }
 
 /// Enable a memecoin paper strategy again: fetch Core's challenge natively,
-/// check it is for the strategy and version the owner reviewed, sign
+/// check it is for the strategy, version and parameter hash the owner
+/// reviewed, sign
 /// `meme_strategy_enable_message` after Touch ID and post the signature.
 /// Only macOS signs; the challenge is not even requested elsewhere.
 #[tauri::command]
@@ -686,6 +695,7 @@ pub(super) async fn meme_enable_strategy(
     app: AppHandle,
     strategy_id: String,
     version: u32,
+    config_sha256: String,
 ) -> Result<(), String> {
     if !cfg!(target_os = "macos") {
         return Err("Enable from your Mac or phone".into());
@@ -701,7 +711,7 @@ pub(super) async fn meme_enable_strategy(
     )
     .await?;
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let approval = meme_enable_approval(&challenge, id, version, device, now)?;
+    let approval = meme_enable_approval(&challenge, id, version, &config_sha256, device, now)?;
     sign_and_post(session, approval, base).await
 }
 
@@ -799,6 +809,9 @@ mod tests {
         }
     }
 
+    /// SHA-256 of `{}`, the parameters in `meme_challenge`.
+    const REVIEWED: &str = "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+
     fn meme_challenge() -> MemeEnableChallenge {
         MemeEnableChallenge {
             strategy_id: "b-base".into(),
@@ -812,8 +825,15 @@ mod tests {
 
     #[test]
     fn meme_enable_signs_the_client_core_bytes_for_the_reviewed_version() {
-        let approval =
-            meme_enable_approval(&meme_challenge(), "b-base", 1_000_002, id(DEVICE), 100).unwrap();
+        let approval = meme_enable_approval(
+            &meme_challenge(),
+            "b-base",
+            1_000_002,
+            REVIEWED,
+            id(DEVICE),
+            100,
+        )
+        .unwrap();
         assert_eq!(
             hex::encode(&approval.message),
             concat!(
@@ -837,7 +857,7 @@ mod tests {
     fn meme_enable_refuses_a_challenge_it_did_not_ask_for() {
         let device = id(DEVICE);
         let refused = |challenge: MemeEnableChallenge, strategy: &str, version: u32| {
-            meme_enable_approval(&challenge, strategy, version, device, 0).unwrap_err()
+            meme_enable_approval(&challenge, strategy, version, REVIEWED, device, 0).unwrap_err()
         };
         let other = MemeEnableChallenge {
             strategy_id: "c-trend".into(),
@@ -848,6 +868,15 @@ mod tests {
             "invalid enable challenge"
         );
         assert!(refused(meme_challenge(), "b-base", 1_000_001).contains("new version"));
+        // Parameters other than the ones the owner saw are not signed.
+        for seen in [&"0".repeat(64), "", "44136fa3"] {
+            assert!(
+                meme_enable_approval(&meme_challenge(), "b-base", 1_000_002, seen, device, 0)
+                    .unwrap_err()
+                    .contains("parameters changed"),
+                "{seen}"
+            );
+        }
         let tampered = MemeEnableChallenge {
             config_json: "{\"take_profit_bps\":1}".into(),
             ..meme_challenge()

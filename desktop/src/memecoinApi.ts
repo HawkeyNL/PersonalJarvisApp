@@ -1,11 +1,13 @@
 // Memecoin paper trader API (contract, guards and states in memecoin.ts) and
 // the loader its page uses. Calls go through the native auth_request command
 // like every other owner endpoint; Vue never sees the session bearer.
-import { ref, watch, type Ref } from "vue";
+import { onUnmounted, ref, watch, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getJsonAuth, postJsonAuth } from "./api";
 import { currentAuthStatus } from "./auth";
 import { LIST_LIMIT, memeFailure, type MemeFailure } from "./memecoin";
+import { memeHint, type EnableReview, type MemeHint } from "./memeStrategies";
 import { devDataSet, type FixtureSet } from "./tradingApi";
 
 async function signedIn(): Promise<void> {
@@ -43,17 +45,34 @@ export const memeApi = {
     return postJsonAuth<unknown>(`/v1/trading/meme/strategies/${id}/disable`, {});
   },
   /** macOS only: native code fetches the challenge, checks it is for this
-   *  strategy and version, asks for Touch ID, signs and posts. The webview
-   *  never sees the challenge or the signature. Rejects with a message. */
-  enable: async (id: string, version: number) => {
+   *  strategy, version and parameter hash, asks for Touch ID, signs and
+   *  posts. The webview never sees the challenge or the signature. Rejects
+   *  with a message. */
+  enable: async ({ id, version, config_sha256 }: EnableReview) => {
     if (import.meta.env.DEV && devDataSet.value !== "live") {
       if (devDataSet.value === "offline") throw "Home Node is unreachable";
       return;
     }
     await signedIn();
-    await invoke("meme_enable_strategy", { strategyId: id, version });
+    await invoke("meme_enable_strategy", { strategyId: id, version, configSha256: config_sha256 });
   },
 };
+
+/** Call `on` for each memecoin realtime hint while the calling component is
+ *  mounted. The native socket delivers the events; reloads stay REST. */
+export function onMemeHint(on: (hint: MemeHint) => void): void {
+  let stop: (() => void) | undefined;
+  let gone = false;
+  // Promise.resolve first: outside Tauri, listen throws instead of rejecting.
+  Promise.resolve().then(() => listen<unknown>("jarvis-realtime", (event) => {
+    const hint = memeHint(event.payload);
+    if (hint) on(hint);
+  })).then((unlisten) => (gone ? unlisten() : (stop = unlisten)), () => {});
+  onUnmounted(() => {
+    gone = true;
+    stop?.();
+  });
+}
 
 export type MemeRead<T> = { kind: "loading" } | { kind: "failed"; failure: MemeFailure } | { kind: "ok"; data: T };
 

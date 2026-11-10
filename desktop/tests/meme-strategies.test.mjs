@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
-  STRATEGY_LIMITS, bpsPct, decisionView, isStrategyId, readDecisions, readStrategies, readStrategy, sendDisable, strategyState,
-  versionOwner,
+  STRATEGY_LIMITS, bpsPct, decisionView, enableReview, isStrategyId, memeHint, readDecisions, readStrategies, readStrategy,
+  sendDisable, strategyState, versionOwner,
 } from "../src/memeStrategies.ts";
 import { agentStatus, readOverview } from "../src/memecoin.ts";
 import { decisionsFixture, overviewFixture, strategiesFixture, strategyFixture } from "../src/memecoinFixtures.ts";
@@ -177,4 +178,31 @@ test("overview agent guard fails closed; an older Core without it reads as off",
   const older = clone(good);
   delete older.agent;
   assert.equal(readOverview(older).agent, null);
+});
+
+test("realtime hints read only the type and ids", () => {
+  const changed = (payload) => memeHint({ type: "trading.meme.strategy_changed", payload });
+  assert.deepEqual(changed({ strategy_id: ID, version: 1000004, enabled: true }), { kind: "strategy", id: ID });
+  // `enabled` is never read: the reload says what holds.
+  assert.deepEqual(changed({ strategy_id: ID, version: 1000004, enabled: "yes" }), { kind: "strategy", id: ID });
+  for (const bad of [{ strategy_id: "../x", version: 1 }, { strategy_id: ID, version: 0 }, { strategy_id: ID, version: "2" }, { strategy_id: ID }]) {
+    assert.equal(changed(bad), null, JSON.stringify(bad));
+  }
+  assert.deepEqual(memeHint({ type: "trading.meme.decision", payload: { id: "d-1" } }), { kind: "decision" });
+  assert.equal(memeHint({ type: "trading.meme.decision", payload: { id: 7 } }), null);
+  assert.equal(memeHint({ type: "trading.meme.decision", payload: { id: "x".repeat(129) } }), null);
+  for (const other of [{ type: "roadmap.changed", payload: { id: "r", revision: 1 } }, { type: "trading.meme.decision" }, null, "x"]) {
+    assert.equal(memeHint(other), null, JSON.stringify(other));
+  }
+});
+
+test("the enable card shows and signs the active version's parameter hash", async () => {
+  const s = readStrategy(strategyFixture("demo", ID), ID);
+  assert.deepEqual(enableReview(s), { id: ID, version: s.active_version, config_sha256: s.active_config_sha256 });
+  assert.equal(enableReview({ ...s, active_config_sha256: null }), null);
+  const view = await readFile(new URL("../src/views/TradingMemeStrategy.vue", import.meta.url), "utf8");
+  assert.match(view, /\{\{ review\.config_sha256 \}\}/);
+  assert.match(view, /memeApi\.enable\(review\.value\)/);
+  const api = await readFile(new URL("../src/memecoinApi.ts", import.meta.url), "utf8");
+  assert.match(api, /invoke\("meme_enable_strategy", \{ strategyId: id, version, configSha256: config_sha256 \}\)/);
 });

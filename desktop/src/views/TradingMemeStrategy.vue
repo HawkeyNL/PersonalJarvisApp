@@ -8,10 +8,10 @@ import "../components/trading/trading.css";
 import { asOfText, formatDecimal, signTone } from "../trading";
 import { failureText, progressPct, usd } from "../memecoin";
 import {
-  ENABLE_ELSEWHERE, FAMILY_LABEL, NO_EDGE_TEXT, bpsPct, isStrategyId, readStrategy, sendDisable, strategyState,
-  type DisableOutcome,
+  ENABLE_ELSEWHERE, FAMILY_LABEL, NO_EDGE_TEXT, bpsPct, enableReview, isStrategyId, readStrategy, sendDisable, strategyState,
+  type DisableOutcome, type EnableReview,
 } from "../memeStrategies";
-import { memeApi, useMemeRead } from "../memecoinApi";
+import { memeApi, onMemeHint, useMemeRead } from "../memecoinApi";
 import { initPlatformCapabilities, platformCapabilities } from "../platform";
 import { MEME_DATA_SETS, devDataSet } from "../tradingApi";
 
@@ -26,6 +26,9 @@ const { state, reload } = useMemeRead({
   read: (x) => (id.value ? readStrategy(x, id.value) : null),
 });
 watch(id, () => void reload());
+onMemeHint((hint) => {
+  if (hint.kind === "strategy" && hint.id === id.value) void reload();
+});
 
 void initPlatformCapabilities();
 const signer = computed(() => platformCapabilities.value.supportsBiometricSigning);
@@ -64,11 +67,15 @@ async function confirmDisable(): Promise<void> {
 
 // ---- enable: native challenge, Touch ID, signature --------------------------
 const enableStep = ref<"idle" | "confirm" | "signing">("idle");
+/** Fixed when the confirm card opens: what the card shows is what is signed. */
+const review = ref<EnableReview | null>(null);
 const enableNote = ref<{ ok: boolean; text: string } | null>(null);
 const keepDisabledBtn = ref<HTMLButtonElement | null>(null);
 const enableNoteEl = ref<HTMLElement | null>(null);
 
 async function askEnable(): Promise<void> {
+  if (!s.value) return;
+  review.value = enableReview(s.value);
   enableNote.value = null;
   disableStep.value = "idle";
   enableStep.value = "confirm";
@@ -77,11 +84,11 @@ async function askEnable(): Promise<void> {
 }
 
 async function confirmEnable(): Promise<void> {
-  if (enableStep.value !== "confirm" || !s.value) return;
-  const { id: target, active_version: version } = s.value;
+  if (enableStep.value !== "confirm" || !review.value) return;
+  const { id: target, version } = review.value;
   enableStep.value = "signing";
   try {
-    await memeApi.enable(target, version);
+    await memeApi.enable(review.value);
     enableNote.value = { ok: true, text: `Enabled ${target} at version ${version}.` };
   } catch (error) {
     // Native errors are fixed strings without secrets.
@@ -93,6 +100,17 @@ async function confirmEnable(): Promise<void> {
   enableNoteEl.value?.focus();
   await reload();
 }
+
+// Enabled elsewhere, or a new version or parameter set, while the card is
+// open: close it, so the owner reviews again.
+watch(s, (current) => {
+  const r = review.value;
+  if (enableStep.value !== "confirm" || !r) return;
+  const next = current && !current.enabled ? enableReview(current) : null;
+  if (next?.version === r.version && next.config_sha256 === r.config_sha256) return;
+  enableStep.value = "idle";
+  enableNote.value = { ok: false, text: "The strategy changed while you were reviewing it. Nothing was signed; review it, then enable again." };
+});
 
 watch([devDataSet, id], () => {
   disableStep.value = "idle";
@@ -147,7 +165,13 @@ const author = (a: "seed" | "claude") => (a === "seed" ? "Seed" : "Claude");
     </p>
 
     <section v-if="enableStep !== 'idle' && s" id="sd-enable" class="card td-col sd-confirm" role="group" aria-labelledby="sd-enable-title" @keydown.esc="enableStep === 'confirm' && (enableStep = 'idle')">
-      <h2 id="sd-enable-title">Enable {{ s.id }} at version {{ s.active_version }}?</h2>
+      <h2 id="sd-enable-title">Enable {{ s.id }} at version {{ review?.version ?? s.active_version }}?</h2>
+      <div v-if="review" class="t-sm">
+        <span class="t-2">Parameters of version {{ review.version }} (SHA-256)</span>
+        <code class="mono sd-hash">{{ review.config_sha256 }}</code>
+        <span class="t-xs t-2">You sign this hash. The Touch ID prompt shows its first 8 characters: {{ review.config_sha256.slice(0, 8) }}.</span>
+      </div>
+      <p v-else class="t-sm" role="alert">Core sent no parameter hash for this version, so nothing can be signed. Reload, then try again.</p>
       <ul class="sd-list t-sm t-2">
         <li>It may open paper positions again, within the profile's limits.</li>
         <li>Your signature enables the strategy, not only this version: while it stays enabled, later versions Claude writes become active without another signature, each checked by Core against the profile's rules. Disable it to stop that.</li>
@@ -155,7 +179,7 @@ const author = (a: "seed" | "claude") => (a === "seed" ? "Seed" : "Claude");
       </ul>
       <div class="sd-actions">
         <button ref="keepDisabledBtn" type="button" class="btn btn-secondary" :disabled="enableStep === 'signing'" @click="enableStep = 'idle'">Keep disabled</button>
-        <button type="button" class="btn btn-primary" :aria-busy="enableStep === 'signing'" @click="confirmEnable">
+        <button type="button" class="btn btn-primary" :aria-busy="enableStep === 'signing'" :disabled="!review" @click="confirmEnable">
           <span v-if="enableStep === 'signing'" class="spinner" aria-hidden="true"></span>
           {{ enableStep === "signing" ? "Waiting for Touch ID…" : "Enable with Touch ID" }}
         </button>
@@ -300,6 +324,7 @@ const author = (a: "seed" | "claude") => (a === "seed" ? "Seed" : "Claude");
 .sd-badges { display: flex; gap: 6px; }
 .sd-diff { min-width: 480px; }
 .sd-val { max-width: 360px; overflow-wrap: anywhere; }
+.sd-hash { display: block; margin: 2px 0; overflow-wrap: anywhere; }
 .sd-rationale { margin: 0; display: flex; flex-direction: column; gap: 4px; }
 .sd-rationale figcaption { color: var(--text-secondary); }
 .sd-rationale blockquote { margin: 0; padding: 8px 12px; border-left: 2px solid var(--border-strong); overflow-wrap: anywhere; }

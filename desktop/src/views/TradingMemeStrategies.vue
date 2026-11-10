@@ -8,7 +8,7 @@ import { agentStatus, failureText, readOverview, shortMint, usd } from "../memec
 import {
   FAMILY_LABEL, NO_EDGE_TEXT, bpsPct, decisionView, readDecisions, readStrategies, strategyState, versionOwner,
 } from "../memeStrategies";
-import { memeApi, useMemeRead } from "../memecoinApi";
+import { memeApi, onMemeHint, useMemeRead } from "../memecoinApi";
 import { MEME_DATA_SETS } from "../tradingApi";
 
 // The paper strategies side by side and Claude's decision log. Read-only:
@@ -29,6 +29,15 @@ onUnmounted(() => window.clearInterval(timer));
 
 const agent = computed(() => (overview.value.kind === "ok" ? agentStatus(overview.value.data, now.value) : null));
 const listed = computed(() => (strategies.value.kind === "ok" ? strategies.value.data : []));
+
+// A decision also spends Claude's call budget, shown from the overview.
+onMemeHint((hint) => {
+  if (hint.kind === "strategy") void reloadStrategies();
+  else {
+    void reloadDecisions();
+    void reloadOverview();
+  }
+});
 
 function refresh(): void {
   void reloadStrategies();

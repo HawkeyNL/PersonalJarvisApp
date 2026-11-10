@@ -270,6 +270,33 @@ export function versionOwner(strategies: Strategy[], version: number | null): st
   return version === null ? null : strategies.find((s) => s.active_version === version)?.id ?? null;
 }
 
+// ---- realtime -----------------------------------------------------------------
+
+/** What a `trading.meme.*` realtime event asks a page to reload. Only the
+ *  type and the ids are read; the reload is the authority, never the event. */
+export type MemeHint = { kind: "strategy"; id: string } | { kind: "decision" };
+
+export function memeHint(event: unknown): MemeHint | null {
+  if (!isObj(event) || !isObj(event.payload)) return null;
+  const p = event.payload;
+  if (event.type === "trading.meme.strategy_changed") {
+    return isStrategyId(p.strategy_id) && isVersion(p.version) ? { kind: "strategy", id: p.strategy_id } : null;
+  }
+  if (event.type === "trading.meme.decision") return isText(p.id, 128) ? { kind: "decision" } : null;
+  return null;
+}
+
+// ---- enable -------------------------------------------------------------------
+
+/** What the owner reviews and Touch ID signs: the strategy, its active
+ *  version and the SHA-256 of that version's parameters. Native code refuses
+ *  a challenge for anything else. Null when Core sent no hash. */
+export type EnableReview = { id: string; version: number; config_sha256: string };
+
+export function enableReview(s: StrategyDetail): EnableReview | null {
+  return s.active_config_sha256 === null ? null : { id: s.id, version: s.active_version, config_sha256: s.active_config_sha256 };
+}
+
 // ---- disable ------------------------------------------------------------------
 
 export type DisableOutcome = { ok: true; at: string } | { ok: false; at: string; message: string; status?: number };
