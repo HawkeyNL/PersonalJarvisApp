@@ -9,7 +9,7 @@ import { currentAuthStatus } from "../auth";
 import { asOfText } from "../trading";
 import {
   AUTHOR_LABEL, LIMITS, STATUSES, STATUS_LABEL, STATUS_TONE, describeChange, describeOp, failureOf, failureText,
-  groupByPhase, isDone, linkLabel, parsePhases, readHistory, readProposals, readSnapshot, tally, validText, waitingOn,
+  groupByPhase, isDone, isNewer, linkLabel, parsePhases, readHistory, readProposals, readSnapshot, tally, validText, waitingOn,
   writeFailureText, type Failure, type HistoryEntry, type ItemPatch, type Proposal, type Snapshot, type Status,
 } from "../roadmaps";
 import { roadmapApi, useRoadmapRefetch } from "../roadmapsApi";
@@ -51,7 +51,10 @@ async function loadHistory(): Promise<void> {
   }
 }
 watch(id, () => { snap.value = null; failure.value = null; history.value = null; void load(); }, { immediate: true });
-useRoadmapRefetch(() => { if (!busy.value) void load(); });
+useRoadmapRefetch(
+  () => { if (!busy.value) void load(); },
+  (change) => { if (change.id === id.value && isNewer(change, snap.value?.roadmap.revision) && !busy.value) void load(); },
+);
 
 const thisDevice = ref<string | null>(null);
 currentAuthStatus().then((s) => (thisDevice.value = s.device_id), () => {});

@@ -4,7 +4,7 @@ import { useRouter } from "vue-router";
 import NavIcon from "../components/NavIcon.vue";
 import PageShell from "../components/PageShell.vue";
 import {
-  DEFAULT_PHASES, LIMITS, STATUS_LABEL, STATUS_TONE, failureOf, failureText, parsePhases, readList, readProposals,
+  DEFAULT_PHASES, LIMITS, STATUS_LABEL, STATUS_TONE, failureOf, failureText, isNewer, parsePhases, readList, readProposals,
   readSnapshot, tally, validText, writeFailureText, type Failure, type Roadmap, type Tally,
 } from "../roadmaps";
 import { roadmapApi, useRoadmapRefetch } from "../roadmapsApi";
@@ -35,7 +35,11 @@ async function load(): Promise<void> {
   }
 }
 void load();
-useRoadmapRefetch(() => void load());
+// A new roadmap, or a newer revision of a listed one, reloads the list.
+useRoadmapRefetch(() => void load(), (change) => {
+  const card = state.value.kind === "ok" ? state.value.cards.find((c) => c.roadmap.id === change.id) : undefined;
+  if (isNewer(change, card?.roadmap.revision)) void load();
+});
 
 const full = computed(() => state.value.kind === "ok" && state.value.cards.length >= LIMITS.roadmaps);
 

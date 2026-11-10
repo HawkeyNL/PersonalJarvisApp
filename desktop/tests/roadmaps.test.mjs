@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  CHANGED_ELSEWHERE, addLink, dependencyOptions, describeChange, describeOp, draftIssue, groupByPhase, itemPatch, linkHref,
-  linkInput, linkLabel, parseLink, parsePhases, readHistory, readList, readProposals, readSnapshot, tally, toDraft,
-  validHttpsUrl, validText, waitingOn, writeFailureText,
+  CHANGED_ELSEWHERE, addLink, dependencyOptions, describeChange, describeOp, draftIssue, groupByPhase, isNewer, itemPatch,
+  linkHref, linkInput, linkLabel, parseLink, parsePhases, readHistory, readList, readProposals, readSnapshot, roadmapChange,
+  tally, toDraft, validHttpsUrl, validText, waitingOn, writeFailureText,
 } from "../src/roadmaps.ts";
 
 // Neutral test data only: no real roadmap content belongs in this repository.
@@ -177,4 +177,19 @@ test("history lines and write failures", () => {
   assert.match(writeFailureText(conflict, false), /archived or a limit/);
   assert.match(writeFailureText({ name: "ApiError", status: 400 }, false), /invalid/);
   assert.match(writeFailureText({ name: "NetworkError" }, false), /unknown whether/);
+});
+
+test("roadmap.changed reads only the id and revision, and refetches only newer revisions", () => {
+  const event = (payload, type = "roadmap.changed") => ({ protocol: 1, sequence: 9, type, payload });
+  const change = roadmapChange(event({ id: "r1", revision: 5, title: "ignored" }));
+  assert.deepEqual(change, { id: "r1", revision: 5 });
+  for (const bad of [
+    event({ id: "r1", revision: -1 }), event({ id: "r1", revision: 1.5 }), event({ id: "r1", revision: "5" }),
+    event({ id: "r1", revision: 2 ** 53 }), event({ id: "x".repeat(65), revision: 1 }), event({ revision: 1 }),
+    event({ id: "r1", revision: 5 }, "connection.ready"), { type: "roadmap.changed" }, null,
+  ]) assert.equal(roadmapChange(bad), null, JSON.stringify(bad));
+  assert.equal(isNewer(change, 4), true);
+  assert.equal(isNewer(change, 5), false, "own write already on screen");
+  assert.equal(isNewer(change, 6), false, "late event for an older revision");
+  assert.equal(isNewer(change, undefined), true, "nothing on screen yet");
 });

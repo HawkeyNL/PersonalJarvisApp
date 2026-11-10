@@ -4,7 +4,7 @@
 import { onMounted, onUnmounted } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { deleteAuth, getJsonAuth, patchJsonAuth, postJsonAuth } from "./api";
-import type { ItemPatch, NewItem } from "./roadmaps";
+import { roadmapChange, type ItemPatch, type NewItem, type RoadmapChange } from "./roadmaps";
 
 const base = (id: string) => `/v1/roadmaps/${encodeURIComponent(id)}`;
 const rev = (revision: number) => `?expected_revision=${revision}`;
@@ -28,9 +28,10 @@ export const roadmapApi = {
   reject: (id: string, proposalId: string) => postJsonAuth<unknown>(`${base(id)}/proposals/${encodeURIComponent(proposalId)}/reject`, {}),
 };
 
-/** Reload when the window regains focus or the realtime socket (re)connects.
- *  Core sends no roadmap event yet, so this is how changes elsewhere arrive. */
-export function useRoadmapRefetch(reload: () => void): void {
+/** Reload when the window regains focus or the realtime socket (re)connects,
+ *  and pass each `roadmap.changed` hint to `changed`. Proposals send no
+ *  event, so focus still matters. */
+export function useRoadmapRefetch(reload: () => void, changed: (change: RoadmapChange) => void): void {
   let unlisten: (() => void) | undefined;
   let gone = false;
   const onFocus = () => reload();
@@ -38,7 +39,9 @@ export function useRoadmapRefetch(reload: () => void): void {
     window.addEventListener("focus", onFocus);
     // Promise.resolve first: outside Tauri, listen throws instead of rejecting.
     Promise.resolve().then(() => listen<{ type?: unknown }>("jarvis-realtime", (event) => {
-      if (event.payload?.type === "connection.ready") reload();
+      if (event.payload?.type === "connection.ready") return reload();
+      const change = roadmapChange(event.payload);
+      if (change) changed(change);
     })).then((stop) => (gone ? stop() : (unlisten = stop)), () => { /* browser preview: focus only */ });
   });
   onUnmounted(() => {

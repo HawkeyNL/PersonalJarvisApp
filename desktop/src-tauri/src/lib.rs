@@ -1162,6 +1162,7 @@ mod tests {
             assert!(!authenticated_api_path(path), "{path}");
         }
         assert!(authenticated_api_path("/v1/conversations?q=a%20b"));
+        assert!(authenticated_api_path("/v1/roadmaps"));
         assert!(authenticated_api_path(
             "/v1/roadmaps/0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b/items?expected_revision=3"
         ));

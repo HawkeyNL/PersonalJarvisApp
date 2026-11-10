@@ -100,7 +100,7 @@ mod tests {
             serde_json::json!({ "device_id": uuid::Uuid::from_u128(1), "reconcile": true }),
         );
         assert!(cursor.accept(&decode(&ready).unwrap().unwrap()));
-        for kind in ["trading.meme.decision", "roadmap.changed"] {
+        for kind in ["trading.meme.future_event", "roadmap.future_event"] {
             assert_eq!(
                 decode(&frame(2, kind, serde_json::json!({ "id": 5 }))),
                 Ok(None)
@@ -125,9 +125,27 @@ mod tests {
     }
 
     #[test]
+    fn memecoin_and_roadmap_hints_decode() {
+        for (kind, payload) in [
+            (
+                "trading.meme.strategy_changed",
+                serde_json::json!({ "strategy_id": "b-base", "version": 7, "enabled": false }),
+            ),
+            ("trading.meme.decision", serde_json::json!({ "id": "d1" })),
+            (
+                "roadmap.changed",
+                serde_json::json!({ "id": "r1", "revision": 3 }),
+            ),
+        ] {
+            let event = decode(&frame(2, kind, payload)).unwrap().unwrap();
+            assert_eq!(serde_json::to_value(&event).unwrap()["type"], kind);
+        }
+    }
+
+    #[test]
     fn malformed_frames_still_disconnect() {
         let unknown = || -> serde_json::Value {
-            serde_json::from_str(&frame(2, "roadmap.changed", serde_json::json!({}))).unwrap()
+            serde_json::from_str(&frame(2, "roadmap.future_event", serde_json::json!({}))).unwrap()
         };
         let mut no_identity = unknown();
         no_identity.as_object_mut().unwrap().remove("epoch");
@@ -138,6 +156,12 @@ mod tests {
             no_identity.to_string(),
             numeric_type.to_string(),
             frame(2, "assistant.delta", serde_json::json!({ "text": 5 })),
+            frame(2, "trading.meme.decision", serde_json::json!({ "id": 5 })),
+            frame(
+                2,
+                "roadmap.changed",
+                serde_json::json!({ "id": "r", "revision": -1 }),
+            ),
         ] {
             assert_eq!(decode(&text), Err(()), "{text}");
         }

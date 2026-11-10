@@ -280,6 +280,22 @@ export function readProposals(x: unknown): Proposal[] | null {
   return out;
 }
 
+// ---- realtime ----------------------------------------------------------
+
+export type RoadmapChange = { id: string; revision: number };
+
+/** A `roadmap.changed` hint. Only its id and revision are read; the refetch
+ *  is the authority. Null for any other or malformed event. */
+export function roadmapChange(event: unknown): RoadmapChange | null {
+  if (!isObj(event) || event.type !== "roadmap.changed" || !isObj(event.payload)) return null;
+  const { id, revision } = event.payload;
+  return str(id, 64) && int(revision) && Number.isSafeInteger(revision) ? { id, revision } : null;
+}
+
+/** Refetch only for a revision newer than the one on screen; with none on
+ *  screen, always. Own writes and repeated events then cost nothing. */
+export const isNewer = (change: RoadmapChange, local: number | undefined) => local === undefined || change.revision > local;
+
 // ---- display -----------------------------------------------------------
 
 export type Tally = { status: Status; count: number }[];
