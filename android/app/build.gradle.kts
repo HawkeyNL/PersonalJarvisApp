@@ -113,8 +113,8 @@ tasks.matching { it.name == "assembleRelease" || it.name == "bundleRelease" }.co
 
 dependencies {
     implementation(project(":realtime-core"))
-    implementation("io.ktor:ktor-client-okhttp:3.3.3")
-    implementation("io.ktor:ktor-client-websockets:3.3.3")
+    implementation("io.ktor:ktor-client-okhttp:3.6.1")
+    implementation("io.ktor:ktor-client-websockets:3.6.1")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
