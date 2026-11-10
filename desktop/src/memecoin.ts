@@ -7,6 +7,7 @@
 //   GET  /v1/trading/meme/candidates?limit= -> { candidates: Candidate[] }
 //   GET  /v1/trading/meme/trades?limit=     -> { trades: ClosedTrade[] }
 //   POST /v1/trading/meme/pause             -> { paused: true }
+// Strategies and Claude's decisions are in memeStrategies.ts.
 // It is a simulation: no wallet, no signer, no execution path. The pause only
 // stops new paper entries; exits keep running. Resuming is configuration-only
 // on the Home Node, so this app has no resume action.
@@ -62,6 +63,21 @@ export type MemeReport = {
   goal: Goal;
 };
 
+/** Claude's call budget; Core sends it only when the paper profile has an
+ *  `agent` section, so null means Claude does not decide. */
+export type AgentBudget = {
+  calling: boolean;
+  calls_last_hour: number;
+  calls_last_day: number;
+  max_calls_per_hour: number;
+  max_calls_per_day: number;
+  last_call_at: string | null;
+  /** Three invalid replies in a row pause decisions. */
+  paused_until: string | null;
+  /** A plan limit backs every call off. */
+  backoff_until: string | null;
+};
+
 export type MemeOverview = {
   enabled: boolean;
   running: boolean;
@@ -69,6 +85,7 @@ export type MemeOverview = {
   paused_at: string | null;
   /** A fixed reason from Core, never error detail. */
   last_error: string | null;
+  agent: AgentBudget | null;
   report: MemeReport | null;
 };
 
@@ -103,16 +120,16 @@ export const MEME_LIMITS = { positions: 100, list: 100, text: 200, mint: 64 } as
 // Fail closed: anything that is not exactly Core's shape, or claims a mode
 // other than "paper", is an error state, never a partly drawn screen.
 
-type Obj = Record<string, unknown>;
-const isObj = (x: unknown): x is Obj => typeof x === "object" && x !== null && !Array.isArray(x);
-const isBool = (x: unknown): x is boolean => typeof x === "boolean";
-const isText = (x: unknown, max: number = MEME_LIMITS.text): x is string => typeof x === "string" && x.length <= max;
-const isTime = (x: unknown) => isText(x, 64) && !Number.isNaN(Date.parse(x));
-const isCount = (x: unknown) => Number.isSafeInteger(x) && (x as number) >= 0;
-const isDec = (x: unknown) => isText(x, 64) && decimalSign(x) !== null;
-const isMint = (x: unknown) => isText(x, MEME_LIMITS.mint) && /^[1-9A-HJ-NP-Za-km-z]+$/.test(x);
-const nullable = (x: unknown, check: (x: unknown) => boolean) => x === null || x === undefined || check(x);
-const isList = (x: unknown, max: number, each: (item: unknown) => boolean): x is unknown[] =>
+export type Obj = Record<string, unknown>;
+export const isObj = (x: unknown): x is Obj => typeof x === "object" && x !== null && !Array.isArray(x);
+export const isBool = (x: unknown): x is boolean => typeof x === "boolean";
+export const isText = (x: unknown, max: number = MEME_LIMITS.text): x is string => typeof x === "string" && x.length <= max;
+export const isTime = (x: unknown) => isText(x, 64) && !Number.isNaN(Date.parse(x));
+export const isCount = (x: unknown) => Number.isSafeInteger(x) && (x as number) >= 0;
+export const isDec = (x: unknown) => isText(x, 64) && decimalSign(x) !== null;
+export const isMint = (x: unknown) => isText(x, MEME_LIMITS.mint) && /^[1-9A-HJ-NP-Za-km-z]+$/.test(x);
+export const nullable = (x: unknown, check: (x: unknown) => boolean) => x === null || x === undefined || check(x);
+export const isList = (x: unknown, max: number, each: (item: unknown) => boolean): x is unknown[] =>
   Array.isArray(x) && x.length <= max && x.every(each);
 
 const isPosition = (p: unknown) =>
@@ -132,13 +149,30 @@ const isGoal = (g: unknown) =>
 const isPnl = (p: unknown) =>
   isObj(p) && [p.realised_usd, p.unrealised_usd, p.failed_tx_fees_usd, p.ai_cost_usd, p.net_usd].every(isDec);
 
+const isAgent = (a: unknown) =>
+  isObj(a) && isBool(a.calling)
+  && [a.calls_last_hour, a.calls_last_day, a.max_calls_per_hour, a.max_calls_per_day].every(isCount)
+  && [a.last_call_at, a.paused_until, a.backoff_until].every((t) => nullable(t, isTime));
+
+function readAgent(a: unknown): AgentBudget | null {
+  if (!isObj(a)) return null;
+  const time = (t: unknown) => (t as string | undefined) ?? null;
+  return {
+    calling: a.calling as boolean,
+    calls_last_hour: a.calls_last_hour as number, calls_last_day: a.calls_last_day as number,
+    max_calls_per_hour: a.max_calls_per_hour as number, max_calls_per_day: a.max_calls_per_day as number,
+    last_call_at: time(a.last_call_at), paused_until: time(a.paused_until), backoff_until: time(a.backoff_until),
+  };
+}
+
 export function readOverview(x: unknown): MemeOverview | null {
   if (!isObj(x) || x.mode !== "paper") return null;
   if (!isBool(x.enabled) || !isBool(x.running) || !isBool(x.paused)) return null;
-  if (!nullable(x.paused_at, isTime) || !nullable(x.last_error, isText)) return null;
+  if (!nullable(x.paused_at, isTime) || !nullable(x.last_error, isText) || !nullable(x.agent, isAgent)) return null;
   const status = {
     enabled: x.enabled, running: x.running, paused: x.paused,
     paused_at: (x.paused_at as string | undefined) ?? null, last_error: (x.last_error as string | undefined) ?? null,
+    agent: readAgent(x.agent),
   };
   // Core adds the report fields together, or none of them.
   if (x.as_of === undefined && x.strategy_version === undefined) return { ...status, report: null };
@@ -214,6 +248,37 @@ export function memeStatus(o: MemeOverview): MemeStatus {
   }
   if (!o.report) return { kind: "starting", label: "Starting", tone: "neutral", detail: "The trader is running but has not reported yet. A tick runs every minute." };
   return { kind: "running", label: "Running · paper", tone: "acc", detail: "Simulating on read-only market data. Exits and entries run every minute." };
+}
+
+export type AgentStatusKind = "off" | "stopped" | "paused" | "backoff" | "calling" | "active";
+export type AgentStatus = { kind: AgentStatusKind; label: string; tone: "neutral" | "acc" | "neg"; detail: string; until: string | null };
+
+const later = (t: string | null, now: number) => t !== null && Date.parse(t) > now;
+
+/** Claude's state as the strategy agent, most restrictive first: off, stopped
+ *  by the trader's state, paused after invalid replies, backing off after a
+ *  plan limit, calling, active. Code exits run in every state. */
+export function agentStatus(o: MemeOverview, now: number): AgentStatus {
+  const a = o.agent;
+  if (!a) {
+    return {
+      kind: "off", label: "Off", tone: "neutral", until: null,
+      detail: "Claude does not decide. Each enabled strategy enters on its own signal. The paper profile's agent section on the Home Node turns Claude on.",
+    };
+  }
+  const exits = "Code exits (stop loss, trailing stop, take profit, liquidity drop, time stop) keep running.";
+  if (!o.enabled || !o.running || o.paused) {
+    return { kind: "stopped", label: "Not deciding", tone: "neutral", until: null, detail: `The trader is ${o.paused ? "paused" : "not running"}, so Claude makes no new calls. ${exits}` };
+  }
+  if (later(a.paused_until, now)) {
+    return { kind: "paused", label: "Paused", tone: "neg", until: a.paused_until, detail: `Three invalid replies in a row paused Claude's decisions. ${exits}` };
+  }
+  if (later(a.backoff_until, now)) {
+    return { kind: "backoff", label: "Backing off", tone: "neg", until: a.backoff_until, detail: `A plan limit was hit, so calls wait. ${exits}` };
+  }
+  const budget = `${a.calls_last_hour} of ${a.max_calls_per_hour} calls this hour, ${a.calls_last_day} of ${a.max_calls_per_day} in the last day.`;
+  if (a.calling) return { kind: "calling", label: "Deciding now", tone: "acc", until: null, detail: `A call is running. ${budget}` };
+  return { kind: "active", label: "Active", tone: "acc", until: null, detail: `Claude decides paper entries and early exits, at most every 15 minutes. ${budget}` };
 }
 
 /** How old the report is when that is past the stale limit; else null. */
@@ -335,6 +400,8 @@ export const EXIT_REASONS: Record<string, string> = {
   stop_loss: "Stop loss",
   take_profit: "Take profit",
   time_stop: "Time stop",
+  trailing_stop: "Trailing stop",
+  agent_exit: "Exited by Claude",
 };
 
 /** A known code's label; an unknown one is shown as its code, marked as such. */

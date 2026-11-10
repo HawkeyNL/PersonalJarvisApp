@@ -404,9 +404,17 @@ fn read_only_route(path: &str) -> bool {
     path.split('?').next() == Some("/v1/devices")
 }
 
-/// Approve routes that only native code may call, with a signature it made.
+/// Approve routes that only native code may call, with a signature it made,
+/// and the memecoin strategy enable routes (challenge and signed enable),
+/// matched on non-empty segments so extra slashes do not slip past.
 fn native_only_route(path: &str) -> bool {
     let route = path.split('?').next().unwrap_or(path);
+    let segments: Vec<&str> = route.split('/').filter(|s| !s.is_empty()).collect();
+    if segments.starts_with(&["v1", "trading", "meme", "strategies"])
+        && segments.get(5) == Some(&"enable")
+    {
+        return true;
+    }
     route.ends_with("/approve")
         && [
             "/v1/auth/pairing/requests/",
@@ -964,6 +972,7 @@ pub fn run() {
             approvals::auth_approve_pairing,
             approvals::auth_approve_agent,
             approvals::auth_sign_account_approval,
+            approvals::meme_enable_strategy,
             model_control::set_model_enabled,
             model_control::set_model_routing,
             auth_remember_enrolled_device,
@@ -1245,6 +1254,12 @@ mod tests {
             "/v1/auth/unlock/fixture/approve",
             "/v1/agent/pending/fixture/approve",
             "/v1/agent/pending/fixture/approve?x=1",
+            "/v1/trading/meme/strategies/a-survivor-momentum/enable",
+            "/v1/trading/meme/strategies/a-survivor-momentum/enable/challenge",
+            "/v1/trading/meme/strategies/a-survivor-momentum/enable/",
+            "/v1/trading/meme/strategies/a-survivor-momentum/enable?x=1",
+            "/v1/trading/meme/strategies//a-survivor-momentum//enable/challenge",
+            "/v1/trading//meme/strategies/x/enable",
         ] {
             assert!(native_only_route(path), "{path}");
         }
@@ -1255,6 +1270,11 @@ mod tests {
             "/v1/agent/pending",
             // Account approvals are signed natively and posted by the page.
             "/v1/auth/account/requests/fixture/approve",
+            // Disabling needs only the owner's session; reads stay proxied.
+            "/v1/trading/meme/strategies/a-survivor-momentum/disable",
+            "/v1/trading/meme/strategies/a-survivor-momentum",
+            "/v1/trading/meme/strategies",
+            "/v1/trading/meme/decisions",
         ] {
             assert!(!native_only_route(path), "{path}");
         }

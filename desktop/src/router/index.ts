@@ -6,6 +6,8 @@ import TradingStocks from "../views/TradingStocks.vue";
 import TradingStock from "../views/TradingStock.vue";
 import TradingPositions from "../views/TradingPositions.vue";
 import TradingMemecoin from "../views/TradingMemecoin.vue";
+import TradingMemeStrategies from "../views/TradingMemeStrategies.vue";
+import TradingMemeStrategy from "../views/TradingMemeStrategy.vue";
 import Health from "../views/Health.vue";
 import Settings from "../views/Settings.vue";
 import Context from "../views/Context.vue";
@@ -26,7 +28,8 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: buildRoutes({
     home: Home, agents: Agents, integrations: Integrations, health: Health,
-    memory: Memory, roadmaps: Roadmaps, roadmap: Roadmap, trading: Trading, desk: TradingDesk, stocks: TradingStocks, stock: TradingStock, positions: TradingPositions, memecoin: TradingMemecoin, tasks: Tasks, context: Context, settings: Settings, soon: ComingSoon,
+    memory: Memory, roadmaps: Roadmaps, roadmap: Roadmap, trading: Trading, desk: TradingDesk, stocks: TradingStocks, stock: TradingStock, positions: TradingPositions, memecoin: TradingMemecoin,
+    memestrategies: TradingMemeStrategies, memestrategy: TradingMemeStrategy, tasks: Tasks, context: Context, settings: Settings, soon: ComingSoon,
   }),
 });
 
