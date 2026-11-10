@@ -109,7 +109,7 @@ const isVersion = (x: unknown) => isCount(x) && (x as number) >= 1 && (x as numb
  *  would also hide the Disable button. */
 const isPlain = (x: unknown, max: number) => typeof x === "string" && [...x].length <= max;
 const plain = (x: unknown) =>
-  typeof x === "string" ? x.replace(/[\p{Cc}\u2028\u2029]/gu, " ").replace(/\p{Cf}/gu, "") : null;
+  (typeof x === "string" ? x.replace(/[\p{Cc}\u2028\u2029]/gu, " ").replace(/\p{Cf}/gu, "") : "") || null;
 const isJson = (x: unknown, max: number) => {
   try {
     return (JSON.stringify(x) ?? "").length <= max;

@@ -624,10 +624,10 @@ const MEME_ENABLE_TTL_SECS: i64 = 300;
 /// Core's refusals of an enable challenge, in words; never Core's body.
 fn meme_challenge_error(error: String) -> String {
     let text = match error {
-        e if e == refused(403) => "This device may not approve a strategy enable",
-        e if e == refused(404) => "Core has no such strategy",
-        e if e == refused(409) => "This strategy is already enabled",
-        e if e == refused(429) => "Too many strategy changes. Wait a minute, then try again",
+        e if e == refused(403) => "This device may not approve a strategy enable.",
+        e if e == refused(404) => "Core has no such strategy.",
+        e if e == refused(409) => "This strategy is already enabled.",
+        e if e == refused(429) => "Too many strategy changes. Wait a minute, then try again.",
         e => return e,
     };
     text.into()
@@ -928,7 +928,7 @@ mod tests {
     fn meme_challenge_refusals_read_as_words() {
         assert_eq!(
             meme_challenge_error(refused(409)),
-            "This strategy is already enabled"
+            "This strategy is already enabled."
         );
         assert!(meme_challenge_error(refused(429)).starts_with("Too many"));
         assert_eq!(meme_challenge_error(refused(500)), refused(500));

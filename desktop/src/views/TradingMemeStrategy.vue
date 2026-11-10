@@ -96,7 +96,7 @@ async function confirmEnable(): Promise<void> {
     enableNote.value = { ok: true, text: `Enabled ${target} at version ${version}.` };
   } catch (error) {
     // Native errors are fixed strings without secrets.
-    const text = typeof error === "string" ? error : "The enable was not confirmed.";
+    const text = typeof error === "string" ? error.replace(/[^.]$/, "$&.") : "The enable was not confirmed.";
     enableNote.value = { ok: false, text: `${text} Reload to see the current state.` };
   }
   enableStep.value = "idle";

@@ -215,6 +215,7 @@ test("Claude's text drops control and format characters instead of failing the r
   assert.equal(readStrategy(raw, ID).versions[0].rationale, "line break");
   const d = { ...decisionsFixture("demo").decisions[1], rationale: "zero\u200Bwidth\u2029end" };
   assert.equal(readDecisions({ decisions: [d] })[0].rationale, "zerowidth end");
+  assert.equal(readDecisions({ decisions: [{ ...d, rationale: "\u200B\u202E" }] })[0].rationale, null, "nothing left reads as none");
   // Length still fails closed.
   raw.versions[0].rationale = "x".repeat(STRATEGY_LIMITS.rationale + 1);
   assert.equal(readStrategy(raw, ID), null);
