@@ -376,6 +376,7 @@ fn authenticated_api_path(path: &str) -> bool {
         "/v1/trading",
         "/v1/agent/pending",
         "/v1/voice",
+        "/v1/roadmaps",
     ];
     shared.iter().chain(ACCOUNT_ADMIN_ROUTES).any(|prefix| {
         route == *prefix
@@ -422,6 +423,16 @@ fn native_only_route(path: &str) -> bool {
         ]
         .iter()
         .any(|prefix| route.starts_with(prefix))
+}
+
+/// Whether the webview proxy may send `method` to `path`: never to a
+/// native-only route, only GET to a read-only one, and PATCH only to the
+/// roadmap routes, so a PATCH route Core adds elsewhere needs a review here.
+fn proxy_method_allowed(method: &reqwest::Method, path: &str) -> bool {
+    let route = path.split('?').next().unwrap_or(path);
+    !native_only_route(path)
+        && (method == reqwest::Method::GET || !read_only_route(path))
+        && (method != reqwest::Method::PATCH || route.starts_with("/v1/roadmaps/"))
 }
 
 /// The webview lists unlock requests but never needs their nonces: native code
@@ -675,13 +686,15 @@ async fn auth_request(
     let method = match method.as_str() {
         "GET" => reqwest::Method::GET,
         "POST" => reqwest::Method::POST,
+        "PATCH" => reqwest::Method::PATCH,
         "DELETE" => reqwest::Method::DELETE,
         _ => return Err("authenticated API method is invalid".to_string()),
     };
-    if native_only_route(&path) || (read_only_route(&path) && method != reqwest::Method::GET) {
+    if !proxy_method_allowed(&method, &path) {
         return Err("authenticated API path is invalid".to_string());
     }
-    if method != reqwest::Method::POST && body.is_some() {
+    let sends_body = method == reqwest::Method::POST || method == reqwest::Method::PATCH;
+    if !sends_body && body.is_some() {
         return Err("authenticated API body is invalid".to_string());
     }
     let mut request = native_http_client()?
@@ -691,7 +704,7 @@ async fn auth_request(
         )
         .bearer_auth(token)
         .header(reqwest::header::ACCEPT, "application/json");
-    if method == reqwest::Method::POST {
+    if sends_body {
         request = request.json(&body.unwrap_or_else(|| serde_json::json!({})));
     }
     let response = request
@@ -1168,6 +1181,11 @@ mod tests {
             assert!(!authenticated_api_path(path), "{path}");
         }
         assert!(authenticated_api_path("/v1/conversations?q=a%20b"));
+        assert!(authenticated_api_path("/v1/roadmaps"));
+        assert!(authenticated_api_path(
+            "/v1/roadmaps/0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b/items?expected_revision=3"
+        ));
+        assert!(!authenticated_api_path("/v1/roadmapsx"));
     }
 
     #[test]
@@ -1260,6 +1278,30 @@ mod tests {
         ] {
             assert!(!native_only_route(path), "{path}");
         }
+    }
+
+    #[test]
+    fn webview_proxy_patches_only_roadmaps() {
+        use reqwest::Method;
+        let item = "/v1/roadmaps/r1/items/i1?expected_revision=3";
+        assert!(proxy_method_allowed(&Method::PATCH, item));
+        assert!(proxy_method_allowed(&Method::PATCH, "/v1/roadmaps/r1"));
+        for path in [
+            "/v1/roadmaps",
+            "/v1/roadmapsx/r1",
+            "/v1/conversations/c1",
+            "/v1/devices",
+            "/v1/agent/pending/fixture/approve",
+        ] {
+            assert!(!proxy_method_allowed(&Method::PATCH, path), "{path}");
+        }
+        assert!(proxy_method_allowed(&Method::GET, "/v1/devices"));
+        assert!(!proxy_method_allowed(&Method::POST, "/v1/devices"));
+        assert!(!proxy_method_allowed(
+            &Method::POST,
+            "/v1/agent/pending/fixture/approve"
+        ));
+        assert!(proxy_method_allowed(&Method::DELETE, item));
     }
 
     #[test]

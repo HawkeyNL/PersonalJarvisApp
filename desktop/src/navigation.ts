@@ -21,6 +21,7 @@ export const NAV: NavSection[] = [
   { label: "Jarvis", items: [
     { id: "chat", label: "Chat", icon: "chat", path: "/" },
     { id: "memory", label: "Memory", icon: "memory", path: "/memory" },
+    { id: "roadmaps", label: "Roadmaps", icon: "layers", path: "/roadmaps" },
   ] },
   { label: "Trading", items: [
     { id: "dashboard", label: "Dashboard", icon: "chart", path: "/trading" },
@@ -46,7 +47,7 @@ export const NAV: NavSection[] = [
 ];
 
 export type View =
-  | "home" | "agents" | "integrations" | "health" | "memory"
+  | "home" | "agents" | "integrations" | "health" | "memory" | "roadmaps" | "roadmap"
   | "trading" | "desk" | "stocks" | "stock" | "positions" | "memecoin" | "memestrategies" | "memestrategy"
   | "tasks" | "context" | "settings" | "soon";
 
@@ -63,6 +64,9 @@ const soon = (id: string, detail: string): Page => {
 export const PAGES: Page[] = [
   { path: "/", name: "home", view: "home", nav: "chat" },
   { path: "/memory", name: "memory", view: "memory", nav: "memory" },
+  // The owner's roadmaps (/v1/roadmaps); a roadmap opens on its own page.
+  { path: "/roadmaps", name: "roadmaps", view: "roadmaps", nav: "roadmaps" },
+  { path: "/roadmaps/:id([0-9a-fA-F-]{36})", name: "roadmap", view: "roadmap", nav: "roadmaps" },
 
   // Trading: the dashboard and the read-only IBKR screens (/v1/trading/*).
   { path: "/trading", name: "trading", view: "desk", nav: "dashboard" },

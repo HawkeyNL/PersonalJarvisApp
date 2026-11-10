@@ -4,7 +4,7 @@ import {createMemoryHistory, createRouter} from "vue-router";
 
 import {NAV, PAGES, REDIRECTS, ariaCurrent, buildRoutes} from "../src/navigation.ts";
 
-const VIEWS = ["home", "agents", "integrations", "health", "memory", "trading", "desk", "stocks", "stock", "positions", "memecoin", "memestrategies", "memestrategy", "tasks", "context", "settings", "soon"];
+const VIEWS = ["home", "agents", "integrations", "health", "memory", "roadmaps", "roadmap", "trading", "desk", "stocks", "stock", "positions", "memecoin", "memestrategies", "memestrategy", "tasks", "context", "settings", "soon"];
 const stub = name => ({name, render: () => null});
 
 async function routerAt(path) {
@@ -15,7 +15,7 @@ async function routerAt(path) {
 
 test("sidebar follows the agreed sections and entries", () => {
   assert.deepEqual(NAV.map(s => [s.label ?? null, s.items.map(i => i.label)]), [
-    ["Jarvis", ["Chat", "Memory"]],
+    ["Jarvis", ["Chat", "Memory", "Roadmaps"]],
     ["Trading", ["Dashboard", "Stocks", "Memecoin", "Futures", "Positions", "Autonomy"]],
     ["Activity", ["Approvals", "Runs", "Notifications"]],
     [null, ["Content"]],
@@ -42,6 +42,10 @@ test("pages map onto the existing views", async () => {
   const view = async path => (await routerAt(path)).matched[0].components.default.name;
   assert.equal(await view("/"), "home");
   assert.equal(await view("/memory"), "memory");
+  assert.equal(await view("/roadmaps"), "roadmaps");
+  const detail = await routerAt("/roadmaps/0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b");
+  assert.equal(detail.matched[0].components.default.name, "roadmap");
+  assert.equal(detail.meta.nav, "roadmaps");
   assert.equal(await view("/trading"), "desk");
   assert.equal(await view("/trading/stocks"), "stocks");
   assert.equal(await view("/trading/positions"), "positions");
@@ -103,7 +107,8 @@ test("paths are unique and redirects never shadow or chain", () => {
 test("exactly one sidebar entry is aria-current on every sidebar page", async () => {
   const items = NAV.flatMap(s => s.items);
   for (const page of PAGES.filter(p => p.nav)) {
-    const nav = (await routerAt(page.path.replace(/:conid\(.*\)/, "265598").replace(/:id\(.*\)/, "a-survivor-momentum"))).meta.nav;
+    // A lowercase UUID fits both the roadmap and the strategy id patterns.
+    const nav = (await routerAt(page.path.replace(/:conid\(.*\)/, "265598").replace(/:id\(.*\)/, "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"))).meta.nav;
     const current = items.filter(i => ariaCurrent(i.id, nav) === "page").map(i => i.id);
     assert.deepEqual(current, [page.nav], page.path);
   }

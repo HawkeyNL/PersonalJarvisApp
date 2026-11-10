@@ -98,7 +98,7 @@ type NativeApiResponse = {
 };
 
 async function authenticatedRequest<T>(
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
   signal?: AbortSignal,
@@ -145,6 +145,10 @@ export async function postJsonAuth<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   return authenticatedRequest<T>("POST", path, body, signal);
+}
+
+export function patchJsonAuth<T>(path: string, body: unknown): Promise<T> {
+  return authenticatedRequest<T>("PATCH", path, body);
 }
 
 export async function deleteAuth(path: string): Promise<void> {
