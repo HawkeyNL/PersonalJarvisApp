@@ -556,7 +556,7 @@ dependencies = [
  "jarvis-client-core",
  "keyring",
  "minisign-verify",
- "rand 0.8.8",
+ "rand 0.10.2",
  "reqwest 0.13.3",
  "robius-authentication",
  "rustls",
