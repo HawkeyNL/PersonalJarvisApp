@@ -12,6 +12,7 @@ updates:
     groups:
       cargo:
         patterns: ["*"]
+        update-types: [minor, patch]
     ignore:
       # Pinned to a reviewed Core commit by hand.
       - dependency-name: jarvis-client-core
@@ -26,6 +27,7 @@ updates:
     groups:
       npm:
         patterns: ["*"]
+        update-types: [minor, patch]
   - package-ecosystem: gradle
     directory: "/android"
     schedule:
@@ -37,3 +39,4 @@ updates:
     groups:
       gradle:
         patterns: ["*"]
+        update-types: [minor, patch]
