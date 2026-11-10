@@ -20,10 +20,18 @@ test("a burst of reload hints costs at most one more reload", async () => {
   release();
 });
 
-test("a failed reload does not wedge later ones", async () => {
+test("a failed reload neither wedges nor drops the queued one", async () => {
   let runs = 0;
-  const reload = coalesce(async () => { runs++; throw new Error("offline"); });
-  await assert.rejects(reload());
-  await assert.rejects(reload());
-  assert.equal(runs, 2);
+  let fail;
+  const reload = coalesce(() => { runs++; return new Promise((_, reject) => (fail = reject)); });
+  const first = reload();
+  void reload();
+  fail(new Error("offline"));
+  await new Promise((r) => setTimeout(r));
+  assert.equal(runs, 2, "the queued run still happens");
+  fail(new Error("offline"));
+  await first;
+  void reload();
+  assert.equal(runs, 3);
+  fail(new Error("offline"));
 });

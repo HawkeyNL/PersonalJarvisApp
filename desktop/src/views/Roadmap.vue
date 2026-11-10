@@ -51,12 +51,15 @@ async function loadHistory(): Promise<void> {
     historyFailed.value = true;
   }
 }
-watch(id, () => { snap.value = null; failure.value = null; history.value = null; void load(); }, { immediate: true });
 // Focus, reconnect and roadmap.changed reload at most once more while a
-// reload runs. One arriving during a write is kept and replayed after it
-// when it is newer than what the write left on screen.
-const refetch = coalesce(load);
+// reload runs. One arriving during a write, or queued when a write starts,
+// is kept and replayed after it when newer than what the write left on screen.
 let missed = -1;
+const refetch = coalesce(async () => {
+  if (busy.value) { missed = Number.MAX_SAFE_INTEGER; return; }
+  await load();
+});
+watch(id, () => { snap.value = null; failure.value = null; history.value = null; missed = -1; void load(); }, { immediate: true });
 function hinted(revision: number): void {
   if (busy.value) missed = Math.max(missed, revision);
   else void refetch();
@@ -138,6 +141,7 @@ async function addItem(): Promise<void> {
 const sheet = ref<{ itemId: string; revision: number; key: number; notice: string } | null>(null);
 const sheetItem = computed(() => (sheet.value ? byId.value.get(sheet.value.itemId) ?? null : null));
 let sheetKey = 0;
+watch(id, () => (sheet.value = null));
 // A reload without the open item (deleted elsewhere) unmounts the sheet
 // without its close event; say so instead of hiding every later notice.
 // During a write (busy) afterSheetWrite handles the sheet, own deletes too.
