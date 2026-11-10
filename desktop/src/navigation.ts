@@ -47,7 +47,8 @@ export const NAV: NavSection[] = [
 
 export type View =
   | "home" | "agents" | "integrations" | "health" | "memory"
-  | "trading" | "desk" | "stocks" | "stock" | "positions" | "memecoin" | "tasks" | "context" | "settings" | "soon";
+  | "trading" | "desk" | "stocks" | "stock" | "positions" | "memecoin" | "memestrategies" | "memestrategy"
+  | "tasks" | "context" | "settings" | "soon";
 
 /** One screen: its path, the view that renders it and the sidebar entry it highlights. */
 export type Page = { path: string; name: string; view: View; nav?: string; props?: Record<string, string> };
@@ -73,6 +74,9 @@ export const PAGES: Page[] = [
   { path: "/trading/ibkr", name: "trading-ibkr", view: "trading", nav: "dashboard" },
   // The memecoin PAPER trader (/v1/trading/meme/*); a simulation, no wallet.
   { path: "/trading/memecoin", name: "memecoin", view: "memecoin", nav: "memecoin" },
+  { path: "/trading/memecoin/strategies", name: "meme-strategies", view: "memestrategies", nav: "memecoin" },
+  // Core's strategy id rule; the view checks it again (routes match case-insensitively).
+  { path: "/trading/memecoin/strategies/:id([a-z0-9-]+)", name: "meme-strategy", view: "memestrategy", nav: "memecoin" },
   soon("futures", "Futures through IBKR come later."),
   soon("autonomy", "Setting what Jarvis may do per pot is not built yet."),
 
