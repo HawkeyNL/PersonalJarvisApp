@@ -137,8 +137,11 @@ mod tests {
                 serde_json::json!({ "id": "r1", "revision": 3 }),
             ),
         ] {
-            let event = decode(&frame(2, kind, payload)).unwrap().unwrap();
-            assert_eq!(serde_json::to_value(&event).unwrap()["type"], kind);
+            let event = decode(&frame(2, kind, payload.clone())).unwrap().unwrap();
+            // The webview reads `type` and `payload` from the emitted envelope.
+            let emitted = serde_json::to_value(&event).unwrap();
+            assert_eq!(emitted["type"], kind);
+            assert_eq!(emitted["payload"], payload);
         }
     }
 

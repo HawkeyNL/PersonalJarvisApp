@@ -17,7 +17,10 @@ const dialog = ref<HTMLDialogElement | null>(null);
 onMounted(() => dialog.value?.showModal());
 
 const draft = ref(toDraft(props.item));
-const patch = computed(() => itemPatch(props.item, draft.value));
+// Against the item as opened: a live reload must not turn a change made
+// elsewhere into an edit. Saving then meets Core's 409 and remounts.
+const opened = props.item;
+const patch = computed(() => itemPatch(opened, draft.value));
 const issue = computed(() => draftIssue(draft.value));
 const byId = computed(() => new Map(props.items.map((i) => [i.id, i])));
 const options = computed(() => dependencyOptions(props.items, props.item.id));

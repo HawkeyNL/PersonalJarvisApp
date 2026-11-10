@@ -7,6 +7,7 @@ import {
   DEFAULT_PHASES, LIMITS, STATUS_LABEL, STATUS_TONE, failureOf, failureText, isNewer, parsePhases, readList, readProposals,
   readSnapshot, tally, validText, writeFailureText, type Failure, type Roadmap, type Tally,
 } from "../roadmaps";
+import { coalesce } from "../coalesce";
 import { roadmapApi, useRoadmapRefetch } from "../roadmapsApi";
 
 // The owner's roadmaps: one card each, with its status tally and pending
@@ -36,9 +37,10 @@ async function load(): Promise<void> {
 }
 void load();
 // A new roadmap, or a newer revision of a listed one, reloads the list.
-useRoadmapRefetch(() => void load(), (change) => {
+const refetch = coalesce(load);
+useRoadmapRefetch(() => void refetch(), (change) => {
   const card = state.value.kind === "ok" ? state.value.cards.find((c) => c.roadmap.id === change.id) : undefined;
-  if (isNewer(change, card?.roadmap.revision)) void load();
+  if (isNewer(change, card?.roadmap.revision)) void refetch();
 });
 
 const full = computed(() => state.value.kind === "ok" && state.value.cards.length >= LIMITS.roadmaps);

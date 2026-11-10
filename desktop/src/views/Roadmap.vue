@@ -12,6 +12,7 @@ import {
   groupByPhase, isDone, isNewer, linkLabel, parsePhases, readHistory, readProposals, readSnapshot, tally, validText, waitingOn,
   writeFailureText, type Failure, type HistoryEntry, type ItemPatch, type Proposal, type Snapshot, type Status,
 } from "../roadmaps";
+import { coalesce } from "../coalesce";
 import { roadmapApi, useRoadmapRefetch } from "../roadmapsApi";
 
 // One roadmap: phases as a vertical rail, what it is waiting on, Jarvis's
@@ -51,9 +52,22 @@ async function loadHistory(): Promise<void> {
   }
 }
 watch(id, () => { snap.value = null; failure.value = null; history.value = null; void load(); }, { immediate: true });
+// Focus, reconnect and roadmap.changed reload at most once more while a
+// reload runs. One arriving during a write is kept and replayed after it
+// when it is newer than what the write left on screen.
+const refetch = coalesce(load);
+let missed = -1;
+function hinted(revision: number): void {
+  if (busy.value) missed = Math.max(missed, revision);
+  else void refetch();
+}
+function afterBusy(): void {
+  if (missed > (snap.value?.roadmap.revision ?? -1)) void refetch();
+  missed = -1;
+}
 useRoadmapRefetch(
-  () => { if (!busy.value) void load(); },
-  (change) => { if (change.id === id.value && isNewer(change, snap.value?.roadmap.revision) && !busy.value) void load(); },
+  () => hinted(Number.MAX_SAFE_INTEGER),
+  (change) => { if (change.id === id.value && isNewer(change, snap.value?.roadmap.revision)) hinted(change.revision); },
 );
 
 const thisDevice = ref<string | null>(null);
@@ -79,6 +93,7 @@ async function write(run: (revision: number) => Promise<unknown>, revision?: num
     return false;
   } finally {
     busy.value = false;
+    afterBusy();
   }
 }
 
@@ -123,6 +138,15 @@ async function addItem(): Promise<void> {
 const sheet = ref<{ itemId: string; revision: number; key: number; notice: string } | null>(null);
 const sheetItem = computed(() => (sheet.value ? byId.value.get(sheet.value.itemId) ?? null : null));
 let sheetKey = 0;
+// A reload without the open item (deleted elsewhere) unmounts the sheet
+// without its close event; say so instead of hiding every later notice.
+// During a write (busy) afterSheetWrite handles the sheet, own deletes too.
+watch(sheetItem, (item) => {
+  if (sheet.value && !item && snap.value && !busy.value) {
+    sheet.value = null;
+    notice.value = "This item was deleted elsewhere.";
+  }
+});
 function openSheet(itemId: string): void {
   if (snap.value) sheet.value = { itemId, revision: snap.value.roadmap.revision, key: ++sheetKey, notice: "" };
 }
@@ -207,6 +231,7 @@ async function decide(p: Proposal, accept: boolean): Promise<void> {
     await load();
     busy.value = false;
     deciding.value = null;
+    afterBusy();
   }
 }
 const opsOf = (p: Proposal) => p.ops.map((op) => describeOp(op, items.value));
