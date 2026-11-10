@@ -40,7 +40,7 @@ jarvis-client-core = { git = "https://github.com/HawkeyNL/PersonalJarvis.git", r
 tokio = { version = "1", features = ["time", "sync", "process", "io-util"] }
 tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
-minisign-verify = "0.2.5"
+minisign-verify = "0.3.0"
 base64 = "0.22"
 sha2 = "0.10"
 
