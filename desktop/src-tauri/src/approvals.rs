@@ -398,6 +398,10 @@ fn parse_id(id: &str) -> Result<uuid::Uuid, String> {
     uuid::Uuid::parse_str(id).map_err(|_| "invalid approval id".into())
 }
 
+fn refused(status: u16) -> String {
+    format!("Home Node refused the request (HTTP {status})")
+}
+
 async fn fetch<T: DeserializeOwned>(session: &Session, path: &str) -> Result<T, String> {
     request(session, reqwest::Method::GET, path).await
 }
@@ -421,10 +425,7 @@ async fn request<T: DeserializeOwned>(
         .await
         .map_err(|_| "Home Node is unreachable")?;
     if !response.status().is_success() {
-        return Err(format!(
-            "Home Node refused the request (HTTP {})",
-            response.status().as_u16()
-        ));
+        return Err(refused(response.status().as_u16()));
     }
     let bytes = native_response::bounded(response, LIST_BYTES)
         .await
@@ -615,8 +616,22 @@ struct MemeEnableChallenge {
     message: String,
 }
 
-/// Core keeps an enable challenge five minutes.
+/// Core keeps an enable challenge five minutes. Counted here from when the
+/// challenge arrives, so it can end a little after Core's expiry; Core's is
+/// the one that holds.
 const MEME_ENABLE_TTL_SECS: i64 = 300;
+
+/// Core's refusals of an enable challenge, in words; never Core's body.
+fn meme_challenge_error(error: String) -> String {
+    let text = match error {
+        e if e == refused(403) => "This device may not approve a strategy enable",
+        e if e == refused(404) => "Core has no such strategy",
+        e if e == refused(409) => "This strategy is already enabled",
+        e if e == refused(429) => "Too many strategy changes. Wait a minute, then try again",
+        e => return e,
+    };
+    text.into()
+}
 
 fn meme_strategy_id(id: &str) -> Result<&str, String> {
     let valid = (1..=32).contains(&id.len())
@@ -709,7 +724,8 @@ pub(super) async fn meme_enable_strategy(
         reqwest::Method::POST,
         &format!("{base}/challenge"),
     )
-    .await?;
+    .await
+    .map_err(meme_challenge_error)?;
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let approval = meme_enable_approval(&challenge, id, version, &config_sha256, device, now)?;
     sign_and_post(session, approval, base).await
@@ -905,6 +921,20 @@ mod tests {
         assert_eq!(
             refused(upper, "B-base", 1_000_002),
             "invalid enable challenge"
+        );
+    }
+
+    #[test]
+    fn meme_challenge_refusals_read_as_words() {
+        assert_eq!(
+            meme_challenge_error(refused(409)),
+            "This strategy is already enabled"
+        );
+        assert!(meme_challenge_error(refused(429)).starts_with("Too many"));
+        assert_eq!(meme_challenge_error(refused(500)), refused(500));
+        assert_eq!(
+            meme_challenge_error("Home Node is unreachable".into()),
+            "Home Node is unreachable"
         );
     }
 

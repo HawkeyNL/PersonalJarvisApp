@@ -25,9 +25,13 @@ const { state, reload } = useMemeRead({
   fixture: (f, set) => f.strategyFixture(set, id.value ?? ""),
   read: (x) => (id.value ? readStrategy(x, id.value) : null),
 });
-watch(id, () => void reload());
+// Another strategy: never show the previous one's state or buttons under it.
+watch(id, () => {
+  state.value = { kind: "loading" };
+  void reload();
+});
 onMemeHint((hint) => {
-  if (hint.kind === "strategy" && hint.id === id.value) void reload();
+  if (hint.kind === "reconcile" || (hint.kind === "strategy" && hint.id === id.value)) void reload();
 });
 
 void initPlatformCapabilities();
@@ -109,7 +113,9 @@ watch(s, (current) => {
   const next = current && !current.enabled ? enableReview(current) : null;
   if (next?.version === r.version && next.config_sha256 === r.config_sha256) return;
   enableStep.value = "idle";
-  enableNote.value = { ok: false, text: "The strategy changed while you were reviewing it. Nothing was signed; review it, then enable again." };
+  enableNote.value = current
+    ? { ok: false, text: "The strategy changed while you were reviewing it. Nothing was signed; review it, then enable again." }
+    : { ok: false, text: "Could not recheck the strategy, so nothing was signed. Reload, then enable again." };
 });
 
 watch([devDataSet, id], () => {

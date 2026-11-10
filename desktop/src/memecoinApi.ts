@@ -66,7 +66,7 @@ export function onMemeHint(on: (hint: MemeHint) => void): void {
   // Promise.resolve first: outside Tauri, listen throws instead of rejecting.
   Promise.resolve().then(() => listen<unknown>("jarvis-realtime", (event) => {
     const hint = memeHint(event.payload);
-    if (hint) on(hint);
+    if (hint && !gone) on(hint);
   })).then((unlisten) => (gone ? unlisten() : (stop = unlisten)), () => {});
   onUnmounted(() => {
     gone = true;

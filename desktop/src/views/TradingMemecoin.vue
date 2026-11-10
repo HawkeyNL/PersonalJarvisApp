@@ -35,12 +35,12 @@ const data = computed(() => {
 const status = computed(() => (data.value ? memeStatus(data.value) : null));
 const report = computed(() => data.value?.report ?? null);
 const stuck = computed(() => (data.value ? stuckCount(data.value) : 0));
-const agent = computed(() => (data.value ? agentStatus(data.value, now.value) : null));
 
 // Re-evaluate staleness while the page is open.
 const now = ref(Date.now());
 const timer = window.setInterval(() => (now.value = Date.now()), 30_000);
 onUnmounted(() => window.clearInterval(timer));
+const agent = computed(() => (data.value ? agentStatus(data.value, now.value) : null));
 const staleMs = computed(() => (data.value ? reportAge(data.value, now.value) : null));
 
 function refresh(): void {

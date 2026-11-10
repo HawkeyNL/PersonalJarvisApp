@@ -56,8 +56,6 @@ test("strategy detail guard fails closed and only for the asked id", () => {
     { ...good, active_config_sha256: "XYZ" },
     { ...good, versions: [{ ...v, author: "owner" }] },
     { ...good, versions: [{ ...v, rationale: "x".repeat(601) }] },
-    { ...good, versions: [{ ...v, rationale: "evil‮text" }] },
-    { ...good, versions: [{ ...v, rationale: "line\nbreak" }] },
     { ...good, versions: [{ ...v, diff: [{ field: "x", from: "a".repeat(STRATEGY_LIMITS.value), to: 1 }] }] },
     { ...good, versions: [{ ...v, diff: "none" }] },
     { ...good, versions: [{ ...v, backtest: { status: "great", mints: 1, points: 2 } }] },
@@ -99,7 +97,6 @@ test("decision guard fails closed", () => {
     { ...good, size_bps: 10001 },
     { ...good, reason_code: "Bad-Code" },
     { ...good, rationale: "x".repeat(301) },
-    { ...good, rationale: "zero​width" },
     { ...good, model: "claude <script>" },
     { ...good, at: "yesterday" },
   ];
@@ -205,4 +202,24 @@ test("the enable card shows and signs the active version's parameter hash", asyn
   assert.match(view, /memeApi\.enable\(review\.value\)/);
   const api = await readFile(new URL("../src/memecoinApi.ts", import.meta.url), "utf8");
   assert.match(api, /invoke\("meme_enable_strategy", \{ strategyId: id, version, configSha256: config_sha256 \}\)/);
+});
+
+test("Claude's text drops control and format characters instead of failing the record", () => {
+  const scotland = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}";
+  const raw = clone(strategyFixture("demo", ID));
+  raw.versions[0].rationale = `evil\u202Etext\u2028next ${scotland}`;
+  const s = readStrategy(raw, ID);
+  assert.ok(s, "a rationale never hides the strategy or its Disable button");
+  assert.equal(s.versions[0].rationale, "eviltext next \u{1F3F4}");
+  raw.versions[0].rationale = "line\nbreak";
+  assert.equal(readStrategy(raw, ID).versions[0].rationale, "line break");
+  const d = { ...decisionsFixture("demo").decisions[1], rationale: "zero\u200Bwidth\u2029end" };
+  assert.equal(readDecisions({ decisions: [d] })[0].rationale, "zerowidth end");
+  // Length still fails closed.
+  raw.versions[0].rationale = "x".repeat(STRATEGY_LIMITS.rationale + 1);
+  assert.equal(readStrategy(raw, ID), null);
+});
+
+test("a reconnect asks for a full reload", () => {
+  assert.deepEqual(memeHint({ type: "connection.ready", payload: { device_id: "d", reconcile: true } }), { kind: "reconcile" });
 });

@@ -8,6 +8,7 @@ import { agentStatus, failureText, readOverview, shortMint, usd } from "../memec
 import {
   FAMILY_LABEL, NO_EDGE_TEXT, bpsPct, decisionView, readDecisions, readStrategies, strategyState, versionOwner,
 } from "../memeStrategies";
+import { coalesce } from "../coalesce";
 import { memeApi, onMemeHint, useMemeRead } from "../memecoinApi";
 import { MEME_DATA_SETS } from "../tradingApi";
 
@@ -30,13 +31,13 @@ onUnmounted(() => window.clearInterval(timer));
 const agent = computed(() => (overview.value.kind === "ok" ? agentStatus(overview.value.data, now.value) : null));
 const listed = computed(() => (strategies.value.kind === "ok" ? strategies.value.data : []));
 
-// A decision also spends Claude's call budget, shown from the overview.
+// A decision also spends Claude's call budget, shown from the overview. A
+// burst of hints costs at most one more reload of each.
+const strategiesSoon = coalesce(reloadStrategies);
+const decisionsSoon = coalesce(() => Promise.all([reloadDecisions(), reloadOverview()]).then(() => {}));
 onMemeHint((hint) => {
-  if (hint.kind === "strategy") void reloadStrategies();
-  else {
-    void reloadDecisions();
-    void reloadOverview();
-  }
+  if (hint.kind !== "decision") void strategiesSoon();
+  if (hint.kind !== "strategy") void decisionsSoon();
 });
 
 function refresh(): void {

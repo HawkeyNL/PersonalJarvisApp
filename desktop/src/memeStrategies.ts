@@ -102,10 +102,14 @@ export const STRATEGY_LIMITS = { strategies: 20, versions: 20, diff: 64, config:
 export const isStrategyId = (x: unknown): x is string => typeof x === "string" && /^[a-z0-9-]{1,32}$/.test(x);
 const isCode = (x: unknown, max = 32) => typeof x === "string" && x.length <= max && /^[a-z][a-z0-9_]*$/.test(x);
 const isVersion = (x: unknown) => isCount(x) && (x as number) >= 1 && (x as number) <= 0xffffffff;
-/** Display text from Claude: bounded, no control or format characters, so it
- *  reads as what it holds. Rendered as text, never as HTML. */
-const isPlain = (x: unknown, max: number) =>
-  typeof x === "string" && [...x].length <= max && !/[\p{Cc}\p{Cf}\u2028\u2029]/u.test(x);
+/** Display text from Claude: bounded. Shown through `plain`, which drops
+ *  control and format characters (bidi overrides, zero-width, tag
+ *  characters) so it reads as what it holds. Rendered as text, never as
+ *  HTML. A character Core lets through never fails the whole record, which
+ *  would also hide the Disable button. */
+const isPlain = (x: unknown, max: number) => typeof x === "string" && [...x].length <= max;
+const plain = (x: unknown) =>
+  typeof x === "string" ? x.replace(/[\p{Cc}\u2028\u2029]/gu, " ").replace(/\p{Cf}/gu, "") : null;
 const isJson = (x: unknown, max: number) => {
   try {
     return (JSON.stringify(x) ?? "").length <= max;
@@ -170,7 +174,7 @@ function version(v: Obj): StrategyVersion {
     version: v.version as number, parent_version: (v.parent_version as number | undefined) ?? null,
     author: v.author as "seed" | "claude", created_at: v.created_at as string, config,
     diff: Array.isArray(v.diff) ? (v.diff as Obj[]).map((d) => ({ field: d.field as string, from: json(d.from), to: json(d.to) })) : null,
-    rationale: (v.rationale as string | undefined) ?? null,
+    rationale: plain(v.rationale),
     backtest: isObj(v.backtest) ? ({ ...v.backtest, profit_factor: v.backtest.profit_factor ?? null } as Backtest) : null,
   };
 }
@@ -204,7 +208,7 @@ export function readDecisions(x: unknown): Decision[] | null {
     key: `${d.id ?? ""}-${d.at}-${i}`, at: d.at as string, call_id: d.call_id as string, kind: d.kind as string,
     strategy_version: (d.strategy_version as number | undefined) ?? null, mint: (d.mint as string | undefined) ?? null,
     size_bps: (d.size_bps as number | undefined) ?? null, reason_code: (d.reason_code as string | undefined) ?? null,
-    rationale: (d.rationale as string | undefined) ?? null, model: (d.model as string | undefined) ?? null,
+    rationale: plain(d.rationale), model: (d.model as string | undefined) ?? null,
   }));
 }
 
@@ -274,10 +278,13 @@ export function versionOwner(strategies: Strategy[], version: number | null): st
 
 /** What a `trading.meme.*` realtime event asks a page to reload. Only the
  *  type and the ids are read; the reload is the authority, never the event. */
-export type MemeHint = { kind: "strategy"; id: string } | { kind: "decision" };
+export type MemeHint = { kind: "strategy"; id: string } | { kind: "decision" } | { kind: "reconcile" };
 
+/** `connection.ready` asks for a full reload: hints sent while the socket
+ *  was down are not replayed. */
 export function memeHint(event: unknown): MemeHint | null {
   if (!isObj(event) || !isObj(event.payload)) return null;
+  if (event.type === "connection.ready") return { kind: "reconcile" };
   const p = event.payload;
   if (event.type === "trading.meme.strategy_changed") {
     return isStrategyId(p.strategy_id) && isVersion(p.version) ? { kind: "strategy", id: p.strategy_id } : null;
