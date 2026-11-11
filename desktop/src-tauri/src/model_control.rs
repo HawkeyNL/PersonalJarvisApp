@@ -376,8 +376,8 @@ impl Session {
 fn fresh_ids() -> (uuid::Uuid, String) {
     let mut nonce = [0; 32];
     let mut request_id = [0; 16];
-    OsRng.fill_bytes(&mut nonce);
-    OsRng.fill_bytes(&mut request_id);
+    UnwrapErr(SysRng).fill_bytes(&mut nonce);
+    UnwrapErr(SysRng).fill_bytes(&mut request_id);
     (
         uuid::Builder::from_random_bytes(request_id).into_uuid(),
         hex::encode(nonce),

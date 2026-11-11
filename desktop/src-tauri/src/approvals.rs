@@ -6,7 +6,7 @@
 use super::*;
 use jarvis_client_core::account::{account_approval_message, AccountAction, AccountApproval};
 use model_control::Session;
-use rand::{seq::SliceRandom, Rng};
+use rand::{seq::SliceRandom, Rng, RngExt};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 use std::sync::Mutex;
@@ -263,7 +263,7 @@ fn unlock_choices<R: Rng + ?Sized>(code: u8, rng: &mut R) -> [u8; 3] {
     let mut choices = [code; 3];
     let mut filled = 1;
     while filled < 3 {
-        let decoy = rng.gen_range(0..100);
+        let decoy = rng.random_range(0..100);
         if !choices[..filled].contains(&decoy) {
             choices[filled] = decoy;
             filled += 1;
@@ -539,7 +539,7 @@ pub(super) async fn auth_unlock_choices(
         item.id,
         unlock_code(item.id, &nonce),
         Instant::now(),
-        &mut rand::rngs::OsRng,
+        &mut UnwrapErr(SysRng),
     )?)
 }
 
@@ -1080,7 +1080,7 @@ mod tests {
 
     #[test]
     fn unlock_choices_hold_the_code_and_two_distinct_decoys() {
-        let mut rng = rand::rngs::OsRng;
+        let mut rng = UnwrapErr(SysRng);
         let mut positions = [0; 3];
         for code in (0..100).cycle().take(3000) {
             let choices = unlock_choices(code, &mut rng);
@@ -1096,7 +1096,7 @@ mod tests {
 
     #[test]
     fn a_request_keeps_its_choice_set_until_it_expires() {
-        let (mut sets, mut rng, start) = (Vec::new(), rand::rngs::OsRng, Instant::now());
+        let (mut sets, mut rng, start) = (Vec::new(), UnwrapErr(SysRng), Instant::now());
         let first = cached_unlock_choices(&mut sets, id(REQUEST), 89, start, &mut rng).unwrap();
         for _ in 0..20 {
             assert_eq!(
@@ -1111,7 +1111,7 @@ mod tests {
 
     #[test]
     fn a_full_choice_cache_refuses_instead_of_re_rolling() {
-        let (mut sets, mut rng, start) = (Vec::new(), rand::rngs::OsRng, Instant::now());
+        let (mut sets, mut rng, start) = (Vec::new(), UnwrapErr(SysRng), Instant::now());
         let ids: Vec<_> = (1..=CHOICE_SETS as u128)
             .map(uuid::Uuid::from_u128)
             .collect();

@@ -5,7 +5,7 @@
 //! app's ordinary metadata file. The private key is never exposed to JS.
 
 use ed25519_dalek::{Signer, SigningKey};
-use rand::{rngs::OsRng, RngCore};
+use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -234,7 +234,7 @@ fn signing_key_unlocked(app: &AppHandle, allow_create: bool) -> Result<SigningKe
                 return Err("Original device key unavailable; restore the original OS credential store or explicitly re-enroll this device".into());
             }
             let mut seed = [0u8; 32];
-            OsRng.fill_bytes(&mut seed);
+            UnwrapErr(SysRng).fill_bytes(&mut seed);
             let key_hex = hex::encode(seed);
             save_credential(KEY_ACCOUNT, &key_hex)?;
             key_hex
