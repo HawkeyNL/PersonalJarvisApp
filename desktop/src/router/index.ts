@@ -17,6 +17,9 @@ import Agents from "../views/Agents.vue";
 import Memory from "../views/Memory.vue";
 import Roadmaps from "../views/Roadmaps.vue";
 import Roadmap from "../views/Roadmap.vue";
+import Jobs from "../views/Jobs.vue";
+import Job from "../views/Job.vue";
+import JobRun from "../views/JobRun.vue";
 import ComingSoon from "../views/ComingSoon.vue";
 import { buildRoutes } from "../navigation";
 import { currentAuthStatus } from "../auth";
@@ -28,7 +31,7 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: buildRoutes({
     home: Home, agents: Agents, integrations: Integrations, health: Health,
-    memory: Memory, roadmaps: Roadmaps, roadmap: Roadmap, trading: Trading, desk: TradingDesk, stocks: TradingStocks, stock: TradingStock, positions: TradingPositions, memecoin: TradingMemecoin,
+    memory: Memory, roadmaps: Roadmaps, roadmap: Roadmap, jobs: Jobs, job: Job, jobrun: JobRun, trading: Trading, desk: TradingDesk, stocks: TradingStocks, stock: TradingStock, positions: TradingPositions, memecoin: TradingMemecoin,
     memestrategies: TradingMemeStrategies, memestrategy: TradingMemeStrategy, tasks: Tasks, context: Context, settings: Settings, soon: ComingSoon,
   }),
 });

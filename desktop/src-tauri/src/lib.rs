@@ -377,6 +377,7 @@ fn authenticated_api_path(path: &str) -> bool {
         "/v1/agent/pending",
         "/v1/voice",
         "/v1/roadmaps",
+        "/v1/jobs",
     ];
     shared.iter().chain(ACCOUNT_ADMIN_ROUTES).any(|prefix| {
         route == *prefix
@@ -427,12 +428,16 @@ fn native_only_route(path: &str) -> bool {
 
 /// Whether the webview proxy may send `method` to `path`: never to a
 /// native-only route, only GET to a read-only one, and PATCH only to the
-/// roadmap routes, so a PATCH route Core adds elsewhere needs a review here.
+/// roadmap and job routes, so a PATCH route Core adds elsewhere needs a
+/// review here.
 fn proxy_method_allowed(method: &reqwest::Method, path: &str) -> bool {
     let route = path.split('?').next().unwrap_or(path);
     !native_only_route(path)
         && (method == reqwest::Method::GET || !read_only_route(path))
-        && (method != reqwest::Method::PATCH || route.starts_with("/v1/roadmaps/"))
+        && (method != reqwest::Method::PATCH
+            || ["/v1/roadmaps/", "/v1/jobs/"]
+                .iter()
+                .any(|prefix| route.starts_with(prefix)))
 }
 
 /// The webview lists unlock requests but never needs their nonces: native code
@@ -1186,6 +1191,18 @@ mod tests {
             "/v1/roadmaps/0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b/items?expected_revision=3"
         ));
         assert!(!authenticated_api_path("/v1/roadmapsx"));
+        assert!(authenticated_api_path("/v1/jobs"));
+        assert!(authenticated_api_path(
+            "/v1/jobs/0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b?expected_revision=3"
+        ));
+        assert!(authenticated_api_path(
+            "/v1/jobs/0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b/runs?limit=20"
+        ));
+        assert!(authenticated_api_path(
+            "/v1/jobs/runs/0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"
+        ));
+        assert!(!authenticated_api_path("/v1/jobsx"));
+        assert!(!authenticated_api_path("/v1/jobs/%2e%2e/auth/login"));
     }
 
     #[test]
@@ -1281,14 +1298,19 @@ mod tests {
     }
 
     #[test]
-    fn webview_proxy_patches_only_roadmaps() {
+    fn webview_proxy_patches_only_roadmaps_and_jobs() {
         use reqwest::Method;
         let item = "/v1/roadmaps/r1/items/i1?expected_revision=3";
+        let job = "/v1/jobs/j1?expected_revision=3";
         assert!(proxy_method_allowed(&Method::PATCH, item));
         assert!(proxy_method_allowed(&Method::PATCH, "/v1/roadmaps/r1"));
+        assert!(proxy_method_allowed(&Method::PATCH, job));
         for path in [
             "/v1/roadmaps",
             "/v1/roadmapsx/r1",
+            "/v1/jobs",
+            "/v1/jobs?expected_revision=3",
+            "/v1/jobsx/j1",
             "/v1/conversations/c1",
             "/v1/devices",
             "/v1/agent/pending/fixture/approve",
@@ -1302,6 +1324,11 @@ mod tests {
             "/v1/agent/pending/fixture/approve"
         ));
         assert!(proxy_method_allowed(&Method::DELETE, item));
+        // Jobs: create, run now and delete follow the general rules.
+        assert!(proxy_method_allowed(&Method::POST, "/v1/jobs"));
+        assert!(proxy_method_allowed(&Method::POST, "/v1/jobs/j1/run"));
+        assert!(proxy_method_allowed(&Method::DELETE, job));
+        assert!(proxy_method_allowed(&Method::GET, "/v1/jobs/runs/r1"));
     }
 
     #[test]

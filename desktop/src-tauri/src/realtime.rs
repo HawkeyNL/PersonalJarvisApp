@@ -125,7 +125,7 @@ mod tests {
     }
 
     #[test]
-    fn memecoin_and_roadmap_hints_decode() {
+    fn memecoin_roadmap_and_job_hints_decode() {
         for (kind, payload) in [
             (
                 "trading.meme.strategy_changed",
@@ -135,6 +135,10 @@ mod tests {
             (
                 "roadmap.changed",
                 serde_json::json!({ "id": "r1", "revision": 3 }),
+            ),
+            (
+                "jobs.run_finished",
+                serde_json::json!({ "job_id": "j1", "run_id": "u1", "status": "ok" }),
             ),
         ] {
             let event = decode(&frame(2, kind, payload.clone())).unwrap().unwrap();
@@ -164,6 +168,11 @@ mod tests {
                 2,
                 "roadmap.changed",
                 serde_json::json!({ "id": "r", "revision": -1 }),
+            ),
+            frame(
+                2,
+                "jobs.run_finished",
+                serde_json::json!({ "job_id": "j1", "run_id": "u1" }),
             ),
         ] {
             assert_eq!(decode(&text), Err(()), "{text}");

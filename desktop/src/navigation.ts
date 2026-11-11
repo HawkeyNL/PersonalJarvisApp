@@ -22,6 +22,7 @@ export const NAV: NavSection[] = [
     { id: "chat", label: "Chat", icon: "chat", path: "/" },
     { id: "memory", label: "Memory", icon: "memory", path: "/memory" },
     { id: "roadmaps", label: "Roadmaps", icon: "layers", path: "/roadmaps" },
+    { id: "jobs", label: "Jobs", icon: "clock", path: "/jobs" },
   ] },
   { label: "Trading", items: [
     { id: "dashboard", label: "Dashboard", icon: "chart", path: "/trading" },
@@ -47,7 +48,7 @@ export const NAV: NavSection[] = [
 ];
 
 export type View =
-  | "home" | "agents" | "integrations" | "health" | "memory" | "roadmaps" | "roadmap"
+  | "home" | "agents" | "integrations" | "health" | "memory" | "roadmaps" | "roadmap" | "jobs" | "job" | "jobrun"
   | "trading" | "desk" | "stocks" | "stock" | "positions" | "memecoin" | "memestrategies" | "memestrategy"
   | "tasks" | "context" | "settings" | "soon";
 
@@ -67,6 +68,10 @@ export const PAGES: Page[] = [
   // The owner's roadmaps (/v1/roadmaps); a roadmap opens on its own page.
   { path: "/roadmaps", name: "roadmaps", view: "roadmaps", nav: "roadmaps" },
   { path: "/roadmaps/:id([0-9a-fA-F-]{36})", name: "roadmap", view: "roadmap", nav: "roadmaps" },
+  // Scheduled jobs (/v1/jobs); a job and a run report open on their own page.
+  { path: "/jobs", name: "jobs", view: "jobs", nav: "jobs" },
+  { path: "/jobs/:id([0-9a-fA-F-]{36})", name: "job", view: "job", nav: "jobs" },
+  { path: "/jobs/runs/:id([0-9a-fA-F-]{36})", name: "job-run", view: "jobrun", nav: "jobs" },
 
   // Trading: the dashboard and the read-only IBKR screens (/v1/trading/*).
   { path: "/trading", name: "trading", view: "desk", nav: "dashboard" },
