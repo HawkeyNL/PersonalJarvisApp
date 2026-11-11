@@ -855,4 +855,107 @@ mod tests {
             assert!(candidate.is_err() || candidate.unwrap() != enrolled);
         }
     }
+
+    /// Known answers for update signatures, pinned across `minisign-verify`
+    /// upgrades. The vectors are minisign-verify's own (key E7620F1842B4E81F,
+    /// message "test"). The `E::Minisign` case above only compiles while this
+    /// crate and the updater plugin share one minisign-verify version, so this
+    /// is the verifier the plugin runs, with the plugin's `allow_legacy = true`.
+    /// Documents are base64 wrapped as Tauri stores them and decoded like the
+    /// plugin and the release verifier example do.
+    #[test]
+    fn update_signature_verification_known_answers() {
+        use base64::Engine;
+        use minisign_verify::{Error, PublicKey, Signature};
+        const KEY: &str = "RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
+        // Same key with one key byte flipped, and with one key id byte flipped.
+        const OTHER_KEY: &str = "RWQf6LRCGA9i53ilYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
+        const OTHER_KEY_ID: &str = "RWQe6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
+        const PREHASHED: &str = "RUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=";
+        // PREHASHED with its scalar S replaced by S + L (a malleated encoding).
+        const MALLEATED: &str = "RUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGOxkY0XlWAIO73/x/qsT+ob7bNJJylDOocrCo8KLzZxo=";
+        const PREHASHED_COMMENT: &str = "timestamp:1556193335\tfile:test";
+        const PREHASHED_GLOBAL: &str = "y/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg==";
+        const LEGACY: &str = "RWQf6LRCGA9i59SLOFxz6NxvASXDJeRtuZykwQepbDEGt87ig1BNpWaVWuNrm73YiIiJbq71Wi+dP9eKL8OC351vwIasSSbXxwA=";
+        const LEGACY_COMMENT: &str = "timestamp:1555779966\tfile:test";
+        const LEGACY_GLOBAL: &str = "QtKMXWyYcwdpZAlPF7tE2ENJkRd1ujvKjlj1m9RtHTBnZPa5WKU5uWRs5GoP5M/VqE81QFuMKI5k/SfNQUaOAA==";
+
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let key = |key: &str| {
+            let document = b64.encode(format!("untrusted comment: minisign public key\n{key}"));
+            PublicKey::decode(std::str::from_utf8(&b64.decode(document).unwrap()).unwrap()).unwrap()
+        };
+        let signature = |signature: &str, comment: &str, global: &str| {
+            let document = b64.encode(format!(
+                "untrusted comment: signature\n{signature}\ntrusted comment: {comment}\n{global}\n"
+            ));
+            Signature::decode(std::str::from_utf8(&b64.decode(document).unwrap()).unwrap()).unwrap()
+        };
+        let verify = |public_key: &str, signature: &Signature, message: &[u8]| {
+            key(public_key).verify(message, signature, true)
+        };
+        let prehashed = signature(PREHASHED, PREHASHED_COMMENT, PREHASHED_GLOBAL);
+        let legacy = signature(LEGACY, LEGACY_COMMENT, LEGACY_GLOBAL);
+
+        // Valid signatures are accepted; the trusted comment is what was signed.
+        assert!(verify(KEY, &prehashed, b"test").is_ok());
+        assert_eq!(prehashed.trusted_comment(), PREHASHED_COMMENT);
+        // Legacy (non-prehashed) handling is unchanged: accepted only with allow_legacy.
+        assert!(verify(KEY, &legacy, b"test").is_ok());
+        assert!(matches!(
+            key(KEY).verify(b"test", &legacy, false),
+            Err(Error::UnexpectedAlgorithm)
+        ));
+        // Tampered message, wrong key, other key id.
+        for signature in [&prehashed, &legacy] {
+            assert!(matches!(
+                verify(KEY, signature, b"Test"),
+                Err(Error::InvalidSignature)
+            ));
+            assert!(matches!(
+                verify(OTHER_KEY, signature, b"test"),
+                Err(Error::InvalidSignature)
+            ));
+            assert!(matches!(
+                verify(OTHER_KEY_ID, signature, b"test"),
+                Err(Error::UnexpectedKeyId)
+            ));
+        }
+        // A tampered trusted comment breaks the global signature.
+        for comment in [
+            "timestamp:1556193336\tfile:test",
+            "timestamp:1556193335\tfile:test\tversion:9.9.9",
+        ] {
+            let tampered = signature(PREHASHED, comment, PREHASHED_GLOBAL);
+            assert!(matches!(
+                verify(KEY, &tampered, b"test"),
+                Err(Error::InvalidSignature)
+            ));
+        }
+        // A non-canonical scalar (S + L) is not accepted as the same signature.
+        let malleated = signature(MALLEATED, PREHASHED_COMMENT, PREHASHED_GLOBAL);
+        assert!(matches!(
+            verify(KEY, &malleated, b"test"),
+            Err(Error::InvalidSignature)
+        ));
+
+        // The release verifier example streams: prehashed only.
+        let stream = |signature: &Signature, chunks: &[&[u8]]| {
+            let public_key = key(KEY);
+            let mut verifier = public_key.verify_stream(signature)?;
+            chunks.iter().for_each(|chunk| verifier.update(chunk));
+            verifier.finalize()
+        };
+        assert!(stream(&prehashed, &[b"te", b"st"]).is_ok());
+        for (signature, chunks) in [(&prehashed, b"teST"), (&malleated, b"test")] {
+            assert!(matches!(
+                stream(signature, &[chunks]),
+                Err(Error::InvalidSignature)
+            ));
+        }
+        assert!(matches!(
+            stream(&legacy, &[b"test"]),
+            Err(Error::UnsupportedLegacyMode)
+        ));
+    }
 }

@@ -1065,6 +1065,19 @@ mod tests {
         assert_eq!(unlock_code(id(DEVICE), &[0x0b; 32]), 0);
     }
 
+    /// FIPS 180-2 "abc": one-shot and chained hashing give the known digest,
+    /// pinned across sha2 upgrades.
+    #[test]
+    fn sha256_matches_the_fips_known_answer() {
+        let expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        assert_eq!(hex::encode(Sha256::digest(b"abc")), expected);
+        let chained = Sha256::new()
+            .chain_update(b"a")
+            .chain_update(b"bc")
+            .finalize();
+        assert_eq!(hex::encode(<[u8; 32]>::from(chained)), expected);
+    }
+
     #[test]
     fn unlock_choices_hold_the_code_and_two_distinct_decoys() {
         let mut rng = rand::rngs::OsRng;
