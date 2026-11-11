@@ -57,7 +57,7 @@ async function save(draft: Draft): Promise<void> {
     notice.value = "Saved.";
   } catch (error) {
     await load();
-    notice.value = writeFailureText(error, (job.value?.revision ?? j.revision) !== j.revision);
+    notice.value = writeFailureText(error, true);
   } finally {
     busy.value = false;
   }

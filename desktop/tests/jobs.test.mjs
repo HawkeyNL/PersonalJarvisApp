@@ -7,13 +7,15 @@ import {
 } from "../src/jobs.ts";
 
 // Neutral test data only.
+const J1 = "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c71";
+const U1 = "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c72";
 const job = {
-  id: "j1", kind: "dependency_review", cadence: "weekly", weekday: 1, at_minute: 420, enabled: true, revision: 3,
+  id: J1, kind: "dependency_review", cadence: "weekly", weekday: 1, at_minute: 420, enabled: true, revision: 3,
   params: {}, last_slot_at: null, created_at: "2026-11-01T10:00:00Z", updated_at: "2026-11-02T10:00:00Z",
   next_run_at: "2026-11-16T06:00:00Z",
 };
 const run = {
-  id: "u1", job_id: "j1", kind: "dependency_review", slot_at: "2026-11-09T06:00:00Z", trigger: "schedule", status: "ok",
+  id: U1, job_id: J1, kind: "dependency_review", slot_at: "2026-11-09T06:00:00Z", trigger: "schedule", status: "ok",
   error_code: null, summary: "<b>Two</b> fixes", summary_source: "claude",
   priorities: [{ ref: "a2", rank: 2, reason: "b" }, { ref: "a1", rank: 1, reason: "a" }],
   started_at: "2026-11-09T06:00:01Z", finished_at: "2026-11-09T06:01:00Z",
@@ -34,6 +36,7 @@ test("job list guard accepts Core's shape and fails closed", () => {
     { status: "ok", jobs: [{ ...job, at_minute: 1440 }] },
     { status: "ok", jobs: [{ ...job, revision: "3" }] },
     { status: "ok", jobs: [{ ...job, params: { roadmap_id: 5 } }] },
+    { status: "ok", jobs: [{ ...job, id: "../x" }] },
   ]) assert.equal(readJobList(broken), null, JSON.stringify(broken)?.slice(0, 80));
 });
 
@@ -46,6 +49,7 @@ test("run guards order priorities, keep text as data and fail closed", () => {
     { ...run, trigger: "cron" },
     { ...run, summary_source: "gpt" },
     { ...run, error_code: "Upstream said <b>no</b>" },
+    { ...run, job_id: "j1" },
     { ...run, priorities: [{ ref: "a1", rank: "1", reason: "x" }] },
     { ...run, priorities: Array.from({ length: 21 }, (_, i) => ({ ref: `a${i}`, rank: i + 1, reason: "x" })) },
   ]) assert.equal(readRuns({ runs: [broken] }), null, JSON.stringify(broken).slice(0, 80));
@@ -77,12 +81,15 @@ test("error codes get fixed owner-facing wording", () => {
 });
 
 test("jobs.run_finished is read for ids and status only", () => {
-  const event = { type: "jobs.run_finished", payload: { job_id: "j1", run_id: "u1", status: "failed", summary: "x" } };
-  assert.deepEqual(runFinished(event), { job_id: "j1", run_id: "u1", status: "failed" });
+  const event = { type: "jobs.run_finished", payload: { job_id: J1, run_id: U1, status: "failed", summary: "x" } };
+  assert.deepEqual(runFinished(event), { job_id: J1, run_id: U1, status: "failed" });
+  // A status a newer Core adds still refetches.
+  assert.equal(runFinished({ ...event, payload: { job_id: J1, run_id: U1, status: "skipped" } }).run_id, U1);
   for (const other of [
     { type: "roadmap.changed", payload: { id: "r1", revision: 1 } },
-    { type: "jobs.run_finished", payload: { job_id: "j1", run_id: 5, status: "ok" } },
-    { type: "jobs.run_finished", payload: { job_id: "j1", run_id: "u1", status: "great" } },
+    { type: "jobs.run_finished", payload: { job_id: J1, run_id: 5, status: "ok" } },
+    { type: "jobs.run_finished", payload: { job_id: J1, run_id: "u1", status: "ok" } },
+    { type: "jobs.run_finished", payload: { job_id: J1, run_id: U1 } },
     { type: "jobs.run_finished" },
     null,
   ]) assert.equal(runFinished(other), null);
@@ -123,6 +130,7 @@ test("an older Core and refusals get fixed wording", () => {
   assert.equal(NEEDS_CORE, "Needs Jarvis Core v0.0.80 or later.");
   assert.equal(runNowFailureText(apiError(429)), RUN_NOW_REFUSED);
   assert.match(runNowFailureText(apiError(409)), /scheduler is off/);
+  // A 409 on a change is always a revision conflict; only a create can mean "exists".
   assert.equal(writeFailureText(apiError(409), true), CHANGED_ELSEWHERE);
   assert.match(writeFailureText(apiError(409), false), /already exists/);
 });

@@ -73,7 +73,7 @@ const facts = computed(() => new Map(run.value?.facts.map((f) => [f.ref, f]) ?? 
       <section v-if="run.errors.length" class="card jb-col" aria-labelledby="jb-repos">
         <h2 id="jb-repos">Repositories that could not be read</h2>
         <ul class="jb-list t-sm">
-          <li v-for="e in run.errors" :key="e.repo"><span class="mono jb-wrap">{{ e.repo }}</span>: {{ errorText(e.error_code) }}</li>
+          <li v-for="(e, i) in run.errors" :key="i"><span class="mono jb-wrap">{{ e.repo }}</span>: {{ errorText(e.error_code) }}</li>
         </ul>
       </section>
 
@@ -99,7 +99,7 @@ const facts = computed(() => new Map(run.value?.facts.map((f) => [f.ref, f]) ?? 
         </ol>
       </section>
       <p v-else-if="run.status === 'ok' || run.status === 'partial'" class="card empty t-sm">No open alerts in the repositories Core could read.</p>
-      <p v-if="run.truncated" class="t-xs t-2">GitHub had more than Core reads in one run; the least severe entries were left out.</p>
+      <p v-if="run.truncated" class="t-xs t-2">Some entries were left out: a full page from GitHub, an alert Core could not read, or the size limit.</p>
     </template>
   </PageShell>
 </template>

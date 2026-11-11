@@ -53,11 +53,13 @@ const str = (x: unknown, max = 10_000): x is string => typeof x === "string" && 
 const optStr = (x: unknown, max?: number) => x === undefined || x === null || str(x, max);
 const int = (x: unknown): x is number => typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
 const CODE = /^[a-z0-9_]{1,64}$/;
+// Job and run ids go into app routes; Core's are UUIDs.
+const isId = (x: unknown): x is string => typeof x === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x);
 const isCode = (x: unknown): x is string => typeof x === "string" && CODE.test(x);
 const nul = <T>(x: unknown) => (x ?? null) as T | null;
 
 function readJob(x: unknown): Job | null {
-  if (!isObj(x) || !str(x.id, 64) || !(KINDS as readonly unknown[]).includes(x.kind)) return null;
+  if (!isObj(x) || !isId(x.id) || !(KINDS as readonly unknown[]).includes(x.kind)) return null;
   if (x.cadence !== "daily" && x.cadence !== "weekly") return null;
   if (x.weekday != null && !(int(x.weekday) && x.weekday >= 1 && x.weekday <= 7)) return null;
   if (!int(x.at_minute) || x.at_minute > 1439 || typeof x.enabled !== "boolean" || !int(x.revision)) return null;
@@ -79,7 +81,7 @@ export function readJobList(x: unknown): JobList | null {
 export const readJobAnswer = readJob;
 
 function readRun(x: unknown): Run | null {
-  if (!isObj(x) || !str(x.id, 64) || !str(x.job_id, 64) || !str(x.slot_at, 64) || !str(x.started_at, 64)) return null;
+  if (!isObj(x) || !isId(x.id) || !isId(x.job_id) || !str(x.slot_at, 64) || !str(x.started_at, 64)) return null;
   if ((x.trigger !== "schedule" && x.trigger !== "owner") || !(RUN_STATUSES as readonly unknown[]).includes(x.status)) return null;
   if ((x.error_code != null && !isCode(x.error_code)) || !optStr(x.summary, 4000) || !optStr(x.finished_at, 64)) return null;
   if (x.summary_source != null && x.summary_source !== "claude" && x.summary_source !== "deterministic") return null;
@@ -138,15 +140,15 @@ export function readRunDetail(x: unknown): RunDetail | null {
 
 // ---- realtime ----------------------------------------------------------
 
-export type RunFinished = { job_id: string; run_id: string; status: RunStatus };
+export type RunFinished = { job_id: string; run_id: string; status: string };
 
 /** A `jobs.run_finished` hint. Only the ids and the status are read; the
- *  refetch is the authority. Null for any other or malformed event. */
+ *  refetch is the authority, so a status this build does not know yet still
+ *  refetches. Null for any other or malformed event. */
 export function runFinished(event: unknown): RunFinished | null {
   if (!isObj(event) || event.type !== "jobs.run_finished" || !isObj(event.payload)) return null;
   const { job_id, run_id, status } = event.payload;
-  return str(job_id, 64) && str(run_id, 64) && (RUN_STATUSES as readonly unknown[]).includes(status)
-    ? { job_id, run_id, status: status as RunStatus } : null;
+  return isId(job_id) && isId(run_id) && str(status, 64) ? { job_id, run_id, status } : null;
 }
 
 // ---- schedule and editor ---------------------------------------------------
@@ -279,11 +281,11 @@ export function runNowFailureText(error: unknown): string {
 
 export const CHANGED_ELSEWHERE = "Changed elsewhere, reloaded.";
 
-/** The notice after a failed write. A 409 is a conflict when the reload
- *  shows a newer revision, otherwise a second job of the same kind. */
-export function writeFailureText(error: unknown, revisionMoved: boolean): string {
+/** The notice after a failed write. A 409 on a change is a revision
+ *  conflict; on a create, a second job of the same kind. */
+export function writeFailureText(error: unknown, update: boolean): string {
   const e = error as { name?: string; status?: number } | null;
-  if (e?.name === "ApiError" && e.status === 409) return revisionMoved ? CHANGED_ELSEWHERE : "Core refused this: a job of this kind already exists.";
+  if (e?.name === "ApiError" && e.status === 409) return update ? CHANGED_ELSEWHERE : "Core refused this: a job of this kind already exists.";
   if (e?.name === "ApiError" && e.status === 400) return "Core refused this as invalid, for example a roadmap that is archived. Check the fields and try again.";
   if (e?.name === "NetworkError") return "No answer from your Home Node. It is unknown whether the change arrived; reloaded to check.";
   return `Not saved. ${failureText(failureOf(error))}`;
