@@ -4,7 +4,7 @@ import {createMemoryHistory, createRouter} from "vue-router";
 
 import {NAV, PAGES, REDIRECTS, ariaCurrent, buildRoutes} from "../src/navigation.ts";
 
-const VIEWS = ["home", "agents", "integrations", "health", "memory", "roadmaps", "roadmap", "trading", "desk", "stocks", "stock", "positions", "memecoin", "memestrategies", "memestrategy", "tasks", "context", "settings", "soon"];
+const VIEWS = ["home", "agents", "integrations", "health", "memory", "roadmaps", "roadmap", "jobs", "job", "jobrun", "trading", "desk", "stocks", "stock", "positions", "memecoin", "memestrategies", "memestrategy", "tasks", "context", "settings", "soon"];
 const stub = name => ({name, render: () => null});
 
 async function routerAt(path) {
@@ -15,7 +15,7 @@ async function routerAt(path) {
 
 test("sidebar follows the agreed sections and entries", () => {
   assert.deepEqual(NAV.map(s => [s.label ?? null, s.items.map(i => i.label)]), [
-    ["Jarvis", ["Chat", "Memory", "Roadmaps"]],
+    ["Jarvis", ["Chat", "Memory", "Roadmaps", "Jobs"]],
     ["Trading", ["Dashboard", "Stocks", "Memecoin", "Futures", "Positions", "Autonomy"]],
     ["Activity", ["Approvals", "Runs", "Notifications"]],
     [null, ["Content"]],
@@ -46,6 +46,12 @@ test("pages map onto the existing views", async () => {
   const detail = await routerAt("/roadmaps/0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b");
   assert.equal(detail.matched[0].components.default.name, "roadmap");
   assert.equal(detail.meta.nav, "roadmaps");
+  assert.equal(await view("/jobs"), "jobs");
+  const uuid = "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b";
+  assert.equal(await view(`/jobs/${uuid}`), "job");
+  const run = await routerAt(`/jobs/runs/${uuid}`);
+  assert.equal(run.matched[0].components.default.name, "jobrun");
+  assert.equal(run.meta.nav, "jobs");
   assert.equal(await view("/trading"), "desk");
   assert.equal(await view("/trading/stocks"), "stocks");
   assert.equal(await view("/trading/positions"), "positions");
