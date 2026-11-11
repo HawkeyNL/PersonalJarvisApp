@@ -8,6 +8,12 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [vue()],
 
+  // Vite 6's default target. Vite 7+ defaults to Baseline 2025 (Safari 16.4),
+  // which older macOS WebKit webviews do not support.
+  build: {
+    target: ["es2020", "edge88", "firefox78", "chrome87", "safari14"],
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

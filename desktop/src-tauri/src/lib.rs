@@ -5,7 +5,7 @@
 //! app's ordinary metadata file. The private key is never exposed to JS.
 
 use ed25519_dalek::{Signer, SigningKey};
-use rand::{rngs::OsRng, RngCore};
+use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -234,7 +234,7 @@ fn signing_key_unlocked(app: &AppHandle, allow_create: bool) -> Result<SigningKe
                 return Err("Original device key unavailable; restore the original OS credential store or explicitly re-enroll this device".into());
             }
             let mut seed = [0u8; 32];
-            OsRng.fill_bytes(&mut seed);
+            UnwrapErr(SysRng).fill_bytes(&mut seed);
             let key_hex = hex::encode(seed);
             save_credential(KEY_ACCOUNT, &key_hex)?;
             key_hex
@@ -1079,6 +1079,67 @@ mod tests {
             .verify_strict(&[9_u8; 32], &signature)
             .is_ok());
     }
+
+    /// RFC 8032 section 7.1 tests 1 and 2: the device key derives the same
+    /// public key and signs the same bytes across ed25519-dalek upgrades, and
+    /// strict verification still refuses tampering and malleated signatures.
+    #[test]
+    fn device_signatures_match_rfc8032_known_answers() {
+        use ed25519_dalek::{Signature, VerifyingKey};
+        let decode = |value: &str| hex::decode(value).unwrap();
+        for (seed, public, message, expected) in [
+            (
+                "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+                "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+                "",
+                "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b",
+            ),
+            (
+                "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
+                "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+                "72",
+                "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00",
+            ),
+        ] {
+            let key = SigningKey::from_bytes(&decode(seed).try_into().unwrap());
+            let public = VerifyingKey::from_bytes(&decode(public).try_into().unwrap()).unwrap();
+            let message = decode(message);
+            let signature = key.sign(&message);
+            assert_eq!(key.verifying_key(), public);
+            assert_eq!(hex::encode(signature.to_bytes()), expected);
+            assert!(public.verify_strict(&message, &signature).is_ok());
+
+            let mut tampered = message.clone();
+            tampered.push(0);
+            assert!(public.verify_strict(&tampered, &signature).is_err());
+            let other = SigningKey::from_bytes(&[7; 32]).verifying_key();
+            assert!(other.verify_strict(&message, &signature).is_err());
+            // S + L encodes the same scalar; strict verification must refuse it.
+            let mut malleated = signature.to_bytes();
+            let mut carry = 0_u16;
+            for (byte, l) in malleated[32..].iter_mut().zip(ED25519_ORDER) {
+                let sum = u16::from(*byte) + u16::from(l) + carry;
+                *byte = sum as u8;
+                carry = sum >> 8;
+            }
+            assert_eq!(carry, 0);
+            let malleated = Signature::from_bytes(&malleated);
+            assert!(public.verify_strict(&message, &malleated).is_err());
+        }
+        // Identity key with R = identity and S = 0 satisfies the cofactorless
+        // equation for any message; strict verification refuses small order.
+        let mut identity = [0; 64];
+        identity[0] = 1;
+        let key = VerifyingKey::from_bytes(identity[..32].try_into().unwrap()).unwrap();
+        let signature = Signature::from_bytes(&identity);
+        assert!(key.verify_strict(b"any message", &signature).is_err());
+    }
+
+    /// The Ed25519 group order L, little endian (RFC 8032 section 5.1).
+    const ED25519_ORDER: [u8; 32] = [
+        0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde,
+        0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10,
+    ];
 
     #[test]
     fn home_node_origin_has_no_production_localhost_fallback_or_credentials() {
