@@ -109,7 +109,11 @@ impl UpdateFailure {
             | E::UrlParse(_)
             | E::TargetNotFound(_)
             | E::TargetsNotFound(_) => Self::ManifestInvalid,
-            E::Minisign(_) | E::Base64(_) | E::SignatureUtf8(_) => Self::SignatureInvalid,
+            E::Minisign(_)
+            | E::Base64(_)
+            | E::SignatureUtf8(_)
+            | E::SignedVersionMismatch { .. }
+            | E::MissingSignedVersion => Self::SignatureInvalid,
             // Only raised for a non-success download response.
             E::Network(_) => Self::DownloadRefused,
             _ => Self::Other,
@@ -804,6 +808,14 @@ mod tests {
                 F::SignatureInvalid,
             ),
             (E::SignatureUtf8("x".into()), F::SignatureInvalid),
+            (
+                E::SignedVersionMismatch {
+                    signed: "0.1.28".into(),
+                    announced: "0.1.29".into(),
+                },
+                F::SignatureInvalid,
+            ),
+            (E::MissingSignedVersion, F::SignatureInvalid),
             (E::Network("status: 404".into()), F::DownloadRefused),
             (E::EmptyEndpoints, F::Other),
         ] {
