@@ -888,6 +888,9 @@ mod tests {
         const MALLEATED: &str = "RUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGOxkY0XlWAIO73/x/qsT+ob7bNJJylDOocrCo8KLzZxo=";
         const PREHASHED_COMMENT: &str = "timestamp:1556193335\tfile:test";
         const PREHASHED_GLOBAL: &str = "y/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg==";
+        // PREHASHED_GLOBAL with S + L: only the S < L check refuses this one,
+        // because the global signature still covers unchanged bytes.
+        const MALLEATED_GLOBAL: &str = "y/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMI5zStVDI9RL5JUGpX+ZjOKFkZZSNCisQbuQY+bHwhEFg==";
         const LEGACY: &str = "RWQf6LRCGA9i59SLOFxz6NxvASXDJeRtuZykwQepbDEGt87ig1BNpWaVWuNrm73YiIiJbq71Wi+dP9eKL8OC351vwIasSSbXxwA=";
         const LEGACY_COMMENT: &str = "timestamp:1555779966\tfile:test";
         const LEGACY_GLOBAL: &str = "QtKMXWyYcwdpZAlPF7tE2ENJkRd1ujvKjlj1m9RtHTBnZPa5WKU5uWRs5GoP5M/VqE81QFuMKI5k/SfNQUaOAA==";
@@ -945,11 +948,16 @@ mod tests {
             ));
         }
         // A non-canonical scalar (S + L) is not accepted as the same signature.
-        let malleated = signature(MALLEATED, PREHASHED_COMMENT, PREHASHED_GLOBAL);
-        assert!(matches!(
-            verify(KEY, &malleated, b"test"),
-            Err(Error::InvalidSignature)
-        ));
+        let malleated = [
+            signature(MALLEATED, PREHASHED_COMMENT, PREHASHED_GLOBAL),
+            signature(PREHASHED, PREHASHED_COMMENT, MALLEATED_GLOBAL),
+        ];
+        for signature in &malleated {
+            assert!(matches!(
+                verify(KEY, signature, b"test"),
+                Err(Error::InvalidSignature)
+            ));
+        }
 
         // The release verifier example streams: prehashed only.
         let stream = |signature: &Signature, chunks: &[&[u8]]| {
@@ -959,7 +967,11 @@ mod tests {
             verifier.finalize()
         };
         assert!(stream(&prehashed, &[b"te", b"st"]).is_ok());
-        for (signature, chunks) in [(&prehashed, b"teST"), (&malleated, b"test")] {
+        for (signature, chunks) in [
+            (&prehashed, b"teST"),
+            (&malleated[0], b"test"),
+            (&malleated[1], b"test"),
+        ] {
             assert!(matches!(
                 stream(signature, &[chunks]),
                 Err(Error::InvalidSignature)
