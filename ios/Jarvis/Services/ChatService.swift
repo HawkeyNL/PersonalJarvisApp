@@ -41,7 +41,7 @@ actor ChatService {
     func deleteConversation(id: UUID) async throws {
         let binding = await api.binding()
         let token = try await requiredToken()
-        try await api.delete("/v1/conversations/\(id.uuidString.lowercased())", token: token, expectedBinding: binding)
+        try await api.deleteConversation(id: id, token: token, expectedBinding: binding)
     }
 
     func uploadPhoto(_ jpeg: Data) async throws -> UUID {
@@ -54,13 +54,13 @@ actor ChatService {
     func setPhotoSaved(id: UUID, saved: Bool) async throws -> PhotoMeta {
         let binding = await api.binding()
         let token = try await requiredToken()
-        return try await api.patch("/v1/photos/\(id.uuidString.lowercased())", body: PhotoSaved(saved: saved), token: token, expectedBinding: binding)
+        return try await api.setPhotoSaved(id: id, saved: saved, token: token, expectedBinding: binding)
     }
 
     func deletePhoto(id: UUID) async throws {
         let binding = await api.binding()
         let token = try await requiredToken()
-        try await api.delete("/v1/photos/\(id.uuidString.lowercased())", token: token, expectedBinding: binding)
+        try await api.deletePhoto(id: id, token: token, expectedBinding: binding)
     }
 
     func conversation(id: UUID) async throws -> ConversationResponse {

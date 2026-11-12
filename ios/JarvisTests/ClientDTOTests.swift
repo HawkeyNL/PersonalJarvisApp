@@ -2587,6 +2587,166 @@ final class ChatPhotoTests: XCTestCase {
     }
 }
 
+/// The composer's photos against a fixture Core, through the real API client.
+@MainActor
+final class ChatPhotoModelTests: XCTestCase {
+    private func signedIn() -> JarvisAppModel {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PhotoCoreProtocol.self]
+        let api = JarvisAPIClient(baseURL: URL(string: "https://jarvis.example.com")!, session: URLSession(configuration: configuration))
+        return JarvisAppModel(signedInChat: ChatService(api: api, tokenLoader: { "fixture-session-not-a-secret" }), api: api, realtime: true)
+    }
+
+    private func png() throws -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return try XCTUnwrap(UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64), format: format).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+        }.pngData())
+    }
+
+    private func until(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
+        var tries = 0
+        while !condition(), tries < 500 { tries += 1; try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertTrue(condition(), file: file, line: line)
+    }
+
+    private let deleted = "DELETE /v1/photos/\(PhotoCoreProtocol.photo)"
+
+    func testRemovingAPhotoWhileItUploadsDeletesItOnTheHomeNode() async throws {
+        PhotoCoreProtocol.reset(uploadDelay: 0.5)
+        let model = signedIn()
+        let photo = try png()
+        model.attachPhotos([{ photo }])
+        try await until { model.chips.first?.state == .uploading }
+        model.removeChip(try XCTUnwrap(model.chips.first?.id))
+        XCTAssertTrue(model.chips.isEmpty)
+        try await until { PhotoCoreProtocol.requests().contains(deleted) }
+    }
+
+    func testLeavingDuringAnUploadSendsNoDeleteButAnUploadedPhotoIsDeleted() async throws {
+        PhotoCoreProtocol.reset(uploadDelay: 0.5)
+        let uploading = signedIn()
+        let photo = try png()
+        uploading.attachPhotos([{ photo }])
+        try await until { uploading.chips.first?.state == .uploading }
+        uploading.lockWhenBackgrounded()
+        XCTAssertTrue(uploading.chips.isEmpty)
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+        XCTAssertTrue(PhotoCoreProtocol.requests().contains("POST /v1/photos"))
+        XCTAssertFalse(PhotoCoreProtocol.requests().contains(deleted))
+
+        PhotoCoreProtocol.reset(uploadDelay: 0)
+        let ready = signedIn()
+        ready.attachPhotos([{ photo }])
+        try await until { ready.chips.first?.state == .ready }
+        ready.lockWhenBackgrounded()
+        XCTAssertTrue(ready.chips.isEmpty)
+        try await until { PhotoCoreProtocol.requests().contains(deleted) }
+    }
+
+    func testARefusedRunPutsThePhotosBack() async throws {
+        let photo = try png()
+        for status in [400, 404] {
+            PhotoCoreProtocol.reset(uploadDelay: 0, runStatus: status)
+            let model = signedIn()
+            model.attachPhotos([{ photo }])
+            try await until { model.chips.first?.state == .ready }
+            let chip = try XCTUnwrap(model.chips.first?.id)
+            let refused = await model.send("Look")
+            XCTAssertTrue(refused)
+            XCTAssertEqual(model.chips.map(\.id), [chip])
+            XCTAssertEqual(model.chips.map(\.state), [.ready])
+            XCTAssertEqual(model.messages.map(\.content), [ChatPhotos.runRefusal(status)!])
+            XCTAssertFalse(model.isSending)
+            XCTAssertEqual(PhotoCoreProtocol.runAttachments(), [PhotoCoreProtocol.photo.uppercased()])
+        }
+    }
+
+    func testPastingWithoutAnImageSaysSo() {
+        let model = signedIn()
+        model.pastePhotos([])
+        XCTAssertEqual(model.chipNotice, "No photo on the clipboard.")
+        XCTAssertTrue(model.chips.isEmpty)
+    }
+
+    func testPhotosCoreNoLongerHasAreMarkedRemoved() async throws {
+        PhotoCoreProtocol.reset(uploadDelay: 0)
+        let model = signedIn()
+        let kept = "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"
+        let deleted = "1b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"
+        let shown = "2b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"
+        try await model.keepPhoto(kept, saved: true)
+        try await model.deletePhoto(deleted)
+        guard case .removed = await model.photo(id: shown) else { return XCTFail("A 404 photo shows as removed") }
+        XCTAssertEqual(model.removedPhotos, [kept, deleted, shown])
+        let requests = PhotoCoreProtocol.requests()
+        XCTAssertTrue(requests.contains("PATCH /v1/photos/\(kept)"))
+        XCTAssertTrue(requests.contains("DELETE /v1/photos/\(deleted)"))
+    }
+}
+
+/// Core for chat photos: uploads succeed (after `uploadDelay`), runs answer `runStatus`,
+/// everything else is 404.
+private final class PhotoCoreProtocol: URLProtocol {
+    static let photo = "3b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"
+    private static let lock = NSLock()
+    private static var log: [String] = []
+    private static var attachments: [String]?
+    private static var uploadDelay: TimeInterval = 0
+    private static var runStatus = 400
+    static func reset(uploadDelay: TimeInterval, runStatus: Int = 400) {
+        lock.withLock { log = []; attachments = nil; self.uploadDelay = uploadDelay; self.runStatus = runStatus }
+    }
+    static func requests() -> [String] { lock.withLock { log } }
+    static func runAttachments() -> [String]? { lock.withLock { attachments } }
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let method = request.httpMethod ?? "GET"
+        let path = request.url?.path ?? ""
+        var delay: TimeInterval = 0
+        var status = 404
+        var body = Data()
+        Self.lock.withLock {
+            Self.log.append("\(method) \(path)")
+            if method == "POST", path == "/v1/photos" {
+                delay = Self.uploadDelay
+                status = 200
+                body = Data(#"{"id":"\#(Self.photo)","width":64,"height":64,"bytes":100}"#.utf8)
+            } else if method == "POST", path == "/v1/assistant/runs" {
+                status = Self.runStatus
+                body = Data(#"{"error":"refused"}"#.utf8)
+                let sent = (try? JSONSerialization.jsonObject(with: Self.body(of: request))) as? [String: Any]
+                Self.attachments = sent?["attachments"] as? [String]
+            }
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
+            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
+                                           headerFields: ["Content-Type": "application/json"])!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: body)
+            client?.urlProtocolDidFinishLoading(self)
+        }
+    }
+    override func stopLoading() { }
+
+    private static func body(of request: URLRequest) -> Data {
+        var data = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open(); defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while data.count < 65536 {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }
+                data.append(contentsOf: buffer.prefix(count))
+            }
+        }
+        return data
+    }
+}
+
 final class ResearchOfferTests: XCTestCase {
     private func completed(_ offer: Any?) throws -> RealtimeEvent {
         let id = UUID().uuidString

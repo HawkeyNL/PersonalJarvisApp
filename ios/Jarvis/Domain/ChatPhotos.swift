@@ -37,12 +37,15 @@ enum ChatPhotos {
     static let jpegQuality: CGFloat = 0.88
     /// Larger files are refused before decoding (a phone photo is far smaller).
     static let maxInputBytes = 30 * 1024 * 1024
+    /// More pixels than this are refused before decoding (a 100 MP photo is already rare).
+    static let maxInputPixels = 100_000_000
     static let unsupported = "This photo format isn't supported; export it as JPEG."
     static let coreTooOld = "Your Home Node needs Jarvis Core v0.0.83 to receive photos."
     static let tooLarge = "This photo is too large."
     static let unreadable = "This photo could not be read."
     static let unreachable = "Could not reach your Home Node."
     static let limit = "Up to \(maxPhotos) photos per message."
+    static let nothingToPaste = "No photo on the clipboard."
     /// Core attaches an unsent photo only within 23 h of its upload.
     static let sendWithin: TimeInterval = 23 * 60 * 60
     static let tooOldToSend = "This photo waited too long; remove it and attach it again."
@@ -61,14 +64,15 @@ enum ChatPhotos {
         guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? Int,
-              let height = properties[kCGImagePropertyPixelHeight] as? Int,
-              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                  kCGImageSourceCreateThumbnailFromImageAlways: true,
-                  kCGImageSourceCreateThumbnailWithTransform: true,
-                  kCGImageSourceShouldCacheImmediately: true,
-                  kCGImageSourceThumbnailMaxPixelSize: side(width: width, height: height),
-              ] as CFDictionary)
+              let height = properties[kCGImagePropertyPixelHeight] as? Int, width > 0, height > 0
         else { throw Failure(message: unsupported) }
+        guard width <= maxInputPixels / height else { throw Failure(message: tooLarge) }
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: side(width: width, height: height),
+        ] as CFDictionary) else { throw Failure(message: unsupported) }
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = true

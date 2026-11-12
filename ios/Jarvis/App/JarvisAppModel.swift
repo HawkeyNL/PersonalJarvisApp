@@ -71,7 +71,9 @@ final class JarvisAppModel: ObservableObject {
         presentation.invalidate()
         messages = []; conversations = []; isSending = false; realtimeAvailable = false
         photos.removeAll()
-        // Uploaded but unsent photos stay pending; Core removes them after 24 hours.
+        // Uploaded photos are deleted while the session may still allow it; one still
+        // uploading stays pending and Core removes it after 24 hours.
+        chips.forEach { forget($0.photoId) }
         chips = []; chipNotice = nil; photoMeta = [:]; removedPhotos = []; researchOffer = nil
         if clearIdentity {
             pendingRequests.clear(); currentConversationId = nil; currentConversationTitle = "New conversation"
@@ -99,14 +101,25 @@ final class JarvisAppModel: ObservableObject {
     /// The "Approval notifications" setting and APNs token registration.
     let approvalPush = ApprovalPush()
 
-    init() {
+    convenience init() {
         let endpointStore = EndpointStore()
         let api = JarvisAPIClient(baseURL: endpointStore.endpoint)
         let auth = AuthService(api: api)
+        self.init(endpointStore: endpointStore, api: api, auth: auth, chat: ChatService(api: api, auth: auth))
+    }
+
+    /// Native test seam: a signed-in, unlocked chat over `chat`; nothing in the app uses it.
+    convenience init(signedInChat chat: ChatService, api: JarvisAPIClient, realtime: Bool) {
+        self.init(endpointStore: EndpointStore(), api: api, auth: AuthService(api: api), chat: chat)
+        enrollmentState = .authenticated
+        realtimeAvailable = realtime
+    }
+
+    private init(endpointStore: EndpointStore, api: JarvisAPIClient, auth: AuthService, chat: ChatService) {
         self.endpointStore = endpointStore
         self.api = api
         self.auth = auth
-        self.chat = ChatService(api: api, auth: auth)
+        self.chat = chat
         self.biometricLock = BiometricLock()
         self.endpointText = endpointStore.endpoint?.absoluteString ?? ""
         speech.setRate(voiceRate)
@@ -440,7 +453,8 @@ final class JarvisAppModel: ObservableObject {
             result = await Task.detached(priority: .userInitiated) { ChatPhoto.thumbnail(data, maxPixels: full ? 1600 : 512) }.value
                 .map(ChatPhoto.image) ?? .unavailable
         } catch let JarvisAPIError.rejected(status, _) where status == 404 {
-            result = .removed
+            if presentation.accepts(generation) { markRemoved(id) }
+            return .removed
         } catch {
             // An expired session goes through the usual sign-in-again flow (once: it resets the generation).
             if (error as? JarvisAPIError) == .unauthorized, presentation.accepts(generation) { handle(error) }
@@ -460,7 +474,7 @@ final class JarvisAppModel: ObservableObject {
 
     /// Adds picked or pasted photos, up to four in the composer. Each is shrunk and
     /// uploaded at once.
-    func attachPhotos(_ loads: [() async -> Data?]) {
+    func attachPhotos(_ loads: [() async throws -> Data]) {
         chipNotice = nil
         for load in loads {
             guard chips.count < ChatPhotos.maxPhotos else { chipNotice = ChatPhotos.limit; break }
@@ -470,7 +484,12 @@ final class JarvisAppModel: ObservableObject {
         }
     }
 
-    private func prepare(_ key: UUID, _ load: () async -> Data?) async {
+    /// Clipboard images, or a word that there are none.
+    func pastePhotos(_ loads: [() async throws -> Data]) {
+        if loads.isEmpty { chipNotice = ChatPhotos.nothingToPaste } else { attachPhotos(loads) }
+    }
+
+    private func prepare(_ key: UUID, _ load: () async throws -> Data) async {
         let generation = presentation.id
         // Changes the chip while it is still in the composer.
         func update(_ change: (inout PhotoChip) -> Void) -> Bool {
@@ -478,8 +497,9 @@ final class JarvisAppModel: ObservableObject {
             change(&chips[index])
             return true
         }
-        guard let data = await load() else {
-            _ = update { $0.state = .failed; $0.error = ChatPhotos.unreadable }
+        let data: Data
+        do { data = try await load() } catch {
+            _ = update { $0.state = .failed; $0.error = (error as? ChatPhotos.Failure)?.message ?? ChatPhotos.unreadable }
             return
         }
         // Decoded and re-encoded off the main actor.
@@ -805,8 +825,12 @@ final class JarvisAppModel: ObservableObject {
         isSending = true
         if realtimeAvailable {
             let requestId = UUID()
-            guard let optimisticID = messages.last?.id,
-                  pendingRequests.insert(requestId, optimisticID: optimisticID) else { isSending = false; return false }
+            guard let optimisticID = messages.last?.id, pendingRequests.insert(requestId, optimisticID: optimisticID) else {
+                isSending = false
+                messages.removeLast()
+                restoreChips(taken)
+                return true
+            }
             let selected = currentConversationId
             do {
                 let run = try await chat.submit(requestId: requestId, text: trimmed, conversationId: selected, history: priorMessages,

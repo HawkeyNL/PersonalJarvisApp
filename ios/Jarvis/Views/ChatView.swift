@@ -1,3 +1,4 @@
+import CoreTransferable
 import ImageIO
 import PhotosUI
 import SwiftUI
@@ -91,7 +92,17 @@ struct ChatView: View {
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             picked = []
-            model.attachPhotos(items.map { item -> () async -> Data? in { try? await item.loadTransferable(type: Data.self) } })
+            model.attachPhotos(items.map { item -> () async throws -> Data in
+                {
+                    guard let photo = try await item.loadTransferable(type: PickedPhoto.self) else {
+                        throw ChatPhotos.Failure(message: ChatPhotos.unreadable)
+                    }
+                    return photo.data
+                }
+            })
+        }
+        .onChange(of: model.chips.compactMap(\.error)) { old, new in
+            for error in new where !old.contains(error) { AccessibilityNotification.Announcement(error).post() }
         }
     }
 
@@ -173,7 +184,7 @@ struct ChatView: View {
         return HStack(alignment: .bottom, spacing: JV.Space.xs) {
             Menu {
                 Button("Photo library", systemImage: "photo.on.rectangle") { picking = true }
-                Button("Paste photo", systemImage: "doc.on.clipboard") { model.attachPhotos(Self.pastedPhotos()) }
+                Button("Paste photo", systemImage: "doc.on.clipboard") { model.pastePhotos(Self.pastedPhotos()) }
             } label: {
                 Image(systemName: "photo.badge.plus")
                     .font(.system(size: 17))
@@ -204,6 +215,7 @@ struct ChatView: View {
             .buttonStyle(.plain)
             .disabled(!canSend)
             .accessibilityLabel("Send message")
+            .accessibilityHint(ChatPhotos.allReady(model.chips) ? "" : "Waiting for photos")
         }
         .padding(.leading, JV.Space.xxs)
         .padding(.trailing, JV.Space.xxs)
@@ -223,14 +235,30 @@ struct ChatView: View {
     }
 
     /// Images on the clipboard (a screenshot), read only on the owner's tap.
-    private static func pastedPhotos() -> [() async -> Data?] {
-        UIPasteboard.general.itemProviders.compactMap { provider -> (() async -> Data?)? in
+    private static func pastedPhotos() -> [() async throws -> Data] {
+        UIPasteboard.general.itemProviders.compactMap { provider -> (() async throws -> Data)? in
             guard let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) else { return nil }
             return {
-                await withCheckedContinuation { (done: CheckedContinuation<Data?, Never>) in
-                    _ = provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in done.resume(returning: data) }
+                try await withCheckedThrowingContinuation { (done: CheckedContinuation<Data, Error>) in
+                    _ = provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
+                        if let data { done.resume(returning: data) } else { done.resume(throwing: ChatPhotos.Failure(message: ChatPhotos.unreadable)) }
+                    }
                 }
             }
+        }
+    }
+}
+
+/// A picked photo, read from its file only once the size is known to be within bounds.
+private struct PickedPhoto: Transferable {
+    let data: Data
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(importedContentType: .image) { received in
+            let size = try received.file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard size <= ChatPhotos.maxInputBytes else { throw ChatPhotos.Failure(message: ChatPhotos.tooLarge) }
+            // Mapped, not copied: ImageIO then reads only what it decodes.
+            return PickedPhoto(data: try Data(contentsOf: received.file, options: .mappedIfSafe))
         }
     }
 }
@@ -317,19 +345,10 @@ private struct PhotoViewer: View {
                     if let error {
                         Text(verbatim: error).font(JV.font(13)).foregroundStyle(JV.dangerText)
                     }
-                    Text(verbatim: ChatPhotos.expiryHint(meta)).font(JV.font(13)).foregroundStyle(JV.textSecondary)
-                    HStack(spacing: JV.Space.xs) {
-                        Button(meta?.saved == true ? "Kept" : "Keep", systemImage: meta?.saved == true ? "star.fill" : "star") {
-                            Task { await toggleKeep() }
-                        }
-                        .buttonStyle(JVButtonStyle(kind: .secondary))
-                        .accessibilityHint(meta?.saved == true ? "Stops keeping it past 90 days" : "Keeps it past 90 days")
-                        .accessibilityAddTraits(meta?.saved == true ? .isSelected : [])
-                        Button("Delete", systemImage: "trash", role: .destructive) { confirming = true }
-                            .buttonStyle(JVButtonStyle(kind: .secondary))
-                            .accessibilityLabel("Delete photo")
+                    if case .image? = photo {
+                        Text(verbatim: ChatPhotos.expiryHint(meta)).font(JV.font(13)).foregroundStyle(JV.textSecondary)
+                        actions
                     }
-                    .disabled(busy)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(JV.Space.md)
@@ -342,10 +361,28 @@ private struct PhotoViewer: View {
             }
         }
         .task { photo = await model.photo(id: id, full: true) }
+        .onChange(of: error) { _, error in
+            if let error { AccessibilityNotification.Announcement(error).post() }
+        }
         .confirmationDialog("Delete this photo?", isPresented: $confirming, titleVisibility: .visible) {
             Button("Delete for good", role: .destructive) { Task { await delete() } }
             Button("Cancel", role: .cancel) {}
         }
+    }
+
+    private var actions: some View {
+        HStack(spacing: JV.Space.xs) {
+            Button(meta?.saved == true ? "Kept" : "Keep", systemImage: meta?.saved == true ? "star.fill" : "star") {
+                Task { await toggleKeep() }
+            }
+            .buttonStyle(JVButtonStyle(kind: .secondary))
+            .accessibilityHint(meta?.saved == true ? "Stops keeping it past 90 days" : "Keeps it past 90 days")
+            .accessibilityAddTraits(meta?.saved == true ? .isSelected : [])
+            Button("Delete", systemImage: "trash", role: .destructive) { confirming = true }
+                .buttonStyle(JVButtonStyle(kind: .secondary))
+                .accessibilityLabel("Delete photo")
+        }
+        .disabled(busy)
     }
 
     private func toggleKeep() async {
