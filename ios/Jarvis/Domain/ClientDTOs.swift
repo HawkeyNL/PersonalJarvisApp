@@ -307,8 +307,25 @@ struct HomeNodeRegistry: Decodable {
     let liveHost: LiveHost?
     let software: [Software]
     let brains: [Brain]?
+    /// The model catalog Core probed; set up means a key or local install exists.
+    let models: [CatalogModel]?
+    let activeBrain: String?
 
-    enum CodingKeys: String, CodingKey { case host, software, brains; case liveHost = "live_host" }
+    enum CodingKeys: String, CodingKey {
+        case host, software, brains, models
+        case liveHost = "live_host"
+        case activeBrain = "active_brain"
+    }
+
+    struct CatalogModel: Decodable {
+        let id: String
+        let backend: String
+        let modelClass: String
+        let cost: String
+        let available: Bool
+
+        enum CodingKeys: String, CodingKey { case id, backend, cost, available; case modelClass = "class" }
+    }
 
     struct Brain: Decodable {
         let id: String

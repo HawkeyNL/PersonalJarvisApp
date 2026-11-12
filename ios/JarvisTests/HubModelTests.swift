@@ -191,6 +191,27 @@ final class HubModelTests: XCTestCase {
         XCTAssertEqual(registry.software.filter(\.present).count, 1)
     }
 
+    func testIntegrationsShowBrainFactsAndTheCatalogLikeDesktop() throws {
+        let registry = try decode(HomeNodeRegistry.self, """
+        {"host":{"os":"linux","arch":"x86_64","cpu":"Ryzen","cpu_cores":16,"mem_total_gb":32,"gpu":"Radeon"},
+         "software":[{"name":"git","present":true,"version":"2.43"},{"name":"docker","present":false,"version":null}],
+         "brains":[{"id":"a","label":"A","cost":"plan","available":true},{"id":"b","label":"B","cost":"plan","available":false},
+                   {"id":"c","label":"C","cost":"local","available":true}],
+         "models":[{"id":"m1","backend":"ollama","class":"local","cost":"local","available":true}],
+         "active_brain":"a"}
+        """)
+        XCTAssertEqual(brainFacts(registry).map(\.value), ["a", "2", "1 ready", "0 ready", "1 ready", "1 present"])
+        XCTAssertEqual(catalogRows(registry.models ?? []).map(\.detail), ["ollama · local · Local"])
+        XCTAssertEqual(catalogRows(registry.models ?? []).map(\.toneLabel), ["Provider set up"])
+        let older = try decode(HomeNodeRegistry.self, """
+        {"host":{"os":"linux","arch":"x86_64","cpu":"Ryzen","cpu_cores":16,"mem_total_gb":32,"gpu":"Radeon"},"software":[],"active_brain":""}
+        """)
+        XCTAssertEqual(brainFacts(older).first?.value, "Not reported")
+        XCTAssertNil(older.models)
+        let entry = try decode(ModelAccessEntry.self, #"{"provider":"p","model":"m","enabled":true,"route":"fast"}"#)
+        XCTAssertEqual(entry.route, "fast")
+    }
+
     func testStatusPillAndMood() {
         XCTAssertEqual(statusPill(mood: .idle, online: false).label, "Offline")
         XCTAssertEqual(statusPill(mood: .thinking, online: true).label, "Thinking")

@@ -5,6 +5,8 @@ struct ModelAccessEntry: Decodable, Identifiable {
     let provider: String
     let model: String
     let enabled: Bool
+    /// The routing tier this model serves, when it has one (shown on Integrations).
+    var route: String? = nil
     var price_status: String? = nil
     var input_per_million_usd: Double? = nil
     var output_per_million_usd: Double? = nil
