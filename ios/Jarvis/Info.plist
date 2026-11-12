@@ -37,6 +37,10 @@
 	<string>Jarvis uses Face ID to unlock your authenticated conversations.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Jarvis connects to your Home Node on the local network.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Jarvis listens only after you tap the mic in a conversation, to turn your words into a message.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Jarvis turns what you say into a chat message, on this device when it can.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>IBMPlexSans-Regular.ttf</string>

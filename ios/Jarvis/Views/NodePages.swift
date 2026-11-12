@@ -1188,12 +1188,12 @@ func pairingCountdown(_ expiresAt: Int64, now: Date) -> String {
 
 // MARK: - Voice
 
-/// Voice input is not part of the iOS app yet; replies can already be spoken
+/// Voice input lives in the chat composer (its mic); replies can be spoken
 /// (Settings › Voice).
 struct VoicePage: View {
     var body: some View {
         PageScaffold(title: "Voice", subtitle: "Talk to Jarvis") {
-            UnavailableState(title: "Push-to-talk", detail: "Push-to-talk arrives in milestone 2. This build does not request microphone access. Spoken replies can be turned on in Settings › Voice.", symbol: "mic")
+            UnavailableState(title: "Push-to-talk", detail: "Tap the mic in Chat and speak; it stops after 5 s of silence and sends what you said. Spoken replies can be turned on in Settings › Voice.", symbol: "mic")
         }
     }
 }
