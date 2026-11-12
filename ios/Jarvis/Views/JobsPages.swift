@@ -55,9 +55,13 @@ struct JobsPage: View {
     @State private var creating: JobKind?
     @State private var busy = false
     @State private var error: String?
+    /// A read already in flight must not overwrite a newer answer.
+    @State private var loads = 0
 
     var body: some View {
         PageScaffold(title: "Jobs", subtitle: "Work Core does by itself on a schedule you set.") {
+            // Above the list: after a refused set-up the reload may remove its card.
+            if let error { JobNotice(text: error, style: .danger) }
             Loaded(source: list, title: "Jobs", symbol: "clock", retry: load) { value in
                 if !value.configured { JobNotice(text: Jobs.notConfigured, style: .negative) }
                 if !value.jobs.isEmpty {
@@ -98,9 +102,6 @@ struct JobsPage: View {
             if creating == kind {
                 JobForm(model: model, kind: kind, initial: JobDraft(), busy: busy, submit: "Set up",
                         cancel: { creating = nil }) { draft in Task { await create(kind, draft) } }
-                if let error {
-                    Text(verbatim: error).font(JV.font(13)).foregroundStyle(JV.dangerText).fixedSize(horizontal: false, vertical: true)
-                }
             } else {
                 Button("Set up") { creating = kind; error = nil }
                     .buttonStyle(JVButtonStyle(kind: .primary))
@@ -125,13 +126,15 @@ struct JobsPage: View {
     }
 
     private func load() async {
+        loads += 1
+        let mine = loads
         let result = await model.coreRead("/v1/jobs", as: JobList.self).checked(Jobs.valid)
         var newest: [UUID: Availability<JobRun?>] = [:]
         // ponytail: one runs read per job (at most one job per kind, one kind today).
         for job in result.value?.jobs ?? [] {
             newest[job.id] = await model.coreRead(Jobs.runsPath(job.id), as: JobRunList.self).checked(Jobs.valid).map(\.runs.first)
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, mine == loads else { return }
         list = result
         last = newest
     }

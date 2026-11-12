@@ -158,26 +158,6 @@ actor AuthService {
 
     func registeredDeviceID() async -> UUID? { try? await credentials.deviceId() }
 
-    /// Scheduled job writes, bound to the current origin. Bearer only, like desktop:
-    /// they change a schedule, never an identity.
-    func createJob(_ body: NewJob) async throws {
-        let binding = await api.binding()
-        guard let token = try await credentials.session()?.token else { throw JarvisAPIError.unauthorized }
-        try await api.createJob(body, token: token, expectedBinding: binding)
-    }
-
-    func updateJob(_ id: UUID, revision: Int, patch: JobPatch) async throws {
-        let binding = await api.binding()
-        guard let token = try await credentials.session()?.token else { throw JarvisAPIError.unauthorized }
-        try await api.updateJob(id: id, revision: revision, patch: patch, token: token, expectedBinding: binding)
-    }
-
-    func runJobNow(_ id: UUID) async throws {
-        let binding = await api.binding()
-        guard let token = try await credentials.session()?.token else { throw JarvisAPIError.unauthorized }
-        try await api.runJobNow(id: id, token: token, expectedBinding: binding)
-    }
-
     /// PUT or DELETE this device's own APNs push target. Core binds it to the
     /// session's device; no other device can be named.
     func setPushTarget(_ target: (token: String, environment: String)?) async throws {

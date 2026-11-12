@@ -140,3 +140,72 @@ final class JobsTests: XCTestCase {
                        "Not saved. Needs Jarvis Core v0.0.80 or later. Update Core on your Home Node.")
     }
 }
+
+/// Job writes through the app model against a fixture Core: the lock and session gates.
+@MainActor
+final class JobWriteModelTests: XCTestCase {
+    private func signedIn() -> JarvisAppModel {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [JobCoreProtocol.self]
+        let api = JarvisAPIClient(baseURL: URL(string: "https://jarvis.example.com")!, session: URLSession(configuration: configuration))
+        return JarvisAppModel(signedInChat: ChatService(api: api, tokenLoader: { "fixture-session-not-a-secret" }), api: api, realtime: false)
+    }
+
+    func testALockedAppSendsNoJobWrite() async {
+        JobCoreProtocol.reset(status: 202)
+        let model = signedIn()
+        model.lockWhenBackgrounded()
+        do {
+            try await model.runJobNow(UUID())
+            XCTFail("sent while locked")
+        } catch {}
+        XCTAssertEqual(JobCoreProtocol.requests(), [])
+    }
+
+    func testA401SignsOutOnlyTheSessionItWasSentFor() async throws {
+        JobCoreProtocol.reset(status: 401)
+        let model = signedIn()
+        do { try await model.runJobNow(UUID()) } catch {}
+        XCTAssertFalse(model.isAuthenticated)
+
+        // The 401 arrives after a lock started a new presentation: the session stays.
+        JobCoreProtocol.reset(status: 401, delay: 0.5)
+        let later = signedIn()
+        let write = Task { try await later.runJobNow(UUID()) }
+        var tries = 0
+        while JobCoreProtocol.requests().isEmpty, tries < 300 { tries += 1; try await Task.sleep(nanoseconds: 10_000_000) }
+        later.lockWhenBackgrounded()
+        _ = await write.result
+        XCTAssertEqual(JobCoreProtocol.requests().count, 1)
+        XCTAssertTrue(later.isAuthenticated, "a late 401 from before the lock keeps the session")
+    }
+}
+
+private final class JobCoreProtocol: URLProtocol {
+    private static let lock = NSLock()
+    private static var log: [String] = []
+    private static var status = 202
+    private static var delay: TimeInterval = 0
+
+    static func reset(status: Int, delay: TimeInterval = 0) {
+        lock.withLock { log = []; self.status = status; self.delay = delay }
+    }
+    static func requests() -> [String] { lock.withLock { log } }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let (status, delay) = Self.lock.withLock {
+            Self.log.append("\(request.httpMethod ?? "GET") \(request.url?.path ?? "")")
+            return (Self.status, Self.delay)
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
+            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
+                                           headerFields: ["Content-Type": "application/json"])!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data("{}".utf8))
+            client?.urlProtocolDidFinishLoading(self)
+        }
+    }
+    override func stopLoading() { }
+}

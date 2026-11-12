@@ -226,13 +226,13 @@ final class JarvisAppModel: ObservableObject {
     }
 
     // Scheduled jobs: each write only while unlocked; a late 401 signs out only the session it was sent for.
-    func createJob(_ body: NewJob) async throws { try await jobWrite { try await self.auth.createJob(body) } }
+    func createJob(_ body: NewJob) async throws { try await jobWrite { try await self.chat.createJob(body) } }
 
     func updateJob(_ id: UUID, revision: Int, patch: JobPatch) async throws {
-        try await jobWrite { try await self.auth.updateJob(id, revision: revision, patch: patch) }
+        try await jobWrite { try await self.chat.updateJob(id, revision: revision, patch: patch) }
     }
 
-    func runJobNow(_ id: UUID) async throws { try await jobWrite { try await self.auth.runJobNow(id) } }
+    func runJobNow(_ id: UUID) async throws { try await jobWrite { try await self.chat.runJobNow(id) } }
 
     private func jobWrite(_ call: () async throws -> Void) async throws {
         guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
