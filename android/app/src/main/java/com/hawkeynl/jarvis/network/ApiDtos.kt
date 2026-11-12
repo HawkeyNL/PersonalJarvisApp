@@ -137,6 +137,16 @@ data class ConversationDetailResponse(
     val title: String,
     val messages: List<ConversationMessage>,
     val assistant_running: Boolean = false,
+    /** The conversation's photos that still exist; older Core sends none. */
+    val photos: List<PhotoMeta> = emptyList(),
+)
+
+/** A chat photo's keep state; [expires_at] is null for a photo kept until deleted. */
+@Serializable
+data class PhotoMeta(
+    val id: String,
+    val saved: Boolean,
+    val expires_at: String? = null,
 )
 
 @Serializable

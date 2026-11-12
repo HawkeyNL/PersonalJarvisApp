@@ -5,6 +5,8 @@ import com.hawkeynl.jarvis.network.ApiResult
 import com.hawkeynl.jarvis.network.HomeNodeEndpoint
 import com.hawkeynl.jarvis.storage.SessionRepository
 import io.ktor.client.HttpClient
+import io.ktor.client.HttpClientConfig
+import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -18,6 +20,7 @@ import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
@@ -53,7 +56,13 @@ internal fun <T> ApiResult<T>.realtimeSelectedHistory(): T? =
     if (this is ApiResult.HttpError && status == 404) null else realtimeSnapshot()
 
 @Serializable private data class Capability(val protocol: Int, val asynchronous_chat: Boolean)
-@Serializable private data class Submit(val request_id: String, val conversation_id: String?, val messages: List<ChatTurn>, val mode: String? = null)
+// Photos are part of the request (and so of its idempotency hash); a text-only
+// request keeps its old shape, since defaults are not encoded.
+@Serializable private data class Submit(val request_id: String, val conversation_id: String?, val messages: List<ChatTurn>, val mode: String? = null,
+    val attachments: List<String> = emptyList())
+
+/** Core answered a new run with a non-2xx [status]. */
+class SubmitFailed(val status: Int) : Exception("Run not accepted")
 private fun HomeNodeEndpoint.url(path: String): String = "$baseUrl$path"
 private sealed interface VoiceCommand {
     data class Report(val payload: PlaybackReport) : VoiceCommand
@@ -62,10 +71,14 @@ private sealed interface VoiceCommand {
 
 // Native bearer transport; the endpoint comes only from validated runtime
 // configuration. The shared authoritative contract is jarvis-client-core.
-class RealtimeService(private val sessions: SessionRepository) {
+// [testEngine] replaces OkHttp in unit tests only.
+class RealtimeService(private val sessions: SessionRepository, testEngine: HttpClientEngine? = null) {
     private val json = Json { ignoreUnknownKeys = true }
-    private val client = HttpClient(OkHttp) {
+    private val client = if (testEngine != null) HttpClient(testEngine) { setup() } else HttpClient(OkHttp) {
         engine { preconfigured = realtimeSocketEngine() }
+        setup()
+    }
+    private fun HttpClientConfig<*>.setup() {
         followRedirects = false
         install(ContentNegotiation) { json(json) }
         install(HttpTimeout) { requestTimeoutMillis = 20_000; connectTimeoutMillis = 15_000 }
@@ -110,12 +123,15 @@ class RealtimeService(private val sessions: SessionRepository) {
         }
     } catch (error: CancellationException) { throw error } catch (_: Exception) { false }
 
-    suspend fun submit(endpoint: HomeNodeEndpoint, requestId: String, conversationId: String?, history: List<ChatTurn>, text: String, mode: String? = null): RealtimeRun {
+    suspend fun submit(endpoint: HomeNodeEndpoint, requestId: String, conversationId: String?, history: List<ChatTurn>, text: String, mode: String? = null,
+        attachments: List<String> = emptyList()): RealtimeRun {
         val token = sessions.session().token ?: error("Session unavailable")
-        return client.post(endpoint.url("/v1/assistant/runs")) {
+        val response = client.post(endpoint.url("/v1/assistant/runs")) {
             bearerAuth(token); contentType(ContentType.Application.Json)
-            setBody(Submit(requestId, conversationId, (history + ChatTurn("user", text)).takeLast(20), mode))
-        }.body()
+            setBody(Submit(requestId, conversationId, (history + ChatTurn("user", text)).takeLast(20), mode, attachments))
+        }
+        if (!response.status.isSuccess()) throw SubmitFailed(response.status.value)
+        return response.body()
     }
 
     fun start(scope: CoroutineScope, endpoint: HomeNodeEndpoint, disconnected: () -> Unit = {}, receive: suspend (RealtimeEvent) -> Unit) {

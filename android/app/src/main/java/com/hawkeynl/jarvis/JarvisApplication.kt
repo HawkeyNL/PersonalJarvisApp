@@ -19,6 +19,10 @@ class JarvisApplication : Application() {
 
 class AppContainer(application: Application) {
     val voicePreferences = application.getSharedPreferences("jarvis-local-voice", android.content.Context.MODE_PRIVATE)
+    /** Only whether the one-time chat photo notice was shown. */
+    val photoPreferences = application.getSharedPreferences("jarvis-photos", android.content.Context.MODE_PRIVATE)
+    /** Reads the photos the owner picks; the picker grants access per photo. */
+    val contentResolver: android.content.ContentResolver = application.contentResolver
     val appearance = com.hawkeynl.jarvis.storage.AppearancePreference(application)
     val localSpeech = com.hawkeynl.jarvis.chat.AndroidSpeechOutput(application)
     private val secureValues = AndroidKeystoreSecureValueStore(application)
