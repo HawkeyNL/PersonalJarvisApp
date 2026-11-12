@@ -46,6 +46,7 @@ import com.hawkeynl.jarvis.network.JobFailure
 import com.hawkeynl.jarvis.network.JobKind
 import com.hawkeynl.jarvis.network.JobRun
 import com.hawkeynl.jarvis.network.Priority
+import com.hawkeynl.jarvis.network.Roadmap
 import com.hawkeynl.jarvis.network.RunDetail
 import com.hawkeynl.jarvis.network.RunStatus
 import com.hawkeynl.jarvis.network.WEEKDAYS
@@ -87,7 +88,7 @@ fun JobsScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
 
 /** One load or write at a time per page: a newer one cancels the one before, so the latest
  *  answer wins (desktop's seq counter). Leaving the page cancels it too. */
-private class Latest(private val scope: CoroutineScope) {
+internal class Latest(private val scope: CoroutineScope) {
     private var current: kotlinx.coroutines.Job? = null
     fun launch(block: suspend () -> Unit) {
         current?.cancel()
@@ -96,7 +97,7 @@ private class Latest(private val scope: CoroutineScope) {
 }
 
 @Composable
-private fun rememberLatest(): Latest {
+internal fun rememberLatest(): Latest {
     val scope = rememberCoroutineScope()
     return remember(scope) { Latest(scope) }
 }
@@ -171,7 +172,7 @@ private fun JobListPage(actions: JarvisViewModel, back: () -> Unit, open: (Strin
                         Column(Modifier.padding(JvSpace.lg), verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
                             MutedText(kind.detail)
                             if (creating == kind) {
-                                JobForm(kind, newDraft(), busy, "Set up", onCancel = { creating = null; error = "" }) { create(kind, it) }
+                                JobForm(actions, kind, newDraft(), busy, "Set up", onCancel = { creating = null; error = "" }) { create(kind, it) }
                             } else {
                                 ActionButton("Set up", { creating = kind; error = "" })
                             }
@@ -292,7 +293,7 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
                         StatusBadge(if (shown.enabled) "Enabled" else "Paused", tone = if (shown.enabled) Tone.OK else Tone.IDLE)
                         MutedText(cadenceText(shown) + "." + if (shown.enabled && shown.nextRunAt != null) " Next run ${zonedText(shown.nextRunAt)}." else "")
                         // Reset per revision: a change elsewhere resets the editor to Core's state.
-                        key(shown.revision) { JobForm(shown.kind, toDraft(shown), busy, "Save", onCancel = null, onSave = ::save) }
+                        key(shown.revision) { JobForm(actions, shown.kind, toDraft(shown), busy, "Save", onCancel = null, onSave = ::save) }
                     }
                 }
                 val list = runs
@@ -414,13 +415,22 @@ private fun PriorityRow(priority: Priority, fact: Fact?) {
 }
 
 /** The schedule editor (desktop JobForm.vue): daily or weekly, the weekday, a time in
- *  Europe/Amsterdam and enabled. The roadmap a dependency review proposes to is kept as is;
- *  it is chosen on desktop. */
+ *  Europe/Amsterdam, enabled, and for a dependency review the roadmap its runs propose
+ *  upgrades to. */
 @Composable
-private fun JobForm(kind: JobKind, initial: JobDraft, busy: Boolean, submit: String, onCancel: (() -> Unit)?, onSave: (JobDraft) -> Unit) {
+private fun JobForm(
+    actions: JarvisViewModel, kind: JobKind, initial: JobDraft, busy: Boolean, submit: String, onCancel: (() -> Unit)?, onSave: (JobDraft) -> Unit,
+) {
     var draft by remember { mutableStateOf(initial) }
     var timeError by remember { mutableStateOf("") }
     var dayMenu by remember { mutableStateOf(false) }
+    // null while loading or when the roadmaps could not be read.
+    var choices by remember { mutableStateOf<List<Roadmap>?>(null) }
+    if (kind == JobKind.DEPENDENCY_REVIEW) {
+        LaunchedEffect(Unit) {
+            choices = (actions.jobs { e, t -> roadmaps(e, t) } as? ApiResult.Success)?.value?.filter { it.archivedAt == null }
+        }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
         SectionLabel("Repeats")
         Segmented(listOf("weekly" to "Weekly", "daily" to "Daily"), if (draft.daily) "daily" else "weekly", { draft = draft.copy(daily = it == "daily") })
@@ -452,8 +462,21 @@ private fun JobForm(kind: JobKind, initial: JobDraft, busy: Boolean, submit: Str
             singleLine = true,
             shape = JvShapes.md,
         )
-        if (kind == JobKind.DEPENDENCY_REVIEW && draft.roadmapId != null) {
-            MutedText("Each run proposes one item per fixable alert to a roadmap. Choose or clear the roadmap on desktop.")
+        if (kind == JobKind.DEPENDENCY_REVIEW) {
+            val list = choices
+            val chosen = draft.roadmapId
+            val options = buildList<Pair<String?, String>> {
+                add(null to "No roadmap")
+                if (chosen != null && list?.none { it.id == chosen } != false) {
+                    add(chosen to if (list == null) "The roadmap set now" else "A roadmap that is gone or archived")
+                }
+                list?.forEach { add(it.id to it.title) }
+            }
+            Picker(
+                "Propose upgrades to a roadmap (optional)", options, chosen, { draft = draft.copy(roadmapId = it) },
+                enabled = list != null || chosen != null,
+            )
+            MutedText("Each run then proposes one item per fixable alert. You accept or reject the proposal on the roadmap.")
         }
         Row(
             Modifier.fillMaxWidth().heightIn(min = 48.dp)
@@ -483,7 +506,7 @@ private fun JobForm(kind: JobKind, initial: JobDraft, busy: Boolean, submit: Str
 }
 
 @Composable
-private fun Warning(text: String) {
+internal fun Warning(text: String) {
     Text(text, color = JvTheme.colors.negativeText, style = MaterialTheme.typography.bodyMedium)
 }
 
