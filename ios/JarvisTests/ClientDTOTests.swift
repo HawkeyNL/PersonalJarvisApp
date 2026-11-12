@@ -2374,6 +2374,9 @@ final class WebAnswerTests: XCTestCase {
         XCTAssertEqual(card[1].shortPath, "/2026/rust")
         XCTAssertEqual(card[2].shortPath.count, 40)
         XCTAssertTrue(card[2].shortPath.hasSuffix("…"))
+        // A look-alike Unicode host never shows on a card (refused, or kept only as punycode).
+        let idn = WebAnswer.split("A\nSources:\nhttps://ex\u{0430}mple.org/").sources
+        XCTAssertTrue(idn.allSatisfy { $0.host.allSatisfy(\.isASCII) })
     }
 
 func testARunRightAfterAFinishedReplyIsCoresOwnWebSearch() {

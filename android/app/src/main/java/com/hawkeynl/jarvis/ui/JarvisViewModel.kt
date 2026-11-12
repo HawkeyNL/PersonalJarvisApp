@@ -110,7 +110,10 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     private var realtimeAvailable = false
     private val pending = com.hawkeynl.jarvis.chat.PendingRuns()
     private var unlinking = false
-    // Decoded chat photos, most recent first out; main thread only, cleared on sign-out.
+    // Decoded chat photos, least recently shown out first; main thread only. Cleared with
+    // every identity change (sign-out, erase, password, Home Node, session expiry).
+    private var photoEpoch = 0
+    private fun clearPhotos() { photoEpoch++; photos.clear() }
     private val photos = object : LinkedHashMap<String, PhotoResult>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, PhotoResult>?) = size > 24
     }
@@ -147,6 +150,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 
     fun saveEndpoint() {
         container.sessions.modelAuthorization.invalidate()
+        clearPhotos()
         viewModelScope.launch {
             val parsed = HomeNodeEndpoint.parse(_state.value.endpointDraft)
             if (parsed is EndpointValidation.Valid && parsed.endpoint != _state.value.endpoint) {
@@ -333,20 +337,23 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     suspend fun photo(id: String): PhotoResult {
         photos[id]?.let { return it }
         val endpoint = _state.value.endpoint ?: return PhotoResult.Unavailable
+        val epoch = photoEpoch
         val result = when (val bytes = container.conversations.photo(endpoint, id)) {
             is ApiResult.Success -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { decodePhoto(bytes.value) }
                 ?.let { PhotoResult.Image(it) } ?: PhotoResult.Unavailable
             is ApiResult.HttpError -> if (bytes.status == 404) PhotoResult.Removed else PhotoResult.Unavailable
             else -> PhotoResult.Unavailable
         }
+        // A late answer from before an identity change is dropped.
+        if (epoch != photoEpoch) return PhotoResult.Unavailable
         // A passing failure is not remembered; the next showing retries.
         if (result != PhotoResult.Unavailable) photos[id] = result
         return result
     }
 
     fun logout() {
-        photos.clear()
         container.sessions.modelAuthorization.invalidate()
+        clearPhotos()
         pending.clear()
         container.realtime.stop(); speech.stop()
         val endpoint = _state.value.endpoint ?: return
@@ -372,6 +379,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         }
         if (failure != null) return@async PairingApproval.displayName(failure.message ?: "The password was not changed.", 160)
         container.sessions.modelAuthorization.invalidate()
+        clearPhotos()
         pending.clear()
         container.realtime.stop(); speech.stop()
         _state.update {
@@ -400,6 +408,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 
     fun lockForBackground() {
         container.sessions.modelAuthorization.invalidate()
+        clearPhotos()
         container.realtime.stop(); speech.stop()
         if (container.sessions.hasSessionRecord()) _state.update { it.copy(locked = true) }
     }
@@ -428,6 +437,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     fun eraseLocally() {
         _state.update { it.copy(localEraseOffer = null) }
         container.sessions.modelAuthorization.invalidate()
+        clearPhotos()
         pending.clear()
         container.realtime.stop(); speech.stop()
         viewModelScope.launch {
@@ -709,7 +719,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 
     private fun handleApiFailure(result: ApiResult<*>) = _state.update { state ->
         when (result) {
-            ApiResult.Unauthorized -> state.copy(
+            ApiResult.Unauthorized -> state.also { clearPhotos() }.copy(
                 authenticated = false,
                 busy = false,
                 error = "Session expired. Sign this device in again.",
@@ -765,13 +775,13 @@ internal fun afterFailedUnlink(state: JarvisUiState, failure: Exception): Jarvis
     else -> state.copy(localEraseOffer = PairingApproval.displayName(failure.message ?: "Core did not confirm the revocation.", 160))
 }
 
-/** Decode a JPEG at most about 1024 px on its long side (Core sends <= 1600). */
+/** Decode a JPEG for a 140 dp thumbnail: at most 512 px on its long side (Core sends <= 1600). */
 private fun decodePhoto(bytes: ByteArray): androidx.compose.ui.graphics.ImageBitmap? {
     val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
     android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
     var sample = 1
-    while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 1024) sample *= 2
+    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 512) sample *= 2
     val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
     return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
 }

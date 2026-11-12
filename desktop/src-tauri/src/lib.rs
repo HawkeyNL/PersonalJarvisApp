@@ -436,7 +436,10 @@ fn native_only_route(path: &str) -> bool {
 fn proxy_method_allowed(method: &reqwest::Method, path: &str) -> bool {
     let route = path.split('?').next().unwrap_or(path);
     if route == "/v1/photos" || route.starts_with("/v1/photos/") {
-        return route.starts_with("/v1/photos/")
+        // Exactly one photo id: a photo sub-route Core adds later needs a review here.
+        return route
+            .strip_prefix("/v1/photos/")
+            .is_some_and(|id| uuid::Uuid::try_parse(id).is_ok())
             && (method == reqwest::Method::PATCH || method == reqwest::Method::DELETE);
     }
     !native_only_route(path)
@@ -1415,8 +1418,15 @@ mod tests {
         assert!(!proxy_method_allowed(&Method::GET, photo));
         assert!(!proxy_method_allowed(&Method::POST, photo));
         for method in [Method::GET, Method::POST, Method::PATCH, Method::DELETE] {
-            assert!(!proxy_method_allowed(&method, "/v1/photos"), "{method}");
-            assert!(!proxy_method_allowed(&method, "/v1/photos?x=1"), "{method}");
+            for path in [
+                "/v1/photos",
+                "/v1/photos?x=1",
+                "/v1/photos/",
+                "/v1/photos/a/b",
+                "/v1/photos/0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b/x",
+            ] {
+                assert!(!proxy_method_allowed(&method, path), "{method} {path}");
+            }
         }
     }
 

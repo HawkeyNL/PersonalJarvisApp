@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fitWithin, downscale, uploadFailure, missingPhotos, expiryHint, UNSUPPORTED, CORE_TOO_OLD, MAX_SIDE, JPEG_QUALITY } from "../src/chatPhotos.ts";
+import { fitWithin, downscale, uploadFailure, missingPhotos, expiryHint, UNSUPPORTED, CORE_TOO_OLD, MAX_SIDE, JPEG_QUALITY, MAX_INPUT_BYTES, TOO_LARGE } from "../src/chatPhotos.ts";
 import { runRequest } from "../src/realtimeProjection.ts";
 
 test("photos shrink to 2048 px on the long side and never grow", () => {
@@ -53,6 +53,10 @@ test("an undecodable photo or a failed encode says to export as JPEG", async () 
   const { calls, deps } = fakes({ blob: null });
   await assert.rejects(downscale(new Blob(["x"]), deps), { message: UNSUPPORTED });
   assert.equal(calls.closed, 1);
+  // Huge files are refused before any decode.
+  const huge = fakes();
+  await assert.rejects(downscale({ size: MAX_INPUT_BYTES + 1 }, huge.deps), { message: TOO_LARGE });
+  assert.equal(huge.calls.decodedWith, null);
 });
 
 test("upload refusals have their own words; 404 means an older Core", () => {

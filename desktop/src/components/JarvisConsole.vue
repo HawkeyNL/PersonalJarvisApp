@@ -16,7 +16,7 @@ import {
 import { conversations, currentId, deleteConversation } from "../conversations";
 import { renderMarkdown, handleMarkdownClick } from "../markdown";
 import { splitSources, sourcePlace, type Source } from "../webAnswer";
-import { chips, chipNotice, attach, removeChip, takeChips, uploading, allReady, photoUrl, photoMeta, keepPhoto, deletePhoto } from "../photos";
+import { chips, chipNotice, attach, removeChip, chipIds, takeChips, uploading, allReady, photoUrl, photoMeta, keepPhoto, deletePhoto } from "../photos";
 import { expiryHint } from "../chatPhotos";
 import { askedIn, dayOf, replyIsHere, type AskedIn } from "../chatList";
 import { useMic } from "../useMic";
@@ -147,9 +147,13 @@ function onResearch() {
 function onSend() {
   // A reply in progress keeps the draft: send() would drop it.
   if (!canSend.value) return;
-  const photos = takeChips();
-  if (photos.length) markDisclosed();
+  const photos = chipIds();
   void send(text.value, undefined, photos);
+  // send() starts a reply synchronously, or refuses (lock, too many pending,
+  // photos without a live connection): then the draft and photos stay.
+  if (!thinking.value) return;
+  takeChips();
+  if (photos.length) markDisclosed();
   text.value = "";
   inputEl.value?.focus();
 }

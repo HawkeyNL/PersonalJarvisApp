@@ -91,8 +91,11 @@ export function removeChip(key: number): void {
 export const uploading = () => chips.value.some((c) => c.state === "preparing" || c.state === "uploading");
 export const allReady = () => chips.value.every((c) => c.state === "ready");
 
-/** Hand the uploaded photos to a message: their ids, while their previews
- *  move into the cache so the sent message shows them without a download. */
+/** The uploaded photos' ids, in order. */
+export const chipIds = () => chips.value.flatMap((c) => (c.state === "ready" && c.id ? [c.id] : []));
+
+/** Hand the uploaded photos to a sent message: their previews move into the
+ *  cache so the message shows them without a download. */
 export function takeChips(): string[] {
   const ids: string[] = [];
   for (const chip of chips.value) {
@@ -107,6 +110,8 @@ export function takeChips(): string[] {
 }
 
 // Shown photos by id: a blob URL, or null once Core says it is gone.
+// ponytail: unbounded within one conversation (<= 1 MiB per photo, freed on a switch);
+// an LRU would revoke URLs still on screen, so cap it only if long photo threads appear.
 const cache = new Map<string, Promise<string | null>>();
 
 /** A blob URL for one photo; null when the photo no longer exists. */

@@ -13,8 +13,10 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
+import io.ktor.client.request.prepareGet
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
+import io.ktor.http.contentLength
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.HttpHeaders
@@ -258,12 +260,13 @@ class KtorJarvisApi(
         val photo = runCatching { java.util.UUID.fromString(id) }.getOrNull()?.toString()?.takeIf { it == id.lowercase() }
             ?: return ApiResult.InvalidResponse("Invalid photo id")
         return try {
-            val response = client.get(endpoint.url("/v1/photos/$photo")) { bearerAuth(token) }
-            when {
+            // Streamed (execute), so the size bound holds while reading, not after buffering.
+            client.prepareGet(endpoint.url("/v1/photos/$photo")) { bearerAuth(token) }.execute { response -> when {
                 response.status == HttpStatusCode.Unauthorized -> ApiResult.Unauthorized
                 response.status != HttpStatusCode.OK -> ApiResult.HttpError(response.status.value, null)
                 response.contentType()?.withoutParameters() != ContentType.Image.JPEG ->
                     ApiResult.InvalidResponse("Home Node did not send a JPEG")
+                (response.contentLength() ?: 0) > MAX_PHOTO_BYTES -> ApiResult.InvalidResponse("Home Node sent an invalid photo")
                 else -> {
                     val bytes = withContext(Dispatchers.IO) {
                         response.bodyAsChannel().toInputStream().use { input -> readAtMost(input, MAX_PHOTO_BYTES + 1) }
@@ -271,7 +274,7 @@ class KtorJarvisApi(
                     if (bytes.size > MAX_PHOTO_BYTES || !isJpeg(bytes)) ApiResult.InvalidResponse("Home Node sent an invalid photo")
                     else ApiResult.Success(bytes)
                 }
-            }
+            } }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {

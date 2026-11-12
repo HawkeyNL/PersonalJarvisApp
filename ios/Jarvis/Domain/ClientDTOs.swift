@@ -203,14 +203,16 @@ enum WebAnswer {
         return (body, lines[(header + 1)...].compactMap(httpsSource).filter { seen.insert($0.url).inserted })
     }
 
-    /// One https URL with a host and no user info, bare or titled, like Core's Sources filter.
+    /// One https URL with an ASCII host and no user info, bare or titled, like Core's Sources
+    /// filter. A non-ASCII (IDN) host is refused, as on Android, so a look-alike host never
+    /// shows on a card.
     private static func httpsSource(_ line: Substring) -> Source? {
         let candidate = line.trimmingCharacters(in: .whitespaces).drop(while: { $0 == "-" || $0 == "*" }).drop(while: \.isWhitespace)
         let titled = titledLink(candidate)
         let text = titled?.url ?? candidate
         guard !text.isEmpty, !text.contains(where: \.isWhitespace),
               let url = URL(string: String(text)), url.scheme?.lowercased() == "https",
-              url.host?.isEmpty == false, url.user == nil, url.password == nil,
+              url.host?.isEmpty == false, url.host?.allSatisfy(\.isASCII) == true, url.user == nil, url.password == nil,
               var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
         components.scheme = "https"
         return components.url.map { Source(url: $0, title: titled?.title) }
