@@ -80,6 +80,21 @@ export function uploadFailure(status: number): string {
   }
 }
 
+/** Core attaches an unsent photo only within 23 h of its upload. */
+export const SEND_WITHIN_MS = 23 * 60 * 60 * 1000;
+export const TOO_OLD_TO_SEND = "This photo waited too long; remove it and attach it again.";
+export const tooOldToSend = (uploadedAt: number | undefined, now: number) =>
+  uploadedAt !== undefined && now - uploadedAt > SEND_WITHIN_MS;
+
+/** What to say when Core refused a new run outright (it stored nothing), or
+ *  null when the outcome is unknown. A 404 is a deleted conversation or a
+ *  photo that is gone, already sent or too old. */
+export function runRefusal(status: number | undefined): string | null {
+  if (status === 400) return "Your Home Node refused this message. Nothing was sent.";
+  if (status === 404) return "Your Home Node no longer has this conversation or one of these photos. Nothing was sent.";
+  return null;
+}
+
 /** Photo ids the messages carry that the conversation no longer has
  *  (deleted or expired): shown as placeholders without a download. */
 export function missingPhotos(messages: { attachments?: string[] }[], photos: { id: string }[]): Set<string> {

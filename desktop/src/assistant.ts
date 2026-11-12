@@ -18,8 +18,9 @@ import { isWebModel, startsWebSearch } from "./webAnswer";
 import { chatSession } from "./chatSession";
 import { currentAuthStatus } from "./auth";
 import { locked } from "./lock";
-import { postJsonAuth, getJsonAuth } from "./api";
+import { postJsonAuth, getJsonAuth, ApiError } from "./api";
 import { setConversationPhotos } from "./photos";
+import { runRefusal } from "./chatPhotos";
 import {
   currentId,
   setCurrent,
@@ -270,8 +271,10 @@ export async function initChat(): Promise<void> {
 
 /** Send a user message; Jarvis replies (and speaks if the policy allows).
  *  `research` only ever comes from the owner's click on a Core offer.
- *  `attachments` are uploaded photo ids; with them the text may be empty. */
-export async function send(input: string, mode?: "research", attachments: string[] = []): Promise<void> {
+ *  `attachments` are uploaded photo ids; with them the text may be empty.
+ *  Resolves true when Core refused the message outright: nothing was stored,
+ *  so the caller can put the draft and photos back. */
+export async function send(input: string, mode?: "research", attachments: string[] = []): Promise<boolean | undefined> {
   const epoch=chatSession.capture();
   const t = input.trim();
   // Nothing is sent from behind the app lock (a voice transcript, a stray Enter).
@@ -302,9 +305,16 @@ export async function send(input: string, mode?: "research", attachments: string
       if(local?.conversation===null && currentId.value===null && messages.value.some(m=>m.id===local.messageId)) setCurrent(result.conversation_id);
       pending.acknowledge(requestId,result.conversation_id,result.run_id);
       // Completion arrives by event; a lost socket is reconciled from REST.
-    } catch {
+    } catch(error) {
       if(!chatSession.current(epoch)) return;
       thinking.value=false;
+      const refusal=runRefusal(error instanceof ApiError?error.status:undefined);
+      if(refusal) {
+        pending.delete(requestId);
+        messages.value=messages.value.filter(m=>m.id!==optimistic.id);
+        push("jarvis",refusal);
+        return true;
+      }
       push("jarvis","Delivery not confirmed. Not resent automatically; reconnect to check the saved history.");
     }
     return;

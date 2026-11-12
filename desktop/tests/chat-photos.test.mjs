@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fitWithin, downscale, uploadFailure, missingPhotos, expiryHint, UNSUPPORTED, CORE_TOO_OLD, MAX_SIDE, JPEG_QUALITY, MAX_INPUT_BYTES, TOO_LARGE, UNREADABLE } from "../src/chatPhotos.ts";
+import { fitWithin, downscale, uploadFailure, missingPhotos, expiryHint, UNSUPPORTED, CORE_TOO_OLD, MAX_SIDE, JPEG_QUALITY, MAX_INPUT_BYTES, TOO_LARGE, UNREADABLE, runRefusal, tooOldToSend, SEND_WITHIN_MS } from "../src/chatPhotos.ts";
 import { runRequest } from "../src/realtimeProjection.ts";
 
 test("photos shrink to 2048 px on the long side and never grow", () => {
@@ -94,4 +94,18 @@ test("the lightbox says how long a photo stays", () => {
   assert.match(expiryHint({ saved: false, expires_at: "2027-02-10T12:00:00Z" }), /^Removed on .*2027.* unless you keep it\.$/);
   // Kept but not sent yet: Core still removes it 24 h after the upload.
   assert.match(expiryHint({ saved: true, expires_at: "2027-02-10T12:00:00Z" }), /^Removed on [^.]*2027\.$/);
+});
+
+test("only a 400 or 404 on submit is a definite refusal", () => {
+  assert.match(runRefusal(400), /Nothing was sent\.$/);
+  assert.match(runRefusal(404), /Nothing was sent\.$/);
+  for (const status of [undefined, 0, 401, 409, 500, 503]) assert.equal(runRefusal(status), null, String(status));
+});
+
+test("a photo older than 23 hours is not sent", () => {
+  const now = Date.UTC(2026, 10, 12, 12);
+  assert.equal(SEND_WITHIN_MS, 23 * 3600 * 1000);
+  assert.equal(tooOldToSend(now - SEND_WITHIN_MS, now), false);
+  assert.equal(tooOldToSend(now - SEND_WITHIN_MS - 1, now), true);
+  assert.equal(tooOldToSend(undefined, now), false);
 });
