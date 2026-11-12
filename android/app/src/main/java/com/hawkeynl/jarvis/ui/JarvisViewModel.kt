@@ -39,6 +39,7 @@ import com.hawkeynl.jarvis.chat.MIC_DENIED
 import com.hawkeynl.jarvis.chat.MicTap
 import com.hawkeynl.jarvis.chat.dictationAllowed
 import com.hawkeynl.jarvis.chat.micTap
+import com.hawkeynl.jarvis.chat.passesToSpeech
 import com.hawkeynl.jarvis.chat.unsentTranscript
 import com.hawkeynl.jarvis.chat.RealtimeEvent
 import com.hawkeynl.jarvis.chat.RealtimeSpeech
@@ -288,6 +289,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 
     fun openConversation(id: String) {
         val endpoint = _state.value.endpoint ?: return
+        cancelDictation()
         viewModelScope.launch {
             _state.update { it.copy(busy = true, error = null, researchOffer = null) }
             when (val result = container.conversations.load(endpoint, id)) {
@@ -307,17 +309,21 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun newConversation() = _state.update {
-        it.copy(
-            screen = Screen.CHAT,
-            conversationId = null,
-            conversationTitle = "New conversation",
-            messages = emptyList(),
-            error = null,
-            researchOffer = null,
-            photoMeta = emptyMap(),
-            removedPhotos = emptySet(),
-        )
+    fun newConversation() {
+        // A transcript is never sent into another conversation than the one it was spoken in.
+        cancelDictation()
+        _state.update {
+            it.copy(
+                screen = Screen.CHAT,
+                conversationId = null,
+                conversationTitle = "New conversation",
+                messages = emptyList(),
+                error = null,
+                researchOffer = null,
+                photoMeta = emptyMap(),
+                removedPhotos = emptySet(),
+            )
+        }
     }
 
     /** Only the owner's click on a Core offer passes [research]. */
@@ -897,7 +903,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         speech.enabled = _state.value.voiceEnabled
         container.realtime.start(viewModelScope, endpoint, disconnected = { speech.stop() }) { event ->
             if (_state.value.endpoint != endpoint || _state.value.locked || !_state.value.authenticated) return@start
-            speech.event(event)
+            if (passesToSpeech(_state.value.listening, event.type)) speech.event(event)
             if (event.type == "connection.ready") {
                 val recovered = container.realtime.recover(endpoint, pending.requests())
                 if (_state.value.endpoint != endpoint || _state.value.locked || !_state.value.authenticated) return@start

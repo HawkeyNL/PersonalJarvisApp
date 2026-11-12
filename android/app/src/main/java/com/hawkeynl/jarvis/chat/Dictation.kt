@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognitionSupport
 import android.speech.RecognitionSupportCallback
@@ -31,6 +33,9 @@ class Dictation(context: Context) {
     private var recognizer: SpeechRecognizer? = null
     /** The owner stopped this session: an ERROR_CLIENT then is ours, not a failure. */
     private var stopping = false
+    private var report: (DictationEvent) -> Unit = {}
+    /** Ends a session whose recogniser went quiet without a callback, so the mic never stays on. */
+    private val watchdog = Handler(Looper.getMainLooper())
 
     fun available(): Boolean = SpeechRecognizer.isRecognitionAvailable(context)
 
@@ -40,6 +45,7 @@ class Dictation(context: Context) {
     fun start(offDevice: Boolean, event: (DictationEvent) -> Unit) {
         cancel()
         stopping = false
+        report = event
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
             checkOnDevice(offDevice, event)
         } else {
@@ -53,6 +59,7 @@ class Dictation(context: Context) {
     private fun checkOnDevice(offDevice: Boolean, event: (DictationEvent) -> Unit) {
         val made = create(onDevice = true) ?: return fallBack(offDevice, event)
         recognizer = made
+        arm(made, event, SESSION_LIMIT_MS)
         made.checkRecognitionSupport(intent(), context.mainExecutor, object : RecognitionSupportCallback {
             override fun onSupportResult(support: RecognitionSupport) {
                 if (recognizer !== made) return
@@ -74,6 +81,7 @@ class Dictation(context: Context) {
         if (!allowed) return event(DictationEvent.NeedsConsent)
         val made = create(onDevice = false) ?: return event(DictationEvent.Ended(UNAVAILABLE))
         recognizer = made
+        arm(made, event, SESSION_LIMIT_MS)
         listen(made, onDevice = false, allowed, event)
     }
 
@@ -88,6 +96,11 @@ class Dictation(context: Context) {
         .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
         .putExtra(RecognizerIntent.EXTRA_LANGUAGE, DICTATION_LANGUAGE)
         .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+
+    private fun arm(made: SpeechRecognizer, event: (DictationEvent) -> Unit, millis: Long) {
+        watchdog.removeCallbacksAndMessages(null)
+        watchdog.postDelayed({ finish(made, event, DictationEvent.Ended(STOPPED)) }, millis)
+    }
 
     /** Ends [made]'s session with [last]; a cancelled session stays silent, also for a
      *  callback already queued. */
@@ -123,11 +136,14 @@ class Dictation(context: Context) {
     /** Stops listening; what was said is still recognised and reported. */
     fun stop() {
         stopping = true
-        recognizer?.stopListening()
+        val current = recognizer ?: return
+        arm(current, report, STOP_GRACE_MS)
+        current.stopListening()
     }
 
     /** Drops the session and what it has not recognised yet. */
     fun cancel() {
+        watchdog.removeCallbacksAndMessages(null)
         val current = recognizer ?: return
         recognizer = null
         current.cancel()
@@ -139,6 +155,11 @@ class Dictation(context: Context) {
 const val DICTATION_LANGUAGE = "nl-NL"
 
 const val UNAVAILABLE = "Voice input unavailable"
+const val STOPPED = "Voice input stopped. Try again."
+/** One utterance takes far less; a session past this has lost its recogniser. */
+const val SESSION_LIMIT_MS = 60_000L
+/** After Stop the result is due at once; without it the session ends anyway. */
+const val STOP_GRACE_MS = 5_000L
 const val MIC_DENIED = "Microphone access is off. Allow it in Android settings to use voice input."
 /** Shown once before the phone's speech service is first used (like PHOTO_DISCLOSURE). */
 const val VOICE_DISCLOSURE = "Voice input uses your phone's speech service. Without on-device recognition your speech may be " +
@@ -158,7 +179,7 @@ private fun languageError(error: Int) =
  *  client error our own stop causes ([stopping]). */
 fun dictationError(error: Int, stopping: Boolean = false): String? = when (error) {
     SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> null
-    SpeechRecognizer.ERROR_CLIENT -> if (stopping) null else "Voice input stopped. Try again."
+    SpeechRecognizer.ERROR_CLIENT -> if (stopping) null else STOPPED
     SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> MIC_DENIED
     SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Voice input is busy. Try again."
     SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT, SpeechRecognizer.ERROR_SERVER,
@@ -166,7 +187,7 @@ fun dictationError(error: Int, stopping: Boolean = false): String? = when (error
         "Speech recognition is not reachable. Try again later."
     SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED, SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ->
         "Dutch speech recognition is not available on this phone."
-    else -> "Voice input stopped. Try again."
+    else -> STOPPED
 }
 
 /** What a tap on the mic does. */
@@ -186,6 +207,10 @@ fun micTap(listening: Boolean, locked: Boolean, authenticated: Boolean, disclose
 
 /** A session's report counts only for the sign-in it started in, and never behind the lock. */
 fun dictationAllowed(asked: Int, identity: Int, locked: Boolean): Boolean = asked == identity && !locked
+
+/** Nothing is spoken into an open mic: a reply that starts while listening stays silent
+ *  (its later parts are ignored without its start). Ownership events always pass. */
+fun passesToSpeech(listening: Boolean, eventType: String): Boolean = !(listening && eventType == "assistant.started")
 
 /** A transcript Jarvis could not send waits in the composer instead; null when it was sent. */
 fun unsentTranscript(sent: Boolean, text: String): String? = text.takeIf { !sent && it.isNotBlank() }

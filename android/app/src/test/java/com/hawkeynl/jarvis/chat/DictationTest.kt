@@ -56,6 +56,15 @@ class DictationTest {
         assertFalse(dictationAllowed(asked = 3, identity = 3, locked = true))
     }
 
+    @Test fun `a reply that starts while listening is not spoken into the mic`() {
+        assertFalse(passesToSpeech(listening = true, eventType = "assistant.started"))
+        assertTrue(passesToSpeech(listening = false, eventType = "assistant.started"))
+        // Ownership and the rest still reach speech, which ignores parts of a run it never started.
+        assertTrue(passesToSpeech(listening = true, eventType = "voice.owner_changed"))
+        assertTrue(passesToSpeech(listening = true, eventType = "connection.ready"))
+        assertTrue(passesToSpeech(listening = true, eventType = "assistant.delta"))
+    }
+
     @Test fun `a transcript that was not sent waits in the composer`() {
         assertNull(unsentTranscript(sent = true, text = "hallo"))
         assertEquals("hallo", unsentTranscript(sent = false, text = "hallo"))
