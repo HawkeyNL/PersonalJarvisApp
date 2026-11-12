@@ -15,7 +15,11 @@ final class JarvisAppModel: ObservableObject {
     @Published private(set) var messages: [ConversationMessage] = []
     @Published private(set) var currentConversationId: UUID?
     @Published private(set) var currentConversationTitle = "New conversation"
-    @Published private(set) var isSending = false
+    /// A reply starting (here or from another device) stops the mic first, so the reply
+    /// is never spoken into a recording audio session; the words heard stay in the draft.
+    @Published private(set) var isSending = false {
+        didSet { if isSending && !oldValue { voiceInput.stop() } }
+    }
     /// A run Core started itself right after a reply (its automatic web search);
     /// only meaningful while its `run:` placeholder row is shown.
     @Published private(set) var webSearchRun: UUID?
@@ -63,6 +67,8 @@ final class JarvisAppModel: ObservableObject {
     }
     private let realtime = RealtimeService()
     private let speech = RealtimeSpeech()
+    /// The chat mic; every lock, reset and conversation change stops it and drops what it heard.
+    let voiceInput: VoiceInput
     private var realtimeAvailable = false
     private var pendingRequests = PendingChatRequests()
     private var voiceReleaseTask: Task<Void, Never>?
@@ -71,6 +77,7 @@ final class JarvisAppModel: ObservableObject {
     private var photoSession = ChatPresentationLifetime()
     private func invalidatePresentation(clearIdentity: Bool) {
         presentation.invalidate()
+        voiceInput.stop(discard: true)
         messages = []; conversations = []; isSending = false; realtimeAvailable = false
         photos.removeAll()
         photoMeta = [:]; removedPhotos = []; researchOffer = nil
@@ -113,19 +120,20 @@ final class JarvisAppModel: ObservableObject {
         let endpointStore = EndpointStore()
         let api = JarvisAPIClient(baseURL: endpointStore.endpoint)
         let auth = AuthService(api: api)
-        self.init(endpointStore: endpointStore, api: api, auth: auth, chat: ChatService(api: api, auth: auth))
+        self.init(endpointStore: endpointStore, api: api, auth: auth, chat: ChatService(api: api, auth: auth), voice: VoiceInput())
     }
 
     #if DEBUG
     /// Native test seam: a signed-in, unlocked chat over `chat`; nothing in the app uses it.
-    convenience init(signedInChat chat: ChatService, api: JarvisAPIClient, realtime: Bool) {
-        self.init(endpointStore: EndpointStore(), api: api, auth: AuthService(api: api), chat: chat)
+    convenience init(signedInChat chat: ChatService, api: JarvisAPIClient, realtime: Bool, voice: VoiceInput? = nil) {
+        self.init(endpointStore: EndpointStore(), api: api, auth: AuthService(api: api), chat: chat, voice: voice ?? VoiceInput())
         enrollmentState = .authenticated
         realtimeAvailable = realtime
     }
     #endif
 
-    private init(endpointStore: EndpointStore, api: JarvisAPIClient, auth: AuthService, chat: ChatService) {
+    private init(endpointStore: EndpointStore, api: JarvisAPIClient, auth: AuthService, chat: ChatService, voice: VoiceInput) {
+        self.voiceInput = voice
         self.endpointStore = endpointStore
         self.api = api
         self.auth = auth
@@ -166,7 +174,7 @@ final class JarvisAppModel: ObservableObject {
     }
 
     /// Orb mood from what the app knows: a reply in progress means thinking.
-    /// iOS has no microphone input yet, so it never listens.
+    /// The mic lives in the chat composer only, so Home never shows listening.
     var mood: Mood { isSending ? .thinking : .idle }
 
     /// Optional owner read for the hub and node pages. An older Core (404/405)
@@ -785,6 +793,7 @@ final class JarvisAppModel: ObservableObject {
     func openConversation(_ id: UUID) async {
         guard isAuthenticated, lockState == .unlocked else { return }
         let generation = presentation.id
+        voiceInput.stop(discard: true)
         currentConversationId = id
         researchOffer = nil
         do {
@@ -806,6 +815,7 @@ final class JarvisAppModel: ObservableObject {
     }
 
     func newConversation() {
+        voiceInput.stop(discard: true)
         currentConversationId = nil
         currentConversationTitle = "New conversation"
         messages = []

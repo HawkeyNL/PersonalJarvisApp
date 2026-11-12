@@ -80,6 +80,20 @@ interface JarvisApi {
     suspend fun deleteConversation(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> =
         ApiResult.InvalidResponse("Not supported")
 
+    /** Scheduled jobs (desktop jobsApi.ts); answers pass the guards in Jobs.kt. */
+    suspend fun jobs(endpoint: HomeNodeEndpoint, token: String): ApiResult<JobList> = ApiResult.InvalidResponse("Not supported")
+    /** The created job, or null when Core's answer cannot be read. */
+    suspend fun createJob(endpoint: HomeNodeEndpoint, token: String, body: kotlinx.serialization.json.JsonObject): ApiResult<Job?> =
+        ApiResult.InvalidResponse("Not supported")
+    /** A change built on [revision]; HttpError(409) when the job moved on. */
+    suspend fun updateJob(endpoint: HomeNodeEndpoint, token: String, id: String, revision: Long, patch: kotlinx.serialization.json.JsonObject): ApiResult<Job?> =
+        ApiResult.InvalidResponse("Not supported")
+    /** Queues a run (202); HttpError(429) within an hour of the last owner run. */
+    suspend fun runJob(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> = ApiResult.InvalidResponse("Not supported")
+    /** The 20 newest runs of a job. */
+    suspend fun jobRuns(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<List<JobRun>> = ApiResult.InvalidResponse("Not supported")
+    suspend fun jobRun(endpoint: HomeNodeEndpoint, token: String, runId: String): ApiResult<RunDetail> = ApiResult.InvalidResponse("Not supported")
+
     suspend fun androidUpdate(
         endpoint: HomeNodeEndpoint,
         token: String,

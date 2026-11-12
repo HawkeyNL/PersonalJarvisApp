@@ -43,7 +43,7 @@ import com.hawkeynl.jarvis.chat.realtimeSelectedHistory
 
 /** Where the authenticated app is: a tab root (HUB, TRADING, ACTIVITY, SETTINGS) or a
  *  screen pushed on one of the tabs; see [tabOf]. */
-enum class Screen { HUB, CHAT, SETTINGS, CONVERSATIONS, AGENTS, TASKS, INTEGRATIONS, HEALTH, MEMORY, CONTEXT, PAIRING_APPROVALS, TRADING, ACTIVITY }
+enum class Screen { HUB, CHAT, SETTINGS, CONVERSATIONS, AGENTS, TASKS, INTEGRATIONS, HEALTH, MEMORY, CONTEXT, PAIRING_APPROVALS, TRADING, ACTIVITY, JOBS }
 
 sealed interface AndroidUpdateUiState {
     data object Idle : AndroidUpdateUiState
@@ -508,6 +508,21 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             else -> DELETE_FAILED
         }
     }.await()
+
+    /** One Jobs call for the signed-in Home Node, with its token read here. Null when the app
+     *  is locked or signed out, or the sign-in changed before the answer came: a late answer
+     *  is dropped, and only a 401 of this sign-in ends it. */
+    suspend fun <T> jobs(call: suspend com.hawkeynl.jarvis.network.JarvisApi.(HomeNodeEndpoint, String) -> ApiResult<T>): ApiResult<T>? =
+        viewModelScope.async {
+            val current = _state.value
+            val endpoint = current.endpoint?.takeIf { !current.locked && current.authenticated } ?: return@async null
+            val token = container.sessions.session().token ?: return@async null
+            val asked = identity
+            val result = container.api.call(endpoint, token)
+            if (asked != identity || _state.value.locked || !_state.value.authenticated) return@async null
+            if (result == ApiResult.Unauthorized) handleApiFailure(result)
+            result
+        }.await()
 
     /** Forget a photo Core no longer has: its messages show "Photo removed". */
     private fun markRemoved(id: String) {

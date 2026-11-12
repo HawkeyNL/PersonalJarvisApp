@@ -15,6 +15,8 @@
         A00000000000000000000072 /* PushRegistrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000072 /* PushRegistrationTests.swift */; };
         A00000000000000000000054 /* HubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000054 /* HubModel.swift */; };
         A00000000000000000000090 /* ChatPhotos.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000090 /* ChatPhotos.swift */; };
+        A000000000000000000000A0 /* VoiceInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000000000000000000A0 /* VoiceInput.swift */; };
+        A000000000000000000000A1 /* VoiceInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000000000000000000A1 /* VoiceInputTests.swift */; };
         A000000000000000000000A2 /* Jobs.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000000000000000000A2 /* Jobs.swift */; };
         A000000000000000000000A3 /* JobsPages.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000000000000000000A3 /* JobsPages.swift */; };
         A000000000000000000000A4 /* JobsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000000000000000000A4 /* JobsTests.swift */; };
@@ -74,6 +76,8 @@
         B00000000000000000000072 /* PushRegistrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistrationTests.swift; sourceTree = "<group>"; };
         B00000000000000000000054 /* HubModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/HubModel.swift; sourceTree = "<group>"; };
         B00000000000000000000090 /* ChatPhotos.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/ChatPhotos.swift; sourceTree = "<group>"; };
+        B000000000000000000000A0 /* VoiceInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/VoiceInput.swift; sourceTree = "<group>"; };
+        B000000000000000000000A1 /* VoiceInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputTests.swift; sourceTree = "<group>"; };
         B000000000000000000000A2 /* Jobs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/Jobs.swift; sourceTree = "<group>"; };
         B000000000000000000000A3 /* JobsPages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/JobsPages.swift; sourceTree = "<group>"; };
         B000000000000000000000A4 /* JobsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobsTests.swift; sourceTree = "<group>"; };
@@ -160,6 +164,7 @@
                 B00000000000000000000080 /* ActivityView.swift */,
                 B00000000000000000000054 /* HubModel.swift */,
                 B00000000000000000000090 /* ChatPhotos.swift */,
+                B000000000000000000000A0 /* VoiceInput.swift */,
                 B000000000000000000000A2 /* Jobs.swift */,
                 B000000000000000000000A3 /* JobsPages.swift */,
                 B00000000000000000000070 /* PushRegistration.swift */,
@@ -186,6 +191,7 @@
                 B00000000000000000000055 /* HubModelTests.swift */,
                 B00000000000000000000056 /* InstrumentTests.swift */,
                 B00000000000000000000072 /* PushRegistrationTests.swift */,
+                B000000000000000000000A1 /* VoiceInputTests.swift */,
                 B000000000000000000000A4 /* JobsTests.swift */,
 			);
 			path = JarvisTests;
@@ -297,13 +303,14 @@
                 A00000000000000000000080 /* ActivityView.swift in Sources */,
                 A00000000000000000000054 /* HubModel.swift in Sources */,
                 A00000000000000000000090 /* ChatPhotos.swift in Sources */,
+                A000000000000000000000A0 /* VoiceInput.swift in Sources */,
                 A000000000000000000000A2 /* Jobs.swift in Sources */,
                 A000000000000000000000A3 /* JobsPages.swift in Sources */,
                 A00000000000000000000070 /* PushRegistration.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		D00000000000000000000003 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000013 /* EndpointNormalizerTests.swift in Sources */, A00000000000000000000014 /* ClientDTOTests.swift in Sources */, A00000000000000000000043 /* ModelAuthorizationTests.swift in Sources */, A00000000000000000000055 /* HubModelTests.swift in Sources */, A00000000000000000000056 /* InstrumentTests.swift in Sources */, A00000000000000000000072 /* PushRegistrationTests.swift in Sources */, A000000000000000000000A4 /* JobsTests.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
+		D00000000000000000000003 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000013 /* EndpointNormalizerTests.swift in Sources */, A00000000000000000000014 /* ClientDTOTests.swift in Sources */, A00000000000000000000043 /* ModelAuthorizationTests.swift in Sources */, A00000000000000000000055 /* HubModelTests.swift in Sources */, A00000000000000000000056 /* InstrumentTests.swift in Sources */, A00000000000000000000072 /* PushRegistrationTests.swift in Sources */, A000000000000000000000A1 /* VoiceInputTests.swift in Sources */, A000000000000000000000A4 /* JobsTests.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */

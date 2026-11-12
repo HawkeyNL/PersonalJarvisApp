@@ -19,6 +19,7 @@ import io.ktor.client.request.prepareGet
 import io.ktor.client.request.preparePatch
 import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpStatement
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.contentLength
 import io.ktor.http.ContentType
@@ -41,6 +42,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -350,13 +352,69 @@ class KtorJarvisApi(
         return request<Unit> { client.delete(endpoint.url("/v1/conversations/$id")) { bearerAuth(token) } }
     }
 
-    /** A small JSON reply, read with a size bound; null when too large or not JSON. */
-    private suspend fun smallJson(response: io.ktor.client.statement.HttpResponse): JsonElement? {
-        val bytes = withContext(Dispatchers.IO) {
-            response.bodyAsChannel().toInputStream().use { input -> readAtMost(input, MAX_REPLY_BYTES + 1) }
+    override suspend fun jobs(endpoint: HomeNodeEndpoint, token: String) =
+        jobCall({ requireNotNull(readJobList(it)) }) { client.prepareGet(endpoint.url("/v1/jobs")) { bearerAuth(token) } }
+
+    override suspend fun createJob(endpoint: HomeNodeEndpoint, token: String, body: JsonObject) = jobCall(::readJob) {
+        client.preparePost(endpoint.url("/v1/jobs")) { bearerAuth(token); setBody(TextContent(body.toString(), ContentType.Application.Json)) }
+    }
+
+    override suspend fun updateJob(endpoint: HomeNodeEndpoint, token: String, id: String, revision: Long, patch: JsonObject): ApiResult<Job?> {
+        if (!isJobId(id) || revision < 0) return ApiResult.InvalidResponse("Invalid job id")
+        return jobCall(::readJob) {
+            client.preparePatch(endpoint.url("/v1/jobs/$id")) {
+                bearerAuth(token); parameter("expected_revision", revision)
+                setBody(TextContent(patch.toString(), ContentType.Application.Json))
+            }
         }
-        if (bytes.size > MAX_REPLY_BYTES) return null
-        return runCatching { Json.parseToJsonElement(bytes.decodeToString()) }.getOrNull()
+    }
+
+    override suspend fun runJob(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> {
+        if (!isJobId(id)) return ApiResult.InvalidResponse("Invalid job id")
+        // Only the status matters; the body is read within the bound and dropped.
+        return jobCall({ }) { client.preparePost(endpoint.url("/v1/jobs/$id/run")) { bearerAuth(token); setBody(TextContent("{}", ContentType.Application.Json)) } }
+    }
+
+    override suspend fun jobRuns(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<List<JobRun>> {
+        if (!isJobId(id)) return ApiResult.InvalidResponse("Invalid job id")
+        return jobCall({ requireNotNull(readRuns(it)) }) {
+            client.prepareGet(endpoint.url("/v1/jobs/$id/runs")) { bearerAuth(token); parameter("limit", 20) }
+        }
+    }
+
+    override suspend fun jobRun(endpoint: HomeNodeEndpoint, token: String, runId: String): ApiResult<RunDetail> {
+        if (!isJobId(runId)) return ApiResult.InvalidResponse("Invalid run id")
+        return jobCall({ requireNotNull(readRunDetail(it)) }) { client.prepareGet(endpoint.url("/v1/jobs/runs/$runId")) { bearerAuth(token) } }
+    }
+
+    /** A Jobs call: the answer is read with a size bound and passed through [read], which
+     *  throws IllegalArgumentException for a shape the guards refuse. */
+    private suspend fun <T> jobCall(read: (JsonElement) -> T, statement: suspend () -> HttpStatement): ApiResult<T> = try {
+        statement().execute { response ->
+            when {
+                response.status == HttpStatusCode.Unauthorized -> ApiResult.Unauthorized
+                response.status.value !in 200..299 -> ApiResult.HttpError(response.status.value, null)
+                else -> try {
+                    val json = smallJson(response, MAX_JOBS_BYTES) ?: JsonNull
+                    ApiResult.Success(withContext(Dispatchers.Default) { read(json) })
+                } catch (_: IllegalArgumentException) {
+                    ApiResult.InvalidResponse("Home Node sent an invalid answer")
+                }
+            }
+        }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        networkFailure(error)
+    }
+
+    /** A small JSON reply, read with a size bound; null when too large or not JSON. */
+    private suspend fun smallJson(response: io.ktor.client.statement.HttpResponse, limit: Int = MAX_REPLY_BYTES): JsonElement? {
+        // Read and parsed off the main thread.
+        return withContext(Dispatchers.IO) {
+            val bytes = response.bodyAsChannel().toInputStream().use { input -> readAtMost(input, limit + 1) }
+            if (bytes.size > limit) null else runCatching { Json.parseToJsonElement(bytes.decodeToString()) }.getOrNull()
+        }
     }
 
     private suspend inline fun <reified T> request(
@@ -409,6 +467,8 @@ class KtorJarvisApi(
         const val MAX_UPLOAD_BYTES = 15 * 1024 * 1024
         /** An upload id or a photo's keep state is tiny. */
         private const val MAX_REPLY_BYTES = 4 * 1024
+        /** A run report with its facts is the largest Jobs answer; Core caps its lists. */
+        private const val MAX_JOBS_BYTES = 1024 * 1024
         private val REPLY_JSON = Json { ignoreUnknownKeys = true }
         private val CONVERSATION_ID = Regex("[A-Za-z0-9_-]{1,128}")
 
