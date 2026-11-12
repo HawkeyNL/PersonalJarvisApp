@@ -19,6 +19,7 @@ import { chatSession } from "./chatSession";
 import { currentAuthStatus } from "./auth";
 import { locked } from "./lock";
 import { postJsonAuth, getJsonAuth } from "./api";
+import { setConversationPhotos } from "./photos";
 import {
   currentId,
   setCurrent,
@@ -216,6 +217,7 @@ async function reloadConversation(id:string):Promise<void> {
   thinking.value=res.assistant_running===true;
   // Rows already on screen keep their local id (a reload after a reconnect).
   const known=new Map(messages.value.filter(m=>m.canonicalId).map(m=>[m.canonicalId,m.id]));
+  setConversationPhotos(res.messages, res.photos ?? []);
   messages.value = res.messages.map((m) => ({
     id: (m.id ? known.get(m.id) : undefined) ?? idc++,
     role: m.role === "assistant" ? "jarvis" : "user",

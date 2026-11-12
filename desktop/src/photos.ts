@@ -5,8 +5,9 @@ import { ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { chatSession } from "./chatSession";
 import { currentId } from "./conversations";
-import { deleteAuth } from "./api";
-import { downscale, uploadFailure, MAX_PHOTOS } from "./chatPhotos";
+import { ApiError, deleteAuth, patchJsonAuth } from "./api";
+import { downscale, uploadFailure, missingPhotos, MAX_PHOTOS } from "./chatPhotos";
+import type { PhotoMeta } from "./assistant";
 
 export interface Chip {
   key: number;
@@ -133,6 +134,41 @@ export function photoUrl(id: string): Promise<string | null> {
   return loading;
 }
 
+/** The open conversation's photos that still exist (from its last read). */
+export const photoMeta = ref(new Map<string, PhotoMeta>());
+/** Photos known to be gone: shown as "Photo removed". */
+export const removedPhotos = ref(new Set<string>());
+
+/** After reading a conversation: its live photos, and the ones its messages
+ *  still name but that were deleted or expired. */
+export function setConversationPhotos(messages: { attachments?: string[] }[], photos: PhotoMeta[]): void {
+  photoMeta.value = new Map(photos.map((photo) => [photo.id, photo]));
+  removedPhotos.value = missingPhotos(messages, photos);
+}
+
+/** Keep (or stop keeping) a photo past its 90 days. */
+export async function keepPhoto(id: string, saved: boolean): Promise<void> {
+  const meta = await patchJsonAuth<PhotoMeta>(photoPath(id), { saved });
+  if (meta?.id === id && typeof meta.saved === "boolean") photoMeta.value = new Map(photoMeta.value).set(id, meta);
+}
+
+/** Delete a photo for good; its messages show a placeholder. */
+export async function deletePhoto(id: string): Promise<void> {
+  try {
+    await deleteAuth(photoPath(id));
+  } catch (error) {
+    // Already gone counts as deleted.
+    if (!(error instanceof ApiError && error.status === 404)) throw error;
+  }
+  const meta = new Map(photoMeta.value);
+  meta.delete(id);
+  photoMeta.value = meta;
+  removedPhotos.value = new Set(removedPhotos.value).add(id);
+  const url = cache.get(id);
+  cache.set(id, Promise.resolve(null));
+  void url?.then((value) => value && URL.revokeObjectURL(value), () => {});
+}
+
 /** Revoke every cached blob URL. */
 export function clearPhotoCache(): void {
   for (const url of cache.values()) void url.then((value) => value && URL.revokeObjectURL(value), () => {});
@@ -142,10 +178,15 @@ export function clearPhotoCache(): void {
 // Leaving a conversation frees its photos. Its first message (no id yet ->
 // an id) keeps them: they are the photos just sent.
 watch(currentId, (_, before) => {
-  if (before !== null) clearPhotoCache();
+  if (before === null) return;
+  clearPhotoCache();
+  photoMeta.value = new Map();
+  removedPhotos.value = new Set();
 });
 chatSession.onReset(() => {
   clearPhotoCache();
+  photoMeta.value = new Map();
+  removedPhotos.value = new Set();
   for (const chip of chips.value) if (chip.url) URL.revokeObjectURL(chip.url);
   chips.value = [];
   chipNotice.value = "";

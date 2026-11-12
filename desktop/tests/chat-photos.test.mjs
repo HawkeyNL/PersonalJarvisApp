@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fitWithin, downscale, uploadFailure, UNSUPPORTED, CORE_TOO_OLD, MAX_SIDE, JPEG_QUALITY } from "../src/chatPhotos.ts";
+import { fitWithin, downscale, uploadFailure, missingPhotos, expiryHint, UNSUPPORTED, CORE_TOO_OLD, MAX_SIDE, JPEG_QUALITY } from "../src/chatPhotos.ts";
 import { runRequest } from "../src/realtimeProjection.ts";
 
 test("photos shrink to 2048 px on the long side and never grow", () => {
@@ -70,4 +70,18 @@ test("run requests carry photos only when there are some", () => {
   assert.ok(!("attachments" in plain) && !("mode" in plain));
   assert.deepEqual(runRequest("r", "c", history, undefined, ["p1", "p2"]).attachments, ["p1", "p2"]);
   assert.equal(runRequest("r", "c", history, "research").mode, "research");
+});
+
+test("photos a message names but the conversation lacks are shown as removed", () => {
+  const messages = [{ attachments: ["a", "b"] }, {}, { attachments: ["c"] }];
+  assert.deepEqual([...missingPhotos(messages, [{ id: "a" }, { id: "c" }])], ["b"]);
+  assert.deepEqual([...missingPhotos(messages, [])], ["a", "b", "c"]);
+  assert.equal(missingPhotos([{}], []).size, 0);
+});
+
+test("the lightbox says how long a photo stays", () => {
+  assert.equal(expiryHint({ saved: true, expires_at: null }), "Kept until you delete it.");
+  assert.equal(expiryHint(undefined), "Photos are kept 90 days unless you keep them.");
+  assert.equal(expiryHint({ saved: false, expires_at: "nonsense" }), "Photos are kept 90 days unless you keep them.");
+  assert.match(expiryHint({ saved: false, expires_at: "2027-02-10T12:00:00Z" }), /^Removed on .*2027.* unless you keep it\.$/);
 });
