@@ -11,6 +11,7 @@ export const CORE_TOO_OLD = "Your Home Node needs Jarvis Core v0.0.83 to receive
 /** Larger files are refused before decoding (a phone photo is far smaller). */
 export const MAX_INPUT_BYTES = 30 * 1024 * 1024;
 export const TOO_LARGE = "This photo is too large.";
+export const UNREADABLE = "This photo could not be read.";
 
 /** `width`×`height` scaled down (never up) to fit `max` on the long side. */
 export function fitWithin(width: number, height: number, max = MAX_SIDE): { width: number; height: number } {
@@ -69,13 +70,29 @@ export async function downscale(file: Blob, deps: DownscaleDeps = browser): Prom
 export function uploadFailure(status: number): string {
   switch (status) {
     case 404: return CORE_TOO_OLD;
-    case 400: case 415: return UNSUPPORTED;
+    case 400: return UNREADABLE;
+    case 415: return UNSUPPORTED;
     case 413: return TOO_LARGE;
     case 429: return "Too many photos for now; try again later.";
-    case 503: return "Photos are unavailable on your Home Node right now.";
+    case 503: return "Photos are busy or unavailable on your Home Node; try again.";
     case 507: return "Photo storage on your Home Node is full.";
     default: return "The photo could not be uploaded.";
   }
+}
+
+/** Core attaches an unsent photo only within 23 h of its upload. */
+export const SEND_WITHIN_MS = 23 * 60 * 60 * 1000;
+export const TOO_OLD_TO_SEND = "This photo waited too long; remove it and attach it again.";
+export const tooOldToSend = (uploadedAt: number | undefined, now: number) =>
+  uploadedAt !== undefined && now - uploadedAt > SEND_WITHIN_MS;
+
+/** What to say when Core refused a new run outright (it stored nothing), or
+ *  null when the outcome is unknown. A 404 is a deleted conversation or a
+ *  photo that is gone, already sent or too old. */
+export function runRefusal(status: number | undefined): string | null {
+  if (status === 400) return "Your Home Node refused this message. Nothing was sent.";
+  if (status === 404) return "Your Home Node no longer has this conversation or one of these photos. Nothing was sent.";
+  return null;
 }
 
 /** Photo ids the messages carry that the conversation no longer has
@@ -86,10 +103,12 @@ export function missingPhotos(messages: { attachments?: string[] }[], photos: { 
 }
 
 /** How long a photo stays, for the lightbox. Without metadata (a photo just
- *  sent) the general rule. */
+ *  sent) the general rule. Core reports a date for a kept photo too while no
+ *  message carries it yet (upload + 24 h): then that date counts. */
 export function expiryHint(meta: { saved: boolean; expires_at: string | null } | undefined): string {
-  if (meta?.saved) return "Kept until you delete it.";
+  if (meta?.saved && meta.expires_at === null) return "Kept until you delete it.";
   const at = meta?.expires_at ? new Date(meta.expires_at) : null;
   if (!at || Number.isNaN(at.getTime())) return "Photos are kept 90 days unless you keep them.";
-  return `Removed on ${at.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })} unless you keep it.`;
+  const day = at.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+  return meta?.saved ? `Removed on ${day}.` : `Removed on ${day} unless you keep it.`;
 }

@@ -24,9 +24,12 @@ data class Source(val url: String, val title: String? = null) {
 
 private val SOURCES_HEADER = Regex("sources|bronnen", RegexOption.IGNORE_CASE)
 
-/** Bidi controls, zero-width, line/paragraph separators and other invisible format
- *  characters (Core's list): a title could hide or reorder text with them. */
-private val INVISIBLE_FORMAT = Regex("[\u00AD\u061C\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]")
+/** Bidi controls, zero-width, fillers, variation selectors, line/paragraph separators,
+ *  tags and other invisible characters: exactly Core's validation::no_hidden_chars list
+ *  (control characters are checked apart). A title could hide or reorder text with them. */
+private val INVISIBLE_FORMAT = Regex(
+    "[\u00AD\u034F\u061C\u115F\u1160\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2069\u3164\uFE00-\uFE0F\uFEFF\uFFF9-\uFFFB\\x{E0000}-\\x{E007F}]",
+)
 
 /** A whole `[Title](url)` line, like Core: a plain title of 1 to 120 characters
  *  without brackets, parentheses, control or invisible format characters. The

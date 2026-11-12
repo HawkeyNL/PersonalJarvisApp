@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 
 /// Chat (D-Home): your messages in accent bubbles, Jarvis answers as plain text
@@ -135,6 +136,21 @@ enum ChatPhoto {
     case image(UIImage)
     case removed
     case unavailable
+
+    /// The photo as a thumbnail of at most `maxPixels` on its long side, upright, decoded
+    /// straight from the JPEG so its full-size bitmap is never held. Thumbnails are all the
+    /// chat shows (there is no full-size viewer); Core sends up to 1600 px.
+    static func thumbnail(_ data: Data, maxPixels: Int = 512) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceShouldCacheImmediately: true,
+                  kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+              ] as CFDictionary)
+        else { return nil }
+        return UIImage(cgImage: image)
+    }
 }
 
 /// One photo of a message, read-only (sending comes later).

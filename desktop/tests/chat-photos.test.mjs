@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fitWithin, downscale, uploadFailure, missingPhotos, expiryHint, UNSUPPORTED, CORE_TOO_OLD, MAX_SIDE, JPEG_QUALITY, MAX_INPUT_BYTES, TOO_LARGE } from "../src/chatPhotos.ts";
+import { readFileSync } from "node:fs";
+import { fitWithin, downscale, uploadFailure, missingPhotos, expiryHint, UNSUPPORTED, CORE_TOO_OLD, MAX_SIDE, JPEG_QUALITY, MAX_INPUT_BYTES, TOO_LARGE, UNREADABLE, runRefusal, tooOldToSend, SEND_WITHIN_MS } from "../src/chatPhotos.ts";
 import { runRequest } from "../src/realtimeProjection.ts";
 
 test("photos shrink to 2048 px on the long side and never grow", () => {
@@ -63,6 +64,10 @@ test("upload refusals have their own words; 404 means an older Core", () => {
   assert.equal(uploadFailure(404), CORE_TOO_OLD);
   assert.equal(CORE_TOO_OLD, "Your Home Node needs Jarvis Core v0.0.83 to receive photos.");
   assert.equal(uploadFailure(415), UNSUPPORTED);
+  // A 400 is any unreadable body, not only a format: no "export as JPEG".
+  assert.equal(uploadFailure(400), UNREADABLE);
+  assert.equal(UNREADABLE, "This photo could not be read.");
+  assert.equal(uploadFailure(503), "Photos are busy or unavailable on your Home Node; try again.");
   for (const status of [413, 429, 503, 507, 500]) assert.ok(uploadFailure(status).length > 0);
   assert.notEqual(uploadFailure(507), uploadFailure(500));
 });
@@ -88,4 +93,34 @@ test("the lightbox says how long a photo stays", () => {
   assert.equal(expiryHint(undefined), "Photos are kept 90 days unless you keep them.");
   assert.equal(expiryHint({ saved: false, expires_at: "nonsense" }), "Photos are kept 90 days unless you keep them.");
   assert.match(expiryHint({ saved: false, expires_at: "2027-02-10T12:00:00Z" }), /^Removed on .*2027.* unless you keep it\.$/);
+  // Kept but not sent yet: Core still removes it 24 h after the upload.
+  assert.match(expiryHint({ saved: true, expires_at: "2027-02-10T12:00:00Z" }), /^Removed on .*2027\.$/);
+});
+
+test("only a 400 or 404 on submit is a definite refusal", () => {
+  assert.match(runRefusal(400), /Nothing was sent\.$/);
+  assert.match(runRefusal(404), /Nothing was sent\.$/);
+  for (const status of [undefined, 0, 401, 409, 500, 503]) assert.equal(runRefusal(status), null, String(status));
+});
+
+test("a photo older than 23 hours is not sent", () => {
+  const now = Date.UTC(2026, 10, 12, 12);
+  assert.equal(SEND_WITHIN_MS, 23 * 3600 * 1000);
+  assert.equal(tooOldToSend(now - SEND_WITHIN_MS, now), false);
+  assert.equal(tooOldToSend(now - SEND_WITHIN_MS - 1, now), true);
+  assert.equal(tooOldToSend(undefined, now), false);
+});
+
+const read = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
+
+test("a refused message comes back to the composer, photos included", () => {
+  assert.match(read("assistant.ts"), /if\(refusal\) \{\n\s+pending\.delete\(requestId\);\n\s+messages\.value=messages\.value\.filter\(m=>m\.id!==optimistic\.id\);/);
+  const chat = read("components/JarvisConsole.vue");
+  assert.match(chat, /function onSend\(\) \{\n  expireStaleChips\(\);/);
+  assert.match(chat, /if \(!refused\) return;\n    if \(!text\.value\.trim\(\)\) text\.value = draft;\n    restoreChips\(taken\);/);
+});
+
+test("keeping a photo Core no longer has marks it removed", () => {
+  assert.match(read("photos.ts"), /if \(!gone\(error\)\) throw error;\n    return markRemoved\(id\);/);
+  assert.match(read("components/JarvisConsole.vue"), /if \(removedPhotos\.value\.has\(id\)\) lightboxEl\.value\?\.close\(\);/);
 });

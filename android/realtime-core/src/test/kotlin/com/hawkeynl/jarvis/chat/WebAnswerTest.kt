@@ -69,6 +69,17 @@ class WebAnswerTest {
         )
         assertTrue(splitSources("A\nSources:\n- [${"t".repeat(121)}](https://example.org/)").sources.isEmpty())
         assertEquals("é".repeat(120), splitSources("A\nSources:\n- [${"é".repeat(120)}](https://example.org/)").sources.single().title)
+        // Every hidden character of Core's validation::no_hidden_chars, at its edges.
+        for (hidden in listOf(0x0, 0x9F, 0xAD, 0x34F, 0x61C, 0x115F, 0x1160, 0x180E, 0x200B, 0x200F, 0x2028, 0x202E,
+            0x2060, 0x2065, 0x2069, 0x3164, 0xFE00, 0xFE0F, 0xFEFF, 0xFFF9, 0xFFFB, 0xE0000, 0xE0001, 0xE007F)) {
+            val title = "a" + String(Character.toChars(hidden)) + "b"
+            assertTrue(hidden.toString(16), splitSources("A\nSources:\n- [$title](https://example.org/)").sources.isEmpty())
+        }
+        // Their neighbours stay allowed, like in Core.
+        for (shown in listOf(0xAE, 0x2027, 0x206A, 0xFE10, 0xFFFC, 0xE0080)) {
+            val title = "a" + String(Character.toChars(shown)) + "b"
+            assertEquals(title, splitSources("A\nSources:\n- [$title](https://example.org/)").sources.single().title)
+        }
     }
 
     @Test fun aCardShowsTheHostWithoutWwwAndAShortPath() {

@@ -6,7 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { chatSession } from "./chatSession";
 import { currentId } from "./conversations";
 import { ApiError, deleteAuth, patchJsonAuth } from "./api";
-import { downscale, uploadFailure, missingPhotos, MAX_PHOTOS } from "./chatPhotos";
+import { downscale, uploadFailure, missingPhotos, tooOldToSend, MAX_PHOTOS, TOO_OLD_TO_SEND } from "./chatPhotos";
 import type { PhotoMeta } from "./assistant";
 
 export interface Chip {
@@ -16,6 +16,10 @@ export interface Chip {
   state: "preparing" | "uploading" | "ready" | "failed";
   id?: string;
   error?: string;
+  /** The shrunk photo, so a refused message can show it again. */
+  blob?: Blob;
+  /** When the upload finished (ms since epoch). */
+  at?: number;
 }
 
 export const chips = ref<Chip[]>([]);
@@ -55,7 +59,7 @@ async function prepare(key: number, file: File): Promise<void> {
   const url = URL.createObjectURL(blob);
   const preparing = chip();
   if (!preparing) return URL.revokeObjectURL(url);
-  Object.assign(preparing, { url, state: "uploading" });
+  Object.assign(preparing, { url, blob, state: "uploading" });
   let status = 0;
   let id: string | undefined;
   try {
@@ -71,7 +75,7 @@ async function prepare(key: number, file: File): Promise<void> {
     if (id && chatSession.current(epoch)) forget(id);
     return;
   }
-  if (id) Object.assign(uploaded, { id, state: "ready" });
+  if (id) Object.assign(uploaded, { id, state: "ready", at: Date.now() });
   else Object.assign(uploaded, { state: "failed", error: status ? uploadFailure(status) : "Could not reach your Home Node." });
 }
 
@@ -94,19 +98,43 @@ export const allReady = () => chips.value.every((c) => c.state === "ready");
 /** The uploaded photos' ids, in order. */
 export const chipIds = () => chips.value.flatMap((c) => (c.state === "ready" && c.id ? [c.id] : []));
 
+/** Photos Core would no longer attach (uploaded over 23 h ago) fail in place. */
+export function expireStaleChips(now = Date.now()): void {
+  for (const chip of chips.value) {
+    if (chip.state === "ready" && tooOldToSend(chip.at, now)) Object.assign(chip, { state: "failed", error: TOO_OLD_TO_SEND });
+  }
+}
+
 /** Hand the uploaded photos to a sent message: their previews move into the
- *  cache so the message shows them without a download. */
-export function takeChips(): string[] {
-  const ids: string[] = [];
+ *  cache so the message shows them without a download. Returns them, for
+ *  restoreChips if Core refuses the message. */
+export function takeChips(): Chip[] {
+  const taken: Chip[] = [];
   for (const chip of chips.value) {
     if (chip.state === "ready" && chip.id) {
-      ids.push(chip.id);
+      taken.push({ ...chip });
       cache.set(chip.id, Promise.resolve(chip.url));
     } else if (chip.url) URL.revokeObjectURL(chip.url);
   }
   chips.value = [];
   chipNotice.value = "";
-  return ids;
+  return taken;
+}
+
+/** Put photos of a refused message back in the composer, ahead of any added
+ *  since. Each takes its preview back from the cache under a fresh URL. */
+export function restoreChips(taken: Chip[]): void {
+  for (const chip of taken) {
+    const old = cache.get(chip.id!);
+    cache.delete(chip.id!);
+    void old?.then((value) => value && URL.revokeObjectURL(value), () => {});
+  }
+  const room = Math.max(MAX_PHOTOS - chips.value.length, 0);
+  // No room left (photos added since): the rest are deleted on the Home Node.
+  for (const chip of taken.slice(room)) forget(chip.id!);
+  if (taken.length > room) chipNotice.value = `Up to ${MAX_PHOTOS} photos per message.`;
+  const back = taken.slice(0, room).map((chip) => ({ ...chip, url: chip.blob ? URL.createObjectURL(chip.blob) : "" }));
+  chips.value = [...back, ...chips.value];
 }
 
 // Shown photos by id: a blob URL, or null once Core says it is gone.
@@ -151,9 +179,18 @@ export function setConversationPhotos(messages: { attachments?: string[] }[], ph
   removedPhotos.value = missingPhotos(messages, photos);
 }
 
-/** Keep (or stop keeping) a photo past its 90 days. */
+const gone = (error: unknown) => error instanceof ApiError && error.status === 404;
+
+/** Keep (or stop keeping) a photo past its 90 days. A photo Core no longer
+ *  has (deleted elsewhere or expired) is marked removed instead. */
 export async function keepPhoto(id: string, saved: boolean): Promise<void> {
-  const meta = await patchJsonAuth<PhotoMeta>(photoPath(id), { saved });
+  let meta: PhotoMeta;
+  try {
+    meta = await patchJsonAuth<PhotoMeta>(photoPath(id), { saved });
+  } catch (error) {
+    if (!gone(error)) throw error;
+    return markRemoved(id);
+  }
   if (meta?.id === id && typeof meta.saved === "boolean") photoMeta.value = new Map(photoMeta.value).set(id, meta);
 }
 
@@ -163,8 +200,13 @@ export async function deletePhoto(id: string): Promise<void> {
     await deleteAuth(photoPath(id));
   } catch (error) {
     // Already gone counts as deleted.
-    if (!(error instanceof ApiError && error.status === 404)) throw error;
+    if (!gone(error)) throw error;
   }
+  markRemoved(id);
+}
+
+/** Forget a photo Core no longer has: its messages show "Photo removed". */
+function markRemoved(id: string): void {
   const meta = new Map(photoMeta.value);
   meta.delete(id);
   photoMeta.value = meta;

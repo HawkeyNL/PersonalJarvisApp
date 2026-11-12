@@ -16,7 +16,7 @@ import {
 import { conversations, currentId, deleteConversation } from "../conversations";
 import { renderMarkdown, handleMarkdownClick } from "../markdown";
 import { splitSources, sourcePlace, type Source } from "../webAnswer";
-import { chips, chipNotice, attach, removeChip, chipIds, takeChips, uploading, allReady, photoUrl, photoMeta, keepPhoto, deletePhoto } from "../photos";
+import { chips, chipNotice, attach, removeChip, chipIds, takeChips, restoreChips, expireStaleChips, uploading, allReady, photoUrl, photoMeta, removedPhotos, keepPhoto, deletePhoto } from "../photos";
 import { expiryHint } from "../chatPhotos";
 import { askedIn, dayOf, replyIsHere, type AskedIn } from "../chatList";
 import { useMic } from "../useMic";
@@ -145,17 +145,25 @@ function onResearch() {
 }
 
 function onSend() {
+  expireStaleChips();
   // A reply in progress keeps the draft: send() would drop it.
   if (!canSend.value) return;
+  const draft = text.value;
   const photos = chipIds();
-  void send(text.value, undefined, photos);
+  const sent = send(draft, undefined, photos);
   // send() starts a reply synchronously, or refuses (lock, too many pending,
   // photos without a live connection): then the draft and photos stay.
   if (!thinking.value) return;
-  takeChips();
+  const taken = takeChips();
   if (photos.length) markDisclosed();
   text.value = "";
   inputEl.value?.focus();
+  // Core refused it outright and stored nothing: the draft and photos return.
+  void sent.then((refused) => {
+    if (!refused) return;
+    if (!text.value.trim()) text.value = draft;
+    restoreChips(taken);
+  });
 }
 function onEnter(event: KeyboardEvent) {
   if (event.shiftKey || event.isComposing) return;
@@ -202,6 +210,8 @@ async function toggleKeep() {
   photoError.value = "";
   try {
     await keepPhoto(id, !viewingMeta.value?.saved);
+    // Gone on the Home Node: its message now shows "Photo removed".
+    if (removedPhotos.value.has(id)) lightboxEl.value?.close();
   } catch {
     photoError.value = "Could not change this photo. Try again.";
   } finally {

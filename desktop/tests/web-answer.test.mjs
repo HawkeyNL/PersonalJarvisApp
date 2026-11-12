@@ -84,6 +84,16 @@ test("titled sources keep a plain title under Core's URL rule", () => {
   });
   assert.equal(splitSources(`A\nSources:\n- [${"t".repeat(121)}](https://example.org/)`).sources.length, 0);
   assert.equal(splitSources(`A\nSources:\n- [${"é".repeat(120)}](https://example.org/)`).sources[0].title.length, 120);
+  // Every hidden character of Core's validation::no_hidden_chars, at its edges.
+  for (const hidden of ["\u0000", "\u009F", "\u00AD", "\u034F", "\u061C", "\u115F", "\u1160", "\u180E", "\u200B", "\u200F",
+    "\u2028", "\u202E", "\u2060", "\u2065", "\u2069", "\u3164", "\uFE00", "\uFE0F", "\uFEFF", "\uFFF9", "\uFFFB",
+    "\u{E0000}", "\u{E0001}", "\u{E007F}"]) {
+    assert.equal(splitSources(`A\nSources:\n- [a${hidden}b](https://example.org/)`).sources.length, 0, hidden.codePointAt(0).toString(16));
+  }
+  // Their neighbours stay allowed, like in Core.
+  for (const shown of ["\u00AE", "\u2027", "\u206A", "\uFE10", "\uFFFC", "\u{E0080}"]) {
+    assert.equal(splitSources(`A\nSources:\n- [a${shown}b](https://example.org/)`).sources[0].title, `a${shown}b`);
+  }
   // The first entry of a URL wins, titled or bare.
   assert.deepEqual(splitSources("A\nSources:\n- https://a.example/\n- [T](https://a.example/)").sources, [{ url: "https://a.example/" }]);
 });

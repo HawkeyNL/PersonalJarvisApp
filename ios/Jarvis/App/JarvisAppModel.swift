@@ -418,10 +418,14 @@ final class JarvisAppModel: ObservableObject {
         let result: ChatPhoto
         do {
             let data = try await chat.photo(id: uuid)
-            result = UIImage(data: data).map(ChatPhoto.image) ?? .unavailable
+            // Decoded off the main actor, already shrunk: 24 cached thumbnails stay small.
+            result = await Task.detached(priority: .userInitiated) { ChatPhoto.thumbnail(data) }.value
+                .map(ChatPhoto.image) ?? .unavailable
         } catch let JarvisAPIError.rejected(status, _) where status == 404 {
             result = .removed
         } catch {
+            // An expired session goes through the usual sign-in-again flow (once: it resets the generation).
+            if (error as? JarvisAPIError) == .unauthorized, presentation.accepts(generation) { handle(error) }
             return .unavailable
         }
         // A late answer from before a reset is dropped.
