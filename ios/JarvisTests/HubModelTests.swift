@@ -136,6 +136,30 @@ final class HubModelTests: XCTestCase {
         XCTAssertEqual(diskState(response.disks[1]).1, "Unknown")
     }
 
+    func testResourceMetersShowCpuMemoryAndEveryDisk() throws {
+        let registry = try decode(HomeNodeRegistry.self, """
+        {"host":{"os":"Linux","arch":"x86_64","cpu":"Ryzen","cpu_cores":16,"mem_total_gb":32,"gpu":"Radeon"},"software":[],
+         "live_host":{"sampled_at":1,"cpu_percent":12.34,"memory_total_bytes":34359738368,"memory_used_bytes":30064771072,"uptime_seconds":60}}
+        """)
+        let disks = try decode(ServicesResponse.self, """
+        {"services":[],"disks":[{"label":"system","state":"ok","total_bytes":107374182400,"free_bytes":5368709120,"used_percent":95},
+                                {"label":"data","state":"unknown"}]}
+        """).disks
+        XCTAssertEqual(resourceMeters(live: registry.liveHost, disks: disks), [
+            Meter(id: "cpu", label: "CPU", percent: 12, tone: .ok, detail: "12.3% in use"),
+            Meter(id: "memory", label: "Memory", percent: 88, tone: .warn, detail: "28.0 GiB used · 4.0 GiB free of 32.0 GiB"),
+            Meter(id: "disk-system-0", label: "Disk · system", percent: 95, tone: .error, detail: "95.0 GiB used · 5.0 GiB free of 100.0 GiB"),
+            Meter(id: "disk-data-1", label: "Disk · data", percent: nil, tone: .idle, detail: "Unknown"),
+        ])
+        // The first CPU sample and an unknown memory total have no reading.
+        let first = try decode(HomeNodeRegistry.LiveHost.self, """
+        {"sampled_at":1,"cpu_percent":null,"memory_total_bytes":0,"memory_used_bytes":0,"uptime_seconds":60}
+        """)
+        XCTAssertEqual(resourceMeters(live: first, disks: []).map(\.detail), ["First sample…", "Unknown"])
+        XCTAssertEqual(resourceMeters(live: first, disks: []).map(\.percent), [nil, nil])
+        XCTAssertEqual(resourceMeters(live: nil, disks: []), [])
+    }
+
     func testIbkrLinkStateComesFromThePortfolioRead() throws {
         let now = try XCTUnwrap(parseCoreDate("2026-11-01T12:00:00Z"))
         let synced = try decode(IbkrPortfolio.self, """

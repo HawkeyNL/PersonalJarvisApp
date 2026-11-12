@@ -233,3 +233,31 @@ private fun Budget(usage: SystemUsage) {
         }
     }
 }
+
+/** Labelled bars for [resourceMeters]: used and free space per resource. */
+@Composable
+internal fun ResourceMeters(meters: List<Meter>, modifier: Modifier = Modifier) {
+    val c = JvTheme.colors
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
+        for (m in meters) {
+            val fraction = ((m.percent ?: 0) / 100f).coerceIn(0f, 1f)
+            val color = when (m.tone) {
+                Tone.ERROR -> c.dangerSolid
+                Tone.WARN -> c.negativeSolid
+                else -> c.accentSolid
+            }
+            Column {
+                Row(Modifier.fillMaxWidth()) {
+                    Text(m.label, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                    Text(m.detail, color = c.textSecondary, style = MaterialTheme.typography.bodySmall.tabular())
+                }
+                Box(
+                    Modifier.padding(top = JvSpace.sm).fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(c.bgSunken)
+                        .semantics { contentDescription = m.percent?.let { "${m.label}: $it% used" } ?: "${m.label}: ${m.detail}" },
+                ) {
+                    Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().background(color))
+                }
+            }
+        }
+    }
+}

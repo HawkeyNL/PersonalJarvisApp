@@ -120,12 +120,41 @@ export function servicesSummary(services: { state: string }[]): [Tone, string] {
 }
 
 export type Disk = { label: string; state: string; total_bytes?: number; free_bytes?: number; used_percent?: number };
+const gib = (n: number) => `${(n / 1024 ** 3).toFixed(1)} GiB`;
 /** Tone and one-line summary of a disk; full disks warn early. */
 export function diskState(disk: Disk): [Tone, string] {
   if (disk.state !== "ok" || disk.used_percent === undefined || disk.free_bytes === undefined || disk.total_bytes === undefined) {
     return ["idle", "Unknown"];
   }
-  const gib = (n: number) => `${(n / 1024 ** 3).toFixed(1)} GiB`;
   const tone: Tone = disk.used_percent >= 90 ? "error" : disk.used_percent >= 80 ? "warn" : "ok";
   return [tone, `${disk.used_percent}% used · ${gib(disk.free_bytes)} free of ${gib(disk.total_bytes)}`];
+}
+
+export type LiveHost = { sampled_at: number; cpu_percent: number | null; memory_total_bytes: number; memory_used_bytes: number; uptime_seconds: number };
+/** One resource bar: `percent` null when Core has no reading. */
+export type Meter = { id: string; label: string; percent: number | null; tone: Tone; detail: string };
+const loadTone = (percent: number): Tone => (percent >= 90 ? "error" : percent >= 80 ? "warn" : "ok");
+const spaceDetail = (used: number, total: number) => `${gib(used)} used · ${gib(total - used)} free of ${gib(total)}`;
+/** CPU, memory and disk bars for the Home Node, in that order; each warns at 80% and 90%. */
+export function resourceMeters(live: LiveHost | undefined, disks: Disk[]): Meter[] {
+  const meters: Meter[] = [];
+  if (live) {
+    const cpu = live.cpu_percent;
+    meters.push(cpu == null
+      ? { id: "cpu", label: "CPU", percent: null, tone: "idle", detail: "First sample…" }
+      : { id: "cpu", label: "CPU", percent: Math.round(cpu), tone: loadTone(cpu), detail: `${cpu.toFixed(1)}% in use` });
+    const { memory_used_bytes: used, memory_total_bytes: total } = live;
+    meters.push(total > 0
+      ? { id: "memory", label: "Memory", percent: Math.round((used / total) * 100), tone: loadTone((used / total) * 100), detail: spaceDetail(used, total) }
+      : { id: "memory", label: "Memory", percent: null, tone: "idle", detail: "Unknown" });
+  }
+  disks.forEach((disk, i) => {
+    const id = `disk-${disk.label}-${i}`;
+    const label = `Disk · ${disk.label}`;
+    const [tone] = diskState(disk);
+    meters.push(tone === "idle"
+      ? { id, label, percent: null, tone, detail: "Unknown" }
+      : { id, label, percent: Math.round(disk.used_percent!), tone, detail: spaceDetail(disk.total_bytes! - disk.free_bytes!, disk.total_bytes!) });
+  });
+  return meters;
 }

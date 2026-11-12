@@ -94,7 +94,7 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
     fun refreshHome() = refresh("home", pending, ibkr)
     fun refreshTrading() = refresh("trading", ibkr)
     fun refreshActivity() = refresh("activity", pending, sessions, agentAudit, agents)
-    fun refreshSettings() = refresh("settings", registry, devices)
+    fun refreshSettings() = refresh("settings", registry, devices, services)
     fun refreshAgents() = refresh("agents", agents)
     fun refreshTasks() = refresh("tasks", sessions, pending, agentAudit)
     fun refreshIntegrations() = refresh("integrations", registry, models, ibkr)

@@ -44,7 +44,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.hawkeynl.jarvis.network.map
+import com.hawkeynl.jarvis.network.valueOrNull
 import com.hawkeynl.jarvis.storage.ThemeMode
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
 
 /** The Settings tab (I-Settings): appearance, Home Node, voice, app updates, the system
@@ -79,6 +83,12 @@ internal fun SettingsScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
                     ActionButton("Save", actions::saveEndpoint, Modifier.weight(1f))
                     ActionButton("Test", actions::checkConnection, Modifier.weight(1f))
+                }
+                val meters = resourceMeters(data.registry.valueOrNull?.live_host, data.services.valueOrNull?.disks.orEmpty())
+                if (meters.isNotEmpty()) ResourceMeters(meters, Modifier.padding(top = JvSpace.sm))
+                data.registry.valueOrNull?.live_host?.let {
+                    val at = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault()).format(Instant.ofEpochSecond(it.sampled_at))
+                    MutedText("Reading at $at · live in System health")
                 }
             }
         }

@@ -8,6 +8,7 @@ import com.hawkeynl.jarvis.network.ConnectionState
 import com.hawkeynl.jarvis.network.DiskStatus
 import com.hawkeynl.jarvis.network.IbkrPortfolio
 import com.hawkeynl.jarvis.network.LinkedDevice
+import com.hawkeynl.jarvis.network.LiveHost
 import com.hawkeynl.jarvis.network.LoadFailure
 import com.hawkeynl.jarvis.network.Registry
 import com.hawkeynl.jarvis.network.ServiceStatus
@@ -285,6 +286,47 @@ fun diskState(disk: DiskStatus): Pair<Tone, String> {
         else -> Tone.OK
     }
     return tone to "${Math.round(used)}% used · ${gib(free)} free of ${gib(total)}"
+}
+
+/** One resource bar; [percent] is null when Core has no reading. */
+data class Meter(val id: String, val label: String, val percent: Int?, val tone: Tone, val detail: String)
+
+private fun loadTone(percent: Double): Tone = when {
+    percent >= 90 -> Tone.ERROR
+    percent >= 80 -> Tone.WARN
+    else -> Tone.OK
+}
+
+private fun spaceDetail(used: Long, total: Long) = "${gib(used)} used · ${gib(total - used)} free of ${gib(total)}"
+
+/** CPU, memory and disk bars for the Home Node, in that order; each warns at 80% and 90%. */
+fun resourceMeters(live: LiveHost?, disks: List<DiskStatus>): List<Meter> = buildList {
+    if (live != null) {
+        val cpu = live.cpu_percent
+        add(
+            if (cpu == null) Meter("cpu", "CPU", null, Tone.IDLE, "First sample…")
+            else Meter("cpu", "CPU", Math.round(cpu).toInt(), loadTone(cpu), String.format(Locale.ROOT, "%.1f%% in use", cpu)),
+        )
+        val used = live.memory_used_bytes
+        val total = live.memory_total_bytes
+        val pct = if (total > 0) used * 100.0 / total else 0.0
+        add(
+            if (total > 0) Meter("memory", "Memory", Math.round(pct).toInt(), loadTone(pct), spaceDetail(used, total))
+            else Meter("memory", "Memory", null, Tone.IDLE, "Unknown"),
+        )
+    }
+    disks.forEachIndexed { i, disk ->
+        val id = "disk-${disk.label}-$i"
+        val label = "Disk · ${disk.label}"
+        val (tone) = diskState(disk)
+        val total = disk.total_bytes
+        val free = disk.free_bytes
+        val used = disk.used_percent
+        add(
+            if (tone == Tone.IDLE || total == null || free == null || used == null) Meter(id, label, null, Tone.IDLE, "Unknown")
+            else Meter(id, label, Math.round(used).toInt(), tone, spaceDetail(total - free, total)),
+        )
+    }
 }
 
 // --- Devices ---------------------------------------------------------------------------------
