@@ -2314,33 +2314,101 @@ final class WebAnswerTests: XCTestCase {
     func testTrailingSourcesBecomeHttpsLinks() {
         let split = WebAnswer.split("Rust 1.99 is out.\n\n**Sources:**\n- https://blog.rust-lang.org/a.html\n* https://example.org\nhttps://news.example\n")
         XCTAssertEqual(split.body, "Rust 1.99 is out.")
-        XCTAssertEqual(split.sources.map(\.absoluteString), ["https://blog.rust-lang.org/a.html", "https://example.org", "https://news.example"])
+        XCTAssertEqual(split.sources.map(\.url.absoluteString), ["https://blog.rust-lang.org/a.html", "https://example.org", "https://news.example"])
         XCTAssertEqual(WebAnswer.split("A\nSources:\n- https://a.example\n- https://a.example").sources.count, 1)
-        XCTAssertEqual(WebAnswer.split("A\nSources:\n- HTTPS://a.example/x").sources.map(\.absoluteString), ["https://a.example/x"])
+        XCTAssertEqual(WebAnswer.split("A\nSources:\n- HTTPS://a.example/x").sources.map(\.url.absoluteString), ["https://a.example/x"])
         let dutch = WebAnswer.split("Het weer.\r\n## Bronnen\r\n- https://knmi.nl/a")
         XCTAssertEqual(dutch.body, "Het weer.")
-        XCTAssertEqual(dutch.sources.map(\.absoluteString), ["https://knmi.nl/a"])
+        XCTAssertEqual(dutch.sources.map(\.url.absoluteString), ["https://knmi.nl/a"])
     }
 
     func testOnlyPlainHttpsUrlsWithAHostSurvive() {
         let bad = ["http://plain.example", "javascript:alert(1)", "https://user:pw@example.org", "https://a.example b",
-                   "[x](https://a.example)", "ftp://a.example", "https://", "see https://a.example"]
+                   "[x](http://a.example)", "ftp://a.example", "https://", "see https://a.example"]
         let split = WebAnswer.split("Answer\nSources:\n" + bad.joined(separator: "\n") + "\n- https://ok.example/p?q=1")
-        XCTAssertEqual(split.sources.map(\.absoluteString), ["https://ok.example/p?q=1"])
+        XCTAssertEqual(split.sources.map(\.url.absoluteString), ["https://ok.example/p?q=1"])
     }
 
     func testTheLastHeaderCountsAndTextWithoutOneIsUntouched() {
         XCTAssertEqual(WebAnswer.split("No list here.").body, "No list here.")
         XCTAssertTrue(WebAnswer.split("No list here.").sources.isEmpty)
-        XCTAssertEqual(WebAnswer.split("Sources:\n- https://a.example\nMore\nSources\n- https://b.example").sources.map(\.absoluteString), ["https://b.example"])
+        XCTAssertEqual(WebAnswer.split("Sources:\n- https://a.example\nMore\nSources\n- https://b.example").sources.map(\.url.absoluteString), ["https://b.example"])
         XCTAssertTrue(WebAnswer.split("Our sources: many\nhttps://a.example").sources.isEmpty)
     }
 
-    func testARunRightAfterAFinishedReplyIsCoresOwnWebSearch() {
+        func testTitledSourcesKeepAPlainTitleUnderCoresUrlRule() {
+        // Core's own fixture (chat.rs https_sources_only test).
+        let lines = [
+            "- [Rust 1.97 released](https://blog.rust-lang.org/2026/rust-1.97)",
+            "[Foo (bar) - Wiki](https://en.example.org/wiki/Foo)",
+            "* [A](https://en.example.org/wiki/Foo_(bar))",
+            "- [Plain title](http://plain.example/)",
+            "- [Who](https://user:pw@evil.example/)",
+            "- [](https://empty.example/)",
+            "- [Spaced](https://example.org/a b)",
+            "- [Click \u{202E}evil](https://example.org/)",
+            "- [Two](https://example.org/a) [Three](https://example.org/b)",
+            "- [Nested [x]](https://example.org/)",
+            "- [Tab\there](https://example.org/)",
+            "- [Zero\u{200B}width](https://example.org/)",
+            "- [Line\u{2028}sep](https://example.org/)",
+            "- [Soft\u{AD}hyphen](https://example.org/)",
+            "- [Unclosed](https://example.org/",
+            "- [<b>hi</b> *x*](https://x.example/)",
+            "- https://bare.example/p",
+        ]
+        let split = WebAnswer.split("Answer\nSources:\n" + lines.joined(separator: "\n"))
+        XCTAssertEqual(split.body, "Answer")
+        XCTAssertEqual(split.sources.map(\.url.absoluteString), [
+            "https://blog.rust-lang.org/2026/rust-1.97", "https://en.example.org/wiki/Foo_(bar)", "https://x.example/", "https://bare.example/p",
+        ])
+        XCTAssertEqual(split.sources.map(\.title), ["Rust 1.97 released", "A", "<b>hi</b> *x*", nil])
+        XCTAssertTrue(WebAnswer.split("A\nSources:\n- [" + String(repeating: "t", count: 121) + "](https://example.org/)").sources.isEmpty)
+        XCTAssertEqual(WebAnswer.split("A\nSources:\n- [" + String(repeating: "é", count: 120) + "](https://example.org/)").sources.first?.title?.count, 120)
+    }
+
+    func testACardShowsTheHostWithoutWwwAndAShortPath() {
+        let card = WebAnswer.split("A\nSources:\nhttps://www.example.org/\nhttps://blog.example/2026/rust?x=1\nhttps://a.example/" + String(repeating: "p", count: 60)).sources
+        XCTAssertEqual(card.map(\.host), ["example.org", "blog.example", "a.example"])
+        XCTAssertEqual(card[0].shortPath, "")
+        XCTAssertEqual(card[1].shortPath, "/2026/rust")
+        XCTAssertEqual(card[2].shortPath.count, 40)
+        XCTAssertTrue(card[2].shortPath.hasSuffix("…"))
+        // A look-alike Unicode host never shows on a card (refused, or kept only as punycode).
+        let idn = WebAnswer.split("A\nSources:\nhttps://ex\u{0430}mple.org/").sources
+        XCTAssertTrue(idn.allSatisfy { $0.host.allSatisfy(\.isASCII) })
+    }
+
+func testARunRightAfterAFinishedReplyIsCoresOwnWebSearch() {
         XCTAssertTrue(WebAnswer.startsAfterReply([message("user", "Weer morgen?"), message("assistant", "Probably dry.")]))
         // Our own, another device's or a tapped research run follows a question.
         XCTAssertFalse(WebAnswer.startsAfterReply([message("user", "Weer morgen?")]))
         XCTAssertFalse(WebAnswer.startsAfterReply([message("user", "x"), message("assistant", "")]))
         XCTAssertFalse(WebAnswer.startsAfterReply([]))
+    }
+}
+
+final class ChatPhotoTests: XCTestCase {
+    func testMessagesCarryPhotoIdsAndOldMessagesDecodeWithoutThem() throws {
+        let old = try JSONDecoder().decode(ConversationMessage.self, from: Data(#"{"role":"user","content":"hi","model":null,"at":"x"}"#.utf8))
+        XCTAssertNil(old.attachments)
+        let photo = try JSONDecoder().decode(ConversationMessage.self, from: Data(#"{"role":"user","content":"","model":null,"at":"x","attachments":["p1"]}"#.utf8))
+        XCTAssertEqual(photo.attachments, ["p1"])
+        let id = "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"
+        let live = try JSONDecoder().decode(RealtimeMessage.self, from: Data(#"{"id":"\#(id)","conversation_id":"\#(id)","role":"user","content":"","model":null,"created_at":"t","attachments":["\#(id.uppercased())"]}"#.utf8))
+        XCTAssertEqual(live.conversationMessage.attachments, [id])
+    }
+
+    func testOnlySmallJpegsAreShown() {
+        let jpeg = Data([0xFF, 0xD8, 0xFF, 0xE0, 1])
+        XCTAssertTrue(JarvisAPIClient.isJPEG(jpeg, contentType: "image/jpeg"))
+        XCTAssertTrue(JarvisAPIClient.isJPEG(jpeg, contentType: "Image/JPEG; charset=binary"))
+        XCTAssertFalse(JarvisAPIClient.isJPEG(jpeg, contentType: nil))
+        XCTAssertFalse(JarvisAPIClient.isJPEG(jpeg, contentType: "image/png"))
+        XCTAssertFalse(JarvisAPIClient.isJPEG(Data("<svg onload=x>".utf8), contentType: "image/jpeg"))
+        XCTAssertFalse(JarvisAPIClient.isJPEG(Data(), contentType: "image/jpeg"))
+        var big = Data(count: JarvisAPIClient.maximumPhotoBytes + 1)
+        big.replaceSubrange(0..<3, with: [0xFF, 0xD8, 0xFF])
+        XCTAssertFalse(JarvisAPIClient.isJPEG(big, contentType: "image/jpeg"))
     }
 }

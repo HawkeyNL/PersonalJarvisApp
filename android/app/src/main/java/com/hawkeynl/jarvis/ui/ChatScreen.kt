@@ -1,5 +1,6 @@
 package com.hawkeynl.jarvis.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -9,6 +10,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -23,11 +26,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -84,7 +89,7 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel) {
                     icon = JvIcon.CHAT,
                 )
             }
-            items(state.messages) { message -> Message(message) }
+            items(state.messages) { message -> Message(message, actions::photo) }
             state.researchOffer?.takeIf { !state.busy && it.conversationId == state.conversationId }?.question?.let { question ->
                 item {
                     // Only this click sends a web search; the shown question is all that leaves.
@@ -132,8 +137,30 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel) {
     }
 }
 
+/** A message's photos in a row; read-only here (sending comes later). */
 @Composable
-private fun Message(message: ConversationMessage) {
+private fun Photos(ids: List<String>, load: suspend (String) -> PhotoResult) {
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+        ids.forEach { id -> PhotoThumb(id, load) }
+    }
+}
+
+@Composable
+private fun PhotoThumb(id: String, load: suspend (String) -> PhotoResult) {
+    val c = JvTheme.colors
+    val result by produceState<PhotoResult?>(null, id) { value = load(id) }
+    Box(Modifier.size(140.dp).clip(JvShapes.md).background(c.bgSunken), contentAlignment = Alignment.Center) {
+        when (val photo = result) {
+            null -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            is PhotoResult.Image -> Image(photo.bitmap, "Photo", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            PhotoResult.Removed -> Text("Photo removed", Modifier.padding(JvSpace.sm), color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+            PhotoResult.Unavailable -> Text("Photo unavailable", Modifier.padding(JvSpace.sm), color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun Message(message: ConversationMessage, photo: suspend (String) -> PhotoResult) {
     val c = JvTheme.colors
     if (message.role == "assistant" || message.role == "jarvis") {
         // Jarvis answers in plain text under a small name line, without a bubble. A web
@@ -152,22 +179,37 @@ private fun Message(message: ConversationMessage) {
                 )
             }
             Text(answer.body, style = MaterialTheme.typography.bodyLarge)
+            if (message.attachments.isNotEmpty()) Photos(message.attachments, photo)
             if (answer.sources.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(JvSpace.xs)) {
                 Text("Sources", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
                 val uris = LocalUriHandler.current
                 // Validated, normalized https URLs only (WebAnswer); opened in the browser on tap.
-                // Without a browser openUri throws: the tap then does nothing.
-                answer.sources.forEach { url ->
-                    Text(
-                        url, Modifier.clickable(role = Role.Button, onClickLabel = "Open source") { runCatching { uris.openUri(url) } },
-                        color = c.accentText, style = MaterialTheme.typography.bodySmall,
-                    )
+                // Without a browser openUri throws: the tap then does nothing. A card shows the
+                // plain title (never Markdown), then the host and a short path.
+                answer.sources.forEach { source ->
+                    Column(
+                        Modifier
+                            .widthIn(max = 320.dp)
+                            .clip(JvShapes.md)
+                            .background(c.bgSunken)
+                            .clickable(role = Role.Button, onClickLabel = "Open source") { runCatching { uris.openUri(source.url) } }
+                            .padding(horizontal = JvSpace.md, vertical = JvSpace.sm),
+                        verticalArrangement = Arrangement.spacedBy(JvSpace.xxs),
+                    ) {
+                        source.title?.let { Text(it, color = c.accentText, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                        Text(
+                            source.host + source.shortPath, color = c.textSecondary, style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
     } else {
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-            Text(
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(JvSpace.xs)) {
+            if (message.attachments.isNotEmpty()) Photos(message.attachments, photo)
+            // A photo alone is a message too: then there is no text bubble.
+            if (message.content.isNotEmpty() || message.attachments.isEmpty()) Text(
                 message.content,
                 Modifier
                     .widthIn(max = 300.dp)

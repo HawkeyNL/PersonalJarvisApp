@@ -5,7 +5,8 @@ import { listen } from "@tauri-apps/api/event";
 import { EventSubscription } from "./eventSubscription";
 import { chatSession } from "./chatSession";
 export interface Run { run_id:string; request_id:string; conversation_id:string }
-export interface CanonicalMessage { id:string; conversation_id:string; role:"user"|"assistant"; content:string; model:string|null; created_at:string }
+/** `attachments`: chat photo ids, absent on text-only messages. */
+export interface CanonicalMessage { id:string; conversation_id:string; role:"user"|"assistant"; content:string; model:string|null; created_at:string; attachments?:string[] }
 export interface Metadata { id:string; title:string; updated_at:string }
 type Payloads = {
   "connection.ready":{device_id:string;reconcile:boolean};

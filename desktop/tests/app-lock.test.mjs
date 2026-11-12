@@ -55,7 +55,7 @@ test("the lock screen is a labelled modal dialog that takes focus", () => {
 });
 
 test("behind the lock no message is sent and the mic stays off", () => {
-  assert.match(read("assistant.ts"), /if \(!t \|\| thinking\.value \|\| locked\.value\) return;/);
+  assert.match(read("assistant.ts"), /if \(\(!t && !attachments\.length\) \|\| thinking\.value \|\| locked\.value\) return;/);
   assert.match(read("voicewake.ts"), /if \(verifying \|\| locked\.value\) return;/);
   const chat = read("components/JarvisConsole.vue");
   assert.match(chat, /if \(!locked\.value && !mic\.listening\.value\) mic\.toggle\(\);/);

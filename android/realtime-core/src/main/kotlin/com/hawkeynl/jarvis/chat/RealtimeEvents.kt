@@ -9,7 +9,8 @@ import kotlinx.serialization.json.jsonObject
 // Native wire projection of PersonalJarvis/crates/client-core. No credentials,
 // Android framework, sockets or LLM dependency belongs in this state module.
 @Serializable data class RealtimeRun(val run_id: String, val request_id: String, val conversation_id: String)
-@Serializable data class RealtimeMessage(val id: String, val conversation_id: String, val role: String, val content: String, val model: String? = null, val created_at: String)
+/** `attachments`: chat photo ids; absent on text-only messages. */
+@Serializable data class RealtimeMessage(val id: String, val conversation_id: String, val role: String, val content: String, val model: String? = null, val created_at: String, val attachments: List<String> = emptyList())
 /** Core's advice to offer a web search; only the owner's click sends it. */
 @Serializable data class ResearchOffer(val question: String)
 @Serializable data class RealtimePayload(

@@ -11,7 +11,7 @@ import { canSpeak, voiceRate, restoreVoiceChoice } from "./voice";
 import { ReconcileLoop } from "./reconcileLoop";
 import { invoke } from "@tauri-apps/api/core";
 import { startRealtime, type RealtimeEvent, type CanonicalMessage } from "./realtime";
-import { mergeCanonical, appendVisualDelta, dropFailedRun } from "./realtimeProjection";
+import { mergeCanonical, appendVisualDelta, dropFailedRun, runRequest } from "./realtimeProjection";
 import { PendingRuns } from "./pendingRuns";
 import { offerFrom, type ResearchOffer } from "./researchOffer";
 import { isWebModel, startsWebSearch } from "./webAnswer";
@@ -19,6 +19,7 @@ import { chatSession } from "./chatSession";
 import { currentAuthStatus } from "./auth";
 import { locked } from "./lock";
 import { postJsonAuth, getJsonAuth } from "./api";
+import { setConversationPhotos } from "./photos";
 import {
   currentId,
   setCurrent,
@@ -41,7 +42,13 @@ export interface Msg {
   web?: boolean;
   /** A pending run Core started itself after a reply: its automatic web search. */
   searching?: boolean;
+  /** Ids of the chat photos this message carries. */
+  attachments?: string[];
 }
+
+/** A conversation photo that still exists on the Home Node. `expires_at` is
+ *  null once kept (`saved`). */
+export interface PhotoMeta { id: string; saved: boolean; expires_at: string | null }
 
 export const messages = ref<Msg[]>([]);
 export const thinking = ref(false); // true while the brain is generating a reply
@@ -56,7 +63,7 @@ chatSession.onReset(()=>{pending.clear();messages.value=[];thinking.value=false;
 
 function upsertCanonical(message:CanonicalMessage,requestId?:string,runId?:string) {
   if(currentId.value!==message.conversation_id) return;
-  const row={id:idc++,role:(message.role==="assistant"?"jarvis":"user") as Role,text:message.content,ts:message.created_at.slice(11,16),spoken:false,canonicalId:message.id,runId,requestId,web:isWebModel(message.model)};
+  const row={id:idc++,role:(message.role==="assistant"?"jarvis":"user") as Role,text:message.content,ts:message.created_at.slice(11,16),spoken:false,canonicalId:message.id,runId,requestId,web:isWebModel(message.model),...(message.attachments?.length?{attachments:message.attachments}:{})};
   messages.value=mergeCanonical(messages.value,row);
 }
 
@@ -202,13 +209,15 @@ async function reloadConversation(id:string):Promise<void> {
   const res = await getJsonAuth<{
     id: string;
     title: string;
-    messages: { id?:string; role: string; content: string; model: string | null; at: string }[];
+    messages: { id?:string; role: string; content: string; model: string | null; at: string; attachments?: string[] }[];
+    photos?: PhotoMeta[];
     assistant_running?:boolean;
   }>(`/v1/conversations/${encodeURIComponent(id)}`);
   if(currentId.value!==id || !chatSession.current(epoch)) return;
   thinking.value=res.assistant_running===true;
   // Rows already on screen keep their local id (a reload after a reconnect).
   const known=new Map(messages.value.filter(m=>m.canonicalId).map(m=>[m.canonicalId,m.id]));
+  setConversationPhotos(res.messages, res.photos ?? []);
   messages.value = res.messages.map((m) => ({
     id: (m.id ? known.get(m.id) : undefined) ?? idc++,
     role: m.role === "assistant" ? "jarvis" : "user",
@@ -217,6 +226,7 @@ async function reloadConversation(id:string):Promise<void> {
     spoken: false,
     canonicalId:m.id,
     web:isWebModel(m.model),
+    ...(m.attachments?.length ? { attachments: m.attachments } : {}),
   }));
 }
 
@@ -259,25 +269,32 @@ export async function initChat(): Promise<void> {
 }
 
 /** Send a user message; Jarvis replies (and speaks if the policy allows).
- *  `research` only ever comes from the owner's click on a Core offer. */
-export async function send(input: string, mode?: "research"): Promise<void> {
+ *  `research` only ever comes from the owner's click on a Core offer.
+ *  `attachments` are uploaded photo ids; with them the text may be empty. */
+export async function send(input: string, mode?: "research", attachments: string[] = []): Promise<void> {
   const epoch=chatSession.capture();
   const t = input.trim();
   // Nothing is sent from behind the app lock (a voice transcript, a stray Enter).
-  if (!t || thinking.value || locked.value) return;
+  if ((!t && !attachments.length) || thinking.value || locked.value) return;
   if(realtimeAvailable && pending.full) {
     push("jarvis","Too many unconfirmed requests. Restore the connection first; nothing is resent.");
     return;
   }
+  // Photos go only with the runs API; the legacy chat endpoint refuses them.
+  if(attachments.length && !realtimeAvailable) {
+    push("jarvis","Photos need a live connection to your Home Node. Nothing was sent.");
+    return;
+  }
   researchOffer.value = null;
   push("user", t);
+  if(attachments.length) messages.value[messages.value.length-1].attachments=attachments;
   thinking.value = true;
   if(realtimeAvailable) {
     const requestId=crypto.randomUUID();
     const optimistic=messages.value[messages.value.length-1];
     optimistic.requestId=requestId;
     pending.set(requestId,{conversation:currentId.value,messageId:optimistic.id});
-    const request={request_id:requestId,conversation_id:currentId.value,messages:messages.value.slice(-MAX_TURNS).map(m=>({role:m.role==="jarvis"?"assistant":"user",content:m.text})),...(mode?{mode}:{})};
+    const request=runRequest(requestId,currentId.value,messages.value.slice(-MAX_TURNS),mode,attachments);
     try {
       const result=await postJsonAuth<{conversation_id:string;run_id:string}>("/v1/assistant/runs",request);
       if(!chatSession.current(epoch)) return;

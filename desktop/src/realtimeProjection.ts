@@ -14,3 +14,8 @@ export function dropFailedRun<T extends ProjectedRow>(rows:T[],runId:string):T[]
 export function appendVisualDelta<T extends ProjectedRow>(rows:T[],runId:string,text:string):T[] {
   return rows.map(row=>row.runId===runId && !row.canonicalId && row.text.length+text.length<=128*1024?{...row,text:row.text+text}:row);
 }
+/** The runs API request for a new user turn. Photos are part of the request
+ *  (and so of its idempotency hash); a text-only request keeps its old shape. */
+export function runRequest(requestId:string,conversationId:string|null,history:{role:string;text:string}[],mode?:"research",attachments:string[]=[]) {
+  return {request_id:requestId,conversation_id:conversationId,messages:history.map(m=>({role:m.role==="jarvis"?"assistant":"user",content:m.text})),...(mode?{mode}:{}),...(attachments.length?{attachments}:{})};
+}

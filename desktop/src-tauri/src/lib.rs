@@ -21,6 +21,7 @@ mod local_voices;
 mod model_authorization;
 mod model_control;
 mod native_response;
+mod photos;
 mod realtime;
 mod speech_playback;
 #[cfg(desktop)]
@@ -378,6 +379,7 @@ fn authenticated_api_path(path: &str) -> bool {
         "/v1/voice",
         "/v1/roadmaps",
         "/v1/jobs",
+        "/v1/photos",
     ];
     shared.iter().chain(ACCOUNT_ADMIN_ROUTES).any(|prefix| {
         route == *prefix
@@ -428,10 +430,18 @@ fn native_only_route(path: &str) -> bool {
 
 /// Whether the webview proxy may send `method` to `path`: never to a
 /// native-only route, only GET to a read-only one, and PATCH only to the
-/// roadmap and job routes, so a PATCH route Core adds elsewhere needs a
-/// review here.
+/// roadmap, job and photo routes, so a PATCH route Core adds elsewhere needs
+/// a review here. Photo bytes go through `photo_upload` and `photo_get`; the
+/// proxy only keeps (PATCH) or deletes one photo.
 fn proxy_method_allowed(method: &reqwest::Method, path: &str) -> bool {
     let route = path.split('?').next().unwrap_or(path);
+    if route == "/v1/photos" || route.starts_with("/v1/photos/") {
+        // Exactly one photo id: a photo sub-route Core adds later needs a review here.
+        return route
+            .strip_prefix("/v1/photos/")
+            .is_some_and(|id| uuid::Uuid::try_parse(id).is_ok())
+            && (method == reqwest::Method::PATCH || method == reqwest::Method::DELETE);
+    }
     !native_only_route(path)
         && (method == reqwest::Method::GET || !read_only_route(path))
         && (method != reqwest::Method::PATCH
@@ -983,6 +993,8 @@ pub fn run() {
             auth_remember_enrolled_device,
             auth_login,
             auth_request,
+            photos::photo_upload,
+            photos::photo_get,
             auth_status,
             auth_logout,
             auth_reset,
@@ -1390,6 +1402,32 @@ mod tests {
         assert!(proxy_method_allowed(&Method::POST, "/v1/jobs/j1/run"));
         assert!(proxy_method_allowed(&Method::DELETE, job));
         assert!(proxy_method_allowed(&Method::GET, "/v1/jobs/runs/r1"));
+    }
+
+    #[test]
+    fn webview_proxy_only_keeps_or_deletes_photos() {
+        use reqwest::Method;
+        let photo = "/v1/photos/0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b";
+        assert!(authenticated_api_path("/v1/photos"));
+        assert!(authenticated_api_path(photo));
+        assert!(!authenticated_api_path("/v1/photosx"));
+        assert!(!authenticated_api_path("/v1/photos/%2e%2e/auth/login"));
+        assert!(proxy_method_allowed(&Method::PATCH, photo));
+        assert!(proxy_method_allowed(&Method::DELETE, photo));
+        // Bytes travel only through the native photo commands.
+        assert!(!proxy_method_allowed(&Method::GET, photo));
+        assert!(!proxy_method_allowed(&Method::POST, photo));
+        for method in [Method::GET, Method::POST, Method::PATCH, Method::DELETE] {
+            for path in [
+                "/v1/photos",
+                "/v1/photos?x=1",
+                "/v1/photos/",
+                "/v1/photos/a/b",
+                "/v1/photos/0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b/x",
+            ] {
+                assert!(!proxy_method_allowed(&method, path), "{method} {path}");
+            }
+        }
     }
 
     #[test]

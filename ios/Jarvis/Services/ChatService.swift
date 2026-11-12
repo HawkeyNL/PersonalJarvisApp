@@ -41,6 +41,12 @@ actor ChatService {
         return try await api.get("/v1/conversations/\(id.uuidString)", token: token, expectedBinding: binding)
     }
 
+    func photo(id: UUID) async throws -> Data {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        return try await api.photo(id: id, token: token, expectedBinding: binding)
+    }
+
     func releaseVoice(run: UUID, origin: URL) async throws {
         let binding = try await api.binding(for: origin)
         let token = try await requiredToken()
