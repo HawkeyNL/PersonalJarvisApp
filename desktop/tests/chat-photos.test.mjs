@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fitWithin, downscale, uploadFailure, missingPhotos, expiryHint, UNSUPPORTED, CORE_TOO_OLD, MAX_SIDE, JPEG_QUALITY, MAX_INPUT_BYTES, TOO_LARGE } from "../src/chatPhotos.ts";
+import { fitWithin, downscale, uploadFailure, missingPhotos, expiryHint, UNSUPPORTED, CORE_TOO_OLD, MAX_SIDE, JPEG_QUALITY, MAX_INPUT_BYTES, TOO_LARGE, UNREADABLE } from "../src/chatPhotos.ts";
 import { runRequest } from "../src/realtimeProjection.ts";
 
 test("photos shrink to 2048 px on the long side and never grow", () => {
@@ -63,6 +63,10 @@ test("upload refusals have their own words; 404 means an older Core", () => {
   assert.equal(uploadFailure(404), CORE_TOO_OLD);
   assert.equal(CORE_TOO_OLD, "Your Home Node needs Jarvis Core v0.0.83 to receive photos.");
   assert.equal(uploadFailure(415), UNSUPPORTED);
+  // A 400 is any unreadable body, not only a format: no "export as JPEG".
+  assert.equal(uploadFailure(400), UNREADABLE);
+  assert.equal(UNREADABLE, "This photo could not be read.");
+  assert.equal(uploadFailure(503), "Photos are busy or unavailable on your Home Node; try again.");
   for (const status of [413, 429, 503, 507, 500]) assert.ok(uploadFailure(status).length > 0);
   assert.notEqual(uploadFailure(507), uploadFailure(500));
 });
@@ -88,4 +92,6 @@ test("the lightbox says how long a photo stays", () => {
   assert.equal(expiryHint(undefined), "Photos are kept 90 days unless you keep them.");
   assert.equal(expiryHint({ saved: false, expires_at: "nonsense" }), "Photos are kept 90 days unless you keep them.");
   assert.match(expiryHint({ saved: false, expires_at: "2027-02-10T12:00:00Z" }), /^Removed on .*2027.* unless you keep it\.$/);
+  // Kept but not sent yet: Core still removes it 24 h after the upload.
+  assert.match(expiryHint({ saved: true, expires_at: "2027-02-10T12:00:00Z" }), /^Removed on [^.]*2027\.$/);
 });
