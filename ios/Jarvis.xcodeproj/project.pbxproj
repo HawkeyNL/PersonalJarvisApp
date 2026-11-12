@@ -14,6 +14,7 @@
         A00000000000000000000070 /* PushRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000070 /* PushRegistration.swift */; };
         A00000000000000000000072 /* PushRegistrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000072 /* PushRegistrationTests.swift */; };
         A00000000000000000000054 /* HubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000054 /* HubModel.swift */; };
+        A00000000000000000000090 /* ChatPhotos.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000090 /* ChatPhotos.swift */; };
         A00000000000000000000060 /* IBMPlexSans-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000060 /* IBMPlexSans-Regular.ttf */; };
         A00000000000000000000061 /* IBMPlexSans-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000061 /* IBMPlexSans-Medium.ttf */; };
         A00000000000000000000062 /* IBMPlexSans-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000062 /* IBMPlexSans-SemiBold.ttf */; };
@@ -69,6 +70,7 @@
         B00000000000000000000071 /* Jarvis.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Jarvis.entitlements; sourceTree = "<group>"; };
         B00000000000000000000072 /* PushRegistrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistrationTests.swift; sourceTree = "<group>"; };
         B00000000000000000000054 /* HubModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/HubModel.swift; sourceTree = "<group>"; };
+        B00000000000000000000090 /* ChatPhotos.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/ChatPhotos.swift; sourceTree = "<group>"; };
         B00000000000000000000060 /* IBMPlexSans-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/IBMPlexSans-Regular.ttf; sourceTree = "<group>"; };
         B00000000000000000000061 /* IBMPlexSans-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/IBMPlexSans-Medium.ttf; sourceTree = "<group>"; };
         B00000000000000000000062 /* IBMPlexSans-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/IBMPlexSans-SemiBold.ttf; sourceTree = "<group>"; };
@@ -151,6 +153,7 @@
                 B00000000000000000000053 /* NodePages.swift */,
                 B00000000000000000000080 /* ActivityView.swift */,
                 B00000000000000000000054 /* HubModel.swift */,
+                B00000000000000000000090 /* ChatPhotos.swift */,
                 B00000000000000000000070 /* PushRegistration.swift */,
                 B00000000000000000000071 /* Jarvis.entitlements */,
                 B00000000000000000000060 /* IBMPlexSans-Regular.ttf */,
@@ -284,6 +287,7 @@
                 A00000000000000000000053 /* NodePages.swift in Sources */,
                 A00000000000000000000080 /* ActivityView.swift in Sources */,
                 A00000000000000000000054 /* HubModel.swift in Sources */,
+                A00000000000000000000090 /* ChatPhotos.swift in Sources */,
                 A00000000000000000000070 /* PushRegistration.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

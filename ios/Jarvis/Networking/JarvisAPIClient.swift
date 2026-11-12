@@ -238,11 +238,28 @@ actor JarvisAPIClient {
                               expectedBinding: expectedBinding, response: EmptyOrJSON.self)
     }
 
-    /// The only DELETE: this device's own APNs push target. A device is revoked with a
-    /// signed approval, never with a bearer-only DELETE.
+    /// This device's own APNs push target. A device is revoked with a signed approval,
+    /// never with a bearer-only DELETE.
     func deletePushTarget(token: String, expectedBinding: UUID) async throws {
-        _ = try await request(path: "/v1/devices/self/push", method: "DELETE", token: token,
+        try await delete("/v1/devices/self/push", token: token, expectedBinding: expectedBinding)
+    }
+
+    /// Bearer-only DELETE of the owner's own chat data (a conversation or a photo).
+    func delete(_ path: String, token: String, expectedBinding: UUID) async throws {
+        _ = try await request(path: path, method: "DELETE", token: token,
                               expectedBinding: expectedBinding, response: EmptyOrJSON.self)
+    }
+
+    func patch<Body: Encodable, Response: Decodable>(
+        _ path: String, body: Body, token: String, expectedBinding: UUID, response: Response.Type = Response.self
+    ) async throws -> Response {
+        try await request(path: path, method: "PATCH", body: body, token: token, expectedBinding: expectedBinding, response: response)
+    }
+
+    /// One chat photo, already shrunk to a JPEG, as raw bytes. The reply is a few fields.
+    func uploadPhoto(_ jpeg: Data, token: String, expectedBinding: UUID) async throws -> PhotoUpload {
+        try await request(path: "/v1/photos", method: "POST", upload: jpeg, token: token,
+                          expectedBinding: expectedBinding, limit: 4 * 1024, response: PhotoUpload.self)
     }
 
     static let maximumPhotoBytes = 2 * 1024 * 1024
@@ -289,9 +306,11 @@ actor JarvisAPIClient {
         path: String,
         method: String,
         body: (any Encodable)? = nil,
+        upload: Data? = nil,
         token: String? = nil,
         headers: [String: String] = [:],
         expectedBinding: UUID? = nil,
+        limit: Int = BoundedAPIResponse.maximumBytes,
         response: Response.Type
     ) async throws -> Response {
         try Task.checkCancellation()
@@ -306,12 +325,15 @@ actor JarvisAPIClient {
         if let body {
             request.httpBody = try encoder.encode(AnyEncodable(body))
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        } else if let upload {
+            request.httpBody = upload
+            request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         }
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
 
         do {
-            let (data, rawResponse) = try await BoundedAPIResponse.read(session: session, request: request)
+            let (data, rawResponse) = try await BoundedAPIResponse.read(session: session, request: request, limit: limit)
             try Task.checkCancellation()
             if let expectedBinding, expectedBinding != bindingID { throw JarvisAPIError.invalidConfiguration }
             guard let http = rawResponse as? HTTPURLResponse else { throw JarvisAPIError.invalidResponse }

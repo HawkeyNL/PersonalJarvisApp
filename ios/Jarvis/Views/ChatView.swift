@@ -1,5 +1,7 @@
 import ImageIO
+import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Chat (D-Home): your messages in accent bubbles, Jarvis answers as plain text
 /// under a name line, a thinking line while a reply runs, and the composer.
@@ -7,13 +9,24 @@ struct ChatView: View {
     @ObservedObject var model: JarvisAppModel
     @State private var draft = ""
     @FocusState private var composerFocused: Bool
+    @State private var picking = false
+    @State private var picked: [PhotosPickerItem] = []
+    @State private var viewing: ViewedPhoto?
+    @State private var confirmingDelete = false
+    @State private var deleteError: String?
 
     /// Core's own run after a reply, while its placeholder row is shown.
     private var searchingWeb: Bool {
         model.webSearchRun.map { run in model.messages.contains { $0.id == "run:\(run)" } } ?? false
     }
 
-    private var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !model.isSending }
+    /// Photos must all be uploaded first; a photo alone is a message too.
+    private var canSend: Bool {
+        (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.chips.isEmpty)
+            && ChatPhotos.allReady(model.chips) && !model.isSending
+    }
+
+    private var hasPhotos: Bool { model.messages.contains { !($0.attachments ?? []).isEmpty } }
 
     var body: some View {
         Group {
@@ -39,6 +52,9 @@ struct ChatView: View {
                             Button("Stop speaking", systemImage: "stop.circle") { model.stopSpeaking() }
                         }
                         Button("New conversation", systemImage: "square.and.pencil") { model.newConversation() }
+                        if model.currentConversationId != nil {
+                            Button("Delete conversation", systemImage: "trash", role: .destructive) { confirmingDelete = true }
+                        }
                         ForEach(model.conversations) { item in
                             Button(item.title) { Task { await model.openConversation(item.id) } }
                         }
@@ -53,6 +69,30 @@ struct ChatView: View {
             if sending { AccessibilityNotification.Announcement("Jarvis is thinking").post() }
         }
         .onDisappear { composerFocused = false }
+        .confirmationDialog("Delete this conversation?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Delete for good", role: .destructive) {
+                Task {
+                    do { try await model.deleteConversation() }
+                    catch { deleteError = "Could not delete: \(error.localizedDescription)" }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            if hasPhotos { Text("Its photos go too, kept ones included.") }
+        }
+        .alert("Not deleted", isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(verbatim: deleteError ?? "")
+        }
+        .fullScreenCover(item: $viewing) { photo in PhotoViewer(model: model, id: photo.id) }
+        .photosPicker(isPresented: $picking, selection: $picked,
+                      maxSelectionCount: max(1, ChatPhotos.maxPhotos - model.chips.count), matching: .images)
+        .onChange(of: picked) { _, items in
+            guard !items.isEmpty else { return }
+            picked = []
+            model.attachPhotos(items.map { item -> () async -> Data? in { try? await item.loadTransferable(type: Data.self) } })
+        }
     }
 
     private var conversation: some View {
@@ -66,7 +106,18 @@ struct ChatView: View {
                                              symbol: "bubble.left")
                         }
                         ForEach(model.messages) { message in
-                            MessageView(message: message, photo: { await model.photo(id: $0) }).id(message.id)
+                            MessageView(message: message, removed: model.removedPhotos,
+                                        photo: { await model.photo(id: $0) }, open: { viewing = ViewedPhoto(id: $0) }).id(message.id)
+                        }
+                        if let offer = model.researchOffer, offer.conversationId == model.currentConversationId,
+                           !model.isSending, model.chips.isEmpty {
+                            // Only this tap sends a web search; the shown question is all that leaves.
+                            VStack(alignment: .leading, spacing: JV.Space.xs) {
+                                Button("Search the web", systemImage: "globe") { Task { await model.searchWeb() } }
+                                    .buttonStyle(JVButtonStyle(kind: .secondary, size: .small))
+                                Text(verbatim: "Sends only “\(offer.question)” to your subscription provider, which searches the web.")
+                                    .font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
+                            }
                         }
                         if model.isSending {
                             HStack(spacing: JV.Space.xs) {
@@ -89,8 +140,49 @@ struct ChatView: View {
     }
 
     private var composer: some View {
+        VStack(alignment: .leading, spacing: JV.Space.xs) {
+            if !model.chips.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: JV.Space.xs) {
+                        ForEach(model.chips) { chip in PhotoChipView(chip: chip) { model.removeChip(chip.id) } }
+                    }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Photos to send")
+                ForEach(model.chips.filter { $0.error != nil }) { chip in
+                    Text(verbatim: chip.error ?? "").font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.dangerText)
+                }
+                if !model.photosDisclosed {
+                    Text("Photos go to your Claude/Codex subscription to be read; never to web search.")
+                        .font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
+                }
+            }
+            if let notice = model.chipNotice {
+                Text(verbatim: notice).font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
+            }
+            input
+        }
+        .padding(.horizontal, JV.Space.md)
+        .padding(.vertical, JV.Space.xs)
+        .background(JV.bgPage)
+        .overlay(alignment: .top) { Rectangle().fill(JV.separator).frame(height: 1) }
+    }
+
+    private var input: some View {
         let shape = RoundedRectangle(cornerRadius: JV.Radius.lg, style: .continuous)
         return HStack(alignment: .bottom, spacing: JV.Space.xs) {
+            Menu {
+                Button("Photo library", systemImage: "photo.on.rectangle") { picking = true }
+                Button("Paste photo", systemImage: "doc.on.clipboard") { model.attachPhotos(Self.pastedPhotos()) }
+            } label: {
+                Image(systemName: "photo.badge.plus")
+                    .font(.system(size: 17))
+                    .foregroundStyle(model.chips.count < ChatPhotos.maxPhotos ? JV.textSecondary : JV.textDisabled)
+                    .frame(width: 44, height: 44)
+            }
+            .disabled(model.chips.count >= ChatPhotos.maxPhotos)
+            .accessibilityLabel("Attach photos")
+            .accessibilityHint("Up to \(ChatPhotos.maxPhotos) photos per message")
             TextField("Ask Jarvis anything…", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(JV.font(16))
@@ -113,21 +205,168 @@ struct ChatView: View {
             .disabled(!canSend)
             .accessibilityLabel("Send message")
         }
-        .padding(.leading, 14)
+        .padding(.leading, JV.Space.xxs)
         .padding(.trailing, JV.Space.xxs)
         .padding(.vertical, JV.Space.xxs)
         .background(JV.bgSurface, in: shape)
         .overlay(shape.strokeBorder(JV.borderStrong, lineWidth: 1))
-        .padding(.horizontal, JV.Space.md)
-        .padding(.vertical, JV.Space.xs)
-        .background(JV.bgPage)
-        .overlay(alignment: .top) { Rectangle().fill(JV.separator).frame(height: 1) }
     }
 
     private func send() {
+        model.expireStaleChips()
+        // A reply in progress keeps the draft.
+        guard canSend else { return }
         let message = draft
         draft = ""
-        Task { await model.send(message) }
+        // Nothing was sent (refused here or by Core): the draft comes back.
+        Task { if await model.send(message), draft.isEmpty { draft = message } }
+    }
+
+    /// Images on the clipboard (a screenshot), read only on the owner's tap.
+    private static func pastedPhotos() -> [() async -> Data?] {
+        UIPasteboard.general.itemProviders.compactMap { provider -> (() async -> Data?)? in
+            guard let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) else { return nil }
+            return {
+                await withCheckedContinuation { (done: CheckedContinuation<Data?, Never>) in
+                    _ = provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in done.resume(returning: data) }
+                }
+            }
+        }
+    }
+}
+
+private struct ViewedPhoto: Identifiable { let id: String }
+
+/// A photo waiting in the composer: its preview, a spinner while it is shrunk and
+/// uploaded, and ✕ to remove it.
+private struct PhotoChipView: View {
+    let chip: PhotoChip
+    let remove: () -> Void
+
+    private var status: String {
+        switch chip.state {
+        case .preparing: "Photo, preparing"
+        case .uploading: "Photo, uploading"
+        case .ready: "Photo, ready to send"
+        case .failed: "Photo, not uploaded"
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            ZStack {
+                if let preview = chip.preview {
+                    Image(uiImage: preview).resizable().scaledToFill().opacity(chip.state == .failed ? 0.4 : 1)
+                }
+                switch chip.state {
+                case .preparing, .uploading: ProgressView().controlSize(.small)
+                case .failed: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(JV.dangerText)
+                case .ready: EmptyView()
+                }
+            }
+            .frame(width: 56, height: 56)
+            .background(JV.bgSunken)
+            .clipShape(RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
+            .padding(.top, 6).padding(.trailing, 6)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(status)
+            Button(action: remove) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(JV.textInverse)
+                    .frame(width: 22, height: 22)
+                    .background(JV.textPrimary, in: Circle())
+                    .frame(width: 44, height: 44, alignment: .topTrailing)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Remove photo")
+        }
+    }
+}
+
+/// One photo full screen, to keep past its 90 days or delete.
+private struct PhotoViewer: View {
+    @ObservedObject var model: JarvisAppModel
+    let id: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var photo: ChatPhoto?
+    @State private var busy = false
+    @State private var confirming = false
+    @State private var error: String?
+
+    private var meta: PhotoMeta? { model.photoMeta[id] }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                switch photo {
+                case .image(let image)?:
+                    Image(uiImage: image).resizable().scaledToFit().accessibilityLabel("Photo")
+                case .removed?:
+                    Text("Photo removed").foregroundStyle(.white)
+                case .unavailable?:
+                    Text("This photo could not be loaded.").foregroundStyle(.white)
+                case nil:
+                    ProgressView().tint(.white)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(alignment: .leading, spacing: JV.Space.xs) {
+                    if let error {
+                        Text(verbatim: error).font(JV.font(13)).foregroundStyle(JV.dangerText)
+                    }
+                    Text(verbatim: ChatPhotos.expiryHint(meta)).font(JV.font(13)).foregroundStyle(JV.textSecondary)
+                    HStack(spacing: JV.Space.xs) {
+                        Button(meta?.saved == true ? "Kept" : "Keep", systemImage: meta?.saved == true ? "star.fill" : "star") {
+                            Task { await toggleKeep() }
+                        }
+                        .buttonStyle(JVButtonStyle(kind: .secondary))
+                        .accessibilityHint(meta?.saved == true ? "Stops keeping it past 90 days" : "Keeps it past 90 days")
+                        .accessibilityAddTraits(meta?.saved == true ? .isSelected : [])
+                        Button("Delete", systemImage: "trash", role: .destructive) { confirming = true }
+                            .buttonStyle(JVButtonStyle(kind: .secondary))
+                            .accessibilityLabel("Delete photo")
+                    }
+                    .disabled(busy)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(JV.Space.md)
+                .background(JV.bgSurface)
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
+        .task { photo = await model.photo(id: id, full: true) }
+        .confirmationDialog("Delete this photo?", isPresented: $confirming, titleVisibility: .visible) {
+            Button("Delete for good", role: .destructive) { Task { await delete() } }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    private func toggleKeep() async {
+        guard !busy else { return }
+        busy = true; error = nil
+        defer { busy = false }
+        do {
+            try await model.keepPhoto(id, saved: meta?.saved != true)
+            // Gone on the Home Node: its message now shows "Photo removed".
+            if model.removedPhotos.contains(id) { dismiss() }
+        } catch { self.error = "Could not change this photo. Try again." }
+    }
+
+    private func delete() async {
+        guard !busy else { return }
+        busy = true; error = nil
+        defer { busy = false }
+        do {
+            try await model.deletePhoto(id)
+            dismiss()
+        } catch { self.error = "Could not delete this photo. Try again." }
     }
 }
 
@@ -138,8 +377,7 @@ enum ChatPhoto {
     case unavailable
 
     /// The photo as a thumbnail of at most `maxPixels` on its long side, upright, decoded
-    /// straight from the JPEG so its full-size bitmap is never held. Thumbnails are all the
-    /// chat shows (there is no full-size viewer); Core sends up to 1600 px.
+    /// straight from the JPEG so its full-size bitmap is never held. Core sends up to 1600 px.
     static func thumbnail(_ data: Data, maxPixels: Int = 512) -> UIImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
@@ -153,17 +391,22 @@ enum ChatPhoto {
     }
 }
 
-/// One photo of a message, read-only (sending comes later).
+/// One photo of a message; tapping it opens it full screen.
 private struct PhotoThumb: View {
     let id: String
+    let removed: Bool
     let load: (String) async -> ChatPhoto
+    let open: (String) -> Void
     @State private var photo: ChatPhoto?
 
     var body: some View {
         ZStack {
-            switch photo {
+            switch removed ? ChatPhoto.removed : photo {
             case .image(let image)?:
-                Image(uiImage: image).resizable().scaledToFill().accessibilityLabel("Photo")
+                Button { open(id) } label: { Image(uiImage: image).resizable().scaledToFill() }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Photo")
+                    .accessibilityHint("Opens it full screen")
             case .removed?:
                 Text("Photo removed").font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary).padding(JV.Space.xs)
             case .unavailable?:
@@ -175,18 +418,22 @@ private struct PhotoThumb: View {
         .frame(width: 140, height: 140)
         .background(JV.bgSunken)
         .clipShape(RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
-        .task(id: id) { photo = await load(id) }
+        .task(id: id) { if !removed { photo = await load(id) } }
     }
 }
 
 private struct MessageView: View {
     let message: ConversationMessage
+    let removed: Set<String>
     let photo: (String) async -> ChatPhoto
+    let open: (String) -> Void
 
     @ViewBuilder private var photos: some View {
         if let ids = message.attachments, !ids.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: JV.Space.xs) { ForEach(ids, id: \.self) { PhotoThumb(id: $0, load: photo) } }
+                HStack(spacing: JV.Space.xs) {
+                    ForEach(ids, id: \.self) { PhotoThumb(id: $0, removed: removed.contains($0), load: photo, open: open) }
+                }
             }
             .frame(maxWidth: 4 * 148)
         }
@@ -203,28 +450,31 @@ private struct MessageView: View {
     /// Your message: an accent bubble on the right, its time under it.
     private var mine: some View {
         VStack(alignment: .trailing, spacing: JV.Space.xxs) {
+            // Outside the combined element so each photo stays its own button.
             photos
-            // A photo alone is a message too: then there is no text bubble.
-            if !message.content.isEmpty || (message.attachments ?? []).isEmpty {
-                Text(verbatim: message.content)
-                    .font(JV.font(16))
-                    .foregroundStyle(JV.textOnAccent)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(JV.accentSolid, in: UnevenRoundedRectangle(
-                        topLeadingRadius: JV.Radius.lg, bottomLeadingRadius: JV.Radius.lg,
-                        bottomTrailingRadius: JV.Radius.sm, topTrailingRadius: JV.Radius.lg, style: .continuous))
+            VStack(alignment: .trailing, spacing: JV.Space.xxs) {
+                // A photo alone is a message too: then there is no text bubble.
+                if !message.content.isEmpty || (message.attachments ?? []).isEmpty {
+                    Text(verbatim: message.content)
+                        .font(JV.font(16))
+                        .foregroundStyle(JV.textOnAccent)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(JV.accentSolid, in: UnevenRoundedRectangle(
+                            topLeadingRadius: JV.Radius.lg, bottomLeadingRadius: JV.Radius.lg,
+                            bottomTrailingRadius: JV.Radius.sm, topTrailingRadius: JV.Radius.lg, style: .continuous))
+                }
+                if let time {
+                    Text(verbatim: time).font(JV.number(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
+                }
             }
-            if let time {
-                Text(verbatim: time).font(JV.number(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
-            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text(verbatim: "You: " + message.content))
+            .accessibilityValue(Text(verbatim: time ?? ""))
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.leading, 48)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text(verbatim: "You: " + message.content))
-        .accessibilityValue(Text(verbatim: time ?? ""))
     }
 
     /// A web answer shows its trailing Sources as links instead of in the text.

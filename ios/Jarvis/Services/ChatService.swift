@@ -28,11 +28,39 @@ actor ChatService {
         return capability.protocol == 1 && capability.asynchronous_chat
     }
 
-    func submit(requestId: UUID, text: String, conversationId: UUID?, history: [ConversationMessage]) async throws -> RealtimeRun {
+    func submit(requestId: UUID, text: String, conversationId: UUID?, history: [ConversationMessage],
+                research: Bool = false, attachments: [UUID] = []) async throws -> RealtimeRun {
         let binding = await api.binding()
         let token = try await requiredToken()
         let turns = history.suffix(19).map { ChatTurn(role: $0.isAssistant ? "assistant" : "user", content: $0.content) } + [ChatTurn(role: "user", content: text)]
-        return try await api.post("/v1/assistant/runs", body: AsyncChatRequest(request_id: requestId, conversation_id: conversationId, messages: turns), token: token, expectedBinding: binding)
+        let request = AsyncChatRequest(request_id: requestId, conversation_id: conversationId, messages: turns,
+                                       mode: research ? "research" : nil, attachments: attachments.isEmpty ? nil : attachments)
+        return try await api.post("/v1/assistant/runs", body: request, token: token, expectedBinding: binding)
+    }
+
+    func deleteConversation(id: UUID) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.delete("/v1/conversations/\(id.uuidString.lowercased())", token: token, expectedBinding: binding)
+    }
+
+    func uploadPhoto(_ jpeg: Data) async throws -> UUID {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        return try await api.uploadPhoto(jpeg, token: token, expectedBinding: binding).id
+    }
+
+    /// Keep (or stop keeping) a photo past its 90 days.
+    func setPhotoSaved(id: UUID, saved: Bool) async throws -> PhotoMeta {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        return try await api.patch("/v1/photos/\(id.uuidString.lowercased())", body: PhotoSaved(saved: saved), token: token, expectedBinding: binding)
+    }
+
+    func deletePhoto(id: UUID) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.delete("/v1/photos/\(id.uuidString.lowercased())", token: token, expectedBinding: binding)
     }
 
     func conversation(id: UUID) async throws -> ConversationResponse {
