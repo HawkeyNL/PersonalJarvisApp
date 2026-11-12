@@ -179,9 +179,18 @@ export function setConversationPhotos(messages: { attachments?: string[] }[], ph
   removedPhotos.value = missingPhotos(messages, photos);
 }
 
-/** Keep (or stop keeping) a photo past its 90 days. */
+const gone = (error: unknown) => error instanceof ApiError && error.status === 404;
+
+/** Keep (or stop keeping) a photo past its 90 days. A photo Core no longer
+ *  has (deleted elsewhere or expired) is marked removed instead. */
 export async function keepPhoto(id: string, saved: boolean): Promise<void> {
-  const meta = await patchJsonAuth<PhotoMeta>(photoPath(id), { saved });
+  let meta: PhotoMeta;
+  try {
+    meta = await patchJsonAuth<PhotoMeta>(photoPath(id), { saved });
+  } catch (error) {
+    if (!gone(error)) throw error;
+    return markRemoved(id);
+  }
   if (meta?.id === id && typeof meta.saved === "boolean") photoMeta.value = new Map(photoMeta.value).set(id, meta);
 }
 
@@ -191,8 +200,13 @@ export async function deletePhoto(id: string): Promise<void> {
     await deleteAuth(photoPath(id));
   } catch (error) {
     // Already gone counts as deleted.
-    if (!(error instanceof ApiError && error.status === 404)) throw error;
+    if (!gone(error)) throw error;
   }
+  markRemoved(id);
+}
+
+/** Forget a photo Core no longer has: its messages show "Photo removed". */
+function markRemoved(id: string): void {
   const meta = new Map(photoMeta.value);
   meta.delete(id);
   photoMeta.value = meta;

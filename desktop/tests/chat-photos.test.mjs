@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { fitWithin, downscale, uploadFailure, missingPhotos, expiryHint, UNSUPPORTED, CORE_TOO_OLD, MAX_SIDE, JPEG_QUALITY, MAX_INPUT_BYTES, TOO_LARGE, UNREADABLE, runRefusal, tooOldToSend, SEND_WITHIN_MS } from "../src/chatPhotos.ts";
 import { runRequest } from "../src/realtimeProjection.ts";
 
@@ -108,4 +109,18 @@ test("a photo older than 23 hours is not sent", () => {
   assert.equal(tooOldToSend(now - SEND_WITHIN_MS, now), false);
   assert.equal(tooOldToSend(now - SEND_WITHIN_MS - 1, now), true);
   assert.equal(tooOldToSend(undefined, now), false);
+});
+
+const read = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
+
+test("a refused message comes back to the composer, photos included", () => {
+  assert.match(read("assistant.ts"), /if\(refusal\) \{\n\s+pending\.delete\(requestId\);\n\s+messages\.value=messages\.value\.filter\(m=>m\.id!==optimistic\.id\);/);
+  const chat = read("components/JarvisConsole.vue");
+  assert.match(chat, /function onSend\(\) \{\n  expireStaleChips\(\);/);
+  assert.match(chat, /if \(!refused\) return;\n    if \(!text\.value\.trim\(\)\) text\.value = draft;\n    restoreChips\(taken\);/);
+});
+
+test("keeping a photo Core no longer has marks it removed", () => {
+  assert.match(read("photos.ts"), /if \(!gone\(error\)\) throw error;\n    return markRemoved\(id\);/);
+  assert.match(read("components/JarvisConsole.vue"), /if \(removedPhotos\.value\.has\(id\)\) lightboxEl\.value\?\.close\(\);/);
 });

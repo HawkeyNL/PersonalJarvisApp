@@ -16,7 +16,7 @@ import {
 import { conversations, currentId, deleteConversation } from "../conversations";
 import { renderMarkdown, handleMarkdownClick } from "../markdown";
 import { splitSources, sourcePlace, type Source } from "../webAnswer";
-import { chips, chipNotice, attach, removeChip, chipIds, takeChips, restoreChips, expireStaleChips, uploading, allReady, photoUrl, photoMeta, keepPhoto, deletePhoto } from "../photos";
+import { chips, chipNotice, attach, removeChip, chipIds, takeChips, restoreChips, expireStaleChips, uploading, allReady, photoUrl, photoMeta, removedPhotos, keepPhoto, deletePhoto } from "../photos";
 import { expiryHint } from "../chatPhotos";
 import { askedIn, dayOf, replyIsHere, type AskedIn } from "../chatList";
 import { useMic } from "../useMic";
@@ -210,6 +210,8 @@ async function toggleKeep() {
   photoError.value = "";
   try {
     await keepPhoto(id, !viewingMeta.value?.saved);
+    // Gone on the Home Node: its message now shows "Photo removed".
+    if (removedPhotos.value.has(id)) lightboxEl.value?.close();
   } catch {
     photoError.value = "Could not change this photo. Try again.";
   } finally {
