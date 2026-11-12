@@ -71,3 +71,19 @@ export function uploadFailure(status: number): string {
     default: return "The photo could not be uploaded.";
   }
 }
+
+/** Photo ids the messages carry that the conversation no longer has
+ *  (deleted or expired): shown as placeholders without a download. */
+export function missingPhotos(messages: { attachments?: string[] }[], photos: { id: string }[]): Set<string> {
+  const live = new Set(photos.map((photo) => photo.id));
+  return new Set(messages.flatMap((m) => m.attachments ?? []).filter((id) => !live.has(id)));
+}
+
+/** How long a photo stays, for the lightbox. Without metadata (a photo just
+ *  sent) the general rule. */
+export function expiryHint(meta: { saved: boolean; expires_at: string | null } | undefined): string {
+  if (meta?.saved) return "Kept until you delete it.";
+  const at = meta?.expires_at ? new Date(meta.expires_at) : null;
+  if (!at || Number.isNaN(at.getTime())) return "Photos are kept 90 days unless you keep them.";
+  return `Removed on ${at.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })} unless you keep it.`;
+}

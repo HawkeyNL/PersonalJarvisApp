@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { nextSpeechStatus } from "../speechStatus";
 import NavIcon from "./NavIcon.vue";
+import ChatPhoto from "./chat/ChatPhoto.vue";
 import {
   messages,
   send,
@@ -15,7 +16,8 @@ import {
 import { conversations, currentId, deleteConversation } from "../conversations";
 import { renderMarkdown, handleMarkdownClick } from "../markdown";
 import { splitSources } from "../webAnswer";
-import { chips, chipNotice, attach, removeChip, takeChips, uploading, allReady } from "../photos";
+import { chips, chipNotice, attach, removeChip, takeChips, uploading, allReady, photoUrl, photoMeta, keepPhoto, deletePhoto } from "../photos";
+import { expiryHint } from "../chatPhotos";
 import { askedIn, dayOf, replyIsHere, type AskedIn } from "../chatList";
 import { useMic } from "../useMic";
 import { wakePulse } from "../voicewake";
@@ -70,7 +72,7 @@ const current = computed(() => conversations.value.find((c) => c.id === currentI
 const day = computed(() => (current.value ? dayOf(current.value.updated_at, Date.now()) : null));
 // An assistant row exists (empty) from the moment a run starts; show it once text streams in.
 // A web answer shows its trailing Sources as a list of links instead of in the text.
-const shown = computed(() => messages.value.filter((m) => m.role === "user" || m.text)
+const shown = computed(() => messages.value.filter((m) => m.role === "user" || m.text || m.attachments?.length)
   .map((m) => ({ ...m, ...(m.web ? splitSources(m.text) : { body: m.text, sources: [] as string[] }) })));
 const last = computed(() => messages.value[messages.value.length - 1]);
 const waiting = computed(() => thinking.value && !(last.value?.role === "jarvis" && last.value.text));
@@ -170,6 +172,56 @@ async function toggleHeadset() {
   await refreshRoute();
 }
 
+// The lightbox: one photo large, to keep past its 90 days or delete.
+const lightboxEl = ref<HTMLDialogElement | null>(null);
+const viewing = ref<{ id: string; url: string | null } | null>(null);
+const photoBusy = ref(false);
+const photoConfirm = ref(false);
+const photoError = ref("");
+const viewingMeta = computed(() => (viewing.value ? photoMeta.value.get(viewing.value.id) : undefined));
+async function openPhoto(id: string) {
+  viewing.value = { id, url: null };
+  photoConfirm.value = false;
+  photoError.value = "";
+  lightboxEl.value?.showModal();
+  try {
+    const url = await photoUrl(id);
+    if (viewing.value?.id === id) viewing.value = { id, url };
+  } catch {
+    if (viewing.value?.id === id) photoError.value = "This photo could not be loaded.";
+  }
+}
+async function toggleKeep() {
+  const id = viewing.value?.id;
+  if (!id || photoBusy.value) return;
+  photoBusy.value = true;
+  photoError.value = "";
+  try {
+    await keepPhoto(id, !viewingMeta.value?.saved);
+  } catch {
+    photoError.value = "Could not change this photo. Try again.";
+  } finally {
+    photoBusy.value = false;
+  }
+}
+async function removePhoto() {
+  const id = viewing.value?.id;
+  if (!id || photoBusy.value) return;
+  photoBusy.value = true;
+  photoError.value = "";
+  try {
+    await deletePhoto(id);
+    lightboxEl.value?.close();
+  } catch {
+    photoError.value = "Could not delete this photo. Try again.";
+  } finally {
+    photoBusy.value = false;
+  }
+}
+// The lightbox shows the open conversation's photos only.
+watch(currentId, () => lightboxEl.value?.close());
+const hasPhotos = computed(() => messages.value.some((m) => m.attachments?.length));
+
 // Delete the open conversation, after a confirm step (ADR-030).
 const confirming = ref(false);
 const deleting = ref(false);
@@ -235,6 +287,7 @@ onMounted(async () => {
       </div>
       <div v-if="current" class="head-actions" @keydown.esc="cancelDelete">
         <template v-if="confirming">
+          <span v-if="hasPhotos" class="t-xs t-2">Its photos go too, kept ones included.</span>
           <button type="button" class="btn btn-danger-quiet btn-sm" :aria-busy="deleting" @click="removeCurrent">Delete for good</button>
           <button ref="cancelEl" type="button" class="btn btn-secondary btn-sm" :disabled="deleting" @click="cancelDelete">Cancel</button>
         </template>
@@ -252,7 +305,10 @@ onMounted(async () => {
       <div v-for="m in shown" :key="m.id" class="msg" :class="m.role">
         <template v-if="m.role === 'user'">
           <span class="sr-only">You:</span>
-          <div class="bubble">{{ m.text }}</div>
+          <div v-if="m.attachments?.length" class="photos">
+            <ChatPhoto v-for="id in m.attachments" :key="id" :id="id" @open="openPhoto" />
+          </div>
+          <div v-if="m.text || !m.attachments?.length" class="bubble">{{ m.text }}</div>
           <span class="t-xs t-2">{{ m.ts }}</span>
         </template>
         <template v-else>
@@ -265,6 +321,9 @@ onMounted(async () => {
           </div>
           <!-- Jarvis speaks Markdown (sanitised in markdown.ts); the user's own text stays literal. -->
           <div class="md" @click="handleMarkdownClick" v-html="renderMarkdown(m.body)"></div>
+          <div v-if="m.attachments?.length" class="photos">
+            <ChatPhoto v-for="id in m.attachments" :key="id" :id="id" @open="openPhoto" />
+          </div>
           <div v-if="m.sources.length" class="sources t-sm" @click="handleMarkdownClick">
             <span class="t-xs t-2">Sources</span>
             <ul><li v-for="url in m.sources" :key="url"><a :href="url">{{ url }}</a></li></ul>
@@ -278,6 +337,34 @@ onMounted(async () => {
       <p v-if="waiting" class="thinking t-sm t-2"><span class="spinner" aria-hidden="true"></span>{{ last?.searching ? "Searching the web…" : "Jarvis is thinking…" }}</p>
     </div>
     <p class="sr-only" role="status">{{ announcement }}</p>
+
+    <dialog ref="lightboxEl" class="lightbox card" aria-label="Photo" @close="viewing = null">
+      <template v-if="viewing">
+        <div class="lightbox-image">
+          <img v-if="viewing.url" :src="viewing.url" alt="Photo" />
+          <p v-else-if="photoError" class="t-sm t-2">{{ photoError }}</p>
+          <span v-else class="spinner" aria-hidden="true"></span>
+        </div>
+        <div class="lightbox-bar">
+          <span class="t-xs t-2">{{ expiryHint(viewingMeta) }}</span>
+          <p v-if="photoError && viewing.url" class="err" role="alert">{{ photoError }}</p>
+          <div class="lightbox-actions">
+            <template v-if="photoConfirm">
+              <button type="button" class="btn btn-danger-quiet btn-sm" :aria-busy="photoBusy" @click="removePhoto">Delete for good</button>
+              <button type="button" class="btn btn-secondary btn-sm" :disabled="photoBusy" @click="photoConfirm = false">Cancel</button>
+            </template>
+            <template v-else>
+              <button type="button" class="btn btn-secondary btn-sm" :aria-pressed="!!viewingMeta?.saved" :aria-busy="photoBusy" @click="toggleKeep">
+                <svg width="16" height="16" viewBox="0 0 24 24" :fill="viewingMeta?.saved ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" /></svg>
+                {{ viewingMeta?.saved ? "Kept" : "Keep" }}
+              </button>
+              <button type="button" class="btn btn-ghost btn-sm" @click="photoConfirm = true">Delete</button>
+            </template>
+            <button type="button" class="btn btn-ghost btn-sm" @click="lightboxEl?.close()">Close</button>
+          </div>
+        </div>
+      </template>
+    </dialog>
 
     <div class="composer-wrap">
       <form class="composer card" @submit.prevent="onSend">
@@ -393,6 +480,18 @@ onMounted(async () => {
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .who { display: flex; align-items: center; gap: 8px; }
+.photos { display: flex; flex-wrap: wrap; gap: 6px; }
+.msg.user .photos { justify-content: flex-end; }
+.lightbox {
+  width: min(92vw, 1100px); max-height: 92vh; padding: 12px; border: 0;
+  flex-direction: column; gap: 10px; color: var(--text-primary);
+}
+.lightbox[open] { display: flex; }
+.lightbox::backdrop { background: var(--bg-scrim); }
+.lightbox-image { min-height: 120px; display: grid; place-items: center; overflow: hidden; }
+.lightbox-image img { max-width: 100%; max-height: calc(92vh - 96px); object-fit: contain; border-radius: var(--r-md); }
+.lightbox-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lightbox-actions { display: flex; gap: 8px; margin-left: auto; }
 .mark { width: 24px; height: 24px; border-radius: 7px; }
 .offer { align-self: flex-start; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 78%; }
 .thinking {
