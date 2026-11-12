@@ -17,6 +17,8 @@ import androidx.annotation.RequiresApi
 sealed interface DictationEvent {
     /** Voice level, 0..1. */
     data class Level(val value: Float) : DictationEvent
+    /** The mic is about to open: nothing else may play into it now. */
+    data object Listening : DictationEvent
     /** The recognised text; the session has ended. */
     data class Heard(val text: String) : DictationEvent
     /** The session ended without text; [message] is null when simply nothing was said. */
@@ -28,9 +30,12 @@ sealed interface DictationEvent {
 
 /** The chat mic (desktop useMic): the platform recogniser in Dutch like desktop, on the device
  *  when it has Dutch installed. One utterance per tap. Main thread only. */
-class Dictation(context: Context) {
+class Dictation(context: Context, private val preferences: android.content.SharedPreferences) {
     private val context = context.applicationContext
     private var recognizer: SpeechRecognizer? = null
+    /** The recogniser that asked for the Dutch model, kept until [release] so the request is
+     *  not torn down with the session. */
+    private var downloader: SpeechRecognizer? = null
     /** The owner stopped this session: an ERROR_CLIENT then is ours, not a failure. */
     private var stopping = false
     private var report: (DictationEvent) -> Unit = {}
@@ -67,7 +72,13 @@ class Dictation(context: Context) {
                     stopping -> finish(made, event, DictationEvent.Ended(null))
                     hasDutch(support.installedOnDeviceLanguages) -> listen(made, onDevice = true, offDevice, event)
                     else -> {
-                        if (hasDutch(support.supportedOnDeviceLanguages)) made.triggerModelDownload(intent())
+                        // Asked once per install; the next sessions use it once installed.
+                        if (hasDutch(support.supportedOnDeviceLanguages) && !preferences.getBoolean(MODEL_REQUESTED, false)) {
+                            preferences.edit().putBoolean(MODEL_REQUESTED, true).apply()
+                            made.triggerModelDownload(intent())
+                            recognizer = null
+                            downloader = made
+                        }
                         fallBack(offDevice, event)
                     }
                 }
@@ -78,6 +89,7 @@ class Dictation(context: Context) {
 
     private fun fallBack(allowed: Boolean, event: (DictationEvent) -> Unit) {
         cancel()
+        report = event
         if (!allowed) return event(DictationEvent.NeedsConsent)
         val made = create(onDevice = false) ?: return event(DictationEvent.Ended(UNAVAILABLE))
         recognizer = made
@@ -130,6 +142,7 @@ class Dictation(context: Context) {
             override fun onPartialResults(partialResults: Bundle?) = Unit
             override fun onEvent(eventType: Int, params: Bundle?) = Unit
         })
+        event(DictationEvent.Listening)
         made.startListening(intent())
     }
 
@@ -144,12 +157,22 @@ class Dictation(context: Context) {
     /** Drops the session and what it has not recognised yet. */
     fun cancel() {
         watchdog.removeCallbacksAndMessages(null)
+        report = {}
         val current = recognizer ?: return
         recognizer = null
         current.cancel()
         current.destroy()
     }
+
+    /** When the ViewModel goes: no session, no model request, no reference to its callback. */
+    fun release() {
+        cancel()
+        downloader?.destroy()
+        downloader = null
+    }
 }
+
+private const val MODEL_REQUESTED = "dutchModelRequested"
 
 /** Recognition language, as desktop (nl-NL). */
 const val DICTATION_LANGUAGE = "nl-NL"
@@ -163,7 +186,8 @@ const val STOP_GRACE_MS = 5_000L
 const val MIC_DENIED = "Microphone access is off. Allow it in Android settings to use voice input."
 /** Shown once before the phone's speech service is first used (like PHOTO_DISCLOSURE). */
 const val VOICE_DISCLOSURE = "Voice input uses your phone's speech service. Without on-device recognition your speech may be " +
-    "processed off this phone. Tap the mic again to continue."
+    "processed off this phone. If your phone offers a Dutch on-device model, it may be downloaded for next time. " +
+    "Tap the mic again to continue."
 
 /** Whether a recogniser's language list has Dutch (nl-NL or plain nl). */
 fun hasDutch(languages: List<String>): Boolean =

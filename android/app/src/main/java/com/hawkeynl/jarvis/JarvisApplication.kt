@@ -25,7 +25,7 @@ class AppContainer(application: Application) {
     val contentResolver: android.content.ContentResolver = application.contentResolver
     val appearance = com.hawkeynl.jarvis.storage.AppearancePreference(application)
     val localSpeech = com.hawkeynl.jarvis.chat.AndroidSpeechOutput(application)
-    val dictation = com.hawkeynl.jarvis.chat.Dictation(application)
+    val dictation = com.hawkeynl.jarvis.chat.Dictation(application, voicePreferences)
     private val secureValues = AndroidKeystoreSecureValueStore(application)
     val settings = EndpointSettingsRepository(application)
     val sessions = SessionRepository(secureValues)

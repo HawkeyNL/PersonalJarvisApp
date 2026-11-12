@@ -440,9 +440,6 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             is MicTap.Start -> {
                 // A second tap on the shown notice is the owner's go for the phone's speech service.
                 if (tap.offDevice && !disclosed) container.voicePreferences.edit().putBoolean("dictationDisclosed", true).apply()
-                // Jarvis must not dictate its own spoken reply.
-                speech.stop()
-                speech.ownedRun()?.let(container.realtime::releaseVoice)
                 val asked = identity
                 _micLevel.value = 0f
                 // Listening before start: the session may end at once (no recogniser, no consent).
@@ -456,7 +453,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     fun cancelDictation() {
         container.dictation.cancel()
         _micLevel.value = 0f
-        if (_state.value.listening) _state.update { it.copy(listening = false) }
+        if (_state.value.listening || _state.value.dictationDisclosure) _state.update { it.copy(listening = false, dictationDisclosure = false) }
     }
 
     fun dictationDenied() = _state.update { it.copy(dictationNotice = MIC_DENIED) }
@@ -467,6 +464,11 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         // Fail closed: nothing heard behind the lock or from another sign-in is used.
         if (!dictationAllowed(asked, identity, _state.value.locked)) { cancelDictation(); return }
         when (event) {
+            // Jarvis must not dictate its own spoken reply; a notice-only tap leaves it speaking.
+            DictationEvent.Listening -> {
+                speech.stop()
+                speech.ownedRun()?.let(container.realtime::releaseVoice)
+            }
             is DictationEvent.Level -> _micLevel.value = event.value
             is DictationEvent.Ended -> {
                 _micLevel.value = 0f
@@ -741,6 +743,9 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         identity++
         pending.clear()
         container.realtime.stop(); speech.stop(); cancelDictation()
+        // A new owner of this phone hears the voice and photo notices again.
+        container.voicePreferences.edit().remove("dictationDisclosed").apply()
+        container.photoPreferences.edit().remove("disclosed").apply()
         viewModelScope.launch {
             container.enrollment.eraseLocally()
             _state.update {
@@ -910,7 +915,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         // history mutation or generation cancellation is performed here.
     }
 
-    override fun onCleared() { container.realtime.stop(); speech.stop(); container.dictation.cancel(); super.onCleared() }
+    override fun onCleared() { container.realtime.stop(); speech.stop(); container.dictation.release(); super.onCleared() }
 
     private suspend fun startRealtime(endpoint: HomeNodeEndpoint) {
         realtimeAvailable = container.realtime.available(endpoint)
