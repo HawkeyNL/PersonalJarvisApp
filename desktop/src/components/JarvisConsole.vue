@@ -17,7 +17,7 @@ import { conversations, currentId, deleteConversation } from "../conversations";
 import { renderMarkdown, handleMarkdownClick } from "../markdown";
 import { splitSources, sourcePlace, type Source } from "../webAnswer";
 import { chips, chipNotice, attach, removeChip, chipIds, takeChips, restoreChips, expireStaleChips, uploading, allReady, photoUrl, photoMeta, removedPhotos, keepPhoto, deletePhoto } from "../photos";
-import { expiryHint, imageFiles } from "../chatPhotos";
+import { expiryHint, imageFiles, PHOTO_TYPES, ONLY_PHOTOS } from "../chatPhotos";
 import { askedIn, dayOf, replyIsHere, type AskedIn } from "../chatList";
 import { useMic } from "../useMic";
 import { wakePulse } from "../voicewake";
@@ -146,6 +146,7 @@ function onDrop(event: DragEvent) {
   event.preventDefault();
   const files = imageFiles(event.dataTransfer?.files);
   if (files.length) attach(files);
+  else chipNotice.value = ONLY_PHOTOS;
 }
 // Said once, the first time photos are in the composer.
 const DISCLOSED = "jarvis.photos.disclosed";
@@ -432,7 +433,7 @@ onMounted(async () => {
         ></textarea>
         <div class="tools">
           <div class="tool-group">
-            <input ref="fileEl" type="file" accept="image/jpeg,image/png,image/webp,image/heic" multiple hidden @change="onPick" />
+            <input ref="fileEl" type="file" :accept="PHOTO_TYPES.join(',')" multiple hidden @change="onPick" />
             <button type="button" class="btn btn-ghost btn-sm icon-btn" aria-label="Attach photos" title="Attach photos (up to 4)"
               :disabled="chips.length >= 4" @click="fileEl?.click()">
               <NavIcon name="photo" />

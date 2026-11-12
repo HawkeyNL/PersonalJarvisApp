@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fitWithin, downscale, imageFiles, uploadFailure, missingPhotos, expiryHint, UNSUPPORTED, CORE_TOO_OLD, MAX_SIDE, JPEG_QUALITY, MAX_INPUT_BYTES, TOO_LARGE, UNREADABLE, runRefusal, tooOldToSend, SEND_WITHIN_MS } from "../src/chatPhotos.ts";
 import { runRequest } from "../src/realtimeProjection.ts";
+import { blocksDrop } from "../src/dropGuard.ts";
 
 test("photos shrink to 2048 px on the long side and never grow", () => {
   assert.deepEqual(fitWithin(4032, 3024), { width: 2048, height: 1536 });
@@ -127,13 +128,27 @@ test("keeping a photo Core no longer has marks it removed", () => {
 
 test("only images from a paste or a drop are attached", () => {
   const file = (type) => ({ type });
-  assert.deepEqual(imageFiles([file("image/png"), file("text/plain"), file("image/jpeg"), file("")]), [file("image/png"), file("image/jpeg")]);
+  assert.deepEqual(imageFiles([file("image/png"), file("text/plain"), file("image/jpeg"), file(""), file("image/svg+xml"), file("image/heic")]), [file("image/png"), file("image/jpeg"), file("image/heic")]);
   assert.deepEqual(imageFiles(null), []);
 });
 
-test("photos dropped on the composer are attached; the window never opens a dropped file", () => {
+test("photos dropped on the composer are attached; other files get a notice", () => {
   const conf = JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
   assert.equal(conf.app.windows[0].dragDropEnabled, false);
-  assert.match(read("components/JarvisConsole.vue"), /<form class="composer card"[^>]*@dragover="onDragOver"[^>]*@drop="onDrop">/);
-  assert.match(read("main.ts"), /for \(const kind of \["dragover", "drop"\]\)/);
+  const chat = read("components/JarvisConsole.vue");
+  const form = chat.match(/<form class="composer card"[^>]*>/)[0];
+  for (const binding of ['@dragover="onDragOver"', '@dragleave="onDragLeave"', '@drop="onDrop"']) assert.ok(form.includes(binding), binding);
+  assert.match(chat, /if \(files\.length\) attach\(files\);\n  else chipNotice\.value = ONLY_PHOTOS;/);
+  assert.match(read("main.ts"), /^guardDrops\(\);$/m);
+});
+
+test("the window swallows file drops anywhere and link drops outside text fields", () => {
+  // Handled by the composer: left alone.
+  assert.equal(blocksDrop(["Files"], true, false), false);
+  // Files outside the composer never open in the window, even over a text field.
+  assert.equal(blocksDrop(["Files"], false, false), true);
+  assert.equal(blocksDrop(["Files"], false, true), true);
+  // A dragged link would navigate the window; text fields keep text drops.
+  assert.equal(blocksDrop(["text/uri-list", "text/plain"], false, false), true);
+  assert.equal(blocksDrop(["text/plain"], false, true), false);
 });

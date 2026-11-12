@@ -13,9 +13,13 @@ export const MAX_INPUT_BYTES = 30 * 1024 * 1024;
 export const TOO_LARGE = "This photo is too large.";
 export const UNREADABLE = "This photo could not be read.";
 
-/** The images among pasted or dropped files. */
+/** The photo types the picker offers; a paste or a drop takes the same. */
+export const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic"];
+export const ONLY_PHOTOS = "Only JPEG, PNG, WebP or HEIC photos can be added.";
+
+/** The photos among picked, pasted or dropped files. */
 export const imageFiles = (files: ArrayLike<File> | null | undefined): File[] =>
-  Array.from(files ?? []).filter((file) => file.type.startsWith("image/"));
+  Array.from(files ?? []).filter((file) => PHOTO_TYPES.includes(file.type));
 
 /** `width`×`height` scaled down (never up) to fit `max` on the long side. */
 export function fitWithin(width: number, height: number, max = MAX_SIDE): { width: number; height: number } {
