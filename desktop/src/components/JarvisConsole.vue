@@ -17,7 +17,7 @@ import { conversations, currentId, deleteConversation } from "../conversations";
 import { renderMarkdown, handleMarkdownClick } from "../markdown";
 import { splitSources, sourcePlace, type Source } from "../webAnswer";
 import { chips, chipNotice, attach, removeChip, chipIds, takeChips, restoreChips, expireStaleChips, uploading, allReady, photoUrl, photoMeta, removedPhotos, keepPhoto, deletePhoto } from "../photos";
-import { expiryHint } from "../chatPhotos";
+import { expiryHint, imageFiles } from "../chatPhotos";
 import { askedIn, dayOf, replyIsHere, type AskedIn } from "../chatList";
 import { useMic } from "../useMic";
 import { wakePulse } from "../voicewake";
@@ -117,7 +117,7 @@ watch(thinking, (busy, before) => {
 // Photos must all be uploaded first; a photo alone is a message too.
 const canSend = computed(() => (!!text.value.trim() || chips.value.length > 0) && allReady() && !thinking.value);
 
-// Attach: the picker or a paste. Shrinking and uploading start at once.
+// Attach: the picker, a paste or a drop. Shrinking and uploading start at once.
 const fileEl = ref<HTMLInputElement | null>(null);
 function onPick(event: Event) {
   const input = event.target as HTMLInputElement;
@@ -125,10 +125,27 @@ function onPick(event: Event) {
   input.value = "";
 }
 function onPaste(event: ClipboardEvent) {
-  const files = [...(event.clipboardData?.files ?? [])].filter((file) => file.type.startsWith("image/"));
+  const files = imageFiles(event.clipboardData?.files);
   if (!files.length) return;
   event.preventDefault();
   attach(files);
+}
+const dropping = ref(false);
+const carriesFiles = (event: DragEvent) => !!event.dataTransfer?.types.includes("Files");
+function onDragOver(event: DragEvent) {
+  if (!carriesFiles(event)) return;
+  event.preventDefault();
+  dropping.value = true;
+}
+function onDragLeave(event: DragEvent) {
+  if (!(event.currentTarget as Node).contains(event.relatedTarget as Node | null)) dropping.value = false;
+}
+function onDrop(event: DragEvent) {
+  dropping.value = false;
+  if (!carriesFiles(event)) return;
+  event.preventDefault();
+  const files = imageFiles(event.dataTransfer?.files);
+  if (files.length) attach(files);
 }
 // Said once, the first time photos are in the composer.
 const DISCLOSED = "jarvis.photos.disclosed";
@@ -389,7 +406,7 @@ onMounted(async () => {
     </dialog>
 
     <div class="composer-wrap">
-      <form class="composer card" @submit.prevent="onSend">
+      <form class="composer card" :class="{ dropping }" @submit.prevent="onSend" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop">
         <ul v-if="chips.length" class="chips" aria-label="Photos to send">
           <li v-for="chip in chips" :key="chip.key" class="chip" :class="chip.state">
             <img v-if="chip.url" :src="chip.url" alt="" />
@@ -559,7 +576,7 @@ onMounted(async () => {
   background: var(--bg-scrim); color: var(--text-on-accent);
 }
 .chip-x:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
-.composer:focus-within { box-shadow: var(--shadow-border), 0 0 0 2px var(--focus-ring); }
+.composer:focus-within, .composer.dropping { box-shadow: var(--shadow-border), 0 0 0 2px var(--focus-ring); }
 textarea {
   width: 100%; min-height: 52px; max-height: 40vh; padding: 6px 0; border: 0; resize: none; field-sizing: content;
   background: transparent; color: var(--text-primary); font: 400 15px/1.5 var(--font-sans);

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { fitWithin, downscale, uploadFailure, missingPhotos, expiryHint, UNSUPPORTED, CORE_TOO_OLD, MAX_SIDE, JPEG_QUALITY, MAX_INPUT_BYTES, TOO_LARGE, UNREADABLE, runRefusal, tooOldToSend, SEND_WITHIN_MS } from "../src/chatPhotos.ts";
+import { fitWithin, downscale, imageFiles, uploadFailure, missingPhotos, expiryHint, UNSUPPORTED, CORE_TOO_OLD, MAX_SIDE, JPEG_QUALITY, MAX_INPUT_BYTES, TOO_LARGE, UNREADABLE, runRefusal, tooOldToSend, SEND_WITHIN_MS } from "../src/chatPhotos.ts";
 import { runRequest } from "../src/realtimeProjection.ts";
 
 test("photos shrink to 2048 px on the long side and never grow", () => {
@@ -123,4 +123,17 @@ test("a refused message comes back to the composer, photos included", () => {
 test("keeping a photo Core no longer has marks it removed", () => {
   assert.match(read("photos.ts"), /if \(!gone\(error\)\) throw error;\n    return markRemoved\(id\);/);
   assert.match(read("components/JarvisConsole.vue"), /if \(removedPhotos\.value\.has\(id\)\) lightboxEl\.value\?\.close\(\);/);
+});
+
+test("only images from a paste or a drop are attached", () => {
+  const file = (type) => ({ type });
+  assert.deepEqual(imageFiles([file("image/png"), file("text/plain"), file("image/jpeg"), file("")]), [file("image/png"), file("image/jpeg")]);
+  assert.deepEqual(imageFiles(null), []);
+});
+
+test("photos dropped on the composer are attached; the window never opens a dropped file", () => {
+  const conf = JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
+  assert.equal(conf.app.windows[0].dragDropEnabled, false);
+  assert.match(read("components/JarvisConsole.vue"), /<form class="composer card"[^>]*@dragover="onDragOver"[^>]*@drop="onDrop">/);
+  assert.match(read("main.ts"), /for \(const kind of \["dragover", "drop"\]\)/);
 });
