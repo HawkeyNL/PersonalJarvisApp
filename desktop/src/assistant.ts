@@ -41,7 +41,13 @@ export interface Msg {
   web?: boolean;
   /** A pending run Core started itself after a reply: its automatic web search. */
   searching?: boolean;
+  /** Ids of the chat photos this message carries. */
+  attachments?: string[];
 }
+
+/** A conversation photo that still exists on the Home Node. `expires_at` is
+ *  null once kept (`saved`). */
+export interface PhotoMeta { id: string; saved: boolean; expires_at: string | null }
 
 export const messages = ref<Msg[]>([]);
 export const thinking = ref(false); // true while the brain is generating a reply
@@ -56,7 +62,7 @@ chatSession.onReset(()=>{pending.clear();messages.value=[];thinking.value=false;
 
 function upsertCanonical(message:CanonicalMessage,requestId?:string,runId?:string) {
   if(currentId.value!==message.conversation_id) return;
-  const row={id:idc++,role:(message.role==="assistant"?"jarvis":"user") as Role,text:message.content,ts:message.created_at.slice(11,16),spoken:false,canonicalId:message.id,runId,requestId,web:isWebModel(message.model)};
+  const row={id:idc++,role:(message.role==="assistant"?"jarvis":"user") as Role,text:message.content,ts:message.created_at.slice(11,16),spoken:false,canonicalId:message.id,runId,requestId,web:isWebModel(message.model),...(message.attachments?.length?{attachments:message.attachments}:{})};
   messages.value=mergeCanonical(messages.value,row);
 }
 
@@ -202,7 +208,8 @@ async function reloadConversation(id:string):Promise<void> {
   const res = await getJsonAuth<{
     id: string;
     title: string;
-    messages: { id?:string; role: string; content: string; model: string | null; at: string }[];
+    messages: { id?:string; role: string; content: string; model: string | null; at: string; attachments?: string[] }[];
+    photos?: PhotoMeta[];
     assistant_running?:boolean;
   }>(`/v1/conversations/${encodeURIComponent(id)}`);
   if(currentId.value!==id || !chatSession.current(epoch)) return;
@@ -217,6 +224,7 @@ async function reloadConversation(id:string):Promise<void> {
     spoken: false,
     canonicalId:m.id,
     web:isWebModel(m.model),
+    ...(m.attachments?.length ? { attachments: m.attachments } : {}),
   }));
 }
 
