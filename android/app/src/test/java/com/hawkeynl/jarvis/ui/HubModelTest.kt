@@ -127,6 +127,31 @@ class HubModelTest {
     }
 
     @Test
+    fun `resource meters show CPU, memory and every disk with used and free space`() {
+        val g = 1024L * 1024 * 1024
+        val live = LiveHost(sampled_at = 1, cpu_percent = 12.34, memory_total_bytes = 32 * g, memory_used_bytes = 28 * g, uptime_seconds = 60)
+        val disks = listOf(
+            DiskStatus(label = "system", state = "ok", total_bytes = 100 * g, free_bytes = 5 * g, used_percent = 95.0),
+            DiskStatus(label = "data", state = "unknown"),
+        )
+        assertEquals(
+            listOf(
+                Meter("cpu", "CPU", 12, Tone.OK, "12.3% in use"),
+                Meter("memory", "Memory", 88, Tone.WARN, "28.0 GiB used · 4.0 GiB free of 32.0 GiB"),
+                Meter("disk-system-0", "Disk · system", 95, Tone.ERROR, "95.0 GiB used · 5.0 GiB free of 100.0 GiB"),
+                Meter("disk-data-1", "Disk · data", null, Tone.IDLE, "Unknown"),
+            ),
+            resourceMeters(live, disks),
+        )
+        // The first CPU sample and an older Core without live vitals have no reading.
+        assertEquals(
+            listOf(null to "First sample…", null to "Unknown"),
+            resourceMeters(live.copy(cpu_percent = null, memory_total_bytes = 0), emptyList()).map { it.percent to it.detail },
+        )
+        assertEquals(emptyList<Meter>(), resourceMeters(null, emptyList()))
+    }
+
+    @Test
     fun `title filter respects query and period`() {
         val rows = listOf("Budget plan" to "2026-10-04T10:00:00Z", "Old budget" to "2026-08-01T10:00:00Z", "Trip" to "2026-10-03T10:00:00Z")
         val week = filterByTitle(rows, " BUDGET ", 7, now, { it.first }, { it.second })

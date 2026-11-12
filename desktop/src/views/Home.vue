@@ -202,8 +202,8 @@ const online = computed(() => (backend.value === "ok" ? true : backend.value ===
 const pick = <T, K extends keyof T>(source: Availability<T>, key: K): Availability<T[K]> =>
   source.state === "ok" ? { state: "ok", value: source.value[key] } : source;
 
-// The live counts the old hub cards showed, each a link to its page. Agents,
-// Integrations and System health are only reachable from here.
+// The live counts the old hub cards showed, each a link to its page. Agents
+// and Integrations are only reachable from here.
 useCoreStatus();
 type StatusLink = { key: string; to: string; icon: IconName; label: string; summary: CardSummary };
 const statusLinks = computed<StatusLink[]>(() => [

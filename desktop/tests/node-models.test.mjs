@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   agentStatus, canSignApproval, countOf, diskState, filterConversations, formatMs, groupAgents, isTrader, measuredCount,
-  serviceState, servicesSummary, sessionState,
+  resourceMeters, serviceState, servicesSummary, sessionState,
 } from "../src/nodeModels.ts";
 
 const NOW = Date.parse("2026-10-04T12:00:00Z");
@@ -98,4 +98,23 @@ test("only agent-approval-v1 pending actions with an action hash can be signed",
   assert.equal(canSignApproval({ approval_message: "agent-approval-v1" }), false);
   assert.equal(canSignApproval({ approval_message: "agent-approval-v1", action_sha256: hash.slice(2) }), false);
   assert.equal(canSignApproval({ approval_message: "agent-approval-v1", action_sha256: hash.toUpperCase() }), false);
+});
+
+test("resource meters show CPU, memory and every disk with used and free space", () => {
+  const GiB = 1024 ** 3;
+  const live = { sampled_at: 1, cpu_percent: 12.34, memory_total_bytes: 32 * GiB, memory_used_bytes: 28 * GiB, uptime_seconds: 60 };
+  const disks = [
+    { label: "system", state: "ok", total_bytes: 100 * GiB, free_bytes: 5 * GiB, used_percent: 95 },
+    { label: "data", state: "unknown" },
+  ];
+  assert.deepEqual(resourceMeters(live, disks), [
+    { id: "cpu", label: "CPU", percent: 12, tone: "ok", detail: "12.3% in use" },
+    { id: "memory", label: "Memory", percent: 88, tone: "warn", detail: "28.0 GiB used · 4.0 GiB free of 32.0 GiB" },
+    { id: "disk-system-0", label: "Disk · system", percent: 95, tone: "error", detail: "95.0 GiB used · 5.0 GiB free of 100.0 GiB" },
+    { id: "disk-data-1", label: "Disk · data", percent: null, tone: "idle", detail: "Unknown" },
+  ]);
+  // The first CPU sample and an older Core without live vitals have no reading.
+  assert.deepEqual(resourceMeters({ ...live, cpu_percent: null, memory_total_bytes: 0 }, []).map((m) => [m.percent, m.detail]),
+    [[null, "First sample…"], [null, "Unknown"]]);
+  assert.deepEqual(resourceMeters(undefined, []), []);
 });

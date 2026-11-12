@@ -318,6 +318,7 @@ private struct ResourcesSettingsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var model: JarvisAppModel
     @State private var registry: HomeNodeRegistry?
+    @State private var disks: [DiskStatus] = []
     @State private var error: String?
     @State private var loading = false
 
@@ -325,9 +326,8 @@ private struct ResourcesSettingsView: View {
         List {
             if let registry {
                 Section {
+                    ForEach(resourceMeters(live: registry.liveHost, disks: disks)) { MeterRow(meter: $0) }
                     if let live = registry.liveHost {
-                        LabeledContent("CPU usage", value: live.cpuPercent.map { String(format: "%.1f%%", $0) } ?? "First reading…")
-                        LabeledContent("Memory in use", value: "\(gib(live.memoryUsedBytes)) / \(gib(live.memoryTotalBytes))")
                         LabeledContent("Uptime", value: "\(live.uptimeSeconds / 3600) h \((live.uptimeSeconds % 3600) / 60) min")
                         LabeledContent("Last reading", value: Date(timeIntervalSince1970: TimeInterval(live.sampledAt)).formatted(date: .omitted, time: .standard))
                     } else {
@@ -381,6 +381,8 @@ private struct ResourcesSettingsView: View {
         do {
             registry = try await model.loadHomeNodeRegistry()
             error = nil
+            // Disk space comes with the services read; a failed read keeps the last disks.
+            if let value = await model.coreRead("/v1/system/services", as: ServicesResponse.self).value { disks = value.disks }
         } catch is CancellationError {
             // Leaving this page cancels polling.
         } catch {
@@ -388,6 +390,37 @@ private struct ResourcesSettingsView: View {
             self.error = (error as? LocalizedError)?.errorDescription ?? "Could not load Home Node resources."
         }
     }
+}
 
-    private func gib(_ bytes: Int64) -> String { String(format: "%.1f GiB", Double(bytes) / 1_073_741_824) }
+/// One labelled bar from `resourceMeters`: used and free space of a resource.
+private struct MeterRow: View {
+    let meter: Meter
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: JV.Space.xs) {
+            HStack {
+                Text(meter.label)
+                Spacer()
+                Text(meter.detail).foregroundStyle(JV.textSecondary).monospacedDigit()
+            }
+            .font(JV.font(13))
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(JV.bgSunken)
+                    Capsule().fill(color).frame(width: geo.size.width * CGFloat(min(max(meter.percent ?? 0, 0), 100)) / 100)
+                }
+            }
+            .frame(height: 6)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(meter.percent.map { "\(meter.label): \($0)% used" } ?? "\(meter.label): \(meter.detail)")
+    }
+
+    private var color: Color {
+        switch meter.tone {
+        case .error: JV.dangerSolid
+        case .warn: JV.negativeSolid
+        default: JV.accentSolid
+        }
+    }
 }

@@ -39,6 +39,7 @@ export const NAV: NavSection[] = [
   ] },
   { items: [{ id: "content", label: "Content", icon: "content", badge: "Later", disabled: true }] },
   { label: "System", items: [
+    { id: "health", label: "System health", icon: "health", path: "/health" },
     { id: "settings", label: "Settings", icon: "gear", path: "/settings" },
     { id: "devices", label: "Devices", icon: "monitor", path: "/devices" },
     // A separate app with root rights and its own sign-in; this app does no administration.
@@ -95,6 +96,7 @@ export const PAGES: Page[] = [
   soon("notifications", "A history of notifications is not built yet."),
   soon("content", "Trends, scripts and publishing proposals come after trading."),
 
+  { path: "/health", name: "health", view: "health", nav: "health" },
   { path: "/settings", name: "settings", view: "settings", nav: "settings" },
   { path: "/devices", name: "devices", view: "context", nav: "devices",
     props: { title: "Devices", subtitle: "The apps linked to Jarvis" } },
@@ -102,7 +104,6 @@ export const PAGES: Page[] = [
   // Reached from the system status on the chat home; not in the sidebar.
   { path: "/agents", name: "agents", view: "agents" },
   { path: "/integrations", name: "integrations", view: "integrations" },
-  { path: "/health", name: "health", view: "health" },
 ];
 
 /** Old path → new path. Query and hash carry over (vue-router string redirects). */

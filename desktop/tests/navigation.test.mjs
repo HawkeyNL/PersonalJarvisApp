@@ -19,7 +19,7 @@ test("sidebar follows the agreed sections and entries", () => {
     ["Trading", ["Dashboard", "Stocks", "Memecoin", "Futures", "Positions", "Autonomy"]],
     ["Activity", ["Approvals", "Runs", "Notifications"]],
     [null, ["Content"]],
-    ["System", ["Settings", "Devices", "Core Admin"]],
+    ["System", ["System health", "Settings", "Devices", "Core Admin"]],
   ]);
   const byId = Object.fromEntries(NAV.flatMap(s => s.items).map(i => [i.id, i]));
   assert.equal(byId.futures.badge, "Later");
@@ -118,7 +118,7 @@ test("exactly one sidebar entry is aria-current on every sidebar page", async ()
     const current = items.filter(i => ariaCurrent(i.id, nav) === "page").map(i => i.id);
     assert.deepEqual(current, [page.nav], page.path);
   }
-  const nav = (await routerAt("/health")).meta.nav;
+  const nav = (await routerAt("/agents")).meta.nav;
   assert.deepEqual(items.filter(i => ariaCurrent(i.id, nav)), []);
 });
 

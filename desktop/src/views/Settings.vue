@@ -2,6 +2,7 @@
 import { computed, ref, onBeforeUnmount, onMounted, watch } from "vue";
 import AccountAdministration from "../components/AccountAdministration.vue";
 import PageShell from "../components/PageShell.vue";
+import HostResources from "../components/settings/HostResources.vue";
 import ThemeCards from "../components/settings/ThemeCards.vue";
 import { currentTheme, setTheme, type ThemeChoice } from "../theme";
 import { currentAuthStatus, currentShellMode, deregisterDevice, type AuthStatus } from "../auth";
@@ -184,6 +185,8 @@ onMounted(async () => {
             </div>
             <p v-if="homeNodeMessage" class="t-sm t-2 wrap" role="status">{{ homeNodeMessage }}</p>
           </section>
+
+          <HostResources />
 
           <section class="card col" aria-labelledby="about-heading">
             <h2 id="about-heading">About</h2>

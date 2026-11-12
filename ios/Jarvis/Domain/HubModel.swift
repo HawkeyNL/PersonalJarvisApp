@@ -411,6 +411,49 @@ func diskState(_ disk: DiskStatus) -> (Tone, String) {
     return (tone, "\(Int(used.rounded()))% used · \(formatGiB(free)) free of \(formatGiB(total))")
 }
 
+/// One resource bar; `percent` is nil when Core has no reading.
+struct Meter: Equatable, Identifiable {
+    let id: String
+    let label: String
+    let percent: Int?
+    let tone: Tone
+    let detail: String
+}
+
+private func loadTone(_ percent: Double) -> Tone { percent >= 90 ? .error : percent >= 80 ? .warn : .ok }
+private func spaceDetail(used: Int64, total: Int64) -> String {
+    "\(formatGiB(used)) used · \(formatGiB(total - used)) free of \(formatGiB(total))"
+}
+
+/// CPU, memory and disk bars for the Home Node, in that order; each warns at 80% and 90%.
+func resourceMeters(live: HomeNodeRegistry.LiveHost?, disks: [DiskStatus]) -> [Meter] {
+    var meters: [Meter] = []
+    if let live {
+        if let cpu = live.cpuPercent {
+            meters.append(Meter(id: "cpu", label: "CPU", percent: Int(cpu.rounded()), tone: loadTone(cpu), detail: String(format: "%.1f%% in use", cpu)))
+        } else {
+            meters.append(Meter(id: "cpu", label: "CPU", percent: nil, tone: .idle, detail: "First sample…"))
+        }
+        let used = live.memoryUsedBytes, total = live.memoryTotalBytes
+        if total > 0 {
+            let pct = Double(used) * 100 / Double(total)
+            meters.append(Meter(id: "memory", label: "Memory", percent: Int(pct.rounded()), tone: loadTone(pct), detail: spaceDetail(used: used, total: total)))
+        } else {
+            meters.append(Meter(id: "memory", label: "Memory", percent: nil, tone: .idle, detail: "Unknown"))
+        }
+    }
+    for (i, disk) in disks.enumerated() {
+        let id = "disk-\(disk.label)-\(i)", label = "Disk · \(disk.label)"
+        let tone = diskState(disk).0
+        if tone != .idle, let total = disk.total_bytes, let free = disk.free_bytes, let used = disk.used_percent {
+            meters.append(Meter(id: id, label: label, percent: Int(used.rounded()), tone: tone, detail: spaceDetail(used: total - free, total: total)))
+        } else {
+            meters.append(Meter(id: id, label: label, percent: nil, tone: .idle, detail: "Unknown"))
+        }
+    }
+    return meters
+}
+
 // MARK: - Devices
 
 /// Devices that may be offered for revoking: active ones other than this
