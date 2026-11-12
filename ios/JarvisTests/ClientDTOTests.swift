@@ -2365,6 +2365,17 @@ final class WebAnswerTests: XCTestCase {
         XCTAssertEqual(split.sources.map(\.title), ["Rust 1.97 released", "A", "<b>hi</b> *x*", nil])
         XCTAssertTrue(WebAnswer.split("A\nSources:\n- [" + String(repeating: "t", count: 121) + "](https://example.org/)").sources.isEmpty)
         XCTAssertEqual(WebAnswer.split("A\nSources:\n- [" + String(repeating: "é", count: 120) + "](https://example.org/)").sources.first?.title?.count, 120)
+        // Every hidden character of Core's validation::no_hidden_chars, at its edges.
+        for hidden: UInt32 in [0x0, 0x9F, 0xAD, 0x34F, 0x61C, 0x115F, 0x1160, 0x180E, 0x200B, 0x200F, 0x2028, 0x202E,
+                               0x2060, 0x2065, 0x2069, 0x3164, 0xFE00, 0xFE0F, 0xFEFF, 0xFFF9, 0xFFFB, 0xE0000, 0xE0001, 0xE007F] {
+            let title = "a" + String(Character(Unicode.Scalar(hidden)!)) + "b"
+            XCTAssertTrue(WebAnswer.split("A\nSources:\n- [\(title)](https://example.org/)").sources.isEmpty, String(hidden, radix: 16))
+        }
+        // Their neighbours stay allowed, like in Core.
+        for shown: UInt32 in [0xAE, 0x2027, 0x206A, 0xFE10, 0xFFFC, 0xE0080] {
+            let title = "a" + String(Character(Unicode.Scalar(shown)!)) + "b"
+            XCTAssertEqual(WebAnswer.split("A\nSources:\n- [\(title)](https://example.org/)").sources.first?.title, title)
+        }
     }
 
     func testACardShowsTheHostWithoutWwwAndAShortPath() {

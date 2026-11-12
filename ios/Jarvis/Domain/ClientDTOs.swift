@@ -230,11 +230,13 @@ enum WebAnswer {
         return plain ? (String(title), candidate[end.upperBound..<candidate.index(before: candidate.endIndex)]) : nil
     }
 
-    /// Bidi controls, zero-width, line/paragraph separators and other invisible format
-    /// characters (Core's list): a title could hide or reorder text with them.
+    /// Bidi controls, zero-width, fillers, variation selectors, line/paragraph separators,
+    /// tags and other invisible characters: exactly Core's validation::no_hidden_chars list
+    /// (control characters are checked apart). A title could hide or reorder text with them.
     private static func invisibleFormat(_ scalar: Unicode.Scalar) -> Bool {
         switch scalar.value {
-        case 0x00AD, 0x061C, 0x200B...0x200F, 0x2028...0x202E, 0x2060...0x2064, 0x2066...0x2069, 0xFEFF: return true
+        case 0x00AD, 0x034F, 0x061C, 0x115F, 0x1160, 0x180E, 0x200B...0x200F, 0x2028...0x202E,
+             0x2060...0x2069, 0x3164, 0xFE00...0xFE0F, 0xFEFF, 0xFFF9...0xFFFB, 0xE0000...0xE007F: return true
         default: return false
         }
     }

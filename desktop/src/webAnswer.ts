@@ -8,9 +8,10 @@ const SOURCES_HEADER = /^(sources|bronnen)$/i;
 /** One Sources entry: an https URL, and the title Core's research gave it. */
 export interface Source { url: string; title?: string }
 
-// Bidi controls, zero-width, line/paragraph separators and other invisible
-// format characters (Core's list): a title could hide or reorder text.
-const INVISIBLE = /[\u00AD\u061C\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/u;
+// Bidi controls, zero-width, fillers, variation selectors, line/paragraph
+// separators, tags and other invisible characters: exactly Core's
+// validation::no_hidden_chars list (control characters are checked apart).
+const INVISIBLE = /[\u00AD\u034F\u061C\u115F\u1160\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2069\u3164\uFE00-\uFE0F\uFEFF\uFFF9-\uFFFB\u{E0000}-\u{E007F}]/u;
 
 /** A whole `[Title](url)` line, like Core: a plain title of 1 to 120
  *  characters without brackets, parentheses, control or invisible format
