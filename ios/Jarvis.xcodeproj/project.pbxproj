@@ -17,6 +17,9 @@
         A00000000000000000000090 /* ChatPhotos.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000090 /* ChatPhotos.swift */; };
         A000000000000000000000A0 /* VoiceInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000000000000000000A0 /* VoiceInput.swift */; };
         A000000000000000000000A1 /* VoiceInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000000000000000000A1 /* VoiceInputTests.swift */; };
+        A000000000000000000000A2 /* Jobs.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000000000000000000A2 /* Jobs.swift */; };
+        A000000000000000000000A3 /* JobsPages.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000000000000000000A3 /* JobsPages.swift */; };
+        A000000000000000000000A4 /* JobsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000000000000000000A4 /* JobsTests.swift */; };
         A00000000000000000000060 /* IBMPlexSans-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000060 /* IBMPlexSans-Regular.ttf */; };
         A00000000000000000000061 /* IBMPlexSans-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000061 /* IBMPlexSans-Medium.ttf */; };
         A00000000000000000000062 /* IBMPlexSans-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000062 /* IBMPlexSans-SemiBold.ttf */; };
@@ -75,6 +78,9 @@
         B00000000000000000000090 /* ChatPhotos.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/ChatPhotos.swift; sourceTree = "<group>"; };
         B000000000000000000000A0 /* VoiceInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/VoiceInput.swift; sourceTree = "<group>"; };
         B000000000000000000000A1 /* VoiceInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputTests.swift; sourceTree = "<group>"; };
+        B000000000000000000000A2 /* Jobs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/Jobs.swift; sourceTree = "<group>"; };
+        B000000000000000000000A3 /* JobsPages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/JobsPages.swift; sourceTree = "<group>"; };
+        B000000000000000000000A4 /* JobsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobsTests.swift; sourceTree = "<group>"; };
         B00000000000000000000060 /* IBMPlexSans-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/IBMPlexSans-Regular.ttf; sourceTree = "<group>"; };
         B00000000000000000000061 /* IBMPlexSans-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/IBMPlexSans-Medium.ttf; sourceTree = "<group>"; };
         B00000000000000000000062 /* IBMPlexSans-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/IBMPlexSans-SemiBold.ttf; sourceTree = "<group>"; };
@@ -159,6 +165,8 @@
                 B00000000000000000000054 /* HubModel.swift */,
                 B00000000000000000000090 /* ChatPhotos.swift */,
                 B000000000000000000000A0 /* VoiceInput.swift */,
+                B000000000000000000000A2 /* Jobs.swift */,
+                B000000000000000000000A3 /* JobsPages.swift */,
                 B00000000000000000000070 /* PushRegistration.swift */,
                 B00000000000000000000071 /* Jarvis.entitlements */,
                 B00000000000000000000060 /* IBMPlexSans-Regular.ttf */,
@@ -184,6 +192,7 @@
                 B00000000000000000000056 /* InstrumentTests.swift */,
                 B00000000000000000000072 /* PushRegistrationTests.swift */,
                 B000000000000000000000A1 /* VoiceInputTests.swift */,
+                B000000000000000000000A4 /* JobsTests.swift */,
 			);
 			path = JarvisTests;
 			sourceTree = "<group>";
@@ -295,11 +304,13 @@
                 A00000000000000000000054 /* HubModel.swift in Sources */,
                 A00000000000000000000090 /* ChatPhotos.swift in Sources */,
                 A000000000000000000000A0 /* VoiceInput.swift in Sources */,
+                A000000000000000000000A2 /* Jobs.swift in Sources */,
+                A000000000000000000000A3 /* JobsPages.swift in Sources */,
                 A00000000000000000000070 /* PushRegistration.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		D00000000000000000000003 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000013 /* EndpointNormalizerTests.swift in Sources */, A00000000000000000000014 /* ClientDTOTests.swift in Sources */, A00000000000000000000043 /* ModelAuthorizationTests.swift in Sources */, A00000000000000000000055 /* HubModelTests.swift in Sources */, A00000000000000000000056 /* InstrumentTests.swift in Sources */, A00000000000000000000072 /* PushRegistrationTests.swift in Sources */, A000000000000000000000A1 /* VoiceInputTests.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
+		D00000000000000000000003 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000013 /* EndpointNormalizerTests.swift in Sources */, A00000000000000000000014 /* ClientDTOTests.swift in Sources */, A00000000000000000000043 /* ModelAuthorizationTests.swift in Sources */, A00000000000000000000055 /* HubModelTests.swift in Sources */, A00000000000000000000056 /* InstrumentTests.swift in Sources */, A00000000000000000000072 /* PushRegistrationTests.swift in Sources */, A000000000000000000000A1 /* VoiceInputTests.swift in Sources */, A000000000000000000000A4 /* JobsTests.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */

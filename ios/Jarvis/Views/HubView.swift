@@ -3,7 +3,7 @@ import SwiftUI
 /// Every screen reachable from the Core hub.
 enum HubRoute: Hashable, CaseIterable {
     case chat, voice, settings, models
-    case conversations, agents, tasks, integrations, health, memory, context
+    case conversations, agents, tasks, jobs, integrations, health, memory, context
     /// Pending new-device pairing requests (Context › Devices).
     case pairingApprovals
     /// System Health opened on its Usage node.
@@ -41,6 +41,7 @@ extension HubRoute {
         case .conversations: "Conversations"
         case .agents: "Agents"
         case .tasks: "Tasks"
+        case .jobs: "Jobs"
         case .integrations: "Integrations"
         case .health: "System health"
         case .healthUsage: "Usage"
@@ -59,6 +60,7 @@ extension HubRoute {
         case .conversations: "bubble.left.and.bubble.right"
         case .agents: "person.2"
         case .tasks: "checkmark.circle"
+        case .jobs: "clock"
         case .integrations: "powerplug"
         case .health: "waveform.path.ecg"
         case .healthUsage: "eurosign.circle"

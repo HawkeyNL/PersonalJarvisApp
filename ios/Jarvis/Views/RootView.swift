@@ -182,6 +182,7 @@ struct MainTabs: View {
         case .conversations: ConversationsPage(model: model, navigate: navigate)
         case .agents: AgentsPage(model: model)
         case .tasks: TasksPage(model: model)
+        case .jobs: JobsPage(model: model)
         case .integrations: IntegrationsPage(model: model, navigate: navigate)
         case .health: HealthPage(model: model, navigate: navigate)
         case .healthUsage: HealthPage(model: model, navigate: navigate, node: "usage")

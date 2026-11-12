@@ -120,6 +120,26 @@ actor ChatService {
         )
     }
 
+    // Scheduled job writes (Jobs pages), bound to the current Home Node. Bearer only, like
+    // desktop: they change a schedule, never an identity.
+    func createJob(_ body: NewJob) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.createJob(body, token: token, expectedBinding: binding)
+    }
+
+    func updateJob(_ id: UUID, revision: Int, patch: JobPatch) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.updateJob(id: id, revision: revision, patch: patch, token: token, expectedBinding: binding)
+    }
+
+    func runJobNow(_ id: UUID) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.runJobNow(id: id, token: token, expectedBinding: binding)
+    }
+
     private func requiredToken() async throws -> String {
         guard let token = try await loadToken() else { throw JarvisAPIError.unauthorized }
         return token
