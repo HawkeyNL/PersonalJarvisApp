@@ -415,7 +415,7 @@ struct IntegrationsPage: View {
     ]
 
     var body: some View {
-        PageScaffold(title: "Integrations", subtitle: "Brains, models and tools") {
+        PageScaffold(title: "Integrations", subtitle: "The systems Jarvis can reach") {
             SegmentedControl(label: "Integrations", items: views, selection: $selected)
             if let current = views.first(where: { $0.id == selected }) {
                 switch selected {
@@ -424,25 +424,41 @@ struct IntegrationsPage: View {
                     SegmentedControl(label: "Brains", pairs: [("overview", "Overview"), ("tools", "Host tools")], selection: $sub)
                     Loaded(source: registry, title: "Home Node registry", symbol: "sparkles", retry: load) { value in
                         if sub == "overview" {
-                            ActivityList(rows: (value.brains ?? []).map { brain in
-                                ActivityRow(id: brain.id, symbol: "sparkles", title: brain.label,
-                                            detail: [costLabel(brain.cost), brain.note ?? ""].filter { !$0.isEmpty }.joined(separator: " · "),
-                                            tone: brain.available ? .ok : .idle, toneLabel: brain.available ? "Ready" : "Not set up")
-                            }, emptyText: value.brains == nil ? "This Core does not report brains yet." : "No brains found.")
+                            TileGrid(tiles: brainFacts(value))
+                            ListSection(title: "Brains") {
+                                ActivityList(rows: (value.brains ?? []).map { brain in
+                                    ActivityRow(id: brain.id, symbol: "sparkles", title: brain.label,
+                                                detail: [costLabel(brain.cost), brain.note ?? ""].filter { !$0.isEmpty }.joined(separator: " · "),
+                                                tone: brain.available ? .ok : .idle, toneLabel: brain.available ? "Ready" : "Not set up")
+                                }, emptyText: value.brains == nil ? "This Core does not report brains yet." : "Core reported no brains.")
+                            }
                         } else {
-                            ActivityList(rows: softwareRows(value.software), emptyText: "No host tools reported.")
+                            ActivityList(rows: softwareRows(value.software), emptyText: "Core reported no host tools.")
                         }
                     }
                 case "models":
                     NodePanel(item: current) {
                         PanelButton(title: "Manage models", symbol: "slider.horizontal.3") { navigate(.models) }
                     }
-                    Loaded(source: policy, title: "Model policy", symbol: "square.stack.3d.up", retry: load) { value in
-                        ListSection(title: "Allowed models") {
-                            ActivityList(rows: value.models.filter(\.enabled).map {
-                                ActivityRow(id: $0.id, symbol: "square.stack.3d.up", title: $0.model, detail: $0.provider,
-                                            tone: .ok, toneLabel: "Allowed", badge: false)
-                            }, emptyText: "No models are allowed.")
+                    SegmentedControl(label: "Models", pairs: [("overview", "Overview"), ("catalog", "Catalog")], selection: $sub)
+                    if sub == "overview" {
+                        Loaded(source: policy, title: "Model policy", symbol: "square.stack.3d.up", retry: load) { value in
+                            TileGrid(tiles: policyFacts(value, catalog: registry.value))
+                            ListSection(title: "Allowed models") {
+                                ActivityList(rows: value.models.filter(\.enabled).map {
+                                    ActivityRow(id: $0.id, symbol: "square.stack.3d.up", title: $0.model,
+                                                detail: $0.provider + ($0.routeName.map { " · route \($0)" } ?? ""),
+                                                tone: .ok, toneLabel: "Allowed", badge: false)
+                                }, emptyText: "No model is allowed yet.")
+                            }
+                        }
+                    } else {
+                        Text("Set up means Core has a key or local install for the provider. Whether Jarvis may use a model is the owner policy.")
+                            .font(JV.font(13)).foregroundStyle(JV.textSecondary).fixedSize(horizontal: false, vertical: true)
+                        Loaded(source: registry, title: "Model catalog", symbol: "square.stack.3d.up", retry: load) { value in
+                            ListSection(title: "Catalog") {
+                                ActivityList(rows: catalogRows(value.models?.entries ?? []), emptyText: "Core reported no models.")
+                            }
                         }
                     }
                 default:
@@ -466,6 +482,42 @@ struct IntegrationsPage: View {
         self.policy = results.1
         self.ibkr = results.2
         loadedAt = Date()
+    }
+}
+
+/// Integrations › Brains at a glance.
+func brainFacts(_ registry: HomeNodeRegistry) -> [TileData] {
+    let brains = registry.brains ?? []
+    let ready = { (cost: String) in "\(brains.filter { $0.cost == cost && $0.available }.count) ready" }
+    return [
+        TileData(label: "Active brain", value: registry.activeBrain.flatMap { $0.isEmpty ? nil : $0 } ?? "Not reported"),
+        TileData(label: "Brains ready", value: "\(brains.filter(\.available).count)"),
+        TileData(label: "Subscription", value: ready("plan")),
+        TileData(label: "Pay per use", value: ready("metered")),
+        TileData(label: "Local", value: ready("local")),
+        TileData(label: "Host tools", value: "\(registry.software.filter(\.present).count) present"),
+    ]
+}
+
+/// Integrations › Models: the owner policy at a glance; changes are made under System health.
+func policyFacts(_ policy: ModelPolicySnapshot, catalog: HomeNodeRegistry?) -> [TileData] {
+    let allowed = policy.models.filter(\.enabled).count
+    return [
+        TileData(label: "Allowed", value: "\(allowed)"),
+        TileData(label: "Blocked", value: "\(policy.models.count - allowed)"),
+        // An older Core without a catalog has none: 0 once the registry has loaded.
+        TileData(label: "In catalog", value: catalog.map { "\($0.models?.entries.count ?? 0)" } ?? "Unavailable"),
+        TileData(label: "Changes", value: "Under System health"),
+    ]
+}
+
+/// The model catalog Core probed. Set up means a key or local install exists, not that Jarvis may use it.
+func catalogRows(_ models: [HomeNodeRegistry.CatalogModel]) -> [ActivityRow] {
+    models.map { model in
+        ActivityRow(id: "\(model.backend)/\(model.id)", symbol: "square.stack.3d.up", title: model.id,
+                    detail: [model.backend, model.modelClass, model.cost.isEmpty ? "" : costLabel(model.cost)]
+                        .filter { !$0.isEmpty }.joined(separator: " · "),
+                    tone: model.available ? .ok : .idle, toneLabel: model.available ? "Provider set up" : "Provider not set up")
     }
 }
 

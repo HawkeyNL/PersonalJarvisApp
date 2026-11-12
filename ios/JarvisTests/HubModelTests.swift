@@ -191,6 +191,49 @@ final class HubModelTests: XCTestCase {
         XCTAssertEqual(registry.software.filter(\.present).count, 1)
     }
 
+    func testIntegrationsShowBrainFactsAndTheCatalogLikeDesktop() throws {
+        let registry = try decode(HomeNodeRegistry.self, """
+        {"host":{"os":"linux","arch":"x86_64","cpu":"Ryzen","cpu_cores":16,"mem_total_gb":32,"gpu":"Radeon"},
+         "software":[{"name":"git","present":true,"version":"2.43"},{"name":"docker","present":false,"version":null}],
+         "brains":[{"id":"a","label":"A","cost":"plan","available":true},{"id":"b","label":"B","cost":"plan","available":false},
+                   {"id":"c","label":"C","cost":"local","available":true}],
+         "models":[{"id":"m1","backend":"ollama","class":"local","cost":"local","available":true}],
+         "active_brain":"a"}
+        """)
+        XCTAssertEqual(brainFacts(registry).map(\.value), ["a", "2", "1 ready", "0 ready", "1 ready", "1 present"])
+        XCTAssertEqual(catalogRows(registry.models?.entries ?? []).map(\.detail), ["ollama · local · Local"])
+        XCTAssertEqual(catalogRows(registry.models?.entries ?? []).map(\.toneLabel), ["Provider set up"])
+        let older = try decode(HomeNodeRegistry.self, """
+        {"host":{"os":"linux","arch":"x86_64","cpu":"Ryzen","cpu_cores":16,"mem_total_gb":32,"gpu":"Radeon"},"software":[],"active_brain":""}
+        """)
+        XCTAssertEqual(brainFacts(older).first?.value, "Not reported")
+        XCTAssertNil(older.models)
+    }
+
+    func testNewerDisplayFieldsNeverFailTheRegistryOrPolicy() throws {
+        let host = #""host":{"os":"linux","arch":"x86_64","cpu":"Ryzen","cpu_cores":16,"mem_total_gb":32,"gpu":"Radeon"},"software":[]"#
+        let long = String(repeating: "b", count: 100)
+        let models = #"[{"id":"m1","backend":null,"class":7},{"id":"m2"},{"backend":"no id"},"junk",{"id":"m3","available":"yes"}]"#
+        let registry = try decode(HomeNodeRegistry.self, #"{\#(host),"active_brain":"\#(long)","models":\#(models)}"#)
+        XCTAssertEqual(registry.models?.entries.map(\.id), ["m1", "m2", "m3"])
+        XCTAssertEqual(catalogRows(registry.models?.entries ?? []).map(\.detail), ["", "", ""])
+        XCTAssertEqual(catalogRows(registry.models?.entries ?? []).map(\.toneLabel), Array(repeating: "Provider not set up", count: 3))
+        XCTAssertEqual(registry.activeBrain?.count, 64)
+        let odd = try decode(HomeNodeRegistry.self, #"{\#(host),"active_brain":5,"models":{"id":"m1"}}"#)
+        XCTAssertNil(odd.activeBrain)
+        XCTAssertEqual(odd.models?.entries.count, 0)
+        let older = try decode(HomeNodeRegistry.self, #"{\#(host)}"#)
+        let id = "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"
+        let policy = try decode(ModelPolicySnapshot.self, #"""
+        {"models":[{"provider":"p","model":"a","enabled":true,"route":3},{"provider":"p","model":"b","enabled":false,"route":null}],
+         "mutation":"unavailable","user_id":"\#(id)","device_id":"\#(id)","server_time":100}
+        """#)
+        XCTAssertEqual(policyFacts(policy, catalog: older).map(\.value), ["1", "1", "0", "Under System health"])
+        XCTAssertEqual(policyFacts(policy, catalog: nil)[2].value, "Unavailable")
+        XCTAssertEqual(policy.models.map(\.routeName), [nil, nil])
+        XCTAssertEqual(try decode(ModelAccessEntry.self, #"{"provider":"p","model":"m","enabled":true,"route":"fast"}"#).routeName, "fast")
+    }
+
     func testStatusPillAndMood() {
         XCTAssertEqual(statusPill(mood: .idle, online: false).label, "Offline")
         XCTAssertEqual(statusPill(mood: .thinking, online: true).label, "Thinking")
