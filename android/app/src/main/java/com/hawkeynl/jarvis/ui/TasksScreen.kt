@@ -15,9 +15,8 @@ import com.hawkeynl.jarvis.network.CodingSession
 import com.hawkeynl.jarvis.network.valueOrNull
 import com.hawkeynl.jarvis.security.AgentApprovalService
 
+// Scheduled and recurring work lives under Jobs on the Jarvis tab.
 private val LATER = listOf(
-    Triple(JvIcon.CALENDAR, "Scheduled", "Runs at a set time or day"),
-    Triple(JvIcon.REPEAT, "Recurring", "Things Jarvis does every week"),
     Triple(JvIcon.GOAL, "Goals", "Bigger outcomes split into tasks"),
 )
 
@@ -25,8 +24,7 @@ private const val AGENT_OFF = "Agent is turned off in Core."
 
 /** Tasks (D-Runs): coding sessions, agent actions waiting for the owner and the agent
  *  audit history, one view at a time. Each waiting action opens in a sheet, is shown in
- *  full and is approved or denied with a strong-biometric prompt. Scheduled and recurring
- *  tasks and goals need Core support. */
+ *  full and is approved or denied with a strong-biometric prompt. Goals need Core support. */
 @Composable
 fun TasksScreen(data: CoreData, onNavigate: (Screen) -> Unit, onRefresh: () -> Unit, agentApprovals: AgentApprovalService?) {
     LaunchedEffect(Unit) { onRefresh() }
