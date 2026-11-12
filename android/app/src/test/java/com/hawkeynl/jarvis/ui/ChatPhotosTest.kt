@@ -101,4 +101,18 @@ class ChatPhotosTest {
         assertEquals(listOf("b"), back.dropped)
         assertEquals("Up to 4 photos per message.", back.notice)
     }
+
+    @Test fun `a late answer from another sign-in restores and deletes nothing`() {
+        assertEquals(SubmitOutcome.REFUSED, submitFailure(400, sameSignIn = true))
+        assertEquals(SubmitOutcome.REFUSED, submitFailure(404, sameSignIn = true))
+        assertEquals(SubmitOutcome.UNCONFIRMED, submitFailure(503, sameSignIn = true))
+        assertEquals(SubmitOutcome.UNCONFIRMED, submitFailure(null, sameSignIn = true))
+        for (status in listOf(400, 404, 503, null)) assertEquals(SubmitOutcome.IGNORE, submitFailure(status, sameSignIn = false))
+
+        // Only a photo whose chip was removed meanwhile, in the same sign-in, is deleted.
+        assertTrue(forgetAfterUpload(chipShown = false, id = "a", sameSignIn = true))
+        assertFalse(forgetAfterUpload(chipShown = true, id = "a", sameSignIn = true))
+        assertFalse(forgetAfterUpload(chipShown = false, id = null, sameSignIn = true))
+        assertFalse(forgetAfterUpload(chipShown = false, id = "a", sameSignIn = false))
+    }
 }

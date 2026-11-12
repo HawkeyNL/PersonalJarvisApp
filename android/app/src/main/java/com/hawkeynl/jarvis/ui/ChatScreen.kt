@@ -47,6 +47,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -78,9 +79,7 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel) {
     var deleting by remember { mutableStateOf(false) }
     var deleteError by remember(state.conversationId) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(MAX_PHOTOS)) { uris ->
-        if (uris.isNotEmpty()) actions.attachPhotos(uris)
-    }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(MAX_PHOTOS), actions::photoPickerClosed)
     // A message Core refused comes back, unless something new was typed since.
     LaunchedEffect(state.returnedDraft) {
         state.returnedDraft?.let { if (draft.isBlank()) draft = it; actions.draftReturned() }
@@ -155,7 +154,10 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel) {
             ) {
                 CircleIconButton(
                     JvIcon.PHOTO, "Attach photos",
-                    onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                    onClick = {
+                        actions.photoPickerOpened()
+                        picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    },
                     enabled = state.chips.size < MAX_PHOTOS,
                 )
                 OutlinedTextField(
@@ -214,16 +216,18 @@ private fun Chips(chips: List<PhotoChip>, remove: (Int) -> Unit) {
             .semantics { contentDescription = "Photos to send" },
         horizontalArrangement = Arrangement.spacedBy(JvSpace.sm),
     ) {
-        chips.forEach { chip ->
+        chips.forEachIndexed { i, chip ->
             Box(Modifier.size(72.dp)) {
                 Box(
                     Modifier.fillMaxSize().clip(JvShapes.md).background(c.bgSunken).semantics(mergeDescendants = true) {
-                        contentDescription = when (chip.state) {
-                            ChipState.PREPARING -> "Photo, preparing"
-                            ChipState.UPLOADING -> "Photo, uploading"
-                            ChipState.READY -> "Photo, ready to send"
-                            ChipState.FAILED -> "Photo, failed: ${chip.error.orEmpty()}"
+                        contentDescription = "Photo ${i + 1} of ${chips.size}, " + when (chip.state) {
+                            ChipState.PREPARING -> "preparing"
+                            ChipState.UPLOADING -> "uploading"
+                            ChipState.READY -> "ready to send"
+                            ChipState.FAILED -> "failed: ${chip.error.orEmpty()}"
                         }
+                        // Said again when its state changes.
+                        liveRegion = LiveRegionMode.Polite
                     },
                     contentAlignment = Alignment.Center,
                 ) {
@@ -237,7 +241,7 @@ private fun Chips(chips: List<PhotoChip>, remove: (Int) -> Unit) {
                 Box(
                     Modifier.align(Alignment.TopEnd).minimumInteractiveComponentSize()
                         .clickable(role = Role.Button, onClickLabel = "Remove photo") { remove(chip.key) }
-                        .semantics { contentDescription = "Remove photo" },
+                        .clearAndSetSemantics { contentDescription = "Remove photo ${i + 1} of ${chips.size}" },
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(

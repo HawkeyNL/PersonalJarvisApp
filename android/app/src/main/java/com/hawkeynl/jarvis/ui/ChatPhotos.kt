@@ -57,6 +57,20 @@ fun runRefusal(status: Int?): String? = when (status) {
     else -> null
 }
 
+/** What a failed run submit means. IGNORE: another sign-in asked it, so nothing is
+ *  restored or deleted in this one. REFUSED: Core stored nothing; draft and photos return. */
+enum class SubmitOutcome { IGNORE, UNCONFIRMED, REFUSED }
+
+fun submitFailure(status: Int?, sameSignIn: Boolean): SubmitOutcome = when {
+    !sameSignIn -> SubmitOutcome.IGNORE
+    runRefusal(status) != null -> SubmitOutcome.REFUSED
+    else -> SubmitOutcome.UNCONFIRMED
+}
+
+/** After an upload: delete the new photo on the Home Node only when its chip was removed
+ *  meanwhile in the same sign-in; another sign-in's token must not reach for an old id. */
+fun forgetAfterUpload(chipShown: Boolean, id: String?, sameSignIn: Boolean): Boolean = !chipShown && id != null && sameSignIn
+
 /** Photo ids the messages carry that the conversation no longer has (deleted or
  *  expired): shown as placeholders without a download. */
 fun missingPhotos(messages: List<ConversationMessage>, photos: List<PhotoMeta>): Set<String> {

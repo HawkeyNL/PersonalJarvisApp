@@ -184,7 +184,8 @@ class MainActivity : FragmentActivity() {
 
     override fun onStop() {
         super.onStop()
-        if (!isChangingConfigurations) {
+        // The photo picker may stop this activity; the app locks when it answers late instead.
+        if (!isChangingConfigurations && !viewModel.pickingPhotos) {
             viewModel.lockForBackground()
             // Drop Core data now; the UI stops recomposing while stopped.
             coreViewModel.clear()
