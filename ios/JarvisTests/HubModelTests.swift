@@ -151,6 +151,12 @@ final class HubModelTests: XCTestCase {
             Meter(id: "disk-system-0", label: "Disk · system", percent: 95, tone: .error, detail: "95.0 GiB used · 5.0 GiB free of 100.0 GiB"),
             Meter(id: "disk-data-1", label: "Disk · data", percent: nil, tone: .idle, detail: "Unknown"),
         ])
+        // The first CPU sample and an unknown memory total have no reading.
+        let first = try decode(HomeNodeRegistry.LiveHost.self, """
+        {"sampled_at":1,"cpu_percent":null,"memory_total_bytes":0,"memory_used_bytes":0,"uptime_seconds":60}
+        """)
+        XCTAssertEqual(resourceMeters(live: first, disks: []).map(\.detail), ["First sample…", "Unknown"])
+        XCTAssertEqual(resourceMeters(live: first, disks: []).map(\.percent), [nil, nil])
         XCTAssertEqual(resourceMeters(live: nil, disks: []), [])
     }
 

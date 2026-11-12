@@ -365,7 +365,7 @@ private struct ResourcesSettingsView: View {
         .font(JV.font(15))
         .navigationTitle("Resources")
         .instrumentList()
-        .refreshable { await reload() }
+        .refreshable { await reload(disks: true) }
         .task {
             while !Task.isCancelled {
                 if scenePhase == .active { await reload() }
@@ -374,7 +374,8 @@ private struct ResourcesSettingsView: View {
         }
     }
 
-    private func reload() async {
+    /// Vitals poll every 5 s; disk space changes slowly, so it is read on the first load and on pull.
+    private func reload(disks readDisks: Bool = false) async {
         guard !loading else { return }
         loading = true
         defer { loading = false }
@@ -382,7 +383,10 @@ private struct ResourcesSettingsView: View {
             registry = try await model.loadHomeNodeRegistry()
             error = nil
             // Disk space comes with the services read; a failed read keeps the last disks.
-            if let value = await model.coreRead("/v1/system/services", as: ServicesResponse.self).value { disks = value.disks }
+            if readDisks || disks.isEmpty,
+               let value = await model.coreRead("/v1/system/services", as: ServicesResponse.self).value {
+                disks = value.disks
+            }
         } catch is CancellationError {
             // Leaving this page cancels polling.
         } catch {
@@ -413,7 +417,8 @@ private struct MeterRow: View {
             .frame(height: 6)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(meter.percent.map { "\(meter.label): \($0)% used" } ?? "\(meter.label): \(meter.detail)")
+        .accessibilityLabel(meter.percent.map { "\(meter.label): \($0)% used" } ?? meter.label)
+        .accessibilityValue(meter.detail)
     }
 
     private var color: Color {

@@ -154,7 +154,7 @@ export function resourceMeters(live: LiveHost | undefined, disks: Disk[]): Meter
     const [tone] = diskState(disk);
     meters.push(tone === "idle"
       ? { id, label, percent: null, tone, detail: "Unknown" }
-      : { id, label, percent: disk.used_percent!, tone, detail: spaceDetail(disk.total_bytes! - disk.free_bytes!, disk.total_bytes!) });
+      : { id, label, percent: Math.round(disk.used_percent!), tone, detail: spaceDetail(disk.total_bytes! - disk.free_bytes!, disk.total_bytes!) });
   });
   return meters;
 }

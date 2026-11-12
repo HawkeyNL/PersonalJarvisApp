@@ -50,9 +50,9 @@ onUnmounted(() => {
         Up {{ formatUptime(registry.value.live_host.uptime_seconds) }} · refreshes every 5 seconds
       </p>
     </div>
-    <ActivityState nested :state="registry" what="the Home Node resources" @retry="load">
-      <p v-if="!meters.length" class="t-sm t-2">This Core reports no live load. Update Core to see CPU, memory and disks.</p>
-      <ul v-else class="meters">
+    <ActivityState v-slot="{ data }" nested :state="registry" what="the Home Node resources" @retry="load">
+      <p v-if="!data.live_host" class="t-sm t-2">This Core reports no live CPU or memory load. Update Core to see it.</p>
+      <ul v-if="meters.length" class="meters">
         <li v-for="m in meters" :key="m.id">
           <div class="mrow t-sm">
             <span>{{ m.label }}</span>

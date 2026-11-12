@@ -117,4 +117,5 @@ test("resource meters show CPU, memory and every disk with used and free space",
   assert.deepEqual(resourceMeters({ ...live, cpu_percent: null, memory_total_bytes: 0 }, []).map((m) => [m.percent, m.detail]),
     [[null, "First sample…"], [null, "Unknown"]]);
   assert.deepEqual(resourceMeters(undefined, []), []);
+  assert.equal(resourceMeters(undefined, [{ ...disks[0], used_percent: 85.27 }])[0].percent, 85);
 });
