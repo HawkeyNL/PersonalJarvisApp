@@ -101,8 +101,9 @@ struct ChatView: View {
                 }
             })
         }
-        .onChange(of: model.chips.compactMap(\.error)) { old, new in
-            for error in new where !old.contains(error) { AccessibilityNotification.Announcement(error).post() }
+        // Each chip's error is said once, also when two chips fail the same way.
+        .onChange(of: model.chips.compactMap { chip in chip.error.map { [chip.id.uuidString, $0] } }) { old, new in
+            for failure in new where !old.contains(failure) { AccessibilityNotification.Announcement(failure[1]).post() }
         }
     }
 
@@ -240,8 +241,9 @@ struct ChatView: View {
             guard let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) else { return nil }
             return {
                 try await withCheckedThrowingContinuation { (done: CheckedContinuation<Data, Error>) in
-                    _ = provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
-                        if let data { done.resume(returning: data) } else { done.resume(throwing: ChatPhotos.Failure(message: ChatPhotos.unreadable)) }
+                    _ = provider.loadFileRepresentation(forTypeIdentifier: type) { file, _ in
+                        // The file exists only during this callback.
+                        done.resume(with: Result { try PickedPhoto.read(file) })
                     }
                 }
             }
@@ -254,12 +256,15 @@ private struct PickedPhoto: Transferable {
     let data: Data
 
     static var transferRepresentation: some TransferRepresentation {
-        FileRepresentation(importedContentType: .image) { received in
-            let size = try received.file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-            guard size <= ChatPhotos.maxInputBytes else { throw ChatPhotos.Failure(message: ChatPhotos.tooLarge) }
-            // Mapped, not copied: ImageIO then reads only what it decodes.
-            return PickedPhoto(data: try Data(contentsOf: received.file, options: .mappedIfSafe))
-        }
+        FileRepresentation(importedContentType: .image) { received in try PickedPhoto(data: PickedPhoto.read(received.file)) }
+    }
+
+    /// The file's bytes, refused before reading when it is over the size limit.
+    static func read(_ file: URL?) throws -> Data {
+        guard let file else { throw ChatPhotos.Failure(message: ChatPhotos.unreadable) }
+        let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size <= ChatPhotos.maxInputBytes else { throw ChatPhotos.Failure(message: ChatPhotos.tooLarge) }
+        return try Data(contentsOf: file)
     }
 }
 

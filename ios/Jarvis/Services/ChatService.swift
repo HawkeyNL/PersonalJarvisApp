@@ -44,10 +44,11 @@ actor ChatService {
         try await api.deleteConversation(id: id, token: token, expectedBinding: binding)
     }
 
-    func uploadPhoto(_ jpeg: Data) async throws -> UUID {
+    /// The new photo's id, and the Home Node binding it was uploaded under.
+    func uploadPhoto(_ jpeg: Data) async throws -> (id: UUID, binding: UUID) {
         let binding = await api.binding()
         let token = try await requiredToken()
-        return try await api.uploadPhoto(jpeg, token: token, expectedBinding: binding).id
+        return (try await api.uploadPhoto(jpeg, token: token, expectedBinding: binding).id, binding)
     }
 
     /// Keep (or stop keeping) a photo past its 90 days.
@@ -57,10 +58,12 @@ actor ChatService {
         return try await api.setPhotoSaved(id: id, saved: saved, token: token, expectedBinding: binding)
     }
 
-    func deletePhoto(id: UUID) async throws {
-        let binding = await api.binding()
+    /// With `binding`, the delete is refused once the Home Node changed since the upload.
+    func deletePhoto(id: UUID, binding: UUID? = nil) async throws {
+        let expected: UUID
+        if let binding { expected = binding } else { expected = await api.binding() }
         let token = try await requiredToken()
-        try await api.deletePhoto(id: id, token: token, expectedBinding: binding)
+        try await api.deletePhoto(id: id, token: token, expectedBinding: expected)
     }
 
     func conversation(id: UUID) async throws -> ConversationResponse {

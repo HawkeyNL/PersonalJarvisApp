@@ -2625,13 +2625,26 @@ final class ChatPhotoModelTests: XCTestCase {
         try await until { PhotoCoreProtocol.requests().contains(deleted) }
     }
 
-    func testLeavingDuringAnUploadSendsNoDeleteButAnUploadedPhotoIsDeleted() async throws {
+    func testComposerPhotosOutliveTheBackgroundLock() async throws {
+        PhotoCoreProtocol.reset(uploadDelay: 0.5)
+        let model = signedIn()
+        let photo = try png()
+        model.attachPhotos([{ photo }])
+        try await until { model.chips.first?.state == .uploading }
+        model.lockWhenBackgrounded()
+        try await until { model.chips.first?.state == .ready }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(model.chips.count, 1)
+        XCTAssertFalse(PhotoCoreProtocol.requests().contains(deleted))
+    }
+
+    func testLosingTheSessionDropsPhotosAndDeletesOnlyUploadedOnes() async throws {
+        let photo = try png()
         PhotoCoreProtocol.reset(uploadDelay: 0.5)
         let uploading = signedIn()
-        let photo = try png()
         uploading.attachPhotos([{ photo }])
         try await until { uploading.chips.first?.state == .uploading }
-        uploading.lockWhenBackgrounded()
+        try? await uploading.keepPhoto(PhotoCoreProtocol.unauthorized, saved: true)
         XCTAssertTrue(uploading.chips.isEmpty)
         try await Task.sleep(nanoseconds: 1_000_000_000)
         XCTAssertTrue(PhotoCoreProtocol.requests().contains("POST /v1/photos"))
@@ -2641,9 +2654,24 @@ final class ChatPhotoModelTests: XCTestCase {
         let ready = signedIn()
         ready.attachPhotos([{ photo }])
         try await until { ready.chips.first?.state == .ready }
-        ready.lockWhenBackgrounded()
+        try? await ready.keepPhoto(PhotoCoreProtocol.unauthorized, saved: true)
         XCTAssertTrue(ready.chips.isEmpty)
         try await until { PhotoCoreProtocol.requests().contains(deleted) }
+    }
+
+    func testARefusalAfterTheBackgroundLockRestoresNothing() async throws {
+        PhotoCoreProtocol.reset(uploadDelay: 0, runStatus: 404, runDelay: 0.5)
+        let model = signedIn()
+        let photo = try png()
+        model.attachPhotos([{ photo }])
+        try await until { model.chips.first?.state == .ready }
+        async let refused = model.send("Look")
+        try await until { PhotoCoreProtocol.requests().contains("POST /v1/assistant/runs") }
+        model.lockWhenBackgrounded()
+        let result = await refused
+        XCTAssertFalse(result)
+        XCTAssertTrue(model.chips.isEmpty)
+        XCTAssertTrue(model.messages.isEmpty)
     }
 
     func testARefusedRunPutsThePhotosBack() async throws {
@@ -2687,17 +2715,23 @@ final class ChatPhotoModelTests: XCTestCase {
     }
 }
 
-/// Core for chat photos: uploads succeed (after `uploadDelay`), runs answer `runStatus`,
-/// everything else is 404.
+/// Core for chat photos: uploads succeed (after `uploadDelay`), runs answer `runStatus`
+/// (after `runDelay`), one photo answers 401, everything else is 404.
 private final class PhotoCoreProtocol: URLProtocol {
     static let photo = "3b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"
+    /// A photo whose PATCH answers 401: the session is gone.
+    static let unauthorized = "4b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"
     private static let lock = NSLock()
     private static var log: [String] = []
     private static var attachments: [String]?
     private static var uploadDelay: TimeInterval = 0
     private static var runStatus = 400
-    static func reset(uploadDelay: TimeInterval, runStatus: Int = 400) {
-        lock.withLock { log = []; attachments = nil; self.uploadDelay = uploadDelay; self.runStatus = runStatus }
+    private static var runDelay: TimeInterval = 0
+    static func reset(uploadDelay: TimeInterval, runStatus: Int = 400, runDelay: TimeInterval = 0) {
+        lock.withLock {
+            log = []; attachments = nil
+            self.uploadDelay = uploadDelay; self.runStatus = runStatus; self.runDelay = runDelay
+        }
     }
     static func requests() -> [String] { lock.withLock { log } }
     static func runAttachments() -> [String]? { lock.withLock { attachments } }
@@ -2715,7 +2749,10 @@ private final class PhotoCoreProtocol: URLProtocol {
                 delay = Self.uploadDelay
                 status = 200
                 body = Data(#"{"id":"\#(Self.photo)","width":64,"height":64,"bytes":100}"#.utf8)
+            } else if path == "/v1/photos/\(Self.unauthorized)" {
+                status = 401
             } else if method == "POST", path == "/v1/assistant/runs" {
+                delay = Self.runDelay
                 status = Self.runStatus
                 body = Data(#"{"error":"refused"}"#.utf8)
                 let sent = (try? JSONSerialization.jsonObject(with: Self.body(of: request))) as? [String: Any]

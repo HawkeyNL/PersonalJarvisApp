@@ -67,15 +67,19 @@ final class JarvisAppModel: ObservableObject {
     private var pendingRequests = PendingChatRequests()
     private var voiceReleaseTask: Task<Void, Never>?
     private var presentation = ChatPresentationLifetime()
+    /// The composer photos' lifetime: like `presentation`, but the background lock keeps it.
+    private var photoSession = ChatPresentationLifetime()
     private func invalidatePresentation(clearIdentity: Bool) {
         presentation.invalidate()
         messages = []; conversations = []; isSending = false; realtimeAvailable = false
         photos.removeAll()
-        // Uploaded photos are deleted while the session may still allow it; one still
-        // uploading stays pending and Core removes it after 24 hours.
-        chips.forEach { forget($0.photoId) }
-        chips = []; chipNotice = nil; photoMeta = [:]; removedPhotos = []; researchOffer = nil
+        photoMeta = [:]; removedPhotos = []; researchOffer = nil
         if clearIdentity {
+            // Composer photos outlive the background lock (pasting means leaving the app);
+            // a new identity or Home Node deletes the uploaded ones and drops the rest. One
+            // still uploading stays pending and Core removes it after 24 hours.
+            chips.forEach { forget($0) }
+            chips = []; chipNotice = nil; photoSession.invalidate()
             pendingRequests.clear(); currentConversationId = nil; currentConversationTitle = "New conversation"
             pendingPasswordReset = nil
         }
@@ -108,12 +112,14 @@ final class JarvisAppModel: ObservableObject {
         self.init(endpointStore: endpointStore, api: api, auth: auth, chat: ChatService(api: api, auth: auth))
     }
 
+    #if DEBUG
     /// Native test seam: a signed-in, unlocked chat over `chat`; nothing in the app uses it.
     convenience init(signedInChat chat: ChatService, api: JarvisAPIClient, realtime: Bool) {
         self.init(endpointStore: EndpointStore(), api: api, auth: AuthService(api: api), chat: chat)
         enrollmentState = .authenticated
         realtimeAvailable = realtime
     }
+    #endif
 
     private init(endpointStore: EndpointStore, api: JarvisAPIClient, auth: AuthService, chat: ChatService) {
         self.endpointStore = endpointStore
@@ -490,10 +496,10 @@ final class JarvisAppModel: ObservableObject {
     }
 
     private func prepare(_ key: UUID, _ load: () async throws -> Data) async {
-        let generation = presentation.id
+        let generation = photoSession.id
         // Changes the chip while it is still in the composer.
         func update(_ change: (inout PhotoChip) -> Void) -> Bool {
-            guard presentation.accepts(generation), let index = chips.firstIndex(where: { $0.id == key }) else { return false }
+            guard photoSession.accepts(generation), let index = chips.firstIndex(where: { $0.id == key }) else { return false }
             change(&chips[index])
             return true
         }
@@ -518,39 +524,45 @@ final class JarvisAppModel: ObservableObject {
             _ = update { $0.state = .failed; $0.error = (error as? ChatPhotos.Failure)?.message ?? ChatPhotos.unsupported }
             return
         }
-        var id: UUID?
+        var uploaded: (id: UUID, binding: UUID)?
         var failure: String?
-        do { id = try await chat.uploadPhoto(jpeg) }
+        do { uploaded = try await chat.uploadPhoto(jpeg) }
         catch let JarvisAPIError.rejected(status, _) { failure = ChatPhotos.uploadFailure(status) }
         catch JarvisAPIError.unreachable, JarvisAPIError.timedOut { failure = ChatPhotos.unreachable }
         catch {
-            if (error as? JarvisAPIError) == .unauthorized, presentation.accepts(generation) { handle(error); return }
+            if (error as? JarvisAPIError) == .unauthorized, photoSession.accepts(generation) { handle(error); return }
             failure = ChatPhotos.uploadFailure(0)
         }
         let kept = update { chip in
-            if let id { chip.photoId = id; chip.state = .ready; chip.uploadedAt = Date() }
+            if let uploaded {
+                chip.photoId = uploaded.id; chip.binding = uploaded.binding; chip.state = .ready; chip.uploadedAt = Date()
+            }
             else { chip.state = .failed; chip.error = failure }
         }
-        // Removed (✕) while uploading: delete what Core kept. After a reset the photo
+        // Removed (✕) while uploading: delete what Core kept. After a sign-out the photo
         // stays pending and Core removes it after 24 hours.
-        if !kept, presentation.accepts(generation) { forget(id) }
+        if !kept, photoSession.accepts(generation), let uploaded { forget(id: uploaded.id, binding: uploaded.binding) }
     }
 
     /// ✕ on a chip: drop it, and delete it on the Home Node once uploaded.
     func removeChip(_ key: UUID) {
         guard let chip = chips.first(where: { $0.id == key }) else { return }
         chips.removeAll { $0.id == key }
-        forget(chip.photoId)
+        forget(chip)
         chipNotice = nil
     }
 
     /// Photos Core would no longer attach fail in place.
     func expireStaleChips(now: Date = Date()) { chips = ChatPhotos.expired(chips, now: now) }
 
-    /// Best-effort delete of an uploaded photo that will not be sent.
-    private func forget(_ id: UUID?) {
-        guard let id else { return }
-        Task { try? await chat.deletePhoto(id: id) }
+    /// Best-effort delete of an uploaded photo that will not be sent, on the Home Node it
+    /// was uploaded to only.
+    private func forget(_ chip: PhotoChip) {
+        if let id = chip.photoId, let binding = chip.binding { forget(id: id, binding: binding) }
+    }
+
+    private func forget(id: UUID, binding: UUID) {
+        Task { try? await chat.deletePhoto(id: id, binding: binding) }
     }
 
     /// Hands the uploaded photos to a sent message; their previews go into the cache so the
@@ -569,7 +581,7 @@ final class JarvisAppModel: ObservableObject {
     private func restoreChips(_ taken: [PhotoChip]) {
         let restored = ChatPhotos.restore(taken, into: chips)
         chips = restored.chips
-        restored.dropped.forEach { forget($0.photoId) }
+        restored.dropped.forEach { forget($0) }
         if !restored.dropped.isEmpty { chipNotice = ChatPhotos.limit }
     }
 

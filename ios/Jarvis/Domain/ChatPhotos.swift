@@ -10,8 +10,9 @@ struct PhotoChip: Identifiable, Equatable {
     var state = State.preparing
     /// The shrunk photo as shown in the chip, and later in the sent message.
     var preview: UIImage?
-    /// Core's photo id, once uploaded.
+    /// Core's photo id, once uploaded, and the Home Node binding it was uploaded under.
     var photoId: UUID?
+    var binding: UUID?
     var error: String?
     /// When the upload finished.
     var uploadedAt: Date?
