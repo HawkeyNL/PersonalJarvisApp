@@ -2422,4 +2422,17 @@ final class ChatPhotoTests: XCTestCase {
         big.replaceSubrange(0..<3, with: [0xFF, 0xD8, 0xFF])
         XCTAssertFalse(JarvisAPIClient.isJPEG(big, contentType: "image/jpeg"))
     }
+
+    func testPhotosAreDecodedAsBoundedThumbnails() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let jpeg = try XCTUnwrap(UIGraphicsImageRenderer(size: CGSize(width: 1600, height: 900), format: format).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 1600, height: 900))
+        }.jpegData(compressionQuality: 0.8))
+        let thumbnail = try XCTUnwrap(ChatPhoto.thumbnail(jpeg)?.cgImage)
+        XCTAssertEqual(max(thumbnail.width, thumbnail.height), 512)
+        XCTAssertTrue((287...289).contains(thumbnail.height), "\(thumbnail.height)")
+        XCTAssertNil(ChatPhoto.thumbnail(Data("<svg onload=x>".utf8)))
+    }
 }
