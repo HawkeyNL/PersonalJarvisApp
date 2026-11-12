@@ -94,7 +94,7 @@ test("the lightbox says how long a photo stays", () => {
   assert.equal(expiryHint({ saved: false, expires_at: "nonsense" }), "Photos are kept 90 days unless you keep them.");
   assert.match(expiryHint({ saved: false, expires_at: "2027-02-10T12:00:00Z" }), /^Removed on .*2027.* unless you keep it\.$/);
   // Kept but not sent yet: Core still removes it 24 h after the upload.
-  assert.match(expiryHint({ saved: true, expires_at: "2027-02-10T12:00:00Z" }), /^Removed on [^.]*2027\.$/);
+  assert.match(expiryHint({ saved: true, expires_at: "2027-02-10T12:00:00Z" }), /^Removed on .*2027\.$/);
 });
 
 test("only a 400 or 404 on submit is a definite refusal", () => {

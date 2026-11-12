@@ -124,16 +124,16 @@ export function takeChips(): Chip[] {
 /** Put photos of a refused message back in the composer, ahead of any added
  *  since. Each takes its preview back from the cache under a fresh URL. */
 export function restoreChips(taken: Chip[]): void {
+  for (const chip of taken) {
+    const old = cache.get(chip.id!);
+    cache.delete(chip.id!);
+    void old?.then((value) => value && URL.revokeObjectURL(value), () => {});
+  }
   const room = Math.max(MAX_PHOTOS - chips.value.length, 0);
   // No room left (photos added since): the rest are deleted on the Home Node.
   for (const chip of taken.slice(room)) forget(chip.id!);
   if (taken.length > room) chipNotice.value = `Up to ${MAX_PHOTOS} photos per message.`;
-  const back = taken.slice(0, room).map((chip) => {
-    const old = cache.get(chip.id!);
-    cache.delete(chip.id!);
-    void old?.then((value) => value && URL.revokeObjectURL(value), () => {});
-    return { ...chip, url: chip.blob ? URL.createObjectURL(chip.blob) : "" };
-  });
+  const back = taken.slice(0, room).map((chip) => ({ ...chip, url: chip.blob ? URL.createObjectURL(chip.blob) : "" }));
   chips.value = [...back, ...chips.value];
 }
 
