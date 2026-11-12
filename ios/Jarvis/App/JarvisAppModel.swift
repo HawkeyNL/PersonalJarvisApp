@@ -63,6 +63,8 @@ final class JarvisAppModel: ObservableObject {
     }
     private let realtime = RealtimeService()
     private let speech = RealtimeSpeech()
+    /// The chat mic; every lock and reset stops it and drops what it heard.
+    let voiceInput = VoiceInput()
     private var realtimeAvailable = false
     private var pendingRequests = PendingChatRequests()
     private var voiceReleaseTask: Task<Void, Never>?
@@ -71,6 +73,7 @@ final class JarvisAppModel: ObservableObject {
     private var photoSession = ChatPresentationLifetime()
     private func invalidatePresentation(clearIdentity: Bool) {
         presentation.invalidate()
+        voiceInput.stop(discard: true)
         messages = []; conversations = []; isSending = false; realtimeAvailable = false
         photos.removeAll()
         photoMeta = [:]; removedPhotos = []; researchOffer = nil

@@ -172,6 +172,9 @@ struct ChatView: View {
             if let notice = model.chipNotice {
                 Text(verbatim: notice).font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
             }
+            if let problem = model.voiceInput.problem {
+                Text(verbatim: problem).font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.dangerText)
+            }
             input
         }
         .padding(.horizontal, JV.Space.md)
@@ -205,6 +208,9 @@ struct ChatView: View {
                 .submitLabel(.send)
                 .onSubmit { send() }
                 .accessibilityLabel("Message to Jarvis")
+            if model.voiceInput.available {
+                MicButton(voice: model.voiceInput, toggle: listen)
+            }
             Button(action: send) {
                 Image(systemName: "arrow.up")
                     .font(.system(size: 17, weight: .semibold))
@@ -233,6 +239,22 @@ struct ChatView: View {
         draft = ""
         // Nothing was sent (refused here or by Core): the draft comes back.
         Task { if await model.send(message), draft.isEmpty { draft = message } }
+    }
+
+    /// Like desktop, the words heard are sent at once; here they join the draft first.
+    private func listen() {
+        let voice = model.voiceInput
+        if voice.listening { voice.stop(); return }
+        // The mic would hear Jarvis read its reply aloud.
+        if model.voiceEnabled { model.stopSpeaking() }
+        Task {
+            await voice.start(while: { [model] in
+                UIApplication.shared.applicationState != .background && model.lockState == .unlocked && model.isAuthenticated
+            }) { said in
+                draft = VoiceInputRules.appending(said, to: draft)
+                send()
+            }
+        }
     }
 
     /// Images on the clipboard (a screenshot), read only on the owner's tap.
@@ -269,6 +291,46 @@ private struct PickedPhoto: Transferable {
 }
 
 private struct ViewedPhoto: Identifiable { let id: String }
+
+/// The composer mic (desktop useMic): a ring that follows your voice while listening;
+/// it stops after 5 s of silence. Leaving the chat or the app drops what it heard.
+private struct MicButton: View {
+    let voice: VoiceInput
+    let toggle: () -> Void
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some View {
+        Button(action: toggle) {
+            Image(systemName: voice.listening ? "mic.fill" : "mic")
+                .font(.system(size: 17))
+                .foregroundStyle(voice.listening ? JV.accentText : JV.textSecondary)
+                .frame(width: 44, height: 44)
+                .overlay {
+                    if voice.listening {
+                        Circle().strokeBorder(JV.accentSubtle, lineWidth: 2 + voice.level * 4).frame(width: 40, height: 40)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .disabled(voice.finishing)
+        .accessibilityLabel("Speak")
+        .accessibilityValue(voice.listening ? "Listening" : "")
+        .accessibilityHint(voice.listening ? "Stops after 5 s of silence" : "")
+        .accessibilityAddTraits(voice.listening ? .isSelected : [])
+        .onChange(of: voice.listening) { was, now in
+            if was && !now { AccessibilityNotification.Announcement("Stopped listening").post() }
+        }
+        .onChange(of: voice.problem) { _, problem in
+            if let problem { AccessibilityNotification.Announcement(problem).post() }
+        }
+        // The background lock stops it in the app model; this also covers the app switcher
+        // and Control Center. Permission prompts (inactive too) come before listening.
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active, voice.listening { voice.stop(discard: true) }
+        }
+        .onDisappear { voice.stop(discard: true) }
+    }
+}
 
 /// A photo waiting in the composer: its preview, a spinner while it is shrunk and
 /// uploaded, and ✕ to remove it.
