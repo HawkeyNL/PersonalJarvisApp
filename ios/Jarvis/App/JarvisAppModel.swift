@@ -120,7 +120,7 @@ final class JarvisAppModel: ObservableObject {
         let endpointStore = EndpointStore()
         let api = JarvisAPIClient(baseURL: endpointStore.endpoint)
         let auth = AuthService(api: api)
-        self.init(endpointStore: endpointStore, api: api, auth: auth, chat: ChatService(api: api, auth: auth))
+        self.init(endpointStore: endpointStore, api: api, auth: auth, chat: ChatService(api: api, auth: auth), voice: VoiceInput())
     }
 
     #if DEBUG
@@ -132,8 +132,7 @@ final class JarvisAppModel: ObservableObject {
     }
     #endif
 
-    private init(endpointStore: EndpointStore, api: JarvisAPIClient, auth: AuthService, chat: ChatService,
-                 voice: VoiceInput = VoiceInput()) {
+    private init(endpointStore: EndpointStore, api: JarvisAPIClient, auth: AuthService, chat: ChatService, voice: VoiceInput) {
         self.voiceInput = voice
         self.endpointStore = endpointStore
         self.api = api

@@ -160,6 +160,6 @@ private final class FakeCapture: VoiceCapture {
 
     func endAudio() { ended += 1 }
     func cancel() { cancelled += 1 }
-    func release() { released += 1 }
+    func releaseAudio() { released += 1 }
 }
 

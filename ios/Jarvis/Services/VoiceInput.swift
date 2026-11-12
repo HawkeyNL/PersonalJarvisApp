@@ -68,7 +68,7 @@ protocol VoiceCapture: AnyObject {
     /// Drops the recognition.
     func cancel()
     /// The microphone off and the audio session given back (spoken replies play again).
-    func release()
+    func releaseAudio()
 }
 
 /// Push-to-talk for the chat composer: Dutch speech to text, on the device when it can.
@@ -100,7 +100,9 @@ final class VoiceInput {
 
     private static let serverNoticeKey = "jarvis.voice.serverNoticeShown"
 
-    init(capture: VoiceCapture = SpeechCapture(), defaults: UserDefaults = .standard) {
+    convenience init() { self.init(capture: SpeechCapture(), defaults: .standard) }
+
+    init(capture: VoiceCapture, defaults: UserDefaults) {
         self.capture = capture
         self.defaults = defaults
         available = capture.isAvailable
@@ -222,7 +224,7 @@ final class VoiceInput {
         timer = nil
         listening = false
         level = 0
-        capture.release()
+        capture.releaseAudio()
     }
 }
 
@@ -296,7 +298,7 @@ final class SpeechCapture: NSObject, VoiceCapture, SFSpeechRecognizerDelegate {
         request = nil
     }
 
-    func release() {
+    func releaseAudio() {
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         observers = []
         guard holdsAudio else { return }
