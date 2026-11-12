@@ -1,0 +1,73 @@
+// Chat photos before upload: shrink and re-encode in the page, and the words
+// for a failed upload. Pure (the decoder and canvas are passed in), so tests
+// can load this file directly.
+
+export const MAX_PHOTOS = 4;
+/** Long side sent to Core; Core shrinks further to 1600 px and re-encodes. */
+export const MAX_SIDE = 2048;
+export const JPEG_QUALITY = 0.88;
+export const UNSUPPORTED = "This photo format isn't supported; export it as JPEG.";
+export const CORE_TOO_OLD = "Your Home Node needs Jarvis Core v0.0.83 to receive photos.";
+
+/** `width`×`height` scaled down (never up) to fit `max` on the long side. */
+export function fitWithin(width: number, height: number, max = MAX_SIDE): { width: number; height: number } {
+  const scale = Math.min(1, max / Math.max(width, height));
+  return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
+}
+
+interface Canvas {
+  width: number;
+  height: number;
+  getContext(kind: "2d"): Pick<CanvasRenderingContext2D, "fillStyle" | "fillRect" | "drawImage"> | null;
+  toBlob(done: (blob: Blob | null) => void, type: string, quality: number): void;
+}
+export interface DownscaleDeps {
+  decode: (file: Blob) => Promise<ImageBitmap>;
+  canvas: () => Canvas;
+}
+
+const browser: DownscaleDeps = {
+  // The EXIF orientation is applied here, so the JPEG we send is upright.
+  decode: (file) => createImageBitmap(file, { imageOrientation: "from-image" }),
+  canvas: () => document.createElement("canvas") as unknown as Canvas,
+};
+
+/** The photo as a JPEG of at most MAX_SIDE px. Transparency becomes white.
+ *  Anything the webview cannot decode (HEIC on Linux/Windows) is refused. */
+export async function downscale(file: Blob, deps: DownscaleDeps = browser): Promise<Blob> {
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await deps.decode(file);
+  } catch {
+    throw new Error(UNSUPPORTED);
+  }
+  try {
+    const size = fitWithin(bitmap.width, bitmap.height);
+    const canvas = deps.canvas();
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error(UNSUPPORTED);
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, size.width, size.height);
+    context.drawImage(bitmap, 0, 0, size.width, size.height);
+    const blob = await new Promise<Blob | null>((done) => canvas.toBlob(done, "image/jpeg", JPEG_QUALITY));
+    if (!blob) throw new Error(UNSUPPORTED);
+    return blob;
+  } finally {
+    bitmap.close();
+  }
+}
+
+/** What to tell the owner when Core refuses an upload with `status`. */
+export function uploadFailure(status: number): string {
+  switch (status) {
+    case 404: return CORE_TOO_OLD;
+    case 400: case 415: return UNSUPPORTED;
+    case 413: return "This photo is too large.";
+    case 429: return "Too many photos for now; try again later.";
+    case 503: return "Photos are unavailable on your Home Node right now.";
+    case 507: return "Photo storage on your Home Node is full.";
+    default: return "The photo could not be uploaded.";
+  }
+}
