@@ -156,12 +156,24 @@ private fun Message(message: ConversationMessage) {
                 Text("Sources", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
                 val uris = LocalUriHandler.current
                 // Validated, normalized https URLs only (WebAnswer); opened in the browser on tap.
-                // Without a browser openUri throws: the tap then does nothing.
-                answer.sources.forEach { url ->
-                    Text(
-                        url, Modifier.clickable(role = Role.Button, onClickLabel = "Open source") { runCatching { uris.openUri(url) } },
-                        color = c.accentText, style = MaterialTheme.typography.bodySmall,
-                    )
+                // Without a browser openUri throws: the tap then does nothing. A card shows the
+                // plain title (never Markdown), then the host and a short path.
+                answer.sources.forEach { source ->
+                    Column(
+                        Modifier
+                            .widthIn(max = 320.dp)
+                            .clip(JvShapes.md)
+                            .background(c.bgSunken)
+                            .clickable(role = Role.Button, onClickLabel = "Open source") { runCatching { uris.openUri(source.url) } }
+                            .padding(horizontal = JvSpace.md, vertical = JvSpace.sm),
+                        verticalArrangement = Arrangement.spacedBy(JvSpace.xxs),
+                    ) {
+                        source.title?.let { Text(it, color = c.accentText, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                        Text(
+                            source.host + source.shortPath, color = c.textSecondary, style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
