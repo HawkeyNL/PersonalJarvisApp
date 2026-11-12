@@ -1,5 +1,9 @@
 package com.hawkeynl.jarvis.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -29,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,7 +44,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -55,7 +62,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hawkeynl.jarvis.chat.WebAnswer
+import com.hawkeynl.jarvis.chat.appendDictated
 import com.hawkeynl.jarvis.chat.isWebModel
 import com.hawkeynl.jarvis.chat.splitSources
 import com.hawkeynl.jarvis.network.ConversationMessage
@@ -80,6 +90,12 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel, pickPhot
     LaunchedEffect(state.returnedDraft) {
         state.returnedDraft?.let { if (draft.isBlank()) draft = it; actions.draftReturned() }
     }
+    // A transcript that could not be sent (a reply was running) waits after the draft.
+    LaunchedEffect(state.dictated) {
+        state.dictated?.let { draft = appendDictated(draft, it); actions.dictatedTaken() }
+    }
+    // Leaving the chat stops the mic, like desktop closing the console.
+    DisposableEffect(Unit) { onDispose { actions.cancelDictation() } }
     val c = JvTheme.colors
     Column(Modifier.fillMaxSize().imePadding().testTag("chat")) {
         Row(
@@ -140,6 +156,8 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel, pickPhot
             Column(Modifier.padding(horizontal = JvSpace.md), verticalArrangement = Arrangement.spacedBy(JvSpace.xxs)) {
                 state.chips.forEach { chip -> chip.error?.let { ErrorText(it) } }
                 state.chipNotice?.let { MutedText(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+                if (state.listening) MutedText("Listening…", Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                state.dictationNotice?.let { ErrorText(it) }
                 // Said once, until a photo was sent.
                 if (state.chips.isNotEmpty() && !state.photosDisclosed) MutedText(PHOTO_DISCLOSURE)
             }
@@ -161,6 +179,7 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel, pickPhot
                     maxLines = 5,
                     shape = JvShapes.md,
                 )
+                MicButton(state.listening, actions)
                 val sendable = canSend(draft, state.chips, state.busy)
                 CircleIconButton(
                     JvIcon.SEND, if (uploading(state.chips)) "Send (waiting for photos)" else "Send",
@@ -197,6 +216,33 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel, pickPhot
                 enabled = !deleting,
             ) { Text("Delete for good", color = c.dangerText) }
         },
+    )
+}
+
+/** Push-to-talk (desktop useMic): a ring follows your voice while listening. Hidden when
+ *  this phone has no speech recogniser. Microphone access is asked on the first tap. */
+@Composable
+private fun MicButton(listening: Boolean, actions: JarvisViewModel) {
+    val context = LocalContext.current
+    val available = remember { actions.dictationAvailable() }
+    if (!available) return
+    val c = JvTheme.colors
+    val level by actions.micLevel.collectAsStateWithLifecycle()
+    val still = rememberReduceMotion()
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) actions.toggleDictation() else actions.dictationDenied()
+    }
+    CircleIconButton(
+        JvIcon.MIC, if (listening) "Stop dictation" else "Start dictation",
+        onClick = {
+            val allowed = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            if (listening || allowed) actions.toggleDictation() else ask.launch(Manifest.permission.RECORD_AUDIO)
+        },
+        // The level is read while drawing only, so it does not recompose the chat.
+        modifier = Modifier.drawBehind {
+            if (listening) drawCircle(c.accentSubtle, size.minDimension / 2 + (2 + if (still) 2f else level * 4).dp.toPx())
+        },
+        selected = listening,
     )
 }
 
