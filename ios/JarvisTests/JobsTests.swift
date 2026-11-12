@@ -17,7 +17,7 @@ final class JobsTests: XCTestCase {
         ] as [String: Any]).merging(overrides) { $1 })
     }
 
-    private func run(_ overrides: [String: Any] = [:]) -> String {
+    private func runJSON(_ overrides: [String: Any] = [:]) -> String {
         json(([
             "id": u1, "job_id": j1, "slot_at": "2026-11-09T06:00:00Z", "trigger": "schedule", "status": "ok",
             "error_code": NSNull(), "summary": "<b>Two</b> fixes", "summary_source": "claude",
@@ -52,7 +52,7 @@ final class JobsTests: XCTestCase {
     }
 
     func testRunsOrderPrioritiesKeepTextAsDataAndFailClosed() throws {
-        let first = try XCTUnwrap(runs(#"{"runs":[\#(run())]}"#)?.runs.first)
+        let first = try XCTUnwrap(runs(#"{"runs":[\#(runJSON())]}"#)?.runs.first)
         XCTAssertEqual(first.ranked.map(\.ref), ["a1", "a2"])
         XCTAssertEqual(first.summary, "<b>Two</b> fixes", "kept verbatim; the page shows it as text")
         let many = (1...21).map { ["ref": "a\($0)", "rank": $0, "reason": "x"] as [String: Any] }
@@ -60,7 +60,7 @@ final class JobsTests: XCTestCase {
             ["status": "done"], ["trigger": "cron"], ["summary_source": "gpt"], ["error_code": "Upstream said <b>no</b>"],
             ["job_id": "j1"], ["priorities": [["ref": "a1", "rank": "1", "reason": "x"]]], ["priorities": many],
         ]
-        for fields in broken { XCTAssertNil(runs(#"{"runs":[\#(run(fields))]}"#), "\(fields.keys)") }
+        for fields in broken { XCTAssertNil(runs(#"{"runs":[\#(runJSON(fields))]}"#), "\(fields.keys)") }
     }
 
     func testRunReportResolvesFactsAndKeepsRepoErrors() throws {
@@ -71,14 +71,14 @@ final class JobsTests: XCTestCase {
             "errors": [["repo": "o/s", "error_code": "token_needs_dependabot_alerts_read"], ["repo": "o/t", "error_code": "Bad text"]],
             "truncated": true,
         ]
-        let detail = run(["status": "partial", "error_code": "token_needs_dependabot_alerts_read", "facts": facts])
+        let detail = runJSON(["status": "partial", "error_code": "token_needs_dependabot_alerts_read", "facts": facts])
         let report = try JSONDecoder().decode(JobRunReport.self, from: Data(detail.utf8))
         XCTAssertEqual(report.facts.map(\.title), ["left-pad (high)", "serde 1.0.1 → 1.0.2"])
         XCTAssertEqual(report.facts[0].detail, "o/r#4 · fixed in 1.3.0 · GHSA-x")
         XCTAssertEqual(report.errors.map(\.repo), ["o/s"])
         XCTAssertTrue(report.truncated)
         // Without facts (a failed or missed run) the report still reads.
-        XCTAssertTrue(try JSONDecoder().decode(JobRunReport.self, from: Data(run(["facts": NSNull()]).utf8)).facts.isEmpty)
+        XCTAssertTrue(try JSONDecoder().decode(JobRunReport.self, from: Data(runJSON(["facts": NSNull()]).utf8)).facts.isEmpty)
     }
 
     func testErrorCodesGetFixedWording() {
