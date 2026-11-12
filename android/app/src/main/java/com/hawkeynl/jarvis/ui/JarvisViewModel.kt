@@ -34,6 +34,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
+import com.hawkeynl.jarvis.chat.DictationEvent
+import com.hawkeynl.jarvis.chat.MIC_DENIED
+import com.hawkeynl.jarvis.chat.MicTap
+import com.hawkeynl.jarvis.chat.dictationAllowed
+import com.hawkeynl.jarvis.chat.micTap
+import com.hawkeynl.jarvis.chat.passesToSpeech
+import com.hawkeynl.jarvis.chat.unsentTranscript
 import com.hawkeynl.jarvis.chat.RealtimeEvent
 import com.hawkeynl.jarvis.chat.RealtimeSpeech
 import com.hawkeynl.jarvis.chat.startsAfterReply
@@ -117,6 +124,14 @@ data class JarvisUiState(
     val removedPhotos: Set<String> = emptySet(),
     /** The text of a message Core refused; the composer takes it back once. */
     val returnedDraft: String? = null,
+    /** The chat mic is listening. */
+    val listening: Boolean = false,
+    /** Why the mic stopped (no access, no recogniser); cleared by the next tap. */
+    val dictationNotice: String? = null,
+    /** A transcript that could not be sent; the composer appends it once. */
+    val dictated: String? = null,
+    /** [VOICE_DISCLOSURE] is showing: the next mic tap may use the phone's speech service. */
+    val dictationDisclosure: Boolean = false,
 )
 
 class JarvisViewModel(private val container: AppContainer) : ViewModel() {
@@ -148,6 +163,9 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             photosDisclosed = container.photoPreferences.getBoolean("disclosed", false)),
     )
     val state: StateFlow<JarvisUiState> = _state.asStateFlow()
+    // Apart from [state]: it changes many times a second while listening.
+    private val _micLevel = MutableStateFlow(0f)
+    val micLevel: StateFlow<Float> = _micLevel.asStateFlow()
 
     init {
         container.localSpeech.rate = _state.value.voiceRate
@@ -179,7 +197,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             val parsed = HomeNodeEndpoint.parse(_state.value.endpointDraft)
             if (parsed is EndpointValidation.Valid && parsed.endpoint != _state.value.endpoint) {
-                container.realtime.stop(); speech.stop(); pending.clear(); container.sessions.reset()
+                container.realtime.stop(); speech.stop(); cancelDictation(); pending.clear(); container.sessions.reset()
                 identity++
                 _state.update {
                     it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), conversationId = null, passwordResetRequest = null,
@@ -271,6 +289,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 
     fun openConversation(id: String) {
         val endpoint = _state.value.endpoint ?: return
+        cancelDictation()
         viewModelScope.launch {
             _state.update { it.copy(busy = true, error = null, researchOffer = null) }
             when (val result = container.conversations.load(endpoint, id)) {
@@ -290,17 +309,21 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun newConversation() = _state.update {
-        it.copy(
-            screen = Screen.CHAT,
-            conversationId = null,
-            conversationTitle = "New conversation",
-            messages = emptyList(),
-            error = null,
-            researchOffer = null,
-            photoMeta = emptyMap(),
-            removedPhotos = emptySet(),
-        )
+    fun newConversation() {
+        // A transcript is never sent into another conversation than the one it was spoken in.
+        cancelDictation()
+        _state.update {
+            it.copy(
+                screen = Screen.CHAT,
+                conversationId = null,
+                conversationTitle = "New conversation",
+                messages = emptyList(),
+                error = null,
+                researchOffer = null,
+                photoMeta = emptyMap(),
+                removedPhotos = emptySet(),
+            )
+        }
     }
 
     /** Only the owner's click on a Core offer passes [research]. */
@@ -310,13 +333,13 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         if (realtimeAvailable) send(offer.question, research = true)
     }
 
-    /** Sends [text] with the composer's photos (none for a web search). False when nothing
-     *  was sent, so the composer keeps the draft. */
-    fun send(text: String, research: Boolean = false): Boolean {
+    /** Sends [text] with the composer's photos (none for a web search or a transcript). False
+     *  when nothing was sent, so the composer keeps the draft. */
+    fun send(text: String, research: Boolean = false, withPhotos: Boolean = !research): Boolean {
         val endpoint = _state.value.endpoint ?: return false
-        if (!research) _state.update { it.copy(chips = expireStale(it.chips, System.currentTimeMillis())) }
+        if (withPhotos) _state.update { it.copy(chips = expireStale(it.chips, System.currentTimeMillis())) }
         val current = _state.value
-        val taken = if (research) emptyList() else current.chips
+        val (taken, kept) = takePhotos(current.chips, withPhotos)
         if (!canSend(text, taken, current.busy) || !current.authenticated || current.locked) return false
         val attachments = chipIds(taken)
         // Photos go only with the runs API; the older chat endpoint refuses them.
@@ -335,7 +358,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             for (chip in taken) chip.preview?.let { photos[chip.id!!] = PhotoResult.Image(it) }
             if (attachments.isNotEmpty()) container.photoPreferences.edit().putBoolean("disclosed", true).apply()
             _state.update {
-                it.copy(busy = true, researchOffer = null, chips = if (research) it.chips else emptyList(), chipNotice = null,
+                it.copy(busy = true, researchOffer = null, chips = kept, chipNotice = null,
                     photosDisclosed = it.photosDisclosed || attachments.isNotEmpty(),
                     messages = it.messages + ConversationMessage("user", text.trim(), at = Instant.now().toString(), id = optimisticId, attachments = attachments))
             }
@@ -404,6 +427,62 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun draftReturned() = _state.update { it.copy(returnedDraft = null) }
+
+    fun dictationAvailable(): Boolean = container.dictation.available()
+
+    /** The mic button (desktop useMic): listen, or stop and send what was heard. */
+    fun toggleDictation() {
+        val current = _state.value
+        val disclosed = container.voicePreferences.getBoolean("dictationDisclosed", false)
+        when (val tap = micTap(current.listening, current.locked, current.authenticated, disclosed, current.dictationDisclosure)) {
+            MicTap.Stop -> container.dictation.stop()
+            MicTap.Ignore -> Unit
+            is MicTap.Start -> {
+                // A second tap on the shown notice is the owner's go for the phone's speech service.
+                if (tap.offDevice && !disclosed) container.voicePreferences.edit().putBoolean("dictationDisclosed", true).apply()
+                val asked = identity
+                _micLevel.value = 0f
+                // Listening before start: the session may end at once (no recogniser, no consent).
+                _state.update { it.copy(listening = true, dictationNotice = null, dictationDisclosure = false) }
+                container.dictation.start(tap.offDevice) { event -> dictationEvent(asked, event) }
+            }
+        }
+    }
+
+    /** Leaving the chat, the lock and sign-out drop what was not recognised yet. */
+    fun cancelDictation() {
+        container.dictation.cancel()
+        _micLevel.value = 0f
+        if (_state.value.listening || _state.value.dictationDisclosure) _state.update { it.copy(listening = false, dictationDisclosure = false) }
+    }
+
+    fun dictationDenied() = _state.update { it.copy(dictationNotice = MIC_DENIED) }
+
+    fun dictatedTaken() = _state.update { it.copy(dictated = null) }
+
+    private fun dictationEvent(asked: Int, event: DictationEvent) {
+        // Fail closed: nothing heard behind the lock or from another sign-in is used.
+        if (!dictationAllowed(asked, identity, _state.value.locked)) { cancelDictation(); return }
+        when (event) {
+            // Jarvis must not dictate its own spoken reply; a notice-only tap leaves it speaking.
+            DictationEvent.Listening -> {
+                speech.stop()
+                speech.ownedRun()?.let(container.realtime::releaseVoice)
+            }
+            is DictationEvent.Level -> _micLevel.value = event.value
+            is DictationEvent.Ended -> {
+                _micLevel.value = 0f
+                _state.update { it.copy(listening = false, dictationNotice = event.message) }
+            }
+            DictationEvent.NeedsConsent -> _state.update { it.copy(listening = false, dictationDisclosure = true) }
+            is DictationEvent.Heard -> {
+                _micLevel.value = 0f
+                _state.update { it.copy(listening = false, dictationNotice = null) }
+                // Sent at once like desktop; while a reply runs it waits in the composer instead.
+                unsentTranscript(send(event.text, withPhotos = false), event.text)?.let { text -> _state.update { it.copy(dictated = text) } }
+            }
+        }
+    }
 
     /** The photo picker's answer. Opening it stops this activity, so the app is usually
      *  locked by now: the photos then wait for the unlock. */
@@ -576,7 +655,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         clearPhotos()
         identity++
         pending.clear()
-        container.realtime.stop(); speech.stop()
+        container.realtime.stop(); speech.stop(); cancelDictation()
         val endpoint = _state.value.endpoint ?: return
         viewModelScope.launch {
             container.enrollment.logout(endpoint)
@@ -604,7 +683,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         clearPhotos()
         identity++
         pending.clear()
-        container.realtime.stop(); speech.stop()
+        container.realtime.stop(); speech.stop(); cancelDictation()
         _state.update {
             it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), chips = emptyList(), chipNotice = null,
                 error = "Password changed. Sign in with the new password.")
@@ -632,7 +711,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     fun lockForBackground() {
         container.sessions.modelAuthorization.invalidate()
         clearPhotos()
-        container.realtime.stop(); speech.stop()
+        container.realtime.stop(); speech.stop(); cancelDictation()
         if (container.sessions.hasSessionRecord()) _state.update { it.copy(locked = true) }
     }
 
@@ -663,7 +742,10 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         clearPhotos()
         identity++
         pending.clear()
-        container.realtime.stop(); speech.stop()
+        container.realtime.stop(); speech.stop(); cancelDictation()
+        // A new owner of this phone hears the voice and photo notices again.
+        container.voicePreferences.edit().remove("dictationDisclosed").apply()
+        container.photoPreferences.edit().remove("disclosed").apply()
         viewModelScope.launch {
             container.enrollment.eraseLocally()
             _state.update {
@@ -751,6 +833,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 }
             }
             is EnrollmentOutcome.Authenticated -> {
+                cancelDictation()
                 identity++
                 _state.update {
                     it.copy(
@@ -832,7 +915,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         // history mutation or generation cancellation is performed here.
     }
 
-    override fun onCleared() { container.realtime.stop(); speech.stop(); super.onCleared() }
+    override fun onCleared() { container.realtime.stop(); speech.stop(); container.dictation.release(); super.onCleared() }
 
     private suspend fun startRealtime(endpoint: HomeNodeEndpoint) {
         realtimeAvailable = container.realtime.available(endpoint)
@@ -840,7 +923,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         speech.enabled = _state.value.voiceEnabled
         container.realtime.start(viewModelScope, endpoint, disconnected = { speech.stop() }) { event ->
             if (_state.value.endpoint != endpoint || _state.value.locked || !_state.value.authenticated) return@start
-            speech.event(event)
+            if (passesToSpeech(_state.value.listening, event.type)) speech.event(event)
             if (event.type == "connection.ready") {
                 val recovered = container.realtime.recover(endpoint, pending.requests())
                 if (_state.value.endpoint != endpoint || _state.value.locked || !_state.value.authenticated) return@start

@@ -19,10 +19,12 @@ The current client provides:
 - a strong-biometric `BiometricPrompt` lock on launch and after backgrounding;
 - conversation list/load/send calls using client-local DTOs that mirror the
   current `jarvis-api` contract;
+- chat voice input through the platform speech recogniser (Dutch, on the device
+  when it can; `RECORD_AUDIO` is asked on the first mic tap);
 - unit tests for endpoint policy, DTO serialization, session migration boundary,
   device signatures and enrollment transitions.
 
-Voice, wake word, notifications, background sync and Home Node discovery are not
+Wake word, notifications, background sync and Home Node discovery are not
 part of this milestone.
 
 ## Signed releases

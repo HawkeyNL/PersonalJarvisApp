@@ -114,6 +114,11 @@ data class PhotoChip(
 fun canSend(text: String, chips: List<PhotoChip>, busy: Boolean): Boolean =
     (text.isNotBlank() || chips.isNotEmpty()) && chips.all { it.state == ChipState.READY } && !busy
 
+/** The photos a message takes and the ones left in the composer; a transcript or a web
+ *  search takes none. */
+fun takePhotos(chips: List<PhotoChip>, withPhotos: Boolean): Pair<List<PhotoChip>, List<PhotoChip>> =
+    if (withPhotos) chips to emptyList() else emptyList<PhotoChip>() to chips
+
 fun uploading(chips: List<PhotoChip>): Boolean = chips.any { it.state == ChipState.PREPARING || it.state == ChipState.UPLOADING }
 
 /** The uploaded photos' ids, in order. */
