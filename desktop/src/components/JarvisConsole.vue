@@ -15,6 +15,7 @@ import {
 import { conversations, currentId, deleteConversation } from "../conversations";
 import { renderMarkdown, handleMarkdownClick } from "../markdown";
 import { splitSources } from "../webAnswer";
+import { chips, chipNotice, attach, removeChip, takeChips, uploading, allReady } from "../photos";
 import { askedIn, dayOf, replyIsHere, type AskedIn } from "../chatList";
 import { useMic } from "../useMic";
 import { wakePulse } from "../voicewake";
@@ -51,7 +52,7 @@ onUnmounted(() => { disposed = true; speechUnlisten?.(); });
 const mic = useMic((said) => send(said));
 // Listening or an unsent draft holds back an automatic update restart.
 watch(
-  () => mic.listening.value || !!text.value.trim(),
+  () => mic.listening.value || !!text.value.trim() || chips.value.length > 0,
   (value) => (consoleActive.value = value),
   { immediate: true },
 );
@@ -111,7 +112,30 @@ watch(thinking, (busy, before) => {
   announcement.value = here && reply?.role === "jarvis" && reply.text ? `Jarvis: ${plain(reply.text)}` : "";
 });
 
-const canSend = computed(() => !!text.value.trim() && !thinking.value);
+// Photos must all be uploaded first; a photo alone is a message too.
+const canSend = computed(() => (!!text.value.trim() || chips.value.length > 0) && allReady() && !thinking.value);
+
+// Attach: the picker or a paste. Shrinking and uploading start at once.
+const fileEl = ref<HTMLInputElement | null>(null);
+function onPick(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (input.files) attach(input.files);
+  input.value = "";
+}
+function onPaste(event: ClipboardEvent) {
+  const files = [...(event.clipboardData?.files ?? [])].filter((file) => file.type.startsWith("image/"));
+  if (!files.length) return;
+  event.preventDefault();
+  attach(files);
+}
+// Said once, the first time photos are in the composer.
+const DISCLOSED = "jarvis.photos.disclosed";
+const disclosed = ref(localStorage.getItem(DISCLOSED) === "1");
+function markDisclosed() {
+  if (disclosed.value) return;
+  disclosed.value = true;
+  localStorage.setItem(DISCLOSED, "1");
+}
 // Only this click sends a web search; the shown question is all that leaves.
 function onResearch() {
   const question = researchOffer.value?.question;
@@ -121,7 +145,9 @@ function onResearch() {
 function onSend() {
   // A reply in progress keeps the draft: send() would drop it.
   if (!canSend.value) return;
-  void send(text.value);
+  const photos = takeChips();
+  if (photos.length) markDisclosed();
+  void send(text.value, undefined, photos);
   text.value = "";
   inputEl.value?.focus();
 }
@@ -245,7 +271,7 @@ onMounted(async () => {
           </div>
         </template>
       </div>
-      <div v-if="researchOffer && researchOffer.conversationId === currentId && !thinking" class="offer">
+      <div v-if="researchOffer && researchOffer.conversationId === currentId && !thinking && !chips.length" class="offer">
         <button type="button" class="btn btn-secondary btn-sm" :disabled="locked" @click="onResearch">Search the web</button>
         <span class="t-xs t-2">Sends only “{{ researchOffer.question }}” to your subscription provider, which searches the web.</span>
       </div>
@@ -255,6 +281,18 @@ onMounted(async () => {
 
     <div class="composer-wrap">
       <form class="composer card" @submit.prevent="onSend">
+        <ul v-if="chips.length" class="chips" aria-label="Photos to send">
+          <li v-for="chip in chips" :key="chip.key" class="chip" :class="chip.state">
+            <img v-if="chip.url" :src="chip.url" alt="" />
+            <span v-if="chip.state === 'preparing' || chip.state === 'uploading'" class="chip-busy" role="status">
+              <span class="spinner" aria-hidden="true"></span><span class="sr-only">{{ chip.state === "preparing" ? "Preparing photo" : "Uploading photo" }}</span>
+            </span>
+            <button type="button" class="chip-x" aria-label="Remove photo" @click="removeChip(chip.key)">✕</button>
+          </li>
+        </ul>
+        <p v-for="chip in chips.filter((c) => c.error)" :key="`e${chip.key}`" class="err t-xs" role="alert">{{ chip.error }}</p>
+        <p v-if="chipNotice" class="t-xs t-2" role="status">{{ chipNotice }}</p>
+        <p v-if="chips.length && !disclosed" class="t-xs t-2">Photos go to your Claude/Codex subscription to be read; never to web search.</p>
         <textarea
           ref="inputEl"
           v-model="text"
@@ -264,9 +302,15 @@ onMounted(async () => {
           aria-describedby="composer-keys"
           aria-keyshortcuts="Control+K Meta+K"
           @keydown.enter="onEnter"
+          @paste="onPaste"
         ></textarea>
         <div class="tools">
           <div class="tool-group">
+            <input ref="fileEl" type="file" accept="image/jpeg,image/png,image/webp,image/heic" multiple hidden @change="onPick" />
+            <button type="button" class="btn btn-ghost btn-sm icon-btn" aria-label="Attach photos" title="Attach photos (up to 4)"
+              :disabled="chips.length >= 4" @click="fileEl?.click()">
+              <NavIcon name="photo" />
+            </button>
             <button
               type="button"
               class="btn btn-ghost btn-sm icon-btn"
@@ -306,7 +350,7 @@ onMounted(async () => {
           </div>
           <div class="tool-group send-group">
             <span id="composer-keys" class="t-xs t-2">Enter to send · Shift+Enter for a new line</span>
-            <button type="submit" class="btn btn-primary icon-btn" aria-label="Send" :aria-disabled="!canSend">
+            <button type="submit" class="btn btn-primary icon-btn" :aria-label="uploading() ? 'Send (waiting for photos)' : 'Send'" :aria-disabled="!canSend">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
             </button>
           </div>
@@ -373,6 +417,20 @@ onMounted(async () => {
 
 .composer-wrap { padding: 16px 32px 20px; display: flex; flex-direction: column; gap: 8px; }
 .composer { padding: 10px 10px 10px 16px; display: flex; flex-direction: column; gap: 8px; }
+.chips { margin: 0; padding: 0; list-style: none; display: flex; gap: 8px; flex-wrap: wrap; }
+.chip {
+  position: relative; width: 64px; height: 64px; border-radius: var(--r-md); overflow: hidden;
+  background: var(--bg-sunken); box-shadow: var(--shadow-border);
+}
+.chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chip.failed img { opacity: 0.4; }
+.chip-busy { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg-scrim); }
+.chip-x {
+  position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; padding: 0; border: 0; border-radius: var(--r-pill);
+  display: grid; place-items: center; font-size: 11px; line-height: 1; cursor: pointer;
+  background: var(--bg-scrim); color: var(--text-on-accent);
+}
+.chip-x:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .composer:focus-within { box-shadow: var(--shadow-border), 0 0 0 2px var(--focus-ring); }
 textarea {
   width: 100%; min-height: 52px; max-height: 40vh; padding: 6px 0; border: 0; resize: none; field-sizing: content;

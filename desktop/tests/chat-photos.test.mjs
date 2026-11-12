@@ -1,0 +1,73 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { fitWithin, downscale, uploadFailure, UNSUPPORTED, CORE_TOO_OLD, MAX_SIDE, JPEG_QUALITY } from "../src/chatPhotos.ts";
+import { runRequest } from "../src/realtimeProjection.ts";
+
+test("photos shrink to 2048 px on the long side and never grow", () => {
+  assert.deepEqual(fitWithin(4032, 3024), { width: 2048, height: 1536 });
+  assert.deepEqual(fitWithin(3024, 4032), { width: 1536, height: 2048 });
+  assert.deepEqual(fitWithin(800, 600), { width: 800, height: 600 });
+  assert.deepEqual(fitWithin(100000, 1), { width: 2048, height: 1 });
+  assert.equal(MAX_SIDE, 2048);
+});
+
+function fakes({ width = 4000, height = 2000, decodeFails = false, blob = new Blob(["jpeg"]) } = {}) {
+  const calls = { closed: 0, drawn: null, filled: null, encoded: null, decodedWith: null };
+  const context = {
+    fillStyle: "",
+    fillRect: (...args) => { calls.filled = { style: context.fillStyle, args }; },
+    drawImage: (_image, ...args) => { calls.drawn = args; },
+  };
+  const canvas = {
+    width: 0, height: 0,
+    getContext: () => context,
+    toBlob: (done, type, quality) => { calls.encoded = { type, quality, width: canvas.width, height: canvas.height }; done(blob); },
+  };
+  return {
+    calls,
+    deps: {
+      decode: async (file) => {
+        calls.decodedWith = file;
+        if (decodeFails) throw new Error("HEIC");
+        return { width, height, close: () => calls.closed++ };
+      },
+      canvas: () => canvas,
+    },
+  };
+}
+
+test("downscale draws onto white and re-encodes as JPEG 0.88", async () => {
+  const { calls, deps } = fakes();
+  const input = new Blob(["png"]);
+  const out = await downscale(input, deps);
+  assert.equal(await out.text(), "jpeg");
+  assert.equal(calls.decodedWith, input);
+  assert.deepEqual(calls.encoded, { type: "image/jpeg", quality: JPEG_QUALITY, width: 2048, height: 1024 });
+  assert.deepEqual(calls.drawn, [0, 0, 2048, 1024]);
+  assert.equal(calls.filled.style, "#fff");
+  assert.equal(calls.closed, 1);
+});
+
+test("an undecodable photo or a failed encode says to export as JPEG", async () => {
+  await assert.rejects(downscale(new Blob(["heic"]), fakes({ decodeFails: true }).deps), { message: UNSUPPORTED });
+  const { calls, deps } = fakes({ blob: null });
+  await assert.rejects(downscale(new Blob(["x"]), deps), { message: UNSUPPORTED });
+  assert.equal(calls.closed, 1);
+});
+
+test("upload refusals have their own words; 404 means an older Core", () => {
+  assert.equal(uploadFailure(404), CORE_TOO_OLD);
+  assert.equal(CORE_TOO_OLD, "Your Home Node needs Jarvis Core v0.0.83 to receive photos.");
+  assert.equal(uploadFailure(415), UNSUPPORTED);
+  for (const status of [413, 429, 503, 507, 500]) assert.ok(uploadFailure(status).length > 0);
+  assert.notEqual(uploadFailure(507), uploadFailure(500));
+});
+
+test("run requests carry photos only when there are some", () => {
+  const history = [{ role: "jarvis", text: "Hi" }, { role: "user", text: "" }];
+  const plain = runRequest("r", null, history);
+  assert.deepEqual(plain, { request_id: "r", conversation_id: null, messages: [{ role: "assistant", content: "Hi" }, { role: "user", content: "" }] });
+  assert.ok(!("attachments" in plain) && !("mode" in plain));
+  assert.deepEqual(runRequest("r", "c", history, undefined, ["p1", "p2"]).attachments, ["p1", "p2"]);
+  assert.equal(runRequest("r", "c", history, "research").mode, "research");
+});

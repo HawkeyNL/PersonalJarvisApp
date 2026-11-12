@@ -18,6 +18,7 @@ export const PATHS = {
   sandbox: "M12 3l8 4.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9",
   terminal: "M4 5h16v14H4zM7 9l3 3-3 3M12 15h5",
   home: "M3 11l9-7 9 7v9H3zM9 20v-6h6v6",
+  photo: "M4 5h16v14H4zM9 8.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM20 15l-5-5-9 9",
   doc: "M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6",
   layers: "M12 3l9 5-9 5-9-5zM3 13l9 5 9-5",
   lines: "M4 6h16M4 12h16M4 18h10",

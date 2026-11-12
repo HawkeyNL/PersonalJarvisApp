@@ -11,7 +11,7 @@ import { canSpeak, voiceRate, restoreVoiceChoice } from "./voice";
 import { ReconcileLoop } from "./reconcileLoop";
 import { invoke } from "@tauri-apps/api/core";
 import { startRealtime, type RealtimeEvent, type CanonicalMessage } from "./realtime";
-import { mergeCanonical, appendVisualDelta, dropFailedRun } from "./realtimeProjection";
+import { mergeCanonical, appendVisualDelta, dropFailedRun, runRequest } from "./realtimeProjection";
 import { PendingRuns } from "./pendingRuns";
 import { offerFrom, type ResearchOffer } from "./researchOffer";
 import { isWebModel, startsWebSearch } from "./webAnswer";
@@ -267,25 +267,32 @@ export async function initChat(): Promise<void> {
 }
 
 /** Send a user message; Jarvis replies (and speaks if the policy allows).
- *  `research` only ever comes from the owner's click on a Core offer. */
-export async function send(input: string, mode?: "research"): Promise<void> {
+ *  `research` only ever comes from the owner's click on a Core offer.
+ *  `attachments` are uploaded photo ids; with them the text may be empty. */
+export async function send(input: string, mode?: "research", attachments: string[] = []): Promise<void> {
   const epoch=chatSession.capture();
   const t = input.trim();
   // Nothing is sent from behind the app lock (a voice transcript, a stray Enter).
-  if (!t || thinking.value || locked.value) return;
+  if ((!t && !attachments.length) || thinking.value || locked.value) return;
   if(realtimeAvailable && pending.full) {
     push("jarvis","Too many unconfirmed requests. Restore the connection first; nothing is resent.");
     return;
   }
+  // Photos go only with the runs API; the legacy chat endpoint refuses them.
+  if(attachments.length && !realtimeAvailable) {
+    push("jarvis","Photos need a live connection to your Home Node. Nothing was sent.");
+    return;
+  }
   researchOffer.value = null;
   push("user", t);
+  if(attachments.length) messages.value[messages.value.length-1].attachments=attachments;
   thinking.value = true;
   if(realtimeAvailable) {
     const requestId=crypto.randomUUID();
     const optimistic=messages.value[messages.value.length-1];
     optimistic.requestId=requestId;
     pending.set(requestId,{conversation:currentId.value,messageId:optimistic.id});
-    const request={request_id:requestId,conversation_id:currentId.value,messages:messages.value.slice(-MAX_TURNS).map(m=>({role:m.role==="jarvis"?"assistant":"user",content:m.text})),...(mode?{mode}:{})};
+    const request=runRequest(requestId,currentId.value,messages.value.slice(-MAX_TURNS),mode,attachments);
     try {
       const result=await postJsonAuth<{conversation_id:string;run_id:string}>("/v1/assistant/runs",request);
       if(!chatSession.current(epoch)) return;
