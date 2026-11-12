@@ -111,18 +111,24 @@ final class VoiceInputSessionTests: XCTestCase {
         XCTAssertFalse(VoiceInput(capture: capture, defaults: defaults).needsServerNotice)
     }
 
+    /// Polls `condition` on the main actor for up to 2 s.
+    private func until(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
+        let deadline = Date().addingTimeInterval(2)
+        while !condition(), Date() < deadline { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertTrue(condition(), file: file, line: line)
+    }
+
     func testTheSilenceTimerStopsTheMicAndTheFinishTimeoutDeliversWhatWasHeard() async throws {
-        voice.silence = 0.3
-        voice.finishTimeout = .seconds(1)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "VoiceInputSessionTests"))
+        voice = VoiceInput(capture: capture, defaults: defaults, silence: 0.3, finishTimeout: .milliseconds(500))
         await listen()
         capture.say("hallo", final: false)
-        try await Task.sleep(nanoseconds: 700_000_000)
-        XCTAssertFalse(voice.listening)
+        try await until { !voice.listening }
         XCTAssertEqual(capture.ended, 1)
+        XCTAssertTrue(voice.finishing)
         XCTAssertEqual(delivered, [], "the recogniser may still answer")
-        try await Task.sleep(nanoseconds: 1_500_000_000)
+        try await until { delivered == ["hallo"] }
         XCTAssertFalse(voice.finishing)
-        XCTAssertEqual(delivered, ["hallo"])
     }
 
     func testAReplyStartingStopsTheMicAndKeepsTheWords() async throws {

@@ -117,7 +117,11 @@ struct ChatView: View {
         }
         .onChange(of: model.voiceInput.listening) { _, listening in
             guard !listening else { return }
-            heldAnnouncements.forEach { AccessibilityNotification.Announcement($0).post() }
+            guard !heldAnnouncements.isEmpty else { return }
+            // One announcement, queued behind "Stopped listening".
+            var held = AttributedString(heldAnnouncements.joined(separator: " "))
+            held.accessibilitySpeechAnnouncementPriority = .low
+            AccessibilityNotification.Announcement(held).post()
             heldAnnouncements = []
         }
         .alert("Speech goes to Apple", isPresented: $serverNotice) {

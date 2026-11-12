@@ -97,17 +97,20 @@ final class VoiceInput {
     @ObservationIgnored private var deliver: ((String) -> Void)?
     /// The silence watch while listening, the finish timeout after.
     @ObservationIgnored private var timer: Task<Void, Never>?
-    /// The rules' timings; tests shorten them.
-    @ObservationIgnored var silence = VoiceInputRules.silence
-    @ObservationIgnored var finishTimeout = VoiceInputRules.finishTimeout
+    /// The rules' timings; tests shorten them, nothing can lengthen them.
+    @ObservationIgnored private let silence: TimeInterval
+    @ObservationIgnored private let finishTimeout: Duration
 
     private static let serverNoticeKey = "jarvis.voice.serverNoticeShown"
 
     convenience init() { self.init(capture: SpeechCapture(), defaults: .standard) }
 
-    init(capture: VoiceCapture, defaults: UserDefaults) {
+    init(capture: VoiceCapture, defaults: UserDefaults, silence: TimeInterval = VoiceInputRules.silence,
+         finishTimeout: Duration = VoiceInputRules.finishTimeout) {
         self.capture = capture
         self.defaults = defaults
+        self.silence = min(max(silence, 0.1), VoiceInputRules.silence)
+        self.finishTimeout = min(max(finishTimeout, .milliseconds(100)), VoiceInputRules.finishTimeout)
         available = capture.isAvailable
         capture.availabilityChanged = { [weak self] available in self?.available = available }
     }
