@@ -447,7 +447,7 @@ struct IntegrationsPage: View {
                             ListSection(title: "Allowed models") {
                                 ActivityList(rows: value.models.filter(\.enabled).map {
                                     ActivityRow(id: $0.id, symbol: "square.stack.3d.up", title: $0.model,
-                                                detail: $0.provider + ($0.route.map { " · route \($0)" } ?? ""),
+                                                detail: $0.provider + ($0.routeName.map { " · route \($0)" } ?? ""),
                                                 tone: .ok, toneLabel: "Allowed", badge: false)
                                 }, emptyText: "No model is allowed yet.")
                             }
@@ -457,7 +457,7 @@ struct IntegrationsPage: View {
                             .font(JV.font(13)).foregroundStyle(JV.textSecondary).fixedSize(horizontal: false, vertical: true)
                         Loaded(source: registry, title: "Model catalog", symbol: "square.stack.3d.up", retry: load) { value in
                             ListSection(title: "Catalog") {
-                                ActivityList(rows: catalogRows(value.models ?? []), emptyText: "Core reported no models.")
+                                ActivityList(rows: catalogRows(value.models?.entries ?? []), emptyText: "Core reported no models.")
                             }
                         }
                     }
@@ -505,17 +505,19 @@ func policyFacts(_ policy: ModelPolicySnapshot, catalog: HomeNodeRegistry?) -> [
     return [
         TileData(label: "Allowed", value: "\(allowed)"),
         TileData(label: "Blocked", value: "\(policy.models.count - allowed)"),
-        TileData(label: "In catalog", value: catalog?.models.map { "\($0.count)" } ?? "Unavailable"),
+        // An older Core without a catalog has none: 0 once the registry has loaded.
+        TileData(label: "In catalog", value: catalog.map { "\($0.models?.entries.count ?? 0)" } ?? "Unavailable"),
         TileData(label: "Changes", value: "Under System health"),
     ]
 }
 
 /// The model catalog Core probed. Set up means a key or local install exists, not that Jarvis may use it.
 func catalogRows(_ models: [HomeNodeRegistry.CatalogModel]) -> [ActivityRow] {
-    models.map {
-        ActivityRow(id: "\($0.backend)/\($0.id)", symbol: "square.stack.3d.up", title: $0.id,
-                    detail: "\($0.backend) · \($0.modelClass) · \(costLabel($0.cost))",
-                    tone: $0.available ? .ok : .idle, toneLabel: $0.available ? "Provider set up" : "Provider not set up")
+    models.map { model in
+        ActivityRow(id: "\(model.backend)/\(model.id)", symbol: "square.stack.3d.up", title: model.id,
+                    detail: [model.backend, model.modelClass, model.cost.isEmpty ? "" : costLabel(model.cost)]
+                        .filter { !$0.isEmpty }.joined(separator: " · "),
+                    tone: model.available ? .ok : .idle, toneLabel: model.available ? "Provider set up" : "Provider not set up")
     }
 }
 

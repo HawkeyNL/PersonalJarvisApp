@@ -307,16 +307,39 @@ struct HomeNodeRegistry: Decodable {
     let liveHost: LiveHost?
     let software: [Software]
     let brains: [Brain]?
+    // Newer and display-only (Integrations): a value that does not fit reads as absent or
+    // is skipped, so it never fails the registry that Health and Settings also read.
     /// The model catalog Core probed; set up means a key or local install exists.
-    let models: [CatalogModel]?
-    let activeBrain: String?
+    let models: ModelCatalog?
+    private let activeBrainText: LenientText?
+    var activeBrain: String? { activeBrainText?.value.map { String($0.prefix(64)) } }
 
     enum CodingKeys: String, CodingKey {
         case host, software, brains, models
         case liveHost = "live_host"
-        case activeBrain = "active_brain"
+        case activeBrainText = "active_brain"
     }
 
+    /// The catalog entries that fit, at most 500; anything but a list is empty.
+    struct ModelCatalog: Decodable {
+        let entries: [CatalogModel]
+
+        init(from decoder: Decoder) throws {
+            var entries: [CatalogModel] = []
+            if var list = try? decoder.unkeyedContainer() {
+                while !list.isAtEnd, entries.count < 500 {
+                    if let entry = try? list.decode(CatalogModel.self) { entries.append(entry) }
+                    // A failed decode does not advance the list; this always does.
+                    else if (try? list.decode(Skipped.self)) == nil { break }
+                }
+            }
+            self.entries = entries
+        }
+
+        private struct Skipped: Decodable { init(from decoder: Decoder) throws {} }
+    }
+
+    /// One catalog model; only its id is required.
     struct CatalogModel: Decodable {
         let id: String
         let backend: String
@@ -325,6 +348,16 @@ struct HomeNodeRegistry: Decodable {
         let available: Bool
 
         enum CodingKeys: String, CodingKey { case id, backend, cost, available; case modelClass = "class" }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = String(try container.decode(String.self, forKey: .id).prefix(200))
+            let text = { (key: CodingKeys) in String(((try? container.decode(String.self, forKey: key)) ?? "").prefix(64)) }
+            backend = text(.backend)
+            modelClass = text(.modelClass)
+            cost = text(.cost)
+            available = (try? container.decode(Bool.self, forKey: .available)) ?? false
+        }
     }
 
     struct Brain: Decodable {
@@ -379,6 +412,13 @@ struct HomeNodeRegistry: Decodable {
 // does not hide a whole page.
 
 struct DeviceListResponse: Decodable { let devices: [LinkedDevice] }
+
+/// An optional display string: any other JSON value reads as nil instead of failing the
+/// surrounding answer.
+struct LenientText: Decodable {
+    let value: String?
+    init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(String.self) }
+}
 
 struct LinkedDevice: Decodable, Identifiable {
     let id: String

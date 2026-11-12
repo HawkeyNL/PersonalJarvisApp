@@ -5,8 +5,9 @@ struct ModelAccessEntry: Decodable, Identifiable {
     let provider: String
     let model: String
     let enabled: Bool
-    /// The routing tier this model serves, when it has one (shown on Integrations).
-    var route: String? = nil
+    /// The routing tier this model serves, when it has one (shown on Integrations); display
+    /// only, so a value of another type reads as none.
+    var route: LenientText? = nil
     var price_status: String? = nil
     var input_per_million_usd: Double? = nil
     var output_per_million_usd: Double? = nil
@@ -15,6 +16,7 @@ struct ModelAccessEntry: Decodable, Identifiable {
     var pricing_updated_at: String? = nil
     var long_context: ModelLongContextPrice? = nil
     var id: String { provider + "/" + model }
+    var routeName: String? { route?.value.map { String($0.prefix(64)) } }
 
     var hasPrice: Bool {
         guard let input = input_per_million_usd, let output = output_per_million_usd else { return false }
