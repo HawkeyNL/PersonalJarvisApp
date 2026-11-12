@@ -15,7 +15,7 @@ import {
 } from "../assistant";
 import { conversations, currentId, deleteConversation } from "../conversations";
 import { renderMarkdown, handleMarkdownClick } from "../markdown";
-import { splitSources } from "../webAnswer";
+import { splitSources, sourcePlace, type Source } from "../webAnswer";
 import { chips, chipNotice, attach, removeChip, takeChips, uploading, allReady, photoUrl, photoMeta, keepPhoto, deletePhoto } from "../photos";
 import { expiryHint } from "../chatPhotos";
 import { askedIn, dayOf, replyIsHere, type AskedIn } from "../chatList";
@@ -73,7 +73,7 @@ const day = computed(() => (current.value ? dayOf(current.value.updated_at, Date
 // An assistant row exists (empty) from the moment a run starts; show it once text streams in.
 // A web answer shows its trailing Sources as a list of links instead of in the text.
 const shown = computed(() => messages.value.filter((m) => m.role === "user" || m.text || m.attachments?.length)
-  .map((m) => ({ ...m, ...(m.web ? splitSources(m.text) : { body: m.text, sources: [] as string[] }) })));
+  .map((m) => ({ ...m, ...(m.web ? splitSources(m.text) : { body: m.text, sources: [] as Source[] }) })));
 const last = computed(() => messages.value[messages.value.length - 1]);
 const waiting = computed(() => thinking.value && !(last.value?.role === "jarvis" && last.value.text));
 
@@ -324,9 +324,17 @@ onMounted(async () => {
           <div v-if="m.attachments?.length" class="photos">
             <ChatPhoto v-for="id in m.attachments" :key="id" :id="id" @open="openPhoto" />
           </div>
+          <!-- Titles are plain text from Core's checked Sources list; nothing is fetched. -->
           <div v-if="m.sources.length" class="sources t-sm" @click="handleMarkdownClick">
             <span class="t-xs t-2">Sources</span>
-            <ul><li v-for="url in m.sources" :key="url"><a :href="url">{{ url }}</a></li></ul>
+            <ul>
+              <li v-for="source in m.sources" :key="source.url">
+                <a :href="source.url" class="source-card" :title="source.url">
+                  <span v-if="source.title" class="source-title">{{ source.title }}</span>
+                  <span class="source-place t-xs t-2">{{ sourcePlace(source.url).host }}<span v-if="sourcePlace(source.url).path" class="source-path">{{ sourcePlace(source.url).path }}</span></span>
+                </a>
+              </li>
+            </ul>
           </div>
         </template>
       </div>
@@ -511,8 +519,15 @@ onMounted(async () => {
 .md :deep(.md-table) { margin: 0 0 0.75em; padding: 4px 8px; overflow-x: auto; }
 .md :deep(.md-table td) { overflow-wrap: normal; }
 .sources { display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
-.sources ul { margin: 0; padding-left: 1.4em; }
-.sources a { color: var(--accent-text); }
+.sources ul { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
+.source-card {
+  display: flex; flex-direction: column; gap: 2px; max-width: 280px; padding: 8px 12px;
+  border-radius: var(--r-md); background: var(--bg-sunken); color: var(--text-primary); text-decoration: none;
+}
+.source-card:hover { background: var(--bg-hover); }
+.source-card:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.source-title { color: var(--accent-text); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.source-place { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .composer-wrap { padding: 16px 32px 20px; display: flex; flex-direction: column; gap: 8px; }
 .composer { padding: 10px 10px 10px 16px; display: flex; flex-direction: column; gap: 8px; }

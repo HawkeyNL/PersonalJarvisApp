@@ -165,7 +165,7 @@ private struct MessageView: View {
     }
 
     /// A web answer shows its trailing Sources as links instead of in the text.
-    private var answer: (body: String, sources: [URL]) {
+    private var answer: (body: String, sources: [WebAnswer.Source]) {
         message.isWeb ? WebAnswer.split(message.content) : (message.content, [])
     }
 
@@ -202,8 +202,23 @@ private struct MessageView: View {
                 VStack(alignment: .leading, spacing: JV.Space.xxs) {
                     Text("Sources").font(JV.font(12, .medium, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
                     // Validated https URLs only (WebAnswer); Link opens them in the browser.
-                    ForEach(answer.sources, id: \.self) { url in
-                        Link(destination: url) { Text(verbatim: url.absoluteString).font(JV.font(13)).multilineTextAlignment(.leading) }
+                    // A card: the plain title (verbatim, never Markdown), then host and short path.
+                    ForEach(answer.sources, id: \.self) { source in
+                        Link(destination: source.url) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                if let title = source.title {
+                                    Text(verbatim: title).font(JV.font(14, .medium)).foregroundStyle(JV.accentText).lineLimit(2)
+                                }
+                                Text(verbatim: source.host + source.shortPath)
+                                    .font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary).lineLimit(1).truncationMode(.middle)
+                            }
+                            .multilineTextAlignment(.leading)
+                            .padding(.horizontal, JV.Space.sm).padding(.vertical, JV.Space.xs)
+                            .frame(maxWidth: 320, alignment: .leading)
+                            .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
+                        }
+                        .accessibilityLabel(Text(verbatim: (source.title.map { $0 + ", " } ?? "") + source.host))
+                        .accessibilityHint("Opens in the browser")
                     }
                 }
             }

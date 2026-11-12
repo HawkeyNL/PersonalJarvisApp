@@ -170,11 +170,27 @@ struct ConversationMessage: Decodable, Identifiable, Equatable {
     var isWeb: Bool { model?.hasPrefix("web:") == true }
 }
 
-/// A web answer ends with a "Sources:" (or "Bronnen:") list of https URLs.
+/// A web answer ends with a "Sources:" (or "Bronnen:") list of https URLs, bare or
+/// titled as `[Title](url)`.
 enum WebAnswer {
-    /// The answer without its trailing Sources list, and that list's distinct https URLs.
+    /// One Sources entry: an https URL and the plain-text title Core's research gave it.
+    struct Source: Equatable, Hashable {
+        let url: URL
+        var title: String? = nil
+        /// The host without "www.", for a link card.
+        var host: String { (url.host ?? "").replacingOccurrences(of: "^www\\.", with: "", options: .regularExpression) }
+        /// The path, shortened to 40 characters; empty for "/".
+        var shortPath: String {
+            let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedPath ?? ""
+            if path == "/" { return "" }
+            return path.count > 40 ? String(path.prefix(39)) + "…" : path
+        }
+    }
+
+    /// The answer without its trailing Sources list, and that list's distinct https
+    /// sources (the first of a URL wins).
     /// Core's rule: the last line that, without `# * _ :` and spaces, reads Sources.
-    static func split(_ text: String) -> (body: String, sources: [URL]) {
+    static func split(_ text: String) -> (body: String, sources: [Source]) {
         let lines = text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
         let label = CharacterSet(charactersIn: "#*_: ")
         guard let header = lines.lastIndex(where: {
@@ -182,18 +198,41 @@ enum WebAnswer {
         }) else { return (text, []) }
         let body = lines[..<header].joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         var seen = Set<URL>()
-        return (body, lines[(header + 1)...].compactMap(httpsSource).filter { seen.insert($0).inserted })
+        return (body, lines[(header + 1)...].compactMap(httpsSource).filter { seen.insert($0.url).inserted })
     }
 
-    /// One https URL with a host and no user info, like Core's Sources filter.
-    private static func httpsSource(_ line: Substring) -> URL? {
+    /// One https URL with a host and no user info, bare or titled, like Core's Sources filter.
+    private static func httpsSource(_ line: Substring) -> Source? {
         let candidate = line.trimmingCharacters(in: .whitespaces).drop(while: { $0 == "-" || $0 == "*" }).drop(while: \.isWhitespace)
-        guard !candidate.isEmpty, !candidate.contains(where: \.isWhitespace),
-              let url = URL(string: String(candidate)), url.scheme?.lowercased() == "https",
+        let titled = titledLink(candidate)
+        let text = titled?.url ?? candidate
+        guard !text.isEmpty, !text.contains(where: \.isWhitespace),
+              let url = URL(string: String(text)), url.scheme?.lowercased() == "https",
               url.host?.isEmpty == false, url.user == nil, url.password == nil,
               var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
         components.scheme = "https"
-        return components.url
+        return components.url.map { Source(url: $0, title: titled?.title) }
+    }
+
+    /// A whole `[Title](url)` line, like Core: a plain title of 1 to 120 characters
+    /// without brackets, parentheses, control or invisible format characters. The
+    /// title is only ever shown as verbatim text.
+    private static func titledLink(_ candidate: Substring) -> (title: String, url: Substring)? {
+        guard candidate.hasPrefix("["), candidate.hasSuffix(")"), let end = candidate.range(of: "](") else { return nil }
+        let title = candidate[candidate.index(after: candidate.startIndex)..<end.lowerBound]
+        let plain = (1...120).contains(title.unicodeScalars.count) && !title.unicodeScalars.contains {
+            "[]()".unicodeScalars.contains($0) || $0.properties.generalCategory == .control || invisibleFormat($0)
+        }
+        return plain ? (String(title), candidate[end.upperBound..<candidate.index(before: candidate.endIndex)]) : nil
+    }
+
+    /// Bidi controls, zero-width, line/paragraph separators and other invisible format
+    /// characters (Core's list): a title could hide or reorder text with them.
+    private static func invisibleFormat(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x00AD, 0x061C, 0x200B...0x200F, 0x2028...0x202E, 0x2060...0x2064, 0x2066...0x2069, 0xFEFF: return true
+        default: return false
+        }
     }
 
     /// A run that starts right after a finished Jarvis reply, with no new question
