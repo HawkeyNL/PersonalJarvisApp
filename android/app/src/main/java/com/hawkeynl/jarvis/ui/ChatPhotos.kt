@@ -71,13 +71,13 @@ fun submitFailure(status: Int?, sameSignIn: Boolean): SubmitOutcome = when {
  *  meanwhile in the same sign-in; another sign-in's token must not reach for an old id. */
 fun forgetAfterUpload(chipShown: Boolean, id: String?, sameSignIn: Boolean): Boolean = !chipShown && id != null && sameSignIn
 
-/** Photos picked while locked are attached after the unlock only in the sign-in that
- *  picked them; a sign-out, other Home Node or new sign-in drops them. */
 /** Another picker answer while locked (a double tap) adds to the waiting photos of the
  *  same sign-in, up to [MAX_PHOTOS]; a different sign-in's are replaced. */
 fun <T> addPicked(waiting: Pair<Int, List<T>>?, identity: Int, uris: List<T>): Pair<Int, List<T>> =
     identity to ((if (waiting?.first == identity) waiting.second else emptyList()) + uris).take(MAX_PHOTOS)
 
+/** Photos picked while locked are attached after the unlock only in the sign-in that
+ *  picked them; a sign-out, other Home Node or new sign-in drops them. */
 fun <T> pickedToAttach(pickedIn: Int, identity: Int, uris: List<T>): List<T> = if (pickedIn == identity) uris else emptyList()
 
 /** Photo ids the messages carry that the conversation no longer has (deleted or
