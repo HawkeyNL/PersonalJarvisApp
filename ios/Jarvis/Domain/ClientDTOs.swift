@@ -161,8 +161,10 @@ struct ConversationMessage: Decodable, Identifiable, Equatable {
     let model: String?
     let at: String
     var canonicalId: String? = nil
+    /// Chat photo ids; shown read-only, fetched with the session token.
+    var attachments: [String]? = nil
 
-    enum CodingKeys: String, CodingKey { case role, content, model, at; case canonicalId = "id" }
+    enum CodingKeys: String, CodingKey { case role, content, model, at, attachments; case canonicalId = "id" }
 
     var id: String { canonicalId ?? "\(at)-\(role)-\(content)" }
     var isAssistant: Bool { role == "assistant" || role == "jarvis" }

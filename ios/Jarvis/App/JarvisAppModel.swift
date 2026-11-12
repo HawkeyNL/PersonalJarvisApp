@@ -405,7 +405,30 @@ final class JarvisAppModel: ObservableObject {
         if isAuthenticated { lockState = .locked }
     }
 
+    /// Decoded chat photos; bounded, cleared on sign-out.
+    private var photos: [String: ChatPhoto] = [:]
+
+    /// One chat photo for display. A passing failure is not remembered; the next showing retries.
+    func photo(id: String) async -> ChatPhoto {
+        if let cached = photos[id] { return cached }
+        guard let uuid = UUID(uuidString: id) else { return .unavailable }
+        let result: ChatPhoto
+        do {
+            let data = try await chat.photo(id: uuid)
+            result = UIImage(data: data).map(ChatPhoto.image) ?? .unavailable
+        } catch let JarvisAPIError.rejected(status, _) where status == 404 {
+            result = .removed
+        } catch {
+            return .unavailable
+        }
+        // ponytail: drop-all when full; an LRU if conversations show many photos.
+        if photos.count >= 24 { photos.removeAll() }
+        if case .unavailable = result {} else { photos[id] = result }
+        return result
+    }
+
     func logout() async {
+        photos.removeAll()
         await approvalPush.signingOut(reset: false)
         invalidatePresentation(clearIdentity: true)
         let generation = presentation.id

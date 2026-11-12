@@ -253,6 +253,32 @@ class KtorJarvisApi(
         }
     }
 
+    override suspend fun photo(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<ByteArray> {
+        // Only a canonical UUID reaches the path.
+        val photo = runCatching { java.util.UUID.fromString(id) }.getOrNull()?.toString()?.takeIf { it == id.lowercase() }
+            ?: return ApiResult.InvalidResponse("Invalid photo id")
+        return try {
+            val response = client.get(endpoint.url("/v1/photos/$photo")) { bearerAuth(token) }
+            when {
+                response.status == HttpStatusCode.Unauthorized -> ApiResult.Unauthorized
+                response.status != HttpStatusCode.OK -> ApiResult.HttpError(response.status.value, null)
+                response.contentType()?.withoutParameters() != ContentType.Image.JPEG ->
+                    ApiResult.InvalidResponse("Home Node did not send a JPEG")
+                else -> {
+                    val bytes = withContext(Dispatchers.IO) {
+                        response.bodyAsChannel().toInputStream().use { input -> readAtMost(input, MAX_PHOTO_BYTES + 1) }
+                    }
+                    if (bytes.size > MAX_PHOTO_BYTES || !isJpeg(bytes)) ApiResult.InvalidResponse("Home Node sent an invalid photo")
+                    else ApiResult.Success(bytes)
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            networkFailure(error)
+        }
+    }
+
     private suspend inline fun <reified T> request(
         crossinline block: suspend () -> io.ktor.client.statement.HttpResponse,
     ): ApiResult<T> {
@@ -297,6 +323,23 @@ class KtorJarvisApi(
     }
 
     companion object {
+        /** Core stores at most 1 MiB per photo; twice that leaves room, no more. */
+        const val MAX_PHOTO_BYTES = 2 * 1024 * 1024
+
+        fun isJpeg(bytes: ByteArray): Boolean =
+            bytes.size >= 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()
+
+        private fun readAtMost(input: java.io.InputStream, limit: Int): ByteArray {
+            val out = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (out.size() < limit) {
+                val read = input.read(buffer, 0, minOf(buffer.size, limit - out.size()))
+                if (read < 0) break
+                out.write(buffer, 0, read)
+            }
+            return out.toByteArray()
+        }
+
         private const val PAIRING_PASSWORD_NOT_SET = "pairing_password_not_set"
         const val PAIRING_PASSWORD_NOT_SET_MESSAGE = "Set an account password on an active device first."
 

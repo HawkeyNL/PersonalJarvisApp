@@ -2384,3 +2384,28 @@ func testARunRightAfterAFinishedReplyIsCoresOwnWebSearch() {
         XCTAssertFalse(WebAnswer.startsAfterReply([]))
     }
 }
+
+final class ChatPhotoTests: XCTestCase {
+    func testMessagesCarryPhotoIdsAndOldMessagesDecodeWithoutThem() throws {
+        let old = try JSONDecoder().decode(ConversationMessage.self, from: Data(#"{"role":"user","content":"hi","model":null,"at":"x"}"#.utf8))
+        XCTAssertNil(old.attachments)
+        let photo = try JSONDecoder().decode(ConversationMessage.self, from: Data(#"{"role":"user","content":"","model":null,"at":"x","attachments":["p1"]}"#.utf8))
+        XCTAssertEqual(photo.attachments, ["p1"])
+        let id = "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"
+        let live = try JSONDecoder().decode(RealtimeMessage.self, from: Data(#"{"id":"\#(id)","conversation_id":"\#(id)","role":"user","content":"","model":null,"created_at":"t","attachments":["\#(id.uppercased())"]}"#.utf8))
+        XCTAssertEqual(live.conversationMessage.attachments, [id])
+    }
+
+    func testOnlySmallJpegsAreShown() {
+        let jpeg = Data([0xFF, 0xD8, 0xFF, 0xE0, 1])
+        XCTAssertTrue(JarvisAPIClient.isJPEG(jpeg, contentType: "image/jpeg"))
+        XCTAssertTrue(JarvisAPIClient.isJPEG(jpeg, contentType: "Image/JPEG; charset=binary"))
+        XCTAssertFalse(JarvisAPIClient.isJPEG(jpeg, contentType: nil))
+        XCTAssertFalse(JarvisAPIClient.isJPEG(jpeg, contentType: "image/png"))
+        XCTAssertFalse(JarvisAPIClient.isJPEG(Data("<svg onload=x>".utf8), contentType: "image/jpeg"))
+        XCTAssertFalse(JarvisAPIClient.isJPEG(Data(), contentType: "image/jpeg"))
+        var big = Data(count: JarvisAPIClient.maximumPhotoBytes + 1)
+        big.replaceSubrange(0..<3, with: [0xFF, 0xD8, 0xFF])
+        XCTAssertFalse(JarvisAPIClient.isJPEG(big, contentType: "image/jpeg"))
+    }
+}

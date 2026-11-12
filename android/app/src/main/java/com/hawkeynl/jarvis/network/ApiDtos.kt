@@ -127,6 +127,8 @@ data class ConversationMessage(
     val model: String? = null,
     val at: String,
     val id: String? = null,
+    /** Chat photo ids; shown read-only, fetched with the session token. */
+    val attachments: List<String> = emptyList(),
 )
 
 @Serializable

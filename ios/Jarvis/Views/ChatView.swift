@@ -65,7 +65,7 @@ struct ChatView: View {
                                              symbol: "bubble.left")
                         }
                         ForEach(model.messages) { message in
-                            MessageView(message: message).id(message.id)
+                            MessageView(message: message, photo: { await model.photo(id: $0) }).id(message.id)
                         }
                         if model.isSending {
                             HStack(spacing: JV.Space.xs) {
@@ -130,8 +130,51 @@ struct ChatView: View {
     }
 }
 
+/// A chat photo for display: decoded, gone (deleted or expired), or not loadable now.
+enum ChatPhoto {
+    case image(UIImage)
+    case removed
+    case unavailable
+}
+
+/// One photo of a message, read-only (sending comes later).
+private struct PhotoThumb: View {
+    let id: String
+    let load: (String) async -> ChatPhoto
+    @State private var photo: ChatPhoto?
+
+    var body: some View {
+        ZStack {
+            switch photo {
+            case .image(let image)?:
+                Image(uiImage: image).resizable().scaledToFill().accessibilityLabel("Photo")
+            case .removed?:
+                Text("Photo removed").font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary).padding(JV.Space.xs)
+            case .unavailable?:
+                Text("Photo unavailable").font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary).padding(JV.Space.xs)
+            case nil:
+                ProgressView().controlSize(.small)
+            }
+        }
+        .frame(width: 140, height: 140)
+        .background(JV.bgSunken)
+        .clipShape(RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
+        .task(id: id) { photo = await load(id) }
+    }
+}
+
 private struct MessageView: View {
     let message: ConversationMessage
+    let photo: (String) async -> ChatPhoto
+
+    @ViewBuilder private var photos: some View {
+        if let ids = message.attachments, !ids.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: JV.Space.xs) { ForEach(ids, id: \.self) { PhotoThumb(id: $0, load: photo) } }
+            }
+            .frame(maxWidth: 4 * 148)
+        }
+    }
 
     private var time: String? {
         parseCoreDate(message.at).map { $0.formatted(date: .omitted, time: .shortened) }
@@ -144,15 +187,19 @@ private struct MessageView: View {
     /// Your message: an accent bubble on the right, its time under it.
     private var mine: some View {
         VStack(alignment: .trailing, spacing: JV.Space.xxs) {
-            Text(verbatim: message.content)
-                .font(JV.font(16))
-                .foregroundStyle(JV.textOnAccent)
-                .textSelection(.enabled)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(JV.accentSolid, in: UnevenRoundedRectangle(
-                    topLeadingRadius: JV.Radius.lg, bottomLeadingRadius: JV.Radius.lg,
-                    bottomTrailingRadius: JV.Radius.sm, topTrailingRadius: JV.Radius.lg, style: .continuous))
+            photos
+            // A photo alone is a message too: then there is no text bubble.
+            if !message.content.isEmpty || (message.attachments ?? []).isEmpty {
+                Text(verbatim: message.content)
+                    .font(JV.font(16))
+                    .foregroundStyle(JV.textOnAccent)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(JV.accentSolid, in: UnevenRoundedRectangle(
+                        topLeadingRadius: JV.Radius.lg, bottomLeadingRadius: JV.Radius.lg,
+                        bottomTrailingRadius: JV.Radius.sm, topTrailingRadius: JV.Radius.lg, style: .continuous))
+            }
             if let time {
                 Text(verbatim: time).font(JV.number(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
             }
@@ -197,6 +244,7 @@ private struct MessageView: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel(Text(verbatim: (message.isWeb ? "Jarvis, from the web: " : "Jarvis: ") + answer.body))
             .accessibilityValue(Text(verbatim: time ?? ""))
+            photos
             // Outside the combined element so each source stays its own link.
             if !answer.sources.isEmpty {
                 VStack(alignment: .leading, spacing: JV.Space.xxs) {

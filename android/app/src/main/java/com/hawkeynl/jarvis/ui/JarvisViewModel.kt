@@ -1,6 +1,7 @@
 package com.hawkeynl.jarvis.ui
 
 import android.os.Build
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -53,6 +54,13 @@ sealed interface AndroidUpdateUiState {
     data class Failed(val message: String) : AndroidUpdateUiState
 }
 
+/** A chat photo for display: decoded, gone (deleted or expired), or not loadable now. */
+sealed interface PhotoResult {
+    data class Image(val bitmap: androidx.compose.ui.graphics.ImageBitmap) : PhotoResult
+    data object Removed : PhotoResult
+    data object Unavailable : PhotoResult
+}
+
 /** An offer is shown and sent only while its own conversation is open. */
 data class WebSearchOffer(val conversationId: String, val question: String)
 
@@ -102,6 +110,10 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     private var realtimeAvailable = false
     private val pending = com.hawkeynl.jarvis.chat.PendingRuns()
     private var unlinking = false
+    // Decoded chat photos, most recent first out; main thread only, cleared on sign-out.
+    private val photos = object : LinkedHashMap<String, PhotoResult>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, PhotoResult>?) = size > 24
+    }
     private val _state = MutableStateFlow(
         JarvisUiState(locked = container.sessions.hasSessionRecord(), voiceEnabled = container.voicePreferences.getBoolean("enabled", false),
             voiceRate = SpeechRate.normalize(container.voicePreferences.getFloat("rate", 1f)),
@@ -317,7 +329,23 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** One chat photo, fetched with the session token and decoded off the main thread. */
+    suspend fun photo(id: String): PhotoResult {
+        photos[id]?.let { return it }
+        val endpoint = _state.value.endpoint ?: return PhotoResult.Unavailable
+        val result = when (val bytes = container.conversations.photo(endpoint, id)) {
+            is ApiResult.Success -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { decodePhoto(bytes.value) }
+                ?.let { PhotoResult.Image(it) } ?: PhotoResult.Unavailable
+            is ApiResult.HttpError -> if (bytes.status == 404) PhotoResult.Removed else PhotoResult.Unavailable
+            else -> PhotoResult.Unavailable
+        }
+        // A passing failure is not remembered; the next showing retries.
+        if (result != PhotoResult.Unavailable) photos[id] = result
+        return result
+    }
+
     fun logout() {
+        photos.clear()
         container.sessions.modelAuthorization.invalidate()
         pending.clear()
         container.realtime.stop(); speech.stop()
@@ -620,7 +648,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 _state.update { state ->
                     val selected = state.conversationId ?: if (optimistic != null && state.messages.any { it.id == optimistic }) message.conversation_id else null
                     if (selected != message.conversation_id) state else state.copy(conversationId = selected,
-                        messages = upsertRealtime(state.messages, ConversationMessage(message.role, message.content, message.model, message.created_at, message.id), optimistic))
+                        messages = upsertRealtime(state.messages, ConversationMessage(message.role, message.content, message.model, message.created_at, message.id, message.attachments), optimistic))
                 }
             }
             "assistant.started" -> {
@@ -650,7 +678,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 pending.remove(run.request_id)
                 _state.update { state -> if (state.conversationId != message.conversation_id) state else state.copy(busy = false,
                     researchOffer = p.research_offer?.question?.trim()?.takeIf { it.isNotEmpty() }?.let { WebSearchOffer(message.conversation_id, it) },
-                    messages = upsertRealtime(state.messages, ConversationMessage(message.role, message.content, message.model, message.created_at, message.id), "run:${run.run_id}")) }
+                    messages = upsertRealtime(state.messages, ConversationMessage(message.role, message.content, message.model, message.created_at, message.id, message.attachments), "run:${run.run_id}")) }
             }
             "assistant.failed" -> {
                 val run = p.run ?: return; pending.remove(run.request_id)
@@ -735,4 +763,15 @@ internal fun afterFailedUnlink(state: JarvisUiState, failure: Exception): Jarvis
     is ApprovalBusyException, is SigningCancelledException -> state.copy(error = failure.message)
     // Server text is shown sanitised and bounded.
     else -> state.copy(localEraseOffer = PairingApproval.displayName(failure.message ?: "Core did not confirm the revocation.", 160))
+}
+
+/** Decode a JPEG at most about 1024 px on its long side (Core sends <= 1600). */
+private fun decodePhoto(bytes: ByteArray): androidx.compose.ui.graphics.ImageBitmap? {
+    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sample = 1
+    while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 1024) sample *= 2
+    val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+    return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
 }
