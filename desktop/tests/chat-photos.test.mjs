@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fitWithin, downscale, imageFiles, uploadFailure, missingPhotos, expiryHint, UNSUPPORTED, CORE_TOO_OLD, MAX_SIDE, JPEG_QUALITY, MAX_INPUT_BYTES, TOO_LARGE, UNREADABLE, runRefusal, tooOldToSend, SEND_WITHIN_MS } from "../src/chatPhotos.ts";
 import { runRequest } from "../src/realtimeProjection.ts";
-import { blocksDrop } from "../src/dropGuard.ts";
+import { blocksDrop, TEXT_FIELDS } from "../src/dropGuard.ts";
 
 test("photos shrink to 2048 px on the long side and never grow", () => {
   assert.deepEqual(fitWithin(4032, 3024), { width: 2048, height: 1536 });
@@ -151,4 +151,10 @@ test("the window swallows file drops anywhere and link drops outside text fields
   // A dragged link would navigate the window; text fields keep text drops.
   assert.equal(blocksDrop(["text/uri-list", "text/plain"], false, false), true);
   assert.equal(blocksDrop(["text/plain"], false, true), false);
+});
+
+test("only writable text fields keep text drops", () => {
+  assert.match(TEXT_FIELDS, /:not\(:disabled, \[readonly\]\)/);
+  assert.doesNotMatch(TEXT_FIELDS, /checkbox|radio/);
+  assert.match(read("components/JarvisConsole.vue"), /const files = imageFiles\(pasted\);\n  if \(files\.length\) attach\(files\);\n  else chipNotice\.value = ONLY_PHOTOS;/);
 });

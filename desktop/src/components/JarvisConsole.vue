@@ -125,10 +125,12 @@ function onPick(event: Event) {
   input.value = "";
 }
 function onPaste(event: ClipboardEvent) {
-  const files = imageFiles(event.clipboardData?.files);
-  if (!files.length) return;
+  const pasted = event.clipboardData?.files;
+  if (!pasted?.length) return;
   event.preventDefault();
-  attach(files);
+  const files = imageFiles(pasted);
+  if (files.length) attach(files);
+  else chipNotice.value = ONLY_PHOTOS;
 }
 const dropping = ref(false);
 const carriesFiles = (event: DragEvent) => !!event.dataTransfer?.types.includes("Files");
