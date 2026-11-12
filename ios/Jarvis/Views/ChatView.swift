@@ -365,6 +365,8 @@ private struct PhotoViewer: View {
                 }
             }
         }
+        // The full-size photo never shows in the app switcher.
+        .privacyCover()
         .task { photo = await model.photo(id: id, full: true) }
         .onChange(of: error) { _, error in
             if let error { AccessibilityNotification.Announcement(error).post() }

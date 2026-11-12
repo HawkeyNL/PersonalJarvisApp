@@ -75,14 +75,18 @@ final class JarvisAppModel: ObservableObject {
         photos.removeAll()
         photoMeta = [:]; removedPhotos = []; researchOffer = nil
         if clearIdentity {
-            // Composer photos outlive the background lock (pasting means leaving the app);
-            // a new identity or Home Node deletes the uploaded ones and drops the rest. One
-            // still uploading stays pending and Core removes it after 24 hours.
-            chips.forEach { forget($0) }
-            chips = []; chipNotice = nil; photoSession.invalidate()
+            dropChips()
             pendingRequests.clear(); currentConversationId = nil; currentConversationTitle = "New conversation"
             pendingPasswordReset = nil
         }
+    }
+
+    /// Composer photos outlive the background lock (pasting means leaving the app); a new
+    /// identity or Home Node deletes the uploaded ones and drops the rest. One still
+    /// uploading stays pending and Core removes it after 24 hours.
+    private func dropChips() {
+        chips.forEach { forget($0) }
+        chips = []; chipNotice = nil; photoSession.invalidate()
     }
 
     func stopSpeaking() {
@@ -288,7 +292,8 @@ final class JarvisAppModel: ObservableObject {
     func saveEndpoint() async -> Bool {
         do {
             let endpoint = try EndpointNormalizer.normalize(endpointText)
-            if endpoint != endpointStore.endpoint {
+            let changed = endpoint != endpointStore.endpoint
+            if changed {
                 invalidatePresentation(clearIdentity: true)
                 realtime.stop(); speech.stop(); voiceReleaseTask?.cancel(); pendingRequests.clear()
                 try await auth.clearLocalBinding()
@@ -296,7 +301,9 @@ final class JarvisAppModel: ObservableObject {
             }
             endpointStore.save(endpoint)
             endpointText = endpoint.absoluteString
-            await api.configure(baseURL: endpoint)
+            // A new binding only for a new Home Node: requests (and photo deletes) bound to
+            // the current one stay valid when the same address is saved again.
+            if changed { await api.configure(baseURL: endpoint) }
             notice = nil
             guard await checkConnection() else { return false }
             if try await auth.requiresLocalUnlock() {
@@ -819,6 +826,7 @@ final class JarvisAppModel: ObservableObject {
         guard !trimmed.isEmpty || !attached.isEmpty, isAuthenticated, lockState == .unlocked, !isSending,
               research || ChatPhotos.allReady(chips) else { return true }
         let generation = presentation.id
+        let photoGeneration = photoSession.id
         if realtimeAvailable && pendingRequests.isFull {
             notice = "Too many unconfirmed requests. Reconnect before sending more; no automatic regeneration will occur."
             return true
@@ -850,16 +858,21 @@ final class JarvisAppModel: ObservableObject {
                 guard presentation.accepts(generation) else { return false }
                 if selected == nil, currentConversationId == nil, pendingRequests[requestId] != nil { currentConversationId = run.conversation_id }
             } catch {
-                guard presentation.accepts(generation) else { return false }
-                isSending = false
+                let shown = presentation.accepts(generation)
                 if case let .rejected(status, _)? = error as? JarvisAPIError, let refusal = ChatPhotos.runRefusal(status) {
-                    // Core stored nothing: the message, its draft and its photos come back.
+                    // Core stored nothing: the message, its draft and its photos come back. After
+                    // the background lock the chat was cleared, but the composer photos remain.
                     pendingRequests.removeValue(forKey: requestId)
-                    messages.removeAll { $0.id == optimisticID }
-                    reply(refusal)
-                    restoreChips(taken)
-                    return true
+                    if shown {
+                        isSending = false
+                        messages.removeAll { $0.id == optimisticID }
+                        reply(refusal)
+                    }
+                    if photoSession.accepts(photoGeneration) { restoreChips(taken) }
+                    return shown || photoSession.accepts(photoGeneration)
                 }
+                guard shown else { return false }
+                isSending = false
                 notice = "Delivery was not confirmed. Reconnect to check saved history; Jarvis will not automatically generate again."
             }
             return false
@@ -898,6 +911,8 @@ final class JarvisAppModel: ObservableObject {
     }
 
     private func apply(awaitResult result: AuthServiceOutcome) {
+        // Not signed in (any more): the composer photos go too.
+        if case .authenticated = result {} else { dropChips() }
         switch result {
         case .needsEnrollment: enrollmentState = .notStarted
         case .needsPassword: enrollmentState = .needsPassword

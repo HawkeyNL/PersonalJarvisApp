@@ -2659,18 +2659,20 @@ final class ChatPhotoModelTests: XCTestCase {
         try await until { PhotoCoreProtocol.requests().contains(deleted) }
     }
 
-    func testARefusalAfterTheBackgroundLockRestoresNothing() async throws {
+    func testARefusalAfterTheBackgroundLockPutsOnlyThePhotosBack() async throws {
         PhotoCoreProtocol.reset(uploadDelay: 0, runStatus: 404, runDelay: 0.5)
         let model = signedIn()
         let photo = try png()
         model.attachPhotos([{ photo }])
         try await until { model.chips.first?.state == .ready }
+        let chip = try XCTUnwrap(model.chips.first?.id)
         async let refused = model.send("Look")
         try await until { PhotoCoreProtocol.requests().contains("POST /v1/assistant/runs") }
         model.lockWhenBackgrounded()
         let result = await refused
-        XCTAssertFalse(result)
-        XCTAssertTrue(model.chips.isEmpty)
+        XCTAssertTrue(result)
+        XCTAssertEqual(model.chips.map(\.id), [chip])
+        // The chat was cleared by the lock: no refusal line in it.
         XCTAssertTrue(model.messages.isEmpty)
     }
 
