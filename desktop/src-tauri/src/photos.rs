@@ -27,9 +27,13 @@ fn upload_body(body: &InvokeBody) -> Result<&[u8], String> {
     }
 }
 
-/// The canonical path of one photo; only a parsed UUID reaches the URL.
+/// The canonical path of one photo; only a parsed UUID reaches the URL. Only
+/// the hyphenated form Core sends is accepted (not simple, braced or urn).
 fn photo_path(id: &str) -> Result<String, String> {
-    let id = uuid::Uuid::try_parse(id).map_err(|_| "the photo id is invalid".to_string())?;
+    let id = Some(id)
+        .filter(|id| id.len() == 36)
+        .and_then(|id| uuid::Uuid::try_parse(id).ok())
+        .ok_or_else(|| "the photo id is invalid".to_string())?;
     Ok(format!("/v1/photos/{}", id.hyphenated()))
 }
 
@@ -163,6 +167,9 @@ mod tests {
             "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b/../x",
             "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b?x=1",
             "%2e%2e",
+            "0b6f3c2e8d1a4f5e9c3b2a1d0e9f8c7b",
+            "{0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b}",
+            "urn:uuid:0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b",
         ] {
             assert!(photo_path(bad).is_err(), "{bad}");
         }
