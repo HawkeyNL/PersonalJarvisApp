@@ -119,5 +119,9 @@ class ChatPhotosTest {
     @Test fun `photos picked while locked are attached after unlock only in the same sign-in`() {
         assertEquals(listOf("a", "b"), pickedToAttach(3, 3, listOf("a", "b")))
         assertEquals(emptyList<String>(), pickedToAttach(3, 4, listOf("a", "b")))
+        // A second picker answer adds up to the limit; another sign-in's are replaced.
+        assertEquals(3 to listOf("a"), addPicked(null, 3, listOf("a")))
+        assertEquals(3 to listOf("a", "b", "c", "d"), addPicked(3 to listOf("a", "b", "c"), 3, listOf("d", "e")))
+        assertEquals(4 to listOf("d"), addPicked(3 to listOf("a"), 4, listOf("d")))
     }
 }

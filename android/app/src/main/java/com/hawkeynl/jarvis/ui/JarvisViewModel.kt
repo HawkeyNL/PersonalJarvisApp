@@ -409,7 +409,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
      *  locked by now: the photos then wait for the unlock. */
     fun photosPicked(uris: List<android.net.Uri>) {
         if (uris.isEmpty()) return
-        if (_state.value.locked) picked = identity to uris else attachPhotos(uris)
+        if (_state.value.locked) picked = addPicked(picked, identity, uris) else attachPhotos(uris)
     }
 
     /** After an unlock: photos picked while locked, if still the same sign-in. */
