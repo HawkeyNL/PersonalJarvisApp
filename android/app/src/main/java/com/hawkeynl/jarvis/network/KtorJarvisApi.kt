@@ -395,7 +395,8 @@ class KtorJarvisApi(
                 response.status == HttpStatusCode.Unauthorized -> ApiResult.Unauthorized
                 response.status.value !in 200..299 -> ApiResult.HttpError(response.status.value, null)
                 else -> try {
-                    ApiResult.Success(read(smallJson(response, MAX_JOBS_BYTES) ?: JsonNull))
+                    val json = smallJson(response, MAX_JOBS_BYTES) ?: JsonNull
+                    ApiResult.Success(withContext(Dispatchers.Default) { read(json) })
                 } catch (_: IllegalArgumentException) {
                     ApiResult.InvalidResponse("Home Node sent an invalid answer")
                 }
@@ -409,11 +410,11 @@ class KtorJarvisApi(
 
     /** A small JSON reply, read with a size bound; null when too large or not JSON. */
     private suspend fun smallJson(response: io.ktor.client.statement.HttpResponse, limit: Int = MAX_REPLY_BYTES): JsonElement? {
-        val bytes = withContext(Dispatchers.IO) {
-            response.bodyAsChannel().toInputStream().use { input -> readAtMost(input, limit + 1) }
+        // Read and parsed off the main thread.
+        return withContext(Dispatchers.IO) {
+            val bytes = response.bodyAsChannel().toInputStream().use { input -> readAtMost(input, limit + 1) }
+            if (bytes.size > limit) null else runCatching { Json.parseToJsonElement(bytes.decodeToString()) }.getOrNull()
         }
-        if (bytes.size > limit) return null
-        return runCatching { Json.parseToJsonElement(bytes.decodeToString()) }.getOrNull()
     }
 
     private suspend inline fun <reified T> request(

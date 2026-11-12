@@ -519,7 +519,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             val token = container.sessions.session().token ?: return@async null
             val asked = identity
             val result = container.api.call(endpoint, token)
-            if (asked != identity || _state.value.locked) return@async null
+            if (asked != identity || _state.value.locked || !_state.value.authenticated) return@async null
             if (result == ApiResult.Unauthorized) handleApiFailure(result)
             result
         }.await()

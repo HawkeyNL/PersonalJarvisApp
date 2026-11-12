@@ -179,6 +179,16 @@ private val TIME = Regex("^([01]\\d|2[0-3]):([0-5]\\d)$")
 /** "HH:MM"; null when it is not a time of day. */
 fun timeToMinute(text: String): Int? = TIME.matchEntire(text)?.let { it.groupValues[1].toInt() * 60 + it.groupValues[2].toInt() }
 
+/** A typed time as "HH:MM": "07:30", "7:30", "0730" and "730" read (a number keypad has no
+ *  colon); null when it is not a time of day. */
+fun typedTime(text: String): String? {
+    val t = text.trim()
+    val (hours, minutes) = if (':' in t) t.substringBefore(':') to t.substringAfter(':')
+        else if (t.length in 3..4) t.dropLast(2) to t.takeLast(2) else return null
+    if (hours.length !in 1..2 || minutes.length != 2 || !(hours + minutes).all { it in '0'..'9' }) return null
+    return "${hours.padStart(2, '0')}:$minutes".takeIf { timeToMinute(it) != null }
+}
+
 fun cadenceText(daily: Boolean, weekday: Int?, atMinute: Int): String {
     val at = "${minuteToTime(atMinute)} ($JOBS_TIME_ZONE)"
     return if (daily) "Daily at $at" else "Every ${WEEKDAYS[((weekday ?: 1) - 1).coerceIn(0, 6)]} at $at"

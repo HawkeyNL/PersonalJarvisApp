@@ -92,6 +92,15 @@ class JobsTest {
         assertEquals("an unknown time", zonedText("nope"))
     }
 
+    @Test fun `a typed time reads with or without its colon`() {
+        assertEquals("07:30", typedTime("07:30"))
+        assertEquals("07:30", typedTime("7:30"))
+        assertEquals("07:30", typedTime("0730"))
+        assertEquals("07:30", typedTime(" 730 "))
+        assertEquals("23:59", typedTime("2359"))
+        for (bad in listOf("", "7", "73", "7:3", "24:00", "2400", "07:60", "12345", "ab:cd", "-1:30", "07:30x")) assertNull(bad, typedTime(bad))
+    }
+
     @Test fun `the editor sends only what changed and never a daily weekday`() {
         val j = readJobList(json("""{"status":"ok","jobs":[$job]}"""))!!.jobs.single()
         assertNull(jobPatch(j, toDraft(j)))

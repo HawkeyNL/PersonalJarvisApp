@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -29,8 +30,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.hawkeynl.jarvis.network.ApiResult
 import com.hawkeynl.jarvis.network.Fact
@@ -54,7 +58,7 @@ import com.hawkeynl.jarvis.network.newDraft
 import com.hawkeynl.jarvis.network.newJob
 import com.hawkeynl.jarvis.network.runNowFailureText
 import com.hawkeynl.jarvis.network.summarySourceLabel
-import com.hawkeynl.jarvis.network.timeToMinute
+import com.hawkeynl.jarvis.network.typedTime
 import com.hawkeynl.jarvis.network.toDraft
 import com.hawkeynl.jarvis.network.triggerLabel
 import com.hawkeynl.jarvis.network.writeFailureText
@@ -159,17 +163,18 @@ private fun JobListPage(actions: JarvisViewModel, back: () -> Unit, open: (Strin
             shown == null -> Skeleton("Loading jobs…")
             else -> {
                 if (!shown.configured) Warning(JOBS_NOT_CONFIGURED)
+                // Outside the set-up card: after a 409 the reload shows the job, and the card goes.
+                if (error.isNotEmpty()) ErrorText(error)
                 shown.rows.forEach { row -> JobCard(row) { open(row.job.id) } }
                 JobKind.entries.filter { kind -> shown.rows.none { it.job.kind == kind } }.forEach { kind ->
                     ListSection(kind.label) {
                         Column(Modifier.padding(JvSpace.lg), verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
                             MutedText(kind.detail)
                             if (creating == kind) {
-                                JobForm(kind, newDraft(), busy, "Set up", onCancel = { creating = null }) { create(kind, it) }
+                                JobForm(kind, newDraft(), busy, "Set up", onCancel = { creating = null; error = "" }) { create(kind, it) }
                             } else {
                                 ActionButton("Set up", { creating = kind; error = "" })
                             }
-                            if (error.isNotEmpty() && creating == kind) ErrorText(error)
                         }
                     }
                 }
@@ -221,6 +226,10 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
             val found = list.value.jobs.firstOrNull { it.id == id }
             job = found
             failure = if (found == null) JobFailure.NOT_FOUND else null
+        } else if (list is ApiResult.InvalidResponse) {
+            // An answer that fails the guards is not shown next to an older one (desktop).
+            job = null
+            failure = JobFailure.FAILED
         } else if (job == null) {
             failure = jobFailureOf(list, list = true)
         }
@@ -255,7 +264,7 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
         latest.launch {
             try {
                 val result = actions.jobs { e, t -> runJob(e, t, current.id) } ?: return@launch
-                notice = if (result is ApiResult.Success) "Started. The run shows up below when it ends." else runNowFailureText(result)
+                notice = if (result is ApiResult.Success) "Started. Refresh to see the run when it ends." else runNowFailureText(result)
             } finally {
                 busy = false
             }
@@ -288,7 +297,10 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
                 }
                 val list = runs
                 if (list == null) {
-                    Unavailable("Runs", JvIcon.CLOCK, kind = UnavailableKind.ERROR, detail = "Could not load the runs.", onRetry = { latest.launch { load() } })
+                    Unavailable(
+                        "Runs", JvIcon.CLOCK, kind = UnavailableKind.ERROR, detail = "Could not load the runs.",
+                        onRetry = if (busy) null else ({ latest.launch { load() } }),
+                    )
                 } else {
                     ActivityList(
                         "Runs",
@@ -407,7 +419,7 @@ private fun PriorityRow(priority: Priority, fact: Fact?) {
 @Composable
 private fun JobForm(kind: JobKind, initial: JobDraft, busy: Boolean, submit: String, onCancel: (() -> Unit)?, onSave: (JobDraft) -> Unit) {
     var draft by remember { mutableStateOf(initial) }
-    var error by remember { mutableStateOf("") }
+    var timeError by remember { mutableStateOf("") }
     var dayMenu by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
         SectionLabel("Repeats")
@@ -417,19 +429,26 @@ private fun JobForm(kind: JobKind, initial: JobDraft, busy: Boolean, submit: Str
                 GhostButton("Day: ${WEEKDAYS[draft.weekday - 1]}", { dayMenu = true })
                 DropdownMenu(expanded = dayMenu, onDismissRequest = { dayMenu = false }) {
                     WEEKDAYS.forEachIndexed { i, day ->
-                        DropdownMenuItem(text = { Text(day) }, onClick = { draft = draft.copy(weekday = i + 1); dayMenu = false })
+                        val chosen = draft.weekday == i + 1
+                        DropdownMenuItem(
+                            text = { Text(day) },
+                            onClick = { draft = draft.copy(weekday = i + 1); dayMenu = false },
+                            modifier = Modifier.semantics { selected = chosen },
+                            trailingIcon = { if (chosen) JvIconView(JvIcon.CHECK, size = 18.dp) },
+                        )
                     }
                 }
             }
         }
         OutlinedTextField(
             value = draft.time,
-            onValueChange = { draft = draft.copy(time = it.take(5)) },
-            modifier = Modifier.fillMaxWidth(),
+            onValueChange = { draft = draft.copy(time = it); timeError = "" },
+            modifier = Modifier.fillMaxWidth().semantics { if (timeError.isNotEmpty()) this.error(timeError) },
             label = { Text("Time") },
             placeholder = { Text("HH:MM") },
-            supportingText = { Text("$JOBS_TIME_ZONE time") },
-            isError = error.isNotEmpty(),
+            supportingText = { Text(timeError.ifEmpty { "$JOBS_TIME_ZONE time" }) },
+            isError = timeError.isNotEmpty(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
             shape = JvShapes.md,
         )
@@ -447,14 +466,15 @@ private fun JobForm(kind: JobKind, initial: JobDraft, busy: Boolean, submit: Str
             )
             Switch(checked = draft.enabled, onCheckedChange = null)
         }
-        if (error.isNotEmpty()) ErrorText(error)
         Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm), verticalAlignment = Alignment.CenterVertically) {
             onCancel?.let { GhostButton("Cancel", it, enabled = !busy) }
             ActionButton(submit, {
-                if (timeToMinute(draft.time) == null) {
-                    error = "Pick a time of day."
+                val time = typedTime(draft.time)
+                if (time == null) {
+                    timeError = "Pick a time of day."
                 } else {
-                    error = ""
+                    timeError = ""
+                    draft = draft.copy(time = time)
                     onSave(draft)
                 }
             }, Modifier.weight(1f), enabled = !busy)
