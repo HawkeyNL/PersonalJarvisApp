@@ -270,6 +270,24 @@ actor JarvisAPIClient {
                           expectedBinding: expectedBinding, limit: 4 * 1024, resourceTimeout: 120, response: PhotoUpload.self)
     }
 
+    // Scheduled jobs (desktop jobsApi.ts). The answers are not needed: the page reloads.
+    func createJob(_ body: NewJob, token: String, expectedBinding: UUID) async throws {
+        _ = try await request(path: "/v1/jobs", method: "POST", body: body, token: token,
+                              expectedBinding: expectedBinding, limit: 64 * 1024, response: EmptyOrJSON.self)
+    }
+
+    /// Core answers 409 when the job moved past `revision`.
+    func updateJob(id: UUID, revision: Int, patch: JobPatch, token: String, expectedBinding: UUID) async throws {
+        _ = try await request(path: "/v1/jobs/\(id.uuidString.lowercased())?expected_revision=\(revision)", method: "PATCH",
+                              body: patch, token: token, expectedBinding: expectedBinding, limit: 64 * 1024, response: EmptyOrJSON.self)
+    }
+
+    /// 202 when queued; 429 within an hour of the last owner run.
+    func runJobNow(id: UUID, token: String, expectedBinding: UUID) async throws {
+        _ = try await request(path: "/v1/jobs/\(id.uuidString.lowercased())/run", method: "POST", body: [String: String](),
+                              token: token, expectedBinding: expectedBinding, limit: 64 * 1024, response: EmptyOrJSON.self)
+    }
+
     private func delete(_ path: String, token: String, expectedBinding: UUID) async throws {
         _ = try await request(path: path, method: "DELETE", token: token,
                               expectedBinding: expectedBinding, response: EmptyOrJSON.self)

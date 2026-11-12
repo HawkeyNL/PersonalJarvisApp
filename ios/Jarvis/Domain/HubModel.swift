@@ -236,7 +236,7 @@ enum AppTab: String, CaseIterable, Hashable {
         switch self {
         case .jarvis: [.chat, .voice, .conversations, .memory]
         case .trading: []
-        case .activity: [.tasks, .agents]
+        case .activity: [.tasks, .agents, .jobs]
         case .settings: [.health, .healthUsage, .integrations, .models, .context]
         }
     }
@@ -248,7 +248,7 @@ func tabDestination(_ route: HubRoute) -> (tab: AppTab, path: [HubRoute]) {
     case .settings: (.settings, [])
     case .pairingApprovals: (.activity, [])
     case .chat, .voice, .conversations, .memory: (.jarvis, [route])
-    case .tasks, .agents: (.activity, [route])
+    case .tasks, .agents, .jobs: (.activity, [route])
     case .health, .healthUsage, .integrations, .models, .context: (.settings, [route])
     }
 }
