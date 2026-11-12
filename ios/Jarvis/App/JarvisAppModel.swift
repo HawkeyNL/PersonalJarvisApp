@@ -169,7 +169,7 @@ final class JarvisAppModel: ObservableObject {
     }
 
     /// Orb mood from what the app knows: a reply in progress means thinking.
-    /// iOS has no microphone input yet, so it never listens.
+    /// The mic lives in the chat composer only, so Home never shows listening.
     var mood: Mood { isSending ? .thinking : .idle }
 
     /// Optional owner read for the hub and node pages. An older Core (404/405)
