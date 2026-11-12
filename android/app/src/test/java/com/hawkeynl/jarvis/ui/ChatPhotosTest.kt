@@ -124,4 +124,10 @@ class ChatPhotosTest {
         assertEquals(3 to listOf("a", "b", "c", "d"), addPicked(3 to listOf("a", "b", "c"), 3, listOf("d", "e")))
         assertEquals(4 to listOf("d"), addPicked(3 to listOf("a"), 4, listOf("d")))
     }
+
+    @Test fun `a transcript or web search leaves the composer photos, a message takes them`() {
+        val chips = listOf(PhotoChip(1, ChipState.READY, id = "a"), PhotoChip(2, ChipState.UPLOADING))
+        assertEquals(emptyList<PhotoChip>() to chips, takePhotos(chips, withPhotos = false))
+        assertEquals(chips to emptyList<PhotoChip>(), takePhotos(chips, withPhotos = true))
+    }
 }

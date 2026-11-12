@@ -64,6 +64,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.hawkeynl.jarvis.chat.VOICE_DISCLOSURE
 import com.hawkeynl.jarvis.chat.WebAnswer
 import com.hawkeynl.jarvis.chat.appendDictated
 import com.hawkeynl.jarvis.chat.isWebModel
@@ -94,7 +95,8 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel, pickPhot
     LaunchedEffect(state.dictated) {
         state.dictated?.let { draft = appendDictated(draft, it); actions.dictatedTaken() }
     }
-    // Leaving the chat stops the mic, like desktop closing the console.
+    // Leaving the chat stops the mic, like desktop closing the console. A rotation recreates
+    // the screen too and so drops a running dictation: it fails closed; tap again.
     DisposableEffect(Unit) { onDispose { actions.cancelDictation() } }
     val c = JvTheme.colors
     Column(Modifier.fillMaxSize().imePadding().testTag("chat")) {
@@ -156,7 +158,9 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel, pickPhot
             Column(Modifier.padding(horizontal = JvSpace.md), verticalArrangement = Arrangement.spacedBy(JvSpace.xxs)) {
                 state.chips.forEach { chip -> chip.error?.let { ErrorText(it) } }
                 state.chipNotice?.let { MutedText(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
-                if (state.listening) MutedText("Listening…", Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                // Not a live region: it would be read aloud into the open mic. The button's state says it.
+                if (state.listening) MutedText("Listening…")
+                if (state.dictationDisclosure) MutedText(VOICE_DISCLOSURE, Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                 state.dictationNotice?.let { ErrorText(it) }
                 // Said once, until a photo was sent.
                 if (state.chips.isNotEmpty() && !state.photosDisclosed) MutedText(PHOTO_DISCLOSURE)
@@ -239,9 +243,11 @@ private fun MicButton(listening: Boolean, actions: JarvisViewModel) {
             if (listening || allowed) actions.toggleDictation() else ask.launch(Manifest.permission.RECORD_AUDIO)
         },
         // The level is read while drawing only, so it does not recompose the chat.
-        modifier = Modifier.drawBehind {
-            if (listening) drawCircle(c.accentSubtle, size.minDimension / 2 + (2 + if (still) 2f else level * 4).dp.toPx())
-        },
+        modifier = Modifier
+            .drawBehind {
+                if (listening) drawCircle(c.accentSubtle, size.minDimension / 2 + (2 + if (still) 2f else level * 4).dp.toPx())
+            }
+            .semantics { stateDescription = if (listening) "On" else "Off" },
         selected = listening,
     )
 }
