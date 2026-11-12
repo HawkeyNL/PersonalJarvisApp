@@ -1,6 +1,7 @@
 import AVFoundation
 import Observation
 import Speech
+import UIKit
 
 /// The rules of chat voice input, apart from the audio for tests. Mirrors desktop useMic.ts.
 enum VoiceInputRules {
@@ -10,11 +11,17 @@ enum VoiceInputRules {
     static let speakLevel = 0.06
     /// The longest transcript taken from one listening.
     static let maxTranscript = 4000
+    /// After the mic stops, the words heard so far are used if the recogniser stays silent this long.
+    static let finishTimeout: Duration = .seconds(10)
+    /// With VoiceOver on, capture starts after the button's own announcement.
+    static let voiceOverDelay: Duration = .milliseconds(800)
 
     static let speechOff = "Speech recognition is off for Jarvis. Turn it on in Settings › Privacy & Security › Speech Recognition."
     static let microphoneOff = "Microphone access is off for Jarvis. Turn it on in Settings › Privacy & Security › Microphone."
     static let restricted = "Voice input is not allowed on this device."
+    static let unavailable = "Speech recognition is not available right now. Try again later."
     static let failed = "Voice input could not start. Try again."
+    static let serverNotice = "This iPhone cannot recognise Dutch speech on the device. What you say is sent to Apple to be turned into text; Jarvis gets only the text."
 
     /// Root mean square of one buffer of samples.
     static func rms<Samples: Collection>(_ samples: Samples) -> Double where Samples.Element == Float {
@@ -40,69 +47,209 @@ enum VoiceInputRules {
     }
 }
 
+/// The microphone and the recogniser that VoiceInput drives; a seam for tests.
+@MainActor
+protocol VoiceCapture: AnyObject {
+    /// Whether Dutch speech can be recognised now.
+    var isAvailable: Bool { get }
+    /// False when recognition sends the audio to Apple.
+    var recognizesOnDevice: Bool { get }
+    /// Told on the main actor when `isAvailable` changes.
+    var availabilityChanged: ((Bool) -> Void)? { get set }
+    /// Asks for speech and microphone access: nil when both are granted, else why not.
+    func authorize() async -> String?
+    /// Starts the microphone and the recognition. `level` gets each buffer's RMS, `heard` the
+    /// text so far and whether it is final, `interrupted` a call or audio reconfiguration;
+    /// any of them may come on another thread.
+    func start(level: @escaping @Sendable (Double) -> Void, heard: @escaping @Sendable (String?, Bool) -> Void,
+               interrupted: @escaping @Sendable () -> Void) throws
+    /// No more audio: the recogniser gives its final text.
+    func endAudio()
+    /// Drops the recognition.
+    func cancel()
+    /// The microphone off and the audio session given back (spoken replies play again).
+    func release()
+}
+
 /// Push-to-talk for the chat composer: Dutch speech to text, on the device when it can.
 /// The level follows the voice; the mic stops after 5 s of silence. The owner (the app
-/// model) stops it with `discard` on every lock and reset, so nothing records while locked.
+/// model) stops it with `discard` on every lock, reset and conversation change, so nothing
+/// records while locked and no words reach another conversation.
 @MainActor
 @Observable
 final class VoiceInput {
     private(set) var listening = false
     /// 0...1, for the meter.
     private(set) var level = 0.0
-    /// Why the mic did not start (permission off); cleared by the next tap.
+    /// Why the mic did not start; cleared by the next tap.
     var problem: String?
+    /// Whether Dutch speech can be recognised now; the mic button hides otherwise.
+    private(set) var available: Bool
+    /// The mic stopped and the last words are on their way.
+    private(set) var finishing = false
 
-    @ObservationIgnored private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "nl-NL"))
-    @ObservationIgnored private let engine = AVAudioEngine()
-    @ObservationIgnored private var request: SFSpeechAudioBufferRecognitionRequest?
-    @ObservationIgnored private var holdsAudio = false
+    @ObservationIgnored private let capture: VoiceCapture
+    @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var session = ChatPresentationLifetime()
     @ObservationIgnored private var lastSpeech = Date()
     @ObservationIgnored private var heard = ""
     @ObservationIgnored private var starting = false
-    /// The recognition still running, also after the mic stopped and until its last words arrive.
-    private var task: SFSpeechRecognitionTask?
+    @ObservationIgnored private var deliver: ((String) -> Void)?
+    /// The silence watch while listening, the finish timeout after.
+    @ObservationIgnored private var timer: Task<Void, Never>?
 
-    /// Whether Dutch speech can be recognised now; the mic button hides otherwise.
-    var available: Bool { recognizer?.isAvailable == true }
-    /// The mic stopped and the last words are on their way.
-    var finishing: Bool { task != nil && !listening }
+    private static let serverNoticeKey = "jarvis.voice.serverNoticeShown"
+
+    init(capture: VoiceCapture = SpeechCapture(), defaults: UserDefaults = .standard) {
+        self.capture = capture
+        self.defaults = defaults
+        available = capture.isAvailable
+        capture.availabilityChanged = { [weak self] available in self?.available = available }
+    }
+
+    /// Recognition would send the audio to Apple and the owner has not been told yet.
+    var needsServerNotice: Bool { !capture.recognizesOnDevice && !defaults.bool(forKey: Self.serverNoticeKey) }
+    func acknowledgeServerNotice() { defaults.set(true, forKey: Self.serverNoticeKey) }
 
     /// Asks for speech and microphone access the first time, then listens while `allowed`
     /// holds. `deliver` gets the words heard, once, after the mic stopped.
     func start(while allowed: @escaping () -> Bool, deliver: @escaping (String) -> Void) async {
-        guard !listening, !starting, task == nil, let recognizer, recognizer.isAvailable, allowed() else { return }
+        guard !listening, !finishing, !starting, allowed() else { return }
+        guard capture.isAvailable else { problem = VoiceInputRules.unavailable; return }
         starting = true
         defer { starting = false }
         problem = nil
         let generation = session.id
-        if let refusal = await Self.authorize() {
+        if let refusal = await capture.authorize() {
             if session.accepts(generation) { problem = refusal }
             return
         }
-        // A lock, reset or leaving the chat during the prompts discarded this attempt.
+        // VoiceOver reads the button on activation; the mic must not type that.
+        if UIAccessibility.isVoiceOverRunning { try? await Task.sleep(for: VoiceInputRules.voiceOverDelay) }
+        // A lock, reset, conversation change or leaving the chat meanwhile discarded this attempt.
         guard session.accepts(generation), allowed() else { return }
+        heard = ""
+        lastSpeech = Date()
+        self.deliver = deliver
         do {
-            try begin(recognizer, generation: generation, deliver: deliver)
+            try capture.start(
+                level: { [weak self] rms in Task { @MainActor in self?.hear(rms, generation: generation) } },
+                heard: { [weak self] text, final in
+                    Task { @MainActor in self?.recognized(text, final: final, generation: generation) }
+                },
+                interrupted: { [weak self] in
+                    Task { @MainActor in if self?.session.accepts(generation) == true { self?.stop() } }
+                })
         } catch {
             stop(discard: true)
             problem = VoiceInputRules.failed
+            return
         }
+        listening = true
+        watchSilence(generation)
     }
 
     /// Stops listening. The words heard so far still arrive, unless `discard` (the lock, a
-    /// reset, leaving the chat): then they are dropped and nothing more is delivered.
+    /// reset, a conversation change, leaving the chat): then they are dropped and nothing
+    /// more is delivered.
     func stop(discard: Bool = false) {
         if discard {
             session.invalidate()
-            task?.cancel(); task = nil; request = nil; heard = ""
-        } else {
-            request?.endAudio()
+            capture.cancel()
+            heard = ""
+            deliver = nil
+            finishing = false
+            release()
+            return
         }
+        guard listening else { return }
+        capture.endAudio()
         release()
+        finishing = true
+        let generation = session.id
+        timer = Task { [weak self] in
+            try? await Task.sleep(for: VoiceInputRules.finishTimeout)
+            guard !Task.isCancelled, let self, self.session.accepts(generation) else { return }
+            self.finish()
+        }
     }
 
-    private static func authorize() async -> String? {
+    /// Like desktop's timer: the mic stops after 5 s without speech, also when no audio comes in.
+    private func watchSilence(_ generation: UUID) {
+        timer = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled, let self, self.listening, self.session.accepts(generation) else { return }
+                if VoiceInputRules.isQuiet(since: self.lastSpeech, now: Date()) {
+                    self.stop()
+                    return
+                }
+            }
+        }
+    }
+
+    private func hear(_ rms: Double, generation: UUID) {
+        guard listening, session.accepts(generation) else { return }
+        level = VoiceInputRules.level(previous: level, rms: rms)
+        if level > VoiceInputRules.speakLevel { lastSpeech = Date() }
+    }
+
+    private func recognized(_ text: String?, final: Bool, generation: UUID) {
+        guard session.accepts(generation) else { return }
+        if let text, !text.isEmpty {
+            heard = String(text.prefix(VoiceInputRules.maxTranscript))
+            // Words coming in keep the mic on, like a loud enough level.
+            lastSpeech = Date()
+        }
+        if final { finish() }
+    }
+
+    /// The recognition is over (its final text, an error or the timeout): deliver once.
+    private func finish() {
+        let said = heard
+        let deliver = deliver
+        session.invalidate()
+        capture.cancel()
+        heard = ""
+        self.deliver = nil
+        finishing = false
+        release()
+        if !said.isEmpty { deliver?(said) }
+    }
+
+    private func release() {
+        timer?.cancel()
+        timer = nil
+        listening = false
+        level = 0
+        capture.release()
+    }
+}
+
+/// The real microphone and recogniser: Dutch, on the device when the device can.
+@MainActor
+final class SpeechCapture: NSObject, VoiceCapture, SFSpeechRecognizerDelegate {
+    var availabilityChanged: ((Bool) -> Void)?
+    private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "nl-NL"))
+    private let engine = AVAudioEngine()
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+    private var task: SFSpeechRecognitionTask?
+    private var observers: [NSObjectProtocol] = []
+    private var holdsAudio = false
+
+    override init() {
+        super.init()
+        recognizer?.delegate = self
+    }
+
+    var isAvailable: Bool { recognizer?.isAvailable == true }
+    var recognizesOnDevice: Bool { recognizer?.supportsOnDeviceRecognition == true }
+
+    nonisolated func speechRecognizer(_ speechRecognizer: SFSpeechRecognizer, availabilityDidChange available: Bool) {
+        Task { @MainActor [weak self] in self?.availabilityChanged?(available) }
+    }
+
+    func authorize() async -> String? {
         let speech = await withCheckedContinuation { done in
             SFSpeechRecognizer.requestAuthorization { done.resume(returning: $0) }
         }
@@ -114,32 +261,51 @@ final class VoiceInput {
         return await AVAudioApplication.requestRecordPermission() ? nil : VoiceInputRules.microphoneOff
     }
 
-    private func begin(_ recognizer: SFSpeechRecognizer, generation: UUID, deliver: @escaping (String) -> Void) throws {
+    func start(level: @escaping @Sendable (Double) -> Void, heard: @escaping @Sendable (String?, Bool) -> Void,
+               interrupted: @escaping @Sendable () -> Void) throws {
+        guard let recognizer else { throw CocoaError(.featureUnsupported) }
         let audio = AVAudioSession.sharedInstance()
         holdsAudio = true
         try audio.setCategory(.record, mode: .measurement, options: .duckOthers)
         try audio.setActive(true, options: .notifyOthersOnDeactivation)
         let request = SFSpeechAudioBufferRecognitionRequest()
-        // Words coming in keep the mic on, like a loud enough level.
         request.shouldReportPartialResults = true
         if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         // No microphone (a simulator without input): installing a tap would crash.
         guard format.channelCount > 0, format.sampleRate > 0 else { throw CocoaError(.featureUnsupported) }
-        input.installTap(onBus: 0, bufferSize: 1024, format: format,
-                         block: Self.tap(request) { [weak self] rms in
-                             Task { @MainActor in self?.hear(rms, generation: generation) }
-                         })
+        input.installTap(onBus: 0, bufferSize: 1024, format: format, block: Self.tap(request, meter: level))
+        // A call, Siri or a new audio route ends the listening.
+        let center = NotificationCenter.default
+        observers = [
+            center.addObserver(forName: AVAudioSession.interruptionNotification, object: audio, queue: nil) { _ in interrupted() },
+            center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { _ in interrupted() },
+        ]
         engine.prepare()
         try engine.start()
         self.request = request
-        heard = ""
-        lastSpeech = Date()
-        listening = true
-        task = recognizer.recognitionTask(with: request, resultHandler: Self.results { [weak self] text, final in
-            Task { @MainActor in self?.recognized(text, final: final, generation: generation, deliver: deliver) }
-        })
+        task = recognizer.recognitionTask(with: request, resultHandler: Self.results(heard))
+    }
+
+    func endAudio() { request?.endAudio() }
+
+    func cancel() {
+        task?.cancel()
+        task = nil
+        request = nil
+    }
+
+    func release() {
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        observers = []
+        guard holdsAudio else { return }
+        holdsAudio = false
+        engine.stop()
+        engine.inputNode.removeTap(onBus: 0)
+        let audio = AVAudioSession.sharedInstance()
+        try? audio.setActive(false, options: .notifyOthersOnDeactivation)
+        try? audio.setCategory(.soloAmbient)
     }
 
     /// Built outside the main actor: the tap runs on the audio thread.
@@ -156,40 +322,5 @@ final class VoiceInput {
     private nonisolated static func results(_ handle: @escaping @Sendable (String?, Bool) -> Void)
         -> @Sendable (SFSpeechRecognitionResult?, Error?) -> Void {
         { result, error in handle(result?.bestTranscription.formattedString, result?.isFinal == true || error != nil) }
-    }
-
-    private func hear(_ rms: Double, generation: UUID) {
-        guard listening, session.accepts(generation) else { return }
-        level = VoiceInputRules.level(previous: level, rms: rms)
-        let now = Date()
-        if level > VoiceInputRules.speakLevel { lastSpeech = now }
-        else if VoiceInputRules.isQuiet(since: lastSpeech, now: now) { stop() }
-    }
-
-    private func recognized(_ text: String?, final: Bool, generation: UUID, deliver: (String) -> Void) {
-        guard session.accepts(generation) else { return }
-        if let text, !text.isEmpty {
-            heard = String(text.prefix(VoiceInputRules.maxTranscript))
-            lastSpeech = Date()
-        }
-        guard final else { return }
-        let said = heard
-        session.invalidate()
-        task = nil; request = nil; heard = ""
-        release()
-        if !said.isEmpty { deliver(said) }
-    }
-
-    /// The mic off and the audio session given back (spoken replies play again).
-    private func release() {
-        listening = false
-        level = 0
-        guard holdsAudio else { return }
-        holdsAudio = false
-        engine.stop()
-        engine.inputNode.removeTap(onBus: 0)
-        let audio = AVAudioSession.sharedInstance()
-        try? audio.setActive(false, options: .notifyOthersOnDeactivation)
-        try? audio.setCategory(.soloAmbient)
     }
 }

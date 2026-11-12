@@ -15,6 +15,7 @@ struct ChatView: View {
     @State private var viewing: ViewedPhoto?
     @State private var confirmingDelete = false
     @State private var deleteError: String?
+    @State private var serverNotice = false
 
     /// Core's own run after a reply, while its placeholder row is shown.
     private var searchingWeb: Bool {
@@ -103,7 +104,18 @@ struct ChatView: View {
         }
         // Each chip's error is said once, also when two chips fail the same way.
         .onChange(of: model.chips.compactMap { chip in chip.error.map { [chip.id.uuidString, $0] } }) { old, new in
+            // Not while listening: the mic would type the announcement.
+            guard !model.voiceInput.listening else { return }
             for failure in new where !old.contains(failure) { AccessibilityNotification.Announcement(failure[1]).post() }
+        }
+        .alert("Speech goes to Apple", isPresented: $serverNotice) {
+            Button("Continue") {
+                model.voiceInput.acknowledgeServerNotice()
+                listen()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(VoiceInputRules.serverNotice)
         }
     }
 
@@ -208,8 +220,8 @@ struct ChatView: View {
                 .submitLabel(.send)
                 .onSubmit { send() }
                 .accessibilityLabel("Message to Jarvis")
-            if model.voiceInput.available {
-                MicButton(voice: model.voiceInput, toggle: listen)
+            if model.voiceInput.available || model.voiceInput.listening {
+                MicButton(voice: model.voiceInput, busy: model.isSending, toggle: listen)
             }
             Button(action: send) {
                 Image(systemName: "arrow.up")
@@ -245,11 +257,14 @@ struct ChatView: View {
     private func listen() {
         let voice = model.voiceInput
         if voice.listening { voice.stop(); return }
+        // Said once, before the first listening whose audio would go to Apple.
+        if voice.needsServerNotice { serverNotice = true; return }
         // The mic would hear Jarvis read its reply aloud.
         if model.voiceEnabled { model.stopSpeaking() }
         Task {
             await voice.start(while: { [model] in
                 UIApplication.shared.applicationState != .background && model.lockState == .unlocked && model.isAuthenticated
+                    && !model.isSending
             }) { said in
                 draft = VoiceInputRules.appending(said, to: draft)
                 send()
@@ -296,6 +311,8 @@ private struct ViewedPhoto: Identifiable { let id: String }
 /// it stops after 5 s of silence. Leaving the chat or the app drops what it heard.
 private struct MicButton: View {
     let voice: VoiceInput
+    /// A reply is running: the mic waits, so Jarvis is never spoken into a recording.
+    let busy: Bool
     let toggle: () -> Void
     @Environment(\.scenePhase) private var scenePhase
 
@@ -312,7 +329,7 @@ private struct MicButton: View {
                 }
         }
         .buttonStyle(.plain)
-        .disabled(voice.finishing)
+        .disabled(voice.finishing || (busy && !voice.listening))
         .accessibilityLabel("Speak")
         .accessibilityValue(voice.listening ? "Listening" : "")
         .accessibilityHint(voice.listening ? "Stops after 5 s of silence" : "")
@@ -326,7 +343,7 @@ private struct MicButton: View {
         // The background lock stops it in the app model; this also covers the app switcher
         // and Control Center. Permission prompts (inactive too) come before listening.
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active, voice.listening { voice.stop(discard: true) }
+            if phase != .active, voice.listening || voice.finishing { voice.stop(discard: true) }
         }
         .onDisappear { voice.stop(discard: true) }
     }
