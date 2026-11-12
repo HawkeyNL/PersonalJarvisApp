@@ -115,4 +115,9 @@ class ChatPhotosTest {
         assertFalse(forgetAfterUpload(chipShown = false, id = null, sameSignIn = true))
         assertFalse(forgetAfterUpload(chipShown = false, id = "a", sameSignIn = false))
     }
+
+    @Test fun `photos picked while locked are attached after unlock only in the same sign-in`() {
+        assertEquals(listOf("a", "b"), pickedToAttach(3, 3, listOf("a", "b")))
+        assertEquals(emptyList<String>(), pickedToAttach(3, 4, listOf("a", "b")))
+    }
 }

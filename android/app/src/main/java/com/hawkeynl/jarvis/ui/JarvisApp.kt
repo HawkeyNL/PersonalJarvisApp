@@ -2,6 +2,9 @@ package com.hawkeynl.jarvis.ui
 
 import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,6 +62,10 @@ fun JarvisApp(
 ) {
     val root = rootFor(state)
     val signedIn = root == Root.SHELL
+    // Registered here, not in the chat: the picker stops this activity, which locks the app
+    // and leaves the chat, and its answer must still arrive (kept until unlock).
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(MAX_PHOTOS), actions::photosPicked)
+    val pickPhotos = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
     // Locking or signing out drops every Core read and cancels running ones.
     LaunchedEffect(signedIn) { if (!signedIn) core.clear() }
     Box(Modifier.fillMaxSize().background(JvTheme.colors.bgPage)) {
@@ -70,7 +77,7 @@ fun JarvisApp(
                     onReset = actions::resetDevice,
                 )
                 Root.ONBOARDING -> OnboardingScreen(state, actions)
-                Root.SHELL -> AuthenticatedShell(state, actions, core, onInstallUpdate, modelControls, pairingApprovals, unlockApprovals, agentApprovals)
+                Root.SHELL -> AuthenticatedShell(state, actions, core, onInstallUpdate, modelControls, pairingApprovals, unlockApprovals, agentApprovals, pickPhotos)
             }
         }
     }
@@ -105,6 +112,7 @@ private fun AuthenticatedShell(
     pairingApprovals: PairingApprovalService?,
     unlockApprovals: UnlockApprovalService?,
     agentApprovals: AgentApprovalService?,
+    pickPhotos: () -> Unit,
 ) {
     val data by core.state.collectAsStateWithLifecycle()
     val screen = state.screen
@@ -120,7 +128,7 @@ private fun AuthenticatedShell(
                 Screen.TRADING -> TradingScreen(data, core::refreshTrading)
                 Screen.ACTIVITY -> ActivityScreen(data, navigate, { core.refreshActivity(); core.refreshPairingIfStale() }, agentApprovals)
                 Screen.SETTINGS -> SettingsScreen(state, actions, data, onInstallUpdate, core::refreshSettings)
-                Screen.CHAT -> ChatScreen(state, actions)
+                Screen.CHAT -> ChatScreen(state, actions, pickPhotos)
                 Screen.CONVERSATIONS -> ConversationsScreen(state, actions)
                 Screen.AGENTS -> AgentsScreen(data, navigate, core::refreshAgents)
                 Screen.TASKS -> TasksScreen(data, navigate, core::refreshTasks, agentApprovals)

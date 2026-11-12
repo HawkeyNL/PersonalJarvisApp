@@ -131,8 +131,9 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     private var identity = 0
     /** One picked photo is shrunk at a time (each decode can take tens of MB). */
     private val preparing = kotlinx.coroutines.sync.Mutex()
-    /** When the photo picker opened; see [pickingPhotos]. */
-    private var pickerOpenedAt: Long? = null
+    /** Photos picked while the app was locked (the picker stops this activity, which locks
+     *  it), with the sign-in they were picked in; attached after the unlock. */
+    private var picked: Pair<Int, List<android.net.Uri>>? = null
     // Decoded chat photos, least recently shown out first; main thread only. Cleared with
     // every identity change (sign-out, erase, password, Home Node, session expiry).
     private var photoEpoch = 0
@@ -175,11 +176,11 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     fun saveEndpoint() {
         container.sessions.modelAuthorization.invalidate()
         clearPhotos()
-        identity++
         viewModelScope.launch {
             val parsed = HomeNodeEndpoint.parse(_state.value.endpointDraft)
             if (parsed is EndpointValidation.Valid && parsed.endpoint != _state.value.endpoint) {
                 container.realtime.stop(); speech.stop(); pending.clear(); container.sessions.reset()
+                identity++
                 _state.update {
                     it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), conversationId = null, passwordResetRequest = null,
                         chips = emptyList(), chipNotice = null)
@@ -256,7 +257,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             is BiometricResult.Authenticated -> {
                 _state.update { it.copy(locked = false, biometricMessage = null) }
                 _state.value.endpoint?.let { endpoint ->
-                    viewModelScope.launch { refreshAfterUnlock(endpoint) }
+                    viewModelScope.launch { refreshAfterUnlock(endpoint); attachPicked() }
                 }
             }
             BiometricResult.Cancelled -> _state.update { it.copy(biometricMessage = "Unlock cancelled.") }
@@ -404,25 +405,23 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 
     fun draftReturned() = _state.update { it.copy(returnedDraft = null) }
 
-    /** True while the photo picker is open: older Android shows it as another app, which
-     *  stops this activity, and that must not lock the app and drop the picked photos. */
-    // ponytail: the lock is skipped for at most PICKER_GRACE_MS; leaving the picker for Home
-    // keeps the app unlocked that long. Lock from the picker's own lifecycle if that matters.
-    val pickingPhotos: Boolean
-        get() = pickerOpenedAt?.let { android.os.SystemClock.elapsedRealtime() - it < PICKER_GRACE_MS } == true
+    /** The photo picker's answer. Opening it stops this activity, so the app is usually
+     *  locked by now: the photos then wait for the unlock. */
+    fun photosPicked(uris: List<android.net.Uri>) {
+        if (uris.isEmpty()) return
+        if (_state.value.locked) picked = identity to uris else attachPhotos(uris)
+    }
 
-    fun photoPickerOpened() { pickerOpenedAt = android.os.SystemClock.elapsedRealtime() }
-
-    /** The picker's answer. Open longer than the grace period: the skipped lock happens now. */
-    fun photoPickerClosed(uris: List<android.net.Uri>) {
-        val stale = pickerOpenedAt != null && !pickingPhotos
-        pickerOpenedAt = null
-        if (stale) lockForBackground() else if (uris.isNotEmpty()) attachPhotos(uris)
+    /** After an unlock: photos picked while locked, if still the same sign-in. */
+    private fun attachPicked() {
+        val (pickedIn, uris) = picked ?: return
+        picked = null
+        attachPhotos(pickedToAttach(pickedIn, identity, uris))
     }
 
     /** Adds picked photos, up to [MAX_PHOTOS] in the composer. Shrinking and uploading start at once. */
     fun attachPhotos(uris: List<android.net.Uri>) {
-        if (_state.value.locked || !_state.value.authenticated) return
+        if (uris.isEmpty() || _state.value.locked || !_state.value.authenticated) return
         val endpoint = _state.value.endpoint ?: return
         val room = maxOf(MAX_PHOTOS - _state.value.chips.size, 0)
         val added = uris.take(room).map { it to PhotoChip(chipKeys++) }
@@ -442,6 +441,11 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             throw cancelled
         } catch (error: Exception) {
             updateChip(key) { it.copy(state = ChipState.FAILED, error = (error as? PhotoRefused)?.message ?: UNSUPPORTED) }
+            return
+        }
+        // Another sign-in while shrinking: its token does not get this photo.
+        if (asked != identity) {
+            updateChip(key) { it.copy(state = ChipState.FAILED, error = "Signed in again; remove this photo and attach it again.") }
             return
         }
         if (!updateChip(key) { it.copy(state = ChipState.UPLOADING, preview = prepared.preview) }) return
@@ -984,7 +988,6 @@ internal fun afterFailedUnlink(state: JarvisUiState, failure: Exception): Jarvis
 }
 
 private const val KEEP_FAILED = "Could not change this photo. Try again."
-private const val PICKER_GRACE_MS = 5 * 60 * 1000L
 private const val DELETE_FAILED = "Could not delete this photo. Try again."
 
 /** Decode a JPEG to at most about [maxSide] px on its long side: 512 for a 140 dp thumbnail,

@@ -1,8 +1,5 @@
 package com.hawkeynl.jarvis.ui
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -71,7 +68,7 @@ private val OWN_BUBBLE = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bo
 /** The chat (D-Home): header with the conversation title, the messages, a thinking line
  *  while Jarvis answers and the composer with its photos. */
 @Composable
-internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel) {
+internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel, pickPhotos: () -> Unit) {
     var draft by remember(state.conversationId) { mutableStateOf("") }
     // The full-screen view shows the open conversation's photos only.
     var viewing by remember(state.conversationId) { mutableStateOf<String?>(null) }
@@ -79,7 +76,6 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel) {
     var deleting by remember { mutableStateOf(false) }
     var deleteError by remember(state.conversationId) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(MAX_PHOTOS), actions::photoPickerClosed)
     // A message Core refused comes back, unless something new was typed since.
     LaunchedEffect(state.returnedDraft) {
         state.returnedDraft?.let { if (draft.isBlank()) draft = it; actions.draftReturned() }
@@ -154,10 +150,7 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel) {
             ) {
                 CircleIconButton(
                     JvIcon.PHOTO, "Attach photos",
-                    onClick = {
-                        actions.photoPickerOpened()
-                        picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    },
+                    onClick = pickPhotos,
                     enabled = state.chips.size < MAX_PHOTOS,
                 )
                 OutlinedTextField(
@@ -220,13 +213,14 @@ private fun Chips(chips: List<PhotoChip>, remove: (Int) -> Unit) {
             Box(Modifier.size(72.dp)) {
                 Box(
                     Modifier.fillMaxSize().clip(JvShapes.md).background(c.bgSunken).semantics(mergeDescendants = true) {
-                        contentDescription = "Photo ${i + 1} of ${chips.size}, " + when (chip.state) {
-                            ChipState.PREPARING -> "preparing"
-                            ChipState.UPLOADING -> "uploading"
-                            ChipState.READY -> "ready to send"
-                            ChipState.FAILED -> "failed: ${chip.error.orEmpty()}"
+                        // No position here: it is live, and a chip added or removed must not re-announce the others.
+                        contentDescription = "Photo to send"
+                        stateDescription = when (chip.state) {
+                            ChipState.PREPARING -> "Preparing"
+                            ChipState.UPLOADING -> "Uploading"
+                            ChipState.READY -> "Ready to send"
+                            ChipState.FAILED -> "Failed: ${chip.error.orEmpty()}"
                         }
-                        // Said again when its state changes.
                         liveRegion = LiveRegionMode.Polite
                     },
                     contentAlignment = Alignment.Center,
