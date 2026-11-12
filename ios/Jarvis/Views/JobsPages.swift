@@ -25,8 +25,8 @@ extension JobRunStatus {
     }
 }
 
-/// A status line on a tinted card; `warn` for the scheduler-off notice.
-private struct JobNotice: View {
+/// A status line on a tinted card; `warn` for the scheduler-off notice. Roadmaps use it too.
+struct JobNotice: View {
     let text: String
     var style = Badge.Style.accent
 
@@ -381,7 +381,7 @@ struct JobForm: View {
     let save: (JobDraft) -> Void
     @State private var draft: JobDraft
     /// Nil while loading or when the roadmaps could not be read.
-    @State private var roadmaps: [RoadmapOption]?
+    @State private var roadmaps: [Roadmap]?
 
     init(model: JarvisAppModel, kind: JobKind, initial: JobDraft, busy: Bool, submit: String,
          cancel: (() -> Void)? = nil, save: @escaping (JobDraft) -> Void) {
@@ -438,21 +438,24 @@ struct JobForm: View {
         .foregroundStyle(JV.textPrimary)
         .task {
             guard kind == .dependencyReview else { return }
-            let result = await model.coreRead("/v1/roadmaps", as: RoadmapList.self).checked(Jobs.valid)
+            let result = await model.coreRead("/v1/roadmaps", as: RoadmapList.self).checked(Roadmaps.valid)
             guard !Task.isCancelled else { return }
             roadmaps = result.value?.roadmaps.filter { $0.archived_at == nil }
         }
     }
+
+    /// A roadmap id as Core writes it in a job's params.
+    private static func key(_ roadmap: Roadmap) -> String { roadmap.id.uuidString.lowercased() }
 
     @ViewBuilder private var roadmapPicker: some View {
         VStack(alignment: .leading, spacing: JV.Space.xxs) {
             LabeledContent("Propose upgrades to a roadmap (optional)") {
                 Picker("Roadmap", selection: $draft.roadmapId) {
                     Text("No roadmap").tag(String?.none)
-                    if let current = draft.roadmapId, !(roadmaps ?? []).contains(where: { $0.id == current }) {
+                    if let current = draft.roadmapId, !(roadmaps ?? []).contains(where: { Self.key($0) == current }) {
                         Text(roadmaps == nil ? "The roadmap set now" : "A roadmap that is gone or archived").tag(String?.some(current))
                     }
-                    ForEach(roadmaps ?? []) { roadmap in Text(verbatim: roadmap.title).tag(String?.some(roadmap.id)) }
+                    ForEach(roadmaps ?? []) { roadmap in Text(verbatim: roadmap.title).tag(String?.some(Self.key(roadmap))) }
                 }
                 .labelsHidden()
                 .disabled(roadmaps == nil && draft.roadmapId == nil)
