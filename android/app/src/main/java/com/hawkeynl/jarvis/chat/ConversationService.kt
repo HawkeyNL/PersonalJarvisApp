@@ -8,6 +8,7 @@ import com.hawkeynl.jarvis.network.ConversationDetailResponse
 import com.hawkeynl.jarvis.network.ConversationListResponse
 import com.hawkeynl.jarvis.network.HomeNodeEndpoint
 import com.hawkeynl.jarvis.network.JarvisApi
+import com.hawkeynl.jarvis.network.PhotoMeta
 import com.hawkeynl.jarvis.storage.SessionRepository
 
 class ConversationService(
@@ -22,6 +23,18 @@ class ConversationService(
 
     suspend fun photo(endpoint: HomeNodeEndpoint, id: String): ApiResult<ByteArray> =
         withToken { api.photo(endpoint, it, id) }
+
+    suspend fun uploadPhoto(endpoint: HomeNodeEndpoint, jpeg: ByteArray): ApiResult<String> =
+        withToken { api.uploadPhoto(endpoint, it, jpeg) }
+
+    suspend fun keepPhoto(endpoint: HomeNodeEndpoint, id: String, saved: Boolean): ApiResult<PhotoMeta> =
+        withToken { api.keepPhoto(endpoint, it, id, saved) }
+
+    suspend fun deletePhoto(endpoint: HomeNodeEndpoint, id: String): ApiResult<Unit> =
+        withToken { api.deletePhoto(endpoint, it, id) }
+
+    suspend fun delete(endpoint: HomeNodeEndpoint, id: String): ApiResult<Unit> =
+        withToken { api.deleteConversation(endpoint, it, id) }
 
     suspend fun send(
         endpoint: HomeNodeEndpoint,

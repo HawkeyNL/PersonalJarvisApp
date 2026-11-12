@@ -8,12 +8,16 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.timeout
 import io.ktor.client.network.sockets.ConnectTimeoutException
+import io.ktor.client.request.accept
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.prepareGet
+import io.ktor.client.request.preparePatch
+import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.contentLength
@@ -21,6 +25,8 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
+import io.ktor.http.content.ByteArrayContent
+import io.ktor.http.content.TextContent
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.utils.io.jvm.javaio.toInputStream
 import java.io.File
@@ -34,6 +40,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 class KtorJarvisApi(
     private val client: HttpClient = defaultHttpClient(),
@@ -256,9 +267,7 @@ class KtorJarvisApi(
     }
 
     override suspend fun photo(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<ByteArray> {
-        // Only a canonical UUID reaches the path.
-        val photo = runCatching { java.util.UUID.fromString(id) }.getOrNull()?.toString()?.takeIf { it == id.lowercase() }
-            ?: return ApiResult.InvalidResponse("Invalid photo id")
+        val photo = photoId(id) ?: return ApiResult.InvalidResponse("Invalid photo id")
         return try {
             // Streamed (execute), so the size bound holds while reading, not after buffering.
             client.prepareGet(endpoint.url("/v1/photos/$photo")) { bearerAuth(token) }.execute { response -> when {
@@ -280,6 +289,74 @@ class KtorJarvisApi(
         } catch (error: Exception) {
             networkFailure(error)
         }
+    }
+
+    override suspend fun uploadPhoto(endpoint: HomeNodeEndpoint, token: String, jpeg: ByteArray): ApiResult<String> {
+        if (jpeg.isEmpty() || jpeg.size > MAX_UPLOAD_BYTES) return ApiResult.InvalidResponse("The photo is too large.")
+        return try {
+            client.preparePost(endpoint.url("/v1/photos")) {
+                bearerAuth(token)
+                accept(ContentType.Application.Json)
+                setBody(ByteArrayContent(jpeg, ContentType.Application.OctetStream))
+                // A photo over a slow mobile link may need longer than the default.
+                timeout { requestTimeoutMillis = 120_000 }
+            }.execute { response -> when {
+                response.status == HttpStatusCode.Unauthorized -> ApiResult.Unauthorized
+                // The status alone tells an older Core (404) from a refusal.
+                response.status.value !in 200..299 -> ApiResult.HttpError(response.status.value, null)
+                else -> {
+                    val id = (smallJson(response) as? JsonObject)?.get("id")?.let { it as? JsonPrimitive }
+                        ?.takeIf { it.isString }?.let { photoId(it.content) }
+                    if (id == null) ApiResult.InvalidResponse("Home Node sent an invalid photo id") else ApiResult.Success(id)
+                }
+            } }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            networkFailure(error)
+        }
+    }
+
+    override suspend fun keepPhoto(endpoint: HomeNodeEndpoint, token: String, id: String, saved: Boolean): ApiResult<PhotoMeta> {
+        val photo = photoId(id) ?: return ApiResult.InvalidResponse("Invalid photo id")
+        return try {
+            client.preparePatch(endpoint.url("/v1/photos/$photo")) {
+                bearerAuth(token)
+                accept(ContentType.Application.Json)
+                setBody(TextContent(buildJsonObject { put("saved", saved) }.toString(), ContentType.Application.Json))
+            }.execute { response -> when {
+                response.status == HttpStatusCode.Unauthorized -> ApiResult.Unauthorized
+                response.status.value !in 200..299 -> ApiResult.HttpError(response.status.value, null)
+                else -> smallJson(response)
+                    ?.let { runCatching { REPLY_JSON.decodeFromJsonElement(PhotoMeta.serializer(), it) }.getOrNull() }
+                    ?.takeIf { it.id == photo }
+                    ?.let { ApiResult.Success(it) }
+                    ?: ApiResult.InvalidResponse("Home Node sent invalid photo details")
+            } }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            networkFailure(error)
+        }
+    }
+
+    override suspend fun deletePhoto(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> {
+        val photo = photoId(id) ?: return ApiResult.InvalidResponse("Invalid photo id")
+        return request<Unit> { client.delete(endpoint.url("/v1/photos/$photo")) { bearerAuth(token) } }
+    }
+
+    override suspend fun deleteConversation(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> {
+        if (!CONVERSATION_ID.matches(id)) return ApiResult.InvalidResponse("Invalid conversation id")
+        return request<Unit> { client.delete(endpoint.url("/v1/conversations/$id")) { bearerAuth(token) } }
+    }
+
+    /** A small JSON reply, read with a size bound; null when too large or not JSON. */
+    private suspend fun smallJson(response: io.ktor.client.statement.HttpResponse): JsonElement? {
+        val bytes = withContext(Dispatchers.IO) {
+            response.bodyAsChannel().toInputStream().use { input -> readAtMost(input, MAX_REPLY_BYTES + 1) }
+        }
+        if (bytes.size > MAX_REPLY_BYTES) return null
+        return runCatching { Json.parseToJsonElement(bytes.decodeToString()) }.getOrNull()
     }
 
     private suspend inline fun <reified T> request(
@@ -328,6 +405,16 @@ class KtorJarvisApi(
     companion object {
         /** Core stores at most 1 MiB per photo; twice that leaves room, no more. */
         const val MAX_PHOTO_BYTES = 2 * 1024 * 1024
+        /** Core's upload body cap; a prepared photo is far smaller. */
+        const val MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+        /** An upload id or a photo's keep state is tiny. */
+        private const val MAX_REPLY_BYTES = 4 * 1024
+        private val REPLY_JSON = Json { ignoreUnknownKeys = true }
+        private val CONVERSATION_ID = Regex("[A-Za-z0-9_-]{1,128}")
+
+        /** Only a canonical UUID reaches a photo path; null for anything else. */
+        fun photoId(id: String): String? =
+            runCatching { java.util.UUID.fromString(id) }.getOrNull()?.toString()?.takeIf { it == id.lowercase() }
 
         fun isJpeg(bytes: ByteArray): Boolean =
             bytes.size >= 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()

@@ -13,6 +13,7 @@ import com.hawkeynl.jarvis.network.ConversationMessage
 import com.hawkeynl.jarvis.network.ConversationSummary
 import com.hawkeynl.jarvis.network.EndpointValidation
 import com.hawkeynl.jarvis.network.HomeNodeEndpoint
+import com.hawkeynl.jarvis.network.PhotoMeta
 import com.hawkeynl.jarvis.network.UnreachableReason
 import com.hawkeynl.jarvis.security.ApprovalBusyException
 import com.hawkeynl.jarvis.security.BiometricAvailability
@@ -103,6 +104,18 @@ data class JarvisUiState(
     val error: String? = null,
     /** A signed password reset waiting for root confirmation on the Home Node. */
     val passwordResetRequest: String? = null,
+    /** Photos in the composer, in order. */
+    val chips: List<PhotoChip> = emptyList(),
+    /** Why a photo was not added (the limit); cleared by the next attach. */
+    val chipNotice: String? = null,
+    /** The one-time note on where photos go was shown with a sent photo. */
+    val photosDisclosed: Boolean = false,
+    /** The open conversation's photos that still exist (from its last read). */
+    val photoMeta: Map<String, PhotoMeta> = emptyMap(),
+    /** Photos known to be gone: shown as "Photo removed" without a download. */
+    val removedPhotos: Set<String> = emptySet(),
+    /** The text of a message Core refused; the composer takes it back once. */
+    val returnedDraft: String? = null,
 )
 
 class JarvisViewModel(private val container: AppContainer) : ViewModel() {
@@ -110,6 +123,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     private var realtimeAvailable = false
     private val pending = com.hawkeynl.jarvis.chat.PendingRuns()
     private var unlinking = false
+    private var chipKeys = 0
     // Decoded chat photos, least recently shown out first; main thread only. Cleared with
     // every identity change (sign-out, erase, password, Home Node, session expiry).
     private var photoEpoch = 0
@@ -120,7 +134,8 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     private val _state = MutableStateFlow(
         JarvisUiState(locked = container.sessions.hasSessionRecord(), voiceEnabled = container.voicePreferences.getBoolean("enabled", false),
             voiceRate = SpeechRate.normalize(container.voicePreferences.getFloat("rate", 1f)),
-            selectedVoice = container.voicePreferences.getString("voice", "") ?: "", themeMode = container.appearance.mode),
+            selectedVoice = container.voicePreferences.getString("voice", "") ?: "", themeMode = container.appearance.mode,
+            photosDisclosed = container.photoPreferences.getBoolean("disclosed", false)),
     )
     val state: StateFlow<JarvisUiState> = _state.asStateFlow()
 
@@ -156,7 +171,8 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             if (parsed is EndpointValidation.Valid && parsed.endpoint != _state.value.endpoint) {
                 container.realtime.stop(); speech.stop(); pending.clear(); container.sessions.reset()
                 _state.update {
-                    it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), conversationId = null, passwordResetRequest = null)
+                    it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), conversationId = null, passwordResetRequest = null,
+                        chips = emptyList(), chipNotice = null)
                 }
             }
             when (val result = container.settings.save(_state.value.endpointDraft)) {
@@ -254,6 +270,8 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                         conversationTitle = result.value.title,
                         messages = result.value.messages,
                         busy = result.value.assistant_running,
+                        photoMeta = result.value.photos.associateBy { photo -> photo.id },
+                        removedPhotos = missingPhotos(result.value.messages, result.value.photos),
                     )
                 }
                 else -> handleApiFailure(result)
@@ -269,6 +287,8 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             messages = emptyList(),
             error = null,
             researchOffer = null,
+            photoMeta = emptyMap(),
+            removedPhotos = emptySet(),
         )
     }
 
@@ -279,28 +299,59 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         if (realtimeAvailable) send(offer.question, research = true)
     }
 
-    fun send(text: String, research: Boolean = false) {
-        val endpoint = _state.value.endpoint ?: return
+    /** Sends [text] with the composer's photos (none for a web search). False when nothing
+     *  was sent, so the composer keeps the draft. */
+    fun send(text: String, research: Boolean = false): Boolean {
+        val endpoint = _state.value.endpoint ?: return false
+        if (!research) _state.update { it.copy(chips = expireStale(it.chips, System.currentTimeMillis())) }
         val current = _state.value
-        if (current.busy || text.isBlank() || !current.authenticated || current.locked) return
+        val taken = if (research) emptyList() else current.chips
+        if (!canSend(text, taken, current.busy) || !current.authenticated || current.locked) return false
+        val attachments = chipIds(taken)
+        // Photos go only with the runs API; the older chat endpoint refuses them.
+        if (attachments.isNotEmpty() && !realtimeAvailable) {
+            _state.update { it.copy(error = "Photos need a live connection to your Home Node. Nothing was sent.") }
+            return false
+        }
         if (realtimeAvailable) {
             val requestId = java.util.UUID.randomUUID().toString()
             val optimisticId = "request:$requestId"
             if (!pending.add(requestId, optimisticId)) {
                 _state.update { it.copy(error = "Too many unconfirmed requests. Restore the connection first; nothing is sent again.") }
-                return
+                return false
             }
-            _state.update { it.copy(busy = true, researchOffer = null, messages = it.messages + ConversationMessage("user", text.trim(), at = Instant.now().toString(), id = optimisticId)) }
+            // The message shows its photos from the previews, without a download.
+            for (chip in taken) chip.preview?.let { photos[chip.id!!] = PhotoResult.Image(it) }
+            if (attachments.isNotEmpty()) container.photoPreferences.edit().putBoolean("disclosed", true).apply()
+            _state.update {
+                it.copy(busy = true, researchOffer = null, chips = if (research) it.chips else emptyList(), chipNotice = null,
+                    photosDisclosed = it.photosDisclosed || attachments.isNotEmpty(),
+                    messages = it.messages + ConversationMessage("user", text.trim(), at = Instant.now().toString(), id = optimisticId, attachments = attachments))
+            }
             viewModelScope.launch {
                 try {
                     val history = current.messages.map { com.hawkeynl.jarvis.network.ChatTurn(it.role, it.content) }
-                    val run = container.realtime.submit(endpoint, requestId, current.conversationId, history, text.trim(), if (research) "research" else null)
+                    val run = container.realtime.submit(endpoint, requestId, current.conversationId, history, text.trim(), if (research) "research" else null, attachments)
                     _state.update { if (current.conversationId == null && it.conversationId == null && it.messages.any { message -> message.id == optimisticId }) it.copy(conversationId = run.conversation_id) else it }
-                } catch (error: kotlinx.coroutines.CancellationException) { throw error } catch (_: Exception) {
-                    _state.update { it.copy(busy = false, error = "Sending was not confirmed. Reconnect to check the stored history; nothing is regenerated automatically.") }
+                } catch (error: kotlinx.coroutines.CancellationException) { throw error } catch (error: Exception) {
+                    val refusal = runRefusal((error as? com.hawkeynl.jarvis.chat.SubmitFailed)?.status)
+                    if (refusal == null) {
+                        _state.update { it.copy(busy = false, error = "Sending was not confirmed. Reconnect to check the stored history; nothing is regenerated automatically.") }
+                        return@launch
+                    }
+                    // Core refused it outright and stored nothing: the draft and photos return.
+                    pending.remove(requestId)
+                    for (chip in taken) chip.id?.let { photos.remove(it) }
+                    val back = restoreChips(_state.value.chips, taken)
+                    _state.update {
+                        it.copy(busy = false, error = refusal, chips = back.chips, chipNotice = back.notice ?: it.chipNotice,
+                            messages = it.messages.filterNot { message -> message.id == optimisticId }, returnedDraft = text.takeUnless { research })
+                    }
+                    // No room left (photos added since): the rest are deleted on the Home Node.
+                    for (id in back.dropped) forgetPhoto(endpoint, id)
                 }
             }
-            return
+            return true
         }
         viewModelScope.launch {
             _state.update { it.copy(busy = true, error = null) }
@@ -331,15 +382,124 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 else -> handleApiFailure(result)
             }
         }
+        return true
     }
 
-    /** One chat photo, fetched with the session token and decoded off the main thread. */
-    suspend fun photo(id: String): PhotoResult {
-        photos[id]?.let { return it }
+    fun draftReturned() = _state.update { it.copy(returnedDraft = null) }
+
+    /** Adds picked photos, up to [MAX_PHOTOS] in the composer. Shrinking and uploading start at once. */
+    fun attachPhotos(uris: List<android.net.Uri>) {
+        val endpoint = _state.value.endpoint ?: return
+        val room = maxOf(MAX_PHOTOS - _state.value.chips.size, 0)
+        val added = uris.take(room).map { it to PhotoChip(chipKeys++) }
+        _state.update { it.copy(chips = it.chips + added.map { (_, chip) -> chip }, chipNotice = if (uris.size > room) TOO_MANY_PHOTOS else null) }
+        for ((uri, chip) in added) viewModelScope.launch { upload(endpoint, chip.key, uri) }
+    }
+
+    private suspend fun upload(endpoint: HomeNodeEndpoint, key: Int, uri: android.net.Uri) {
+        val epoch = photoEpoch
+        val prepared = try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { preparePhoto(container.contentResolver, uri) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            updateChip(key) { it.copy(state = ChipState.FAILED, error = (error as? PhotoRefused)?.message ?: UNSUPPORTED) }
+            return
+        }
+        if (!updateChip(key) { it.copy(state = ChipState.UPLOADING, preview = prepared.preview) }) return
+        val result = container.conversations.uploadPhoto(endpoint, prepared.jpeg)
+        val id = (result as? ApiResult.Success)?.value
+        val shown = updateChip(key) {
+            if (id != null) it.copy(state = ChipState.READY, id = id, at = System.currentTimeMillis())
+            else it.copy(state = ChipState.FAILED, error = when (result) {
+                is ApiResult.HttpError -> uploadFailure(result.status)
+                is ApiResult.InvalidResponse -> result.message
+                ApiResult.Unauthorized -> "Session expired. Sign this device in again."
+                else -> "Could not reach your Home Node."
+            })
+        }
+        // Removed (✕) while uploading: delete what Core kept. After a sign-out the photo
+        // stays pending and Core removes it after 24 hours.
+        if (!shown && id != null && epoch == photoEpoch) forgetPhoto(endpoint, id)
+        if (result == ApiResult.Unauthorized) handleApiFailure(result)
+    }
+
+    /** Changes one composer photo; false when it is no longer there. Main thread only. */
+    private fun updateChip(key: Int, change: (PhotoChip) -> PhotoChip): Boolean {
+        if (_state.value.chips.none { it.key == key }) return false
+        _state.update { it.copy(chips = it.chips.map { chip -> if (chip.key == key) change(chip) else chip }) }
+        return true
+    }
+
+    /** ✕ on a chip: drop it, and delete it on the Home Node once uploaded. */
+    fun removeChip(key: Int) {
+        val chip = _state.value.chips.firstOrNull { it.key == key } ?: return
+        _state.update { it.copy(chips = it.chips.filterNot { other -> other.key == key }, chipNotice = null) }
+        val endpoint = _state.value.endpoint ?: return
+        chip.id?.let { forgetPhoto(endpoint, it) }
+    }
+
+    /** Best effort: Core removes an unsent photo after 24 hours anyway. */
+    private fun forgetPhoto(endpoint: HomeNodeEndpoint, id: String) {
+        viewModelScope.launch { container.conversations.deletePhoto(endpoint, id) }
+    }
+
+    /** Keeps a photo past its 90 days, or stops keeping it; returns why it failed. A photo
+     *  Core no longer has (deleted elsewhere or expired) is marked removed instead. */
+    suspend fun keepPhoto(id: String, saved: Boolean): String? = viewModelScope.async {
+        val endpoint = _state.value.endpoint ?: return@async KEEP_FAILED
+        when (val result = container.conversations.keepPhoto(endpoint, id, saved)) {
+            is ApiResult.Success -> { _state.update { it.copy(photoMeta = it.photoMeta + (id to result.value)) }; null }
+            is ApiResult.HttpError -> if (result.status == 404) { markRemoved(id); null } else KEEP_FAILED
+            ApiResult.Unauthorized -> { handleApiFailure(result); KEEP_FAILED }
+            else -> KEEP_FAILED
+        }
+    }.await()
+
+    /** Deletes a photo for good (already gone counts as deleted); returns why it failed. */
+    suspend fun deletePhoto(id: String): String? = viewModelScope.async {
+        val endpoint = _state.value.endpoint ?: return@async DELETE_FAILED
+        when (val result = container.conversations.deletePhoto(endpoint, id)) {
+            is ApiResult.Success -> { markRemoved(id); null }
+            is ApiResult.HttpError -> if (result.status == 404) { markRemoved(id); null } else DELETE_FAILED
+            ApiResult.Unauthorized -> { handleApiFailure(result); DELETE_FAILED }
+            else -> DELETE_FAILED
+        }
+    }.await()
+
+    /** Forget a photo Core no longer has: its messages show "Photo removed". */
+    private fun markRemoved(id: String) {
+        photos[id] = PhotoResult.Removed
+        _state.update { it.copy(photoMeta = it.photoMeta - id, removedPhotos = it.removedPhotos + id) }
+    }
+
+    /** Deletes the open conversation on the Home Node, its photos included (kept ones too),
+     *  then starts a new one; returns why it failed. */
+    suspend fun deleteConversation(): String? = viewModelScope.async {
+        val endpoint = _state.value.endpoint ?: return@async "Could not delete: no Home Node is set."
+        val id = _state.value.conversationId ?: return@async null
+        when (val result = container.conversations.delete(endpoint, id)) {
+            is ApiResult.Success -> {
+                _state.update { it.copy(conversations = it.conversations.filterNot { item -> item.id == id }) }
+                if (_state.value.conversationId == id) newConversation()
+                null
+            }
+            ApiResult.Unauthorized -> { handleApiFailure(result); "Session expired. Sign this device in again." }
+            is ApiResult.HttpError -> "Could not delete: ${result.message ?: "HTTP ${result.status}"}"
+            is ApiResult.Unreachable -> "Could not delete: ${result.reason.message()}"
+            is ApiResult.InvalidResponse -> "Could not delete: ${result.message}"
+        }
+    }.await()
+
+    /** One chat photo, fetched with the session token and decoded off the main thread.
+     *  [full] is for the full-screen view: a larger decode that is not cached. */
+    suspend fun photo(id: String, full: Boolean = false): PhotoResult {
+        if (id in _state.value.removedPhotos) return PhotoResult.Removed
+        if (!full) photos[id]?.let { return it }
         val endpoint = _state.value.endpoint ?: return PhotoResult.Unavailable
         val epoch = photoEpoch
         val result = when (val bytes = container.conversations.photo(endpoint, id)) {
-            is ApiResult.Success -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { decodePhoto(bytes.value) }
+            is ApiResult.Success -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { decodePhoto(bytes.value, if (full) 1600 else 512) }
                 ?.let { PhotoResult.Image(it) } ?: PhotoResult.Unavailable
             is ApiResult.HttpError -> if (bytes.status == 404) PhotoResult.Removed else PhotoResult.Unavailable
             // An expired session goes through the usual sign-in-again flow (once: it clears the epoch).
@@ -349,7 +509,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         // A late answer from before an identity change is dropped.
         if (epoch != photoEpoch) return PhotoResult.Unavailable
         // A passing failure is not remembered; the next showing retries.
-        if (result != PhotoResult.Unavailable) photos[id] = result
+        if (result == PhotoResult.Removed || (result is PhotoResult.Image && !full)) photos[id] = result
         return result
     }
 
@@ -362,7 +522,8 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             container.enrollment.logout(endpoint)
             _state.update {
-                it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), passwordResetRequest = null)
+                it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), passwordResetRequest = null,
+                    chips = emptyList(), chipNotice = null)
             }
         }
     }
@@ -385,7 +546,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         pending.clear()
         container.realtime.stop(); speech.stop()
         _state.update {
-            it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(),
+            it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), chips = emptyList(), chipNotice = null,
                 error = "Password changed. Sign in with the new password.")
         }
         null
@@ -632,7 +793,8 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                     _state.update {
                         if (it.conversationId != selected) it
                         else if (snapshot == null) it.copy(conversationId = null, messages = emptyList(), busy = false)
-                        else it.copy(messages = snapshot.messages, busy = snapshot.assistant_running)
+                        else it.copy(messages = snapshot.messages, busy = snapshot.assistant_running,
+                            photoMeta = snapshot.photos.associateBy { photo -> photo.id }, removedPhotos = missingPhotos(snapshot.messages, snapshot.photos))
                     }
                 }
             } else receiveRealtime(event)
@@ -651,7 +813,8 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 _state.update { it.copy(conversations = (it.conversations.filterNot { item -> item.id == id } + ConversationSummary(id, title, at)).sortedByDescending { item -> item.updated_at }) }
             }
             "conversation.deleted" -> _state.update {
-                if (it.conversationId == p.conversation_id) it.copy(conversationId = null, messages = emptyList(), conversations = it.conversations.filterNot { item -> item.id == p.conversation_id })
+                if (it.conversationId == p.conversation_id) it.copy(conversationId = null, messages = emptyList(), photoMeta = emptyMap(), removedPhotos = emptySet(),
+                    conversations = it.conversations.filterNot { item -> item.id == p.conversation_id })
                 else it.copy(conversations = it.conversations.filterNot { item -> item.id == p.conversation_id })
             }
             "message.created" -> {
@@ -777,13 +940,53 @@ internal fun afterFailedUnlink(state: JarvisUiState, failure: Exception): Jarvis
     else -> state.copy(localEraseOffer = PairingApproval.displayName(failure.message ?: "Core did not confirm the revocation.", 160))
 }
 
-/** Decode a JPEG for a 140 dp thumbnail: at most 512 px on its long side (Core sends <= 1600). */
-private fun decodePhoto(bytes: ByteArray): androidx.compose.ui.graphics.ImageBitmap? {
+private const val KEEP_FAILED = "Could not change this photo. Try again."
+private const val DELETE_FAILED = "Could not delete this photo. Try again."
+
+/** Decode a JPEG to at most about [maxSide] px on its long side: 512 for a 140 dp thumbnail,
+ *  1600 (all Core sends) for the full-screen view. */
+private fun decodePhoto(bytes: ByteArray, maxSide: Int): androidx.compose.ui.graphics.ImageBitmap? {
     val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
     android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
     var sample = 1
-    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 512) sample *= 2
+    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxSide) sample *= 2
     val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
     return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
+}
+
+/** Why a picked photo cannot be sent; [message] is shown on its chip. */
+private class PhotoRefused(override val message: String) : Exception(message)
+
+private class PreparedPhoto(val jpeg: ByteArray, val preview: androidx.compose.ui.graphics.ImageBitmap)
+
+/** The picked photo as an upright JPEG of at most [MAX_SIDE] px, never upscaled, with
+ *  transparency on white; plus a small preview for its chip. Blocking: call off the main thread. */
+private fun preparePhoto(resolver: android.content.ContentResolver, uri: android.net.Uri): PreparedPhoto {
+    // ponytail: a byte cap only when the provider knows the size (the photo picker does);
+    // setTargetSize bounds the decoded pixels either way.
+    val size = try { resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } } catch (_: Exception) { throw PhotoRefused(UNREADABLE) }
+    if (size != null && size > MAX_INPUT_BYTES) throw PhotoRefused(TOO_LARGE)
+    val decoded = try {
+        // ImageDecoder applies the EXIF orientation, so the JPEG we send is upright.
+        android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(resolver, uri)) { decoder, info, _ ->
+            val (width, height) = fitWithin(info.size.width, info.size.height)
+            decoder.setTargetSize(width, height)
+            // Software pixels: drawn on a Canvas and compressed below.
+            decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+        }
+    } catch (_: Exception) {
+        throw PhotoRefused(UNSUPPORTED)
+    }
+    // JPEG has no alpha: transparent pixels would turn black, so they go on white.
+    val bitmap = if (!decoded.hasAlpha()) decoded else android.graphics.Bitmap.createBitmap(decoded.width, decoded.height, android.graphics.Bitmap.Config.ARGB_8888).also {
+        android.graphics.Canvas(it).apply { drawColor(android.graphics.Color.WHITE); drawBitmap(decoded, 0f, 0f, null) }
+    }
+    val jpeg = java.io.ByteArrayOutputStream().use { out ->
+        if (!bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)) throw PhotoRefused(UNSUPPORTED)
+        out.toByteArray()
+    }
+    if (jpeg.size > com.hawkeynl.jarvis.network.KtorJarvisApi.MAX_UPLOAD_BYTES) throw PhotoRefused(TOO_LARGE)
+    val (width, height) = fitWithin(bitmap.width, bitmap.height, 512)
+    return PreparedPhoto(jpeg, android.graphics.Bitmap.createScaledBitmap(bitmap, width, height, true).asImageBitmap())
 }

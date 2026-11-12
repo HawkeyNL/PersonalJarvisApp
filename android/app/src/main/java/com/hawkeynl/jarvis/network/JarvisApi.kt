@@ -64,6 +64,22 @@ interface JarvisApi {
     suspend fun photo(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<ByteArray> =
         ApiResult.InvalidResponse("Photos are not supported")
 
+    /** Upload one prepared JPEG; returns the new photo's id. HttpError carries Core's status. */
+    suspend fun uploadPhoto(endpoint: HomeNodeEndpoint, token: String, jpeg: ByteArray): ApiResult<String> =
+        ApiResult.InvalidResponse("Photos are not supported")
+
+    /** Keep a photo past its 90 days, or stop keeping it. */
+    suspend fun keepPhoto(endpoint: HomeNodeEndpoint, token: String, id: String, saved: Boolean): ApiResult<PhotoMeta> =
+        ApiResult.InvalidResponse("Photos are not supported")
+
+    /** Delete a photo for good; HttpError(404) when it is already gone. */
+    suspend fun deletePhoto(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> =
+        ApiResult.InvalidResponse("Photos are not supported")
+
+    /** Delete a conversation with its messages and photos. */
+    suspend fun deleteConversation(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> =
+        ApiResult.InvalidResponse("Not supported")
+
     suspend fun androidUpdate(
         endpoint: HomeNodeEndpoint,
         token: String,
