@@ -342,6 +342,8 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             is ApiResult.Success -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { decodePhoto(bytes.value) }
                 ?.let { PhotoResult.Image(it) } ?: PhotoResult.Unavailable
             is ApiResult.HttpError -> if (bytes.status == 404) PhotoResult.Removed else PhotoResult.Unavailable
+            // An expired session goes through the usual sign-in-again flow (once: it clears the epoch).
+            ApiResult.Unauthorized -> { if (epoch == photoEpoch) handleApiFailure(bytes); PhotoResult.Unavailable }
             else -> PhotoResult.Unavailable
         }
         // A late answer from before an identity change is dropped.
