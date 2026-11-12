@@ -245,6 +245,46 @@ actor JarvisAPIClient {
                               expectedBinding: expectedBinding, response: EmptyOrJSON.self)
     }
 
+    static let maximumPhotoBytes = 2 * 1024 * 1024
+
+    /// One chat photo: a 200 `image/jpeg` of at most 2 MiB starting FF D8 FF. A deleted or
+    /// expired photo is `.rejected(status: 404, …)`.
+    func photo(id: UUID, token: String, expectedBinding: UUID) async throws -> Data {
+        try Task.checkCancellation()
+        guard expectedBinding == bindingID, let baseURL,
+              let url = URL(string: "/v1/photos/\(id.uuidString.lowercased())", relativeTo: baseURL)?.absoluteURL else {
+            throw JarvisAPIError.invalidConfiguration
+        }
+        var request = URLRequest(url: url)
+        request.setValue("image/jpeg", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, rawResponse) = try await BoundedAPIResponse.read(session: session, request: request, limit: Self.maximumPhotoBytes)
+            try Task.checkCancellation()
+            guard expectedBinding == bindingID else { throw JarvisAPIError.invalidConfiguration }
+            guard let http = rawResponse as? HTTPURLResponse else { throw JarvisAPIError.invalidResponse }
+            if http.statusCode == 401 { throw JarvisAPIError.unauthorized }
+            guard http.statusCode == 200 else { throw JarvisAPIError.rejected(status: http.statusCode, message: nil) }
+            guard Self.isJPEG(data, contentType: http.value(forHTTPHeaderField: "Content-Type")) else {
+                throw JarvisAPIError.invalidResponse
+            }
+            return data
+        } catch let error as JarvisAPIError {
+            throw error
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .timedOut {
+            throw JarvisAPIError.timedOut
+        } catch {
+            throw JarvisAPIError.unreachable
+        }
+    }
+
+    static func isJPEG(_ data: Data, contentType: String?) -> Bool {
+        let type = contentType?.split(separator: ";").first?.trimmingCharacters(in: .whitespaces).lowercased()
+        return type == "image/jpeg" && data.count <= maximumPhotoBytes && data.starts(with: [0xFF, 0xD8, 0xFF])
+    }
+
     private func request<Response: Decodable>(
         path: String,
         method: String,

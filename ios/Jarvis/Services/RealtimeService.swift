@@ -6,8 +6,11 @@ struct RealtimeRun: Codable { let run_id: UUID; let request_id: UUID; let conver
 struct RealtimeMessage: Decodable {
     let id: UUID; let conversation_id: UUID; let role: String
     let content: String; let model: String?; let created_at: String
+    /// Chat photo ids; absent on text-only messages.
+    var attachments: [UUID]? = nil
     var conversationMessage: ConversationMessage {
-        ConversationMessage(role: role, content: content, model: model, at: created_at, canonicalId: id.uuidString.lowercased())
+        ConversationMessage(role: role, content: content, model: model, at: created_at, canonicalId: id.uuidString.lowercased(),
+                            attachments: attachments?.map { $0.uuidString.lowercased() })
     }
 }
 struct RealtimePayload: Decodable {

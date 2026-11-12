@@ -56,6 +56,7 @@ final class JarvisAppModel: ObservableObject {
     private func invalidatePresentation(clearIdentity: Bool) {
         presentation.invalidate()
         messages = []; conversations = []; isSending = false; realtimeAvailable = false
+        photos.removeAll()
         if clearIdentity {
             pendingRequests.clear(); currentConversationId = nil; currentConversationTitle = "New conversation"
             pendingPasswordReset = nil
@@ -403,6 +404,32 @@ final class JarvisAppModel: ObservableObject {
         voiceReleaseTask?.cancel()
         realtime.stop(); speech.stop()
         if isAuthenticated { lockState = .locked }
+    }
+
+    /// Decoded chat photos; bounded, cleared with every presentation reset (sign-out, erase,
+    /// expired session, Home Node change).
+    private var photos: [String: ChatPhoto] = [:]
+
+    /// One chat photo for display. A passing failure is not remembered; the next showing retries.
+    func photo(id: String) async -> ChatPhoto {
+        if let cached = photos[id] { return cached }
+        guard let uuid = UUID(uuidString: id) else { return .unavailable }
+        let generation = presentation.id
+        let result: ChatPhoto
+        do {
+            let data = try await chat.photo(id: uuid)
+            result = UIImage(data: data).map(ChatPhoto.image) ?? .unavailable
+        } catch let JarvisAPIError.rejected(status, _) where status == 404 {
+            result = .removed
+        } catch {
+            return .unavailable
+        }
+        // A late answer from before a reset is dropped.
+        guard presentation.accepts(generation) else { return .unavailable }
+        // ponytail: drop-all when full; an LRU if conversations show many photos.
+        if photos.count >= 24 { photos.removeAll() }
+        if case .unavailable = result {} else { photos[id] = result }
+        return result
     }
 
     func logout() async {

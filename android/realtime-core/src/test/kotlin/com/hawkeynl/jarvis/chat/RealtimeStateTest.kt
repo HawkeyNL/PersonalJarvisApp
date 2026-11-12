@@ -18,6 +18,13 @@ class RealtimeStateTest {
         assertEquals("weer?", offered.research_offer?.question)
     }
 
+    @Test fun messagePhotosAreOptionalIds() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val message = """"id":"m","conversation_id":"c","role":"user","content":"","created_at":"t""""
+        assertEquals(emptyList<String>(), json.decodeFromString<RealtimeMessage>("{$message}").attachments)
+        assertEquals(listOf("p1", "p2"), json.decodeFromString<RealtimeMessage>("{$message,\"attachments\":[\"p1\",\"p2\"]}").attachments)
+    }
+
     @Test fun webSearchMarkerIsOptional() {
         val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         assertNull(json.decodeFromString<RealtimePayload>("""{"run_id":"r"}""").web_search)

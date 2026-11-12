@@ -20,6 +20,9 @@ class ConversationService(
     suspend fun load(endpoint: HomeNodeEndpoint, id: String): ApiResult<ConversationDetailResponse> =
         withToken { api.conversation(endpoint, it, id) }
 
+    suspend fun photo(endpoint: HomeNodeEndpoint, id: String): ApiResult<ByteArray> =
+        withToken { api.photo(endpoint, it, id) }
+
     suspend fun send(
         endpoint: HomeNodeEndpoint,
         conversationId: String?,

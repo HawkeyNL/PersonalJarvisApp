@@ -60,6 +60,10 @@ interface JarvisApi {
         request: ChatRequest,
     ): ApiResult<ChatResponse>
 
+    /** One chat photo as JPEG bytes (<= 2 MiB); HttpError(404) once deleted or expired. */
+    suspend fun photo(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<ByteArray> =
+        ApiResult.InvalidResponse("Photos are not supported")
+
     suspend fun androidUpdate(
         endpoint: HomeNodeEndpoint,
         token: String,
