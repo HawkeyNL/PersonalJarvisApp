@@ -39,9 +39,9 @@ enum BoundedAPIResponse {
     static let maximumBytes = 16 * 1024 * 1024
 
     static func read(session: URLSession, request: URLRequest,
-                     limit: Int = maximumBytes) async throws -> (Data, URLResponse) {
+                     limit: Int = maximumBytes, resourceTimeout: TimeInterval? = nil) async throws -> (Data, URLResponse) {
         guard limit >= 0 else { throw JarvisAPIError.responseTooLarge }
-        let receiver = BoundedAPIReceiver(limit: limit)
+        let receiver = BoundedAPIReceiver(limit: limit, resourceTimeout: resourceTimeout)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 receiver.start(session: session, request: request, continuation: continuation)
@@ -60,6 +60,7 @@ enum BoundedAPIResponse {
 private final class BoundedAPIReceiver: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private let limit: Int
+    private let resourceTimeout: TimeInterval?
     private var finished = false
     private var task: URLSessionDataTask?
     private var transport: URLSession?
@@ -67,7 +68,7 @@ private final class BoundedAPIReceiver: NSObject, URLSessionDataDelegate, @unche
     private var response: URLResponse?
     private var data = Data()
 
-    init(limit: Int) { self.limit = limit }
+    init(limit: Int, resourceTimeout: TimeInterval?) { self.limit = limit; self.resourceTimeout = resourceTimeout }
 
     func start(session: URLSession, request: URLRequest,
                continuation: CheckedContinuation<(Data, URLResponse), Error>) {
@@ -80,7 +81,10 @@ private final class BoundedAPIReceiver: NSObject, URLSessionDataDelegate, @unche
         self.continuation = continuation
         // Data/response callbacks belong to the session delegate, not merely
         // the task-specific progress delegate. Preserve all transport settings.
-        let transport = URLSession(configuration: session.configuration, delegate: self, delegateQueue: nil)
+        // `configuration` is a copy: changing it leaves the shared session alone.
+        let configuration = session.configuration
+        if let resourceTimeout { configuration.timeoutIntervalForResource = resourceTimeout }
+        let transport = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         self.transport = transport
         let task = transport.dataTask(with: request)
         self.task = task
@@ -238,10 +242,36 @@ actor JarvisAPIClient {
                               expectedBinding: expectedBinding, response: EmptyOrJSON.self)
     }
 
-    /// The only DELETE: this device's own APNs push target. A device is revoked with a
-    /// signed approval, never with a bearer-only DELETE.
+    // The only bearer-only DELETEs: this device's own APNs push target, and the owner's
+    // own chat data (a conversation, a photo). A device is revoked with a signed approval,
+    // never with a bearer-only DELETE.
     func deletePushTarget(token: String, expectedBinding: UUID) async throws {
-        _ = try await request(path: "/v1/devices/self/push", method: "DELETE", token: token,
+        try await delete("/v1/devices/self/push", token: token, expectedBinding: expectedBinding)
+    }
+
+    func deleteConversation(id: UUID, token: String, expectedBinding: UUID) async throws {
+        try await delete("/v1/conversations/\(id.uuidString.lowercased())", token: token, expectedBinding: expectedBinding)
+    }
+
+    func deletePhoto(id: UUID, token: String, expectedBinding: UUID) async throws {
+        try await delete("/v1/photos/\(id.uuidString.lowercased())", token: token, expectedBinding: expectedBinding)
+    }
+
+    /// Keep (or stop keeping) a photo past its 90 days.
+    func setPhotoSaved(id: UUID, saved: Bool, token: String, expectedBinding: UUID) async throws -> PhotoMeta {
+        try await request(path: "/v1/photos/\(id.uuidString.lowercased())", method: "PATCH", body: PhotoSaved(saved: saved),
+                          token: token, expectedBinding: expectedBinding, response: PhotoMeta.self)
+    }
+
+    /// One chat photo, already shrunk to a JPEG, as raw bytes. The reply is a few fields; a
+    /// slow uplink gets two minutes instead of the usual 30 seconds.
+    func uploadPhoto(_ jpeg: Data, token: String, expectedBinding: UUID) async throws -> PhotoUpload {
+        try await request(path: "/v1/photos", method: "POST", upload: jpeg, token: token,
+                          expectedBinding: expectedBinding, limit: 4 * 1024, resourceTimeout: 120, response: PhotoUpload.self)
+    }
+
+    private func delete(_ path: String, token: String, expectedBinding: UUID) async throws {
+        _ = try await request(path: path, method: "DELETE", token: token,
                               expectedBinding: expectedBinding, response: EmptyOrJSON.self)
     }
 
@@ -289,9 +319,12 @@ actor JarvisAPIClient {
         path: String,
         method: String,
         body: (any Encodable)? = nil,
+        upload: Data? = nil,
         token: String? = nil,
         headers: [String: String] = [:],
         expectedBinding: UUID? = nil,
+        limit: Int = BoundedAPIResponse.maximumBytes,
+        resourceTimeout: TimeInterval? = nil,
         response: Response.Type
     ) async throws -> Response {
         try Task.checkCancellation()
@@ -306,12 +339,16 @@ actor JarvisAPIClient {
         if let body {
             request.httpBody = try encoder.encode(AnyEncodable(body))
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        } else if let upload {
+            request.httpBody = upload
+            request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         }
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
 
         do {
-            let (data, rawResponse) = try await BoundedAPIResponse.read(session: session, request: request)
+            let (data, rawResponse) = try await BoundedAPIResponse.read(session: session, request: request, limit: limit,
+                                                                           resourceTimeout: resourceTimeout)
             try Task.checkCancellation()
             if let expectedBinding, expectedBinding != bindingID { throw JarvisAPIError.invalidConfiguration }
             guard let http = rawResponse as? HTTPURLResponse else { throw JarvisAPIError.invalidResponse }

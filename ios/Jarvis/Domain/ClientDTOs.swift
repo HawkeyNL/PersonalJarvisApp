@@ -161,7 +161,7 @@ struct ConversationMessage: Decodable, Identifiable, Equatable {
     let model: String?
     let at: String
     var canonicalId: String? = nil
-    /// Chat photo ids; shown read-only, fetched with the session token.
+    /// Chat photo ids, fetched with the session token.
     var attachments: [String]? = nil
 
     enum CodingKeys: String, CodingKey { case role, content, model, at, attachments; case canonicalId = "id" }
@@ -254,8 +254,10 @@ struct ConversationResponse: Decodable, Equatable {
     let title: String
     let messages: [ConversationMessage]
     let assistantRunning: Bool?
+    /// Its photos that still exist; absent on an older Core.
+    var photos: [PhotoMeta]? = nil
     enum CodingKeys: String, CodingKey {
-        case id, title, messages
+        case id, title, messages, photos
         case assistantRunning = "assistant_running"
     }
 }

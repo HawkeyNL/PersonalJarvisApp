@@ -19,6 +19,20 @@ final class JarvisAppModel: ObservableObject {
     /// A run Core started itself right after a reply (its automatic web search);
     /// only meaningful while its `run:` placeholder row is shown.
     @Published private(set) var webSearchRun: UUID?
+    /// A web search Core advised after the last reply; only the owner's tap sends it.
+    @Published private(set) var researchOffer: ResearchOffer?
+    /// Photos in the composer, in order (ChatPhotos).
+    @Published private(set) var chips: [PhotoChip] = []
+    /// Why a photo was not added (the limit); cleared by the next attach.
+    @Published private(set) var chipNotice: String?
+    /// The open conversation's photos that still exist (from its last read), by id.
+    @Published private(set) var photoMeta: [String: PhotoMeta] = [:]
+    /// Photos known to be gone: shown as "Photo removed" without a download.
+    @Published private(set) var removedPhotos: Set<String> = []
+    /// Where photos go is said once, until the first message with photos is sent.
+    @Published private(set) var photosDisclosed = UserDefaults.standard.bool(forKey: "jarvis.photos.disclosed") {
+        didSet { UserDefaults.standard.set(photosDisclosed, forKey: "jarvis.photos.disclosed") }
+    }
     @Published var endpointText: String
     @Published var notice: String?
     /// A signed password reset waiting for root confirmation on the Home Node.
@@ -53,14 +67,26 @@ final class JarvisAppModel: ObservableObject {
     private var pendingRequests = PendingChatRequests()
     private var voiceReleaseTask: Task<Void, Never>?
     private var presentation = ChatPresentationLifetime()
+    /// The composer photos' lifetime: like `presentation`, but the background lock keeps it.
+    private var photoSession = ChatPresentationLifetime()
     private func invalidatePresentation(clearIdentity: Bool) {
         presentation.invalidate()
         messages = []; conversations = []; isSending = false; realtimeAvailable = false
         photos.removeAll()
+        photoMeta = [:]; removedPhotos = []; researchOffer = nil
         if clearIdentity {
+            dropChips()
             pendingRequests.clear(); currentConversationId = nil; currentConversationTitle = "New conversation"
             pendingPasswordReset = nil
         }
+    }
+
+    /// Composer photos outlive the background lock (pasting means leaving the app); a new
+    /// identity or Home Node deletes the uploaded ones and drops the rest. One still
+    /// uploading stays pending and Core removes it after 24 hours.
+    private func dropChips() {
+        chips.forEach { forget($0) }
+        chips = []; chipNotice = nil; photoSession.invalidate()
     }
 
     func stopSpeaking() {
@@ -83,14 +109,27 @@ final class JarvisAppModel: ObservableObject {
     /// The "Approval notifications" setting and APNs token registration.
     let approvalPush = ApprovalPush()
 
-    init() {
+    convenience init() {
         let endpointStore = EndpointStore()
         let api = JarvisAPIClient(baseURL: endpointStore.endpoint)
         let auth = AuthService(api: api)
+        self.init(endpointStore: endpointStore, api: api, auth: auth, chat: ChatService(api: api, auth: auth))
+    }
+
+    #if DEBUG
+    /// Native test seam: a signed-in, unlocked chat over `chat`; nothing in the app uses it.
+    convenience init(signedInChat chat: ChatService, api: JarvisAPIClient, realtime: Bool) {
+        self.init(endpointStore: EndpointStore(), api: api, auth: AuthService(api: api), chat: chat)
+        enrollmentState = .authenticated
+        realtimeAvailable = realtime
+    }
+    #endif
+
+    private init(endpointStore: EndpointStore, api: JarvisAPIClient, auth: AuthService, chat: ChatService) {
         self.endpointStore = endpointStore
         self.api = api
         self.auth = auth
-        self.chat = ChatService(api: api, auth: auth)
+        self.chat = chat
         self.biometricLock = BiometricLock()
         self.endpointText = endpointStore.endpoint?.absoluteString ?? ""
         speech.setRate(voiceRate)
@@ -253,7 +292,8 @@ final class JarvisAppModel: ObservableObject {
     func saveEndpoint() async -> Bool {
         do {
             let endpoint = try EndpointNormalizer.normalize(endpointText)
-            if endpoint != endpointStore.endpoint {
+            let changed = endpoint != endpointStore.endpoint
+            if changed {
                 invalidatePresentation(clearIdentity: true)
                 realtime.stop(); speech.stop(); voiceReleaseTask?.cancel(); pendingRequests.clear()
                 try await auth.clearLocalBinding()
@@ -261,7 +301,9 @@ final class JarvisAppModel: ObservableObject {
             }
             endpointStore.save(endpoint)
             endpointText = endpoint.absoluteString
-            await api.configure(baseURL: endpoint)
+            // A new binding only for a new Home Node: requests (and photo deletes) bound to
+            // the current one stay valid when the same address is saved again.
+            if changed { await api.configure(baseURL: endpoint) }
             notice = nil
             guard await checkConnection() else { return false }
             if try await auth.requiresLocalUnlock() {
@@ -410,19 +452,22 @@ final class JarvisAppModel: ObservableObject {
     /// expired session, Home Node change).
     private var photos: [String: ChatPhoto] = [:]
 
-    /// One chat photo for display. A passing failure is not remembered; the next showing retries.
-    func photo(id: String) async -> ChatPhoto {
-        if let cached = photos[id] { return cached }
+    /// One chat photo for display: a thumbnail, or `full` size for the full-screen view (not
+    /// cached). A passing failure is not remembered; the next showing retries.
+    func photo(id: String, full: Bool = false) async -> ChatPhoto {
+        if removedPhotos.contains(id) { return .removed }
+        if !full, let cached = photos[id] { return cached }
         guard let uuid = UUID(uuidString: id) else { return .unavailable }
         let generation = presentation.id
         let result: ChatPhoto
         do {
             let data = try await chat.photo(id: uuid)
             // Decoded off the main actor, already shrunk: 24 cached thumbnails stay small.
-            result = await Task.detached(priority: .userInitiated) { ChatPhoto.thumbnail(data) }.value
+            result = await Task.detached(priority: .userInitiated) { ChatPhoto.thumbnail(data, maxPixels: full ? 1600 : 512) }.value
                 .map(ChatPhoto.image) ?? .unavailable
         } catch let JarvisAPIError.rejected(status, _) where status == 404 {
-            result = .removed
+            if presentation.accepts(generation) { markRemoved(id) }
+            return .removed
         } catch {
             // An expired session goes through the usual sign-in-again flow (once: it resets the generation).
             if (error as? JarvisAPIError) == .unauthorized, presentation.accepts(generation) { handle(error) }
@@ -430,10 +475,156 @@ final class JarvisAppModel: ObservableObject {
         }
         // A late answer from before a reset is dropped.
         guard presentation.accepts(generation) else { return .unavailable }
+        if !full { remember(id, result) }
+        return result
+    }
+
+    private func remember(_ id: String, _ photo: ChatPhoto) {
         // ponytail: drop-all when full; an LRU if conversations show many photos.
         if photos.count >= 24 { photos.removeAll() }
-        if case .unavailable = result {} else { photos[id] = result }
-        return result
+        if case .unavailable = photo {} else { photos[id] = photo }
+    }
+
+    /// Adds picked or pasted photos, up to four in the composer. Each is shrunk and
+    /// uploaded at once.
+    func attachPhotos(_ loads: [() async throws -> Data]) {
+        chipNotice = nil
+        for load in loads {
+            guard chips.count < ChatPhotos.maxPhotos else { chipNotice = ChatPhotos.limit; break }
+            let chip = PhotoChip()
+            chips.append(chip)
+            Task { await prepare(chip.id, load) }
+        }
+    }
+
+    /// Clipboard images, or a word that there are none.
+    func pastePhotos(_ loads: [() async throws -> Data]) {
+        if loads.isEmpty { chipNotice = ChatPhotos.nothingToPaste } else { attachPhotos(loads) }
+    }
+
+    private func prepare(_ key: UUID, _ load: () async throws -> Data) async {
+        let generation = photoSession.id
+        // Changes the chip while it is still in the composer.
+        func update(_ change: (inout PhotoChip) -> Void) -> Bool {
+            guard photoSession.accepts(generation), let index = chips.firstIndex(where: { $0.id == key }) else { return false }
+            change(&chips[index])
+            return true
+        }
+        let data: Data
+        do { data = try await load() } catch {
+            _ = update { $0.state = .failed; $0.error = (error as? ChatPhotos.Failure)?.message ?? ChatPhotos.unreadable }
+            return
+        }
+        // Decoded and re-encoded off the main actor.
+        let prepared = await Task.detached(priority: .userInitiated) {
+            Result<(jpeg: Data, preview: UIImage?), Error> {
+                let jpeg = try ChatPhotos.downscale(data)
+                return (jpeg, ChatPhoto.thumbnail(jpeg))
+            }
+        }.value
+        let jpeg: Data
+        switch prepared {
+        case let .success(photo):
+            jpeg = photo.jpeg
+            guard update({ $0.preview = photo.preview; $0.state = .uploading }) else { return }
+        case let .failure(error):
+            _ = update { $0.state = .failed; $0.error = (error as? ChatPhotos.Failure)?.message ?? ChatPhotos.unsupported }
+            return
+        }
+        var uploaded: (id: UUID, binding: UUID)?
+        var failure: String?
+        do { uploaded = try await chat.uploadPhoto(jpeg) }
+        catch let JarvisAPIError.rejected(status, _) { failure = ChatPhotos.uploadFailure(status) }
+        catch JarvisAPIError.unreachable, JarvisAPIError.timedOut { failure = ChatPhotos.unreachable }
+        catch {
+            if (error as? JarvisAPIError) == .unauthorized, photoSession.accepts(generation) { handle(error); return }
+            failure = ChatPhotos.uploadFailure(0)
+        }
+        let kept = update { chip in
+            if let uploaded {
+                chip.photoId = uploaded.id; chip.binding = uploaded.binding; chip.state = .ready; chip.uploadedAt = Date()
+            }
+            else { chip.state = .failed; chip.error = failure }
+        }
+        // Removed (✕) while uploading: delete what Core kept. After a sign-out the photo
+        // stays pending and Core removes it after 24 hours.
+        if !kept, photoSession.accepts(generation), let uploaded { forget(id: uploaded.id, binding: uploaded.binding) }
+    }
+
+    /// ✕ on a chip: drop it, and delete it on the Home Node once uploaded.
+    func removeChip(_ key: UUID) {
+        guard let chip = chips.first(where: { $0.id == key }) else { return }
+        chips.removeAll { $0.id == key }
+        forget(chip)
+        chipNotice = nil
+    }
+
+    /// Photos Core would no longer attach fail in place.
+    func expireStaleChips(now: Date = Date()) { chips = ChatPhotos.expired(chips, now: now) }
+
+    /// Best-effort delete of an uploaded photo that will not be sent, on the Home Node it
+    /// was uploaded to only.
+    private func forget(_ chip: PhotoChip) {
+        if let id = chip.photoId, let binding = chip.binding { forget(id: id, binding: binding) }
+    }
+
+    private func forget(id: UUID, binding: UUID) {
+        Task { try? await chat.deletePhoto(id: id, binding: binding) }
+    }
+
+    /// Hands the uploaded photos to a sent message; their previews go into the cache so the
+    /// message shows them without a download. Returns them, for restoreChips.
+    private func takeChips() -> [PhotoChip] {
+        let taken = chips.filter { $0.state == .ready && $0.photoId != nil }
+        for chip in taken {
+            if let id = chip.photoId, let preview = chip.preview { remember(id.uuidString.lowercased(), .image(preview)) }
+        }
+        chips = []; chipNotice = nil
+        if !taken.isEmpty { photosDisclosed = true }
+        return taken
+    }
+
+    /// Puts the photos of a refused message back in the composer; any without room are deleted.
+    private func restoreChips(_ taken: [PhotoChip]) {
+        let restored = ChatPhotos.restore(taken, into: chips)
+        chips = restored.chips
+        restored.dropped.forEach { forget($0) }
+        if !restored.dropped.isEmpty { chipNotice = ChatPhotos.limit }
+    }
+
+    /// Keep (or stop keeping) a photo past its 90 days. A photo Core no longer has (deleted
+    /// elsewhere or expired) is marked removed instead.
+    func keepPhoto(_ id: String, saved: Bool) async throws {
+        guard let uuid = UUID(uuidString: id) else { return }
+        let generation = presentation.id
+        do {
+            let meta = try await chat.setPhotoSaved(id: uuid, saved: saved)
+            if presentation.accepts(generation), meta.key == id { photoMeta[id] = meta }
+        } catch JarvisAPIError.rejected(status: 404, message: _) {
+            if presentation.accepts(generation) { markRemoved(id) }
+        } catch { throw failed(error, generation) }
+    }
+
+    /// Delete a photo for good; its messages show "Photo removed". Already gone counts as deleted.
+    func deletePhoto(_ id: String) async throws {
+        guard let uuid = UUID(uuidString: id) else { return }
+        let generation = presentation.id
+        do { try await chat.deletePhoto(id: uuid) }
+        catch JarvisAPIError.rejected(status: 404, message: _) {}
+        catch { throw failed(error, generation) }
+        if presentation.accepts(generation) { markRemoved(id) }
+    }
+
+    private func markRemoved(_ id: String) {
+        photoMeta[id] = nil
+        removedPhotos.insert(id)
+        remember(id, .removed)
+    }
+
+    /// An expired session goes through the usual sign-in-again flow; the error is passed on.
+    private func failed(_ error: Error, _ generation: UUID) -> Error {
+        if (error as? JarvisAPIError) == .unauthorized, presentation.accepts(generation) { handle(error) }
+        return error
     }
 
     func logout() async {
@@ -580,14 +771,23 @@ final class JarvisAppModel: ObservableObject {
         guard isAuthenticated, lockState == .unlocked else { return }
         let generation = presentation.id
         currentConversationId = id
+        researchOffer = nil
         do {
             let conversation = try await chat.conversation(id: id)
             guard currentConversationId == id, presentation.accepts(generation) else { return }
             currentConversationId = conversation.id
-            currentConversationTitle = conversation.title
-            messages = conversation.messages
-            isSending = conversation.assistantRunning == true
+            show(conversation)
         } catch { if presentation.accepts(generation) { handle(error) } }
+    }
+
+    private func show(_ conversation: ConversationResponse) {
+        currentConversationTitle = conversation.title
+        messages = conversation.messages
+        isSending = conversation.assistantRunning == true
+        let live = conversation.photos ?? []
+        photoMeta = Dictionary(live.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+        // An older Core reports no photos at all: then none is assumed gone.
+        removedPhotos = conversation.photos == nil ? [] : ChatPhotos.missing(conversation.messages, photos: live)
     }
 
     func newConversation() {
@@ -595,35 +795,87 @@ final class JarvisAppModel: ObservableObject {
         currentConversationTitle = "New conversation"
         messages = []
         isSending = false
+        researchOffer = nil; photoMeta = [:]; removedPhotos = []
     }
 
-    func send(_ text: String) async {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, isAuthenticated, lockState == .unlocked, !isSending else { return }
+    /// Delete the open conversation for good, its photos included (kept ones too), then
+    /// open the most recent one left.
+    func deleteConversation() async throws {
+        guard let id = currentConversationId, isAuthenticated, lockState == .unlocked else { return }
         let generation = presentation.id
+        do { try await chat.deleteConversation(id: id) } catch { throw failed(error, generation) }
+        guard presentation.accepts(generation) else { return }
+        conversations.removeAll { $0.id == id }
+        guard currentConversationId == id else { return }
+        if let next = conversations.first?.id { await openConversation(next) } else { newConversation() }
+    }
+
+    /// Only this tap sends a web search; the shown question is all that leaves.
+    func searchWeb() async {
+        guard realtimeAvailable, let offer = researchOffer, offer.conversationId == currentConversationId else { return }
+        await send(offer.question, research: true)
+    }
+
+    /// Sends a message with the composer's photos (a photo alone is a message too).
+    /// `research` only ever comes from the owner's tap on a Core offer. Returns true when
+    /// nothing was sent, refused here or outright by Core, so the draft can come back.
+    @discardableResult
+    func send(_ text: String, research: Bool = false) async -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let attached = research ? [] : chips.compactMap(\.photoId)
+        guard !trimmed.isEmpty || !attached.isEmpty, isAuthenticated, lockState == .unlocked, !isSending,
+              research || ChatPhotos.allReady(chips) else { return true }
+        let generation = presentation.id
+        let photoGeneration = photoSession.id
         if realtimeAvailable && pendingRequests.isFull {
             notice = "Too many unconfirmed requests. Reconnect before sending more; no automatic regeneration will occur."
-            return
+            return true
         }
+        // Photos go only with the runs API; the legacy chat endpoint refuses them.
+        if !attached.isEmpty && !realtimeAvailable {
+            reply("Photos need a live connection to your Home Node. Nothing was sent.")
+            return true
+        }
+        researchOffer = nil
+        let taken = attached.isEmpty ? [] : takeChips()
         let priorMessages = messages
         let now = ISO8601DateFormatter().string(from: Date())
-        messages.append(ConversationMessage(role: "user", content: trimmed, model: nil, at: now))
+        messages.append(ConversationMessage(role: "user", content: trimmed, model: nil, at: now,
+                                            attachments: attached.isEmpty ? nil : attached.map { $0.uuidString.lowercased() }))
         isSending = true
         if realtimeAvailable {
             let requestId = UUID()
-            guard let optimisticID = messages.last?.id,
-                  pendingRequests.insert(requestId, optimisticID: optimisticID) else { isSending = false; return }
+            guard let optimisticID = messages.last?.id, pendingRequests.insert(requestId, optimisticID: optimisticID) else {
+                isSending = false
+                messages.removeLast()
+                restoreChips(taken)
+                return true
+            }
             let selected = currentConversationId
             do {
-                let run = try await chat.submit(requestId: requestId, text: trimmed, conversationId: selected, history: priorMessages)
-                guard presentation.accepts(generation) else { return }
+                let run = try await chat.submit(requestId: requestId, text: trimmed, conversationId: selected, history: priorMessages,
+                                                research: research, attachments: attached)
+                guard presentation.accepts(generation) else { return false }
                 if selected == nil, currentConversationId == nil, pendingRequests[requestId] != nil { currentConversationId = run.conversation_id }
             } catch {
-                guard presentation.accepts(generation) else { return }
+                let shown = presentation.accepts(generation)
+                if case let .rejected(status, _)? = error as? JarvisAPIError, let refusal = ChatPhotos.runRefusal(status) {
+                    // Core stored nothing: the message, its draft and its photos come back. After
+                    // the background lock the chat was cleared, but the composer photos remain.
+                    pendingRequests.removeValue(forKey: requestId)
+                    if shown {
+                        isSending = false
+                        messages.removeAll { $0.id == optimisticID }
+                        reply(refusal)
+                    }
+                    if photoSession.accepts(photoGeneration) { restoreChips(taken) }
+                    return shown || photoSession.accepts(photoGeneration)
+                }
+                guard shown else { return false }
                 isSending = false
                 notice = "Delivery was not confirmed. Reconnect to check saved history; Jarvis will not automatically generate again."
             }
-            return
+            return false
         }
         defer { if presentation.accepts(generation) { isSending = false } }
         do {
@@ -632,7 +884,7 @@ final class JarvisAppModel: ObservableObject {
                 conversationId: currentConversationId,
                 history: priorMessages
             )
-            guard presentation.accepts(generation) else { return }
+            guard presentation.accepts(generation) else { return false }
             currentConversationId = response.conversationId
             currentConversationTitle = response.conversationTitle
             if response.newTopic && !priorMessages.isEmpty {
@@ -645,14 +897,22 @@ final class JarvisAppModel: ObservableObject {
                     at: ISO8601DateFormatter().string(from: Date())
                 ))
             }
-            guard presentation.accepts(generation) else { return }
+            guard presentation.accepts(generation) else { return false }
             let snapshot = try await chat.conversations()
-            guard presentation.accepts(generation) else { return }
+            guard presentation.accepts(generation) else { return false }
             conversations = snapshot
         } catch { if presentation.accepts(generation) { handle(error) } }
+        return false
+    }
+
+    /// A local Jarvis line in the chat (not stored on the Home Node).
+    private func reply(_ text: String) {
+        messages.append(ConversationMessage(role: "assistant", content: text, model: nil, at: ISO8601DateFormatter().string(from: Date())))
     }
 
     private func apply(awaitResult result: AuthServiceOutcome) {
+        // Not signed in (any more): the composer photos go too.
+        if case .authenticated = result {} else { dropChips() }
         switch result {
         case .needsEnrollment: enrollmentState = .notStarted
         case .needsPassword: enrollmentState = .needsPassword
@@ -685,9 +945,7 @@ final class JarvisAppModel: ObservableObject {
                     }
                     guard presentation.accepts(generation) else { return }
                     if currentConversationId == selected {
-                        if let snapshot {
-                            messages = snapshot.messages; currentConversationTitle = snapshot.title; isSending = snapshot.assistantRunning == true
-                        } else { newConversation() }
+                        if let snapshot { show(snapshot) } else { newConversation() }
                     }
                 }
             } catch {
@@ -736,6 +994,7 @@ final class JarvisAppModel: ObservableObject {
                 pendingRequests.removeValue(forKey: run.request_id)
                 if currentConversationId == message.conversation_id {
                     upsertRealtime(message, optimistic: "run:\(run.run_id)"); isSending = false
+                    researchOffer = ResearchOffer.from(payload)
                 }
             }
         case "assistant.failed":

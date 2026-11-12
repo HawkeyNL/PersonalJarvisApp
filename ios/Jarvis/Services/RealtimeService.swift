@@ -18,6 +18,21 @@ struct RealtimePayload: Decodable {
     var conversation_id: UUID?; var id: UUID?; var title: String?; var updated_at: String?
     var run: RealtimeRun?; var text: String?; var message: RealtimeMessage?; var reason: String?
     var web_search: Bool?
+    /// Core's advice to search the web after this reply; only the owner's tap sends it.
+    var research_offer: RealtimeResearchOffer?
+}
+struct RealtimeResearchOffer: Decodable { let question: String }
+/// A web search Core advised after the last reply in `conversationId`.
+struct ResearchOffer: Equatable {
+    let conversationId: UUID
+    let question: String
+
+    static func from(_ payload: RealtimePayload) -> ResearchOffer? {
+        guard let conversation = payload.run?.conversation_id,
+              let question = payload.research_offer?.question.trimmingCharacters(in: .whitespacesAndNewlines),
+              !question.isEmpty else { return nil }
+        return ResearchOffer(conversationId: conversation, question: question)
+    }
 }
 struct RealtimeEvent: Decodable {
     let `protocol`: Int; let epoch: UUID; let sequence: UInt64; let event_id: UUID
@@ -45,7 +60,13 @@ struct RealtimeEvent: Decodable {
     }
 }
 struct RealtimeCapability: Decodable { let `protocol`: Int; let asynchronous_chat: Bool }
-struct AsyncChatRequest: Encodable { let request_id: UUID; let conversation_id: UUID?; let messages: [ChatTurn] }
+struct AsyncChatRequest: Encodable {
+    let request_id: UUID; let conversation_id: UUID?; let messages: [ChatTurn]
+    /// "research" only from the owner's tap on a Core offer; nil fields are left out.
+    var mode: String? = nil
+    /// Uploaded chat photo ids.
+    var attachments: [UUID]? = nil
+}
 
 /// ID-only correlation state; uncertainty is never evicted to permit more work.
 struct PendingChatRequests {

@@ -1,4 +1,5 @@
 import XCTest
+import ImageIO
 import Network
 import SwiftUI
 import UIKit
@@ -2434,5 +2435,379 @@ final class ChatPhotoTests: XCTestCase {
         XCTAssertEqual(max(thumbnail.width, thumbnail.height), 512)
         XCTAssertTrue((287...289).contains(thumbnail.height), "\(thumbnail.height)")
         XCTAssertNil(ChatPhoto.thumbnail(Data("<svg onload=x>".utf8)))
+    }
+
+    private func png(width: Int, height: Int) throws -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        // Nothing drawn: fully transparent.
+        return try XCTUnwrap(UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format).image { _ in }.pngData())
+    }
+
+    private func size(_ jpeg: Data) throws -> (width: Int, height: Int) {
+        let image = try XCTUnwrap(UIImage(data: jpeg)?.cgImage)
+        return (image.width, image.height)
+    }
+
+    func testPhotosShrinkTo2048OnTheLongSideAndNeverGrow() throws {
+        XCTAssertEqual(ChatPhotos.side(width: 4000, height: 3000), 2048)
+        XCTAssertEqual(ChatPhotos.side(width: 300, height: 1200), 1200)
+        let big = try size(ChatPhotos.downscale(png(width: 3000, height: 1000)))
+        XCTAssertEqual(big.width, 2048)
+        XCTAssertTrue((682...683).contains(big.height), "\(big.height)")
+        let small = try size(ChatPhotos.downscale(png(width: 300, height: 200)))
+        XCTAssertEqual(small.width, 300)
+        XCTAssertEqual(small.height, 200)
+    }
+
+    func testDownscaleSendsAnUprightJpegWithTransparencyAsWhite() throws {
+        let jpeg = try ChatPhotos.downscale(png(width: 64, height: 64))
+        XCTAssertTrue(jpeg.starts(with: [0xFF, 0xD8, 0xFF]))
+        let image = try XCTUnwrap(UIImage(data: jpeg)?.cgImage)
+        var pixel = [UInt8](repeating: 0, count: 4)
+        pixel.withUnsafeMutableBytes { bytes in
+            CGContext(data: bytes.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)?
+                .draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
+        XCTAssertTrue(pixel.prefix(3).allSatisfy { $0 > 250 }, "\(pixel)")
+        // A 400×200 photo stored with EXIF orientation 6 (rotated) is sent upright: 200×400.
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let sideways = try XCTUnwrap(UIGraphicsImageRenderer(size: CGSize(width: 400, height: 200), format: format).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 400, height: 200))
+        }.cgImage)
+        let rotated = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(rotated, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, sideways, [kCGImagePropertyOrientation: 6] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let upright = try size(ChatPhotos.downscale(rotated as Data))
+        XCTAssertEqual(upright.width, 200)
+        XCTAssertEqual(upright.height, 400)
+    }
+
+    func testTooLargeOrUnreadablePhotosAreRefusedBeforeUpload() {
+        XCTAssertThrowsError(try ChatPhotos.downscale(Data(count: ChatPhotos.maxInputBytes + 1))) {
+            XCTAssertEqual($0 as? ChatPhotos.Failure, ChatPhotos.Failure(message: ChatPhotos.tooLarge))
+        }
+        XCTAssertThrowsError(try ChatPhotos.downscale(Data("<svg onload=x>".utf8))) {
+            XCTAssertEqual($0 as? ChatPhotos.Failure, ChatPhotos.Failure(message: ChatPhotos.unsupported))
+        }
+    }
+
+    func testUploadRefusalsHaveTheirOwnWordsAnd404MeansAnOlderCore() {
+        XCTAssertEqual(ChatPhotos.uploadFailure(404), "Your Home Node needs Jarvis Core v0.0.83 to receive photos.")
+        XCTAssertEqual(ChatPhotos.uploadFailure(415), "This photo format isn't supported; export it as JPEG.")
+        XCTAssertEqual(ChatPhotos.uploadFailure(400), "This photo could not be read.")
+        XCTAssertEqual(ChatPhotos.uploadFailure(413), "This photo is too large.")
+        XCTAssertEqual(ChatPhotos.uploadFailure(429), "Too many photos for now; try again later.")
+        XCTAssertEqual(ChatPhotos.uploadFailure(503), "Photos are busy or unavailable on your Home Node; try again.")
+        XCTAssertEqual(ChatPhotos.uploadFailure(507), "Photo storage on your Home Node is full.")
+        XCTAssertEqual(ChatPhotos.uploadFailure(500), "The photo could not be uploaded.")
+    }
+
+    func testAPhotoOlderThan23HoursIsNotSent() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertFalse(ChatPhotos.tooOld(now.addingTimeInterval(-ChatPhotos.sendWithin), now: now))
+        XCTAssertTrue(ChatPhotos.tooOld(now.addingTimeInterval(-ChatPhotos.sendWithin - 1), now: now))
+        XCTAssertFalse(ChatPhotos.tooOld(nil, now: now))
+        var fresh = PhotoChip(state: .ready, uploadedAt: now.addingTimeInterval(-60))
+        fresh.photoId = UUID()
+        var stale = fresh
+        stale.uploadedAt = now.addingTimeInterval(-24 * 3600)
+        let uploading = PhotoChip(state: .uploading)
+        let chips = ChatPhotos.expired([fresh, stale, uploading], now: now)
+        XCTAssertEqual(chips.map(\.state), [.ready, .failed, .uploading])
+        XCTAssertEqual(chips[1].error, "This photo waited too long; remove it and attach it again.")
+    }
+
+    func testSendingWaitsUntilEveryPhotoIsUploaded() {
+        XCTAssertTrue(ChatPhotos.allReady([]))
+        XCTAssertTrue(ChatPhotos.allReady([PhotoChip(state: .ready), PhotoChip(state: .ready)]))
+        XCTAssertFalse(ChatPhotos.allReady([PhotoChip(state: .ready), PhotoChip(state: .uploading)]))
+        XCTAssertFalse(ChatPhotos.allReady([PhotoChip(state: .preparing)]))
+        XCTAssertFalse(ChatPhotos.allReady([PhotoChip(state: .failed)]))
+    }
+
+    func testARefusedMessageGetsItsPhotosBackAheadWhileThereIsRoom() {
+        let taken = (0..<3).map { _ in PhotoChip(state: .ready) }
+        let added = [PhotoChip(state: .uploading), PhotoChip(state: .ready)]
+        let restored = ChatPhotos.restore(taken, into: added)
+        XCTAssertEqual(restored.chips.map(\.id), [taken[0].id, taken[1].id, added[0].id, added[1].id])
+        XCTAssertEqual(restored.dropped.map(\.id), [taken[2].id])
+        XCTAssertEqual(ChatPhotos.restore(taken, into: []).chips.count, 3)
+        XCTAssertTrue(ChatPhotos.restore(taken, into: []).dropped.isEmpty)
+    }
+
+    func testOnlyA400Or404OnSubmitIsADefiniteRefusal() {
+        XCTAssertEqual(ChatPhotos.runRefusal(400), "Your Home Node refused this message. Nothing was sent.")
+        XCTAssertEqual(ChatPhotos.runRefusal(404), "Your Home Node no longer has this conversation or one of these photos. Nothing was sent.")
+        for status in [nil, 0, 401, 409, 500, 503] { XCTAssertNil(ChatPhotos.runRefusal(status), "\(String(describing: status))") }
+    }
+
+    func testRunRequestsCarryPhotosAndResearchOnlyWhenThereAreSome() throws {
+        let id = UUID(uuidString: "0B6F3C2E-8D1A-4F5E-9C3B-2A1D0E9F8C7B")!
+        let plain = try JSONSerialization.jsonObject(with: JSONEncoder().encode(
+            AsyncChatRequest(request_id: id, conversation_id: nil, messages: []))) as? [String: Any]
+        XCTAssertEqual(plain?.keys.sorted(), ["messages", "request_id"])
+        let full = try JSONSerialization.jsonObject(with: JSONEncoder().encode(
+            AsyncChatRequest(request_id: id, conversation_id: id, messages: [], mode: "research", attachments: [id]))) as? [String: Any]
+        XCTAssertEqual(full?["mode"] as? String, "research")
+        XCTAssertEqual(full?["attachments"] as? [String], [id.uuidString])
+    }
+
+    func testConversationPhotosAndTheOnesItLacks() throws {
+        let kept = "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"
+        let gone = "1b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"
+        let conversation = try JSONDecoder().decode(ConversationResponse.self, from: Data(#"""
+        {"id":"\#(kept)","title":"t","messages":[{"role":"user","content":"","model":null,"at":"x","attachments":["\#(kept)","\#(gone)"]},
+         {"role":"assistant","content":"hi","model":null,"at":"x"}],
+         "photos":[{"id":"\#(kept.uppercased())","saved":true,"expires_at":null}]}
+        """#.utf8))
+        let photos = try XCTUnwrap(conversation.photos)
+        XCTAssertEqual(photos.map(\.key), [kept])
+        XCTAssertEqual(ChatPhotos.missing(conversation.messages, photos: photos), [gone])
+        XCTAssertEqual(ChatPhotos.missing(conversation.messages, photos: []), [kept, gone])
+        let old = try JSONDecoder().decode(ConversationResponse.self, from: Data(#"{"id":"\#(kept)","title":"t","messages":[]}"#.utf8))
+        XCTAssertNil(old.photos)
+    }
+
+    func testTheFullScreenViewSaysHowLongAPhotoStays() {
+        let id = UUID()
+        XCTAssertEqual(ChatPhotos.expiryHint(PhotoMeta(id: id, saved: true, expires_at: nil)), "Kept until you delete it.")
+        XCTAssertEqual(ChatPhotos.expiryHint(nil), "Photos are kept 90 days unless you keep them.")
+        XCTAssertEqual(ChatPhotos.expiryHint(PhotoMeta(id: id, saved: false, expires_at: "nonsense")), "Photos are kept 90 days unless you keep them.")
+        let unkept = ChatPhotos.expiryHint(PhotoMeta(id: id, saved: false, expires_at: "2027-02-10T12:00:00Z"))
+        XCTAssertTrue(unkept.hasPrefix("Removed on ") && unkept.contains("2027") && unkept.hasSuffix(" unless you keep it."), unkept)
+        // Kept but not sent yet: Core still removes it 24 h after the upload.
+        let pending = ChatPhotos.expiryHint(PhotoMeta(id: id, saved: true, expires_at: "2027-02-10T12:00:00Z"))
+        XCTAssertTrue(pending.hasPrefix("Removed on ") && pending.contains("2027") && pending.hasSuffix("2027."), pending)
+    }
+}
+
+/// The composer's photos against a fixture Core, through the real API client.
+@MainActor
+final class ChatPhotoModelTests: XCTestCase {
+    private func signedIn() -> JarvisAppModel {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PhotoCoreProtocol.self]
+        let api = JarvisAPIClient(baseURL: URL(string: "https://jarvis.example.com")!, session: URLSession(configuration: configuration))
+        return JarvisAppModel(signedInChat: ChatService(api: api, tokenLoader: { "fixture-session-not-a-secret" }), api: api, realtime: true)
+    }
+
+    private func png() throws -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return try XCTUnwrap(UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64), format: format).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+        }.pngData())
+    }
+
+    private func until(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
+        var tries = 0
+        while !condition(), tries < 500 { tries += 1; try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertTrue(condition(), file: file, line: line)
+    }
+
+    private let deleted = "DELETE /v1/photos/\(PhotoCoreProtocol.photo)"
+
+    func testRemovingAPhotoWhileItUploadsDeletesItOnTheHomeNode() async throws {
+        PhotoCoreProtocol.reset(uploadDelay: 0.5)
+        let model = signedIn()
+        let photo = try png()
+        model.attachPhotos([{ photo }])
+        try await until { model.chips.first?.state == .uploading }
+        model.removeChip(try XCTUnwrap(model.chips.first?.id))
+        XCTAssertTrue(model.chips.isEmpty)
+        try await until { PhotoCoreProtocol.requests().contains(deleted) }
+    }
+
+    func testComposerPhotosOutliveTheBackgroundLock() async throws {
+        PhotoCoreProtocol.reset(uploadDelay: 0.5)
+        let model = signedIn()
+        let photo = try png()
+        model.attachPhotos([{ photo }])
+        try await until { model.chips.first?.state == .uploading }
+        model.lockWhenBackgrounded()
+        try await until { model.chips.first?.state == .ready }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(model.chips.count, 1)
+        XCTAssertFalse(PhotoCoreProtocol.requests().contains(deleted))
+    }
+
+    func testLosingTheSessionDropsPhotosAndDeletesOnlyUploadedOnes() async throws {
+        let photo = try png()
+        PhotoCoreProtocol.reset(uploadDelay: 0.5)
+        let uploading = signedIn()
+        uploading.attachPhotos([{ photo }])
+        try await until { uploading.chips.first?.state == .uploading }
+        try? await uploading.keepPhoto(PhotoCoreProtocol.unauthorized, saved: true)
+        XCTAssertTrue(uploading.chips.isEmpty)
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+        XCTAssertTrue(PhotoCoreProtocol.requests().contains("POST /v1/photos"))
+        XCTAssertFalse(PhotoCoreProtocol.requests().contains(deleted))
+
+        PhotoCoreProtocol.reset(uploadDelay: 0)
+        let ready = signedIn()
+        ready.attachPhotos([{ photo }])
+        try await until { ready.chips.first?.state == .ready }
+        try? await ready.keepPhoto(PhotoCoreProtocol.unauthorized, saved: true)
+        XCTAssertTrue(ready.chips.isEmpty)
+        try await until { PhotoCoreProtocol.requests().contains(deleted) }
+    }
+
+    func testARefusalAfterTheBackgroundLockPutsOnlyThePhotosBack() async throws {
+        PhotoCoreProtocol.reset(uploadDelay: 0, runStatus: 404, runDelay: 0.5)
+        let model = signedIn()
+        let photo = try png()
+        model.attachPhotos([{ photo }])
+        try await until { model.chips.first?.state == .ready }
+        let chip = try XCTUnwrap(model.chips.first?.id)
+        async let refused = model.send("Look")
+        try await until { PhotoCoreProtocol.requests().contains("POST /v1/assistant/runs") }
+        model.lockWhenBackgrounded()
+        let result = await refused
+        XCTAssertTrue(result)
+        XCTAssertEqual(model.chips.map(\.id), [chip])
+        // The chat was cleared by the lock: no refusal line in it.
+        XCTAssertTrue(model.messages.isEmpty)
+    }
+
+    func testARefusedRunPutsThePhotosBack() async throws {
+        let photo = try png()
+        for status in [400, 404] {
+            PhotoCoreProtocol.reset(uploadDelay: 0, runStatus: status)
+            let model = signedIn()
+            model.attachPhotos([{ photo }])
+            try await until { model.chips.first?.state == .ready }
+            let chip = try XCTUnwrap(model.chips.first?.id)
+            let refused = await model.send("Look")
+            XCTAssertTrue(refused)
+            XCTAssertEqual(model.chips.map(\.id), [chip])
+            XCTAssertEqual(model.chips.map(\.state), [.ready])
+            XCTAssertEqual(model.messages.map(\.content), [ChatPhotos.runRefusal(status)!])
+            XCTAssertFalse(model.isSending)
+            XCTAssertEqual(PhotoCoreProtocol.runAttachments(), [PhotoCoreProtocol.photo.uppercased()])
+        }
+    }
+
+    func testPastingWithoutAnImageSaysSo() {
+        let model = signedIn()
+        model.pastePhotos([])
+        XCTAssertEqual(model.chipNotice, "No photo on the clipboard.")
+        XCTAssertTrue(model.chips.isEmpty)
+    }
+
+    func testPhotosCoreNoLongerHasAreMarkedRemoved() async throws {
+        PhotoCoreProtocol.reset(uploadDelay: 0)
+        let model = signedIn()
+        let kept = "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"
+        let deleted = "1b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"
+        let shown = "2b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"
+        try await model.keepPhoto(kept, saved: true)
+        try await model.deletePhoto(deleted)
+        guard case .removed = await model.photo(id: shown) else { return XCTFail("A 404 photo shows as removed") }
+        XCTAssertEqual(model.removedPhotos, [kept, deleted, shown])
+        let requests = PhotoCoreProtocol.requests()
+        XCTAssertTrue(requests.contains("PATCH /v1/photos/\(kept)"))
+        XCTAssertTrue(requests.contains("DELETE /v1/photos/\(deleted)"))
+    }
+}
+
+/// Core for chat photos: uploads succeed (after `uploadDelay`), runs answer `runStatus`
+/// (after `runDelay`), one photo answers 401, everything else is 404.
+private final class PhotoCoreProtocol: URLProtocol {
+    static let photo = "3b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"
+    /// A photo whose PATCH answers 401: the session is gone.
+    static let unauthorized = "4b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c7b"
+    private static let lock = NSLock()
+    private static var log: [String] = []
+    private static var attachments: [String]?
+    private static var uploadDelay: TimeInterval = 0
+    private static var runStatus = 400
+    private static var runDelay: TimeInterval = 0
+    static func reset(uploadDelay: TimeInterval, runStatus: Int = 400, runDelay: TimeInterval = 0) {
+        lock.withLock {
+            log = []; attachments = nil
+            self.uploadDelay = uploadDelay; self.runStatus = runStatus; self.runDelay = runDelay
+        }
+    }
+    static func requests() -> [String] { lock.withLock { log } }
+    static func runAttachments() -> [String]? { lock.withLock { attachments } }
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let method = request.httpMethod ?? "GET"
+        let path = request.url?.path ?? ""
+        var delay: TimeInterval = 0
+        var status = 404
+        var body = Data()
+        Self.lock.withLock {
+            Self.log.append("\(method) \(path)")
+            if method == "POST", path == "/v1/photos" {
+                delay = Self.uploadDelay
+                status = 200
+                body = Data(#"{"id":"\#(Self.photo)","width":64,"height":64,"bytes":100}"#.utf8)
+            } else if path == "/v1/photos/\(Self.unauthorized)" {
+                status = 401
+            } else if method == "POST", path == "/v1/assistant/runs" {
+                delay = Self.runDelay
+                status = Self.runStatus
+                body = Data(#"{"error":"refused"}"#.utf8)
+                let sent = (try? JSONSerialization.jsonObject(with: Self.body(of: request))) as? [String: Any]
+                Self.attachments = sent?["attachments"] as? [String]
+            }
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
+            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
+                                           headerFields: ["Content-Type": "application/json"])!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: body)
+            client?.urlProtocolDidFinishLoading(self)
+        }
+    }
+    override func stopLoading() { }
+
+    private static func body(of request: URLRequest) -> Data {
+        var data = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open(); defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while data.count < 65536 {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }
+                data.append(contentsOf: buffer.prefix(count))
+            }
+        }
+        return data
+    }
+}
+
+final class ResearchOfferTests: XCTestCase {
+    private func completed(_ offer: Any?) throws -> RealtimeEvent {
+        let id = UUID().uuidString
+        var payload: [String: Any] = [
+            "run": ["run_id": id, "request_id": id, "conversation_id": id],
+            "message": ["id": id, "conversation_id": id, "role": "assistant", "content": "x", "created_at": "2026-01-01T00:00:00Z"],
+        ]
+        if let offer { payload["research_offer"] = offer }
+        return try JSONDecoder().decode(RealtimeEvent.self, from: JSONSerialization.data(withJSONObject: [
+            "protocol": 1, "epoch": id, "sequence": 1, "event_id": id, "type": "assistant.completed", "payload": payload,
+        ]))
+    }
+
+    func testAnOfferCarriesTheOwnersQuestionForItsOwnConversation() throws {
+        let event = try completed(["question": " weer morgen? "])
+        let offer = try XCTUnwrap(ResearchOffer.from(event.payload))
+        XCTAssertEqual(offer.question, "weer morgen?")
+        XCTAssertEqual(offer.conversationId, event.payload.run?.conversation_id)
+    }
+
+    func testOlderCoresAndEmptyOffersShowNoButton() throws {
+        XCTAssertNil(ResearchOffer.from(try completed(nil).payload))
+        XCTAssertNil(ResearchOffer.from(try completed(["question": "   "]).payload))
     }
 }
