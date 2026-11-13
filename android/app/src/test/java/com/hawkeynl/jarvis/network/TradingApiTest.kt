@@ -81,5 +81,9 @@ class TradingApiTest {
             assertTrue(bad, engine.requestHistory.isEmpty())
         }
         assertEquals(ApiResult.HttpError(400, null), api(HttpStatusCode.BadRequest).first.addHolding(endpoint, "t", "", "", ""))
+        // A 2xx with an oversized answer fails closed instead of counting as added or removed.
+        val big = "{}" + " ".repeat(1024 * 1024)
+        assertTrue(api(HttpStatusCode.Created, big).first.addHolding(endpoint, "t", "AAPL", "2", "1") is ApiResult.InvalidResponse)
+        assertTrue(api(body = big).first.deleteHolding(endpoint, "t", "h1") is ApiResult.InvalidResponse)
     }
 }

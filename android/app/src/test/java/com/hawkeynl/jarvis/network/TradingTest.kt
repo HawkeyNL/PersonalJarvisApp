@@ -220,6 +220,26 @@ class TradingTest {
         assertNull(readValueHistory(json(with(with(base, "base_currency", "null"), "points", "[]"))))
     }
 
+    @Test fun `narrow currency symbols and toFixed rounding match desktop`() {
+        assertEquals("$10.00", formatMoney("10", "CAD"))
+        assertEquals("$10.00", formatMoney("10", "HKD"))
+        assertEquals("kr10.00", formatMoney("10", "SEK"))
+        // toFixed(2) rounds the exact binary value: 1.005 is just below, 0.125 exactly half.
+        assertEquals("1.00", fixed2(1.005))
+        assertEquals("0.13", fixed2(0.125))
+        assertEquals("-0.13", fixed2(-0.125))
+        assertEquals("4.80", changeRatio("100", "104.8"))
+    }
+
+    @Test fun `typed holding amounts accept a decimal comma`() {
+        assertEquals("12.5", holdingNumber(" 12,5 "))
+        assertEquals("12.5", holdingNumber("12.5"))
+        assertEquals("3", holdingNumber("3"))
+        for (bad in listOf("", "1.000,50", "1,2,3", "12,5.0", "abc", "1e3", "12.")) assertNull(bad, holdingNumber(bad))
+        assertEquals("Not confirmed; reloaded to check.", holdingsWriteText(ApiResult.InvalidResponse("x")))
+        assertTrue(holdingsWriteText(ApiResult.Unreachable(UnreachableReason.NETWORK)).contains("reloaded to check"))
+    }
+
     @Test fun `holdings read strings or numbers and only path-safe ids`() {
         val h = """{"id":"h1","symbol":"AAPL","quantity":"2","avg_cost":150.5,"currency":"USD","cost_basis":"301.00","weight_pct":"100.00"}"""
         val read = readHoldings(json("""{"holdings":[$h],"total_cost":"301.00"}"""))!!
