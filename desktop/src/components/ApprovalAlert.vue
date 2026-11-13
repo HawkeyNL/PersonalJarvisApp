@@ -15,7 +15,12 @@ const alert = ref<WaitingRequest | null>(null);
 let seen = new Set<string>();
 
 watch(waiting, (current) => {
-  document.title = titleWithCount(document.title, current.length);
+  // Tauri does not copy document.title to the window, so set both.
+  const title = titleWithCount(document.title, current.length);
+  if (title !== document.title) {
+    document.title = title;
+    void getCurrentWindow().setTitle(title).catch(() => {});
+  }
   const next = nextAlert(seen, current);
   seen = next.seen;
   if (next.alert) {

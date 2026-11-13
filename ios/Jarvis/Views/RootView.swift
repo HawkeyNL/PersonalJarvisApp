@@ -127,13 +127,14 @@ struct MainTabs: View {
             switch current {
             case let .unlock(item):
                 UnlockSheet(model: model, item: item) { id in unlocks.removeAll { $0.id == id } }
+                    // Only an open unlock sheet silences unlock pushes; any other
+                    // sheet would hold the next request back.
+                    .approvalScreen(Self.unlockLink)
             case let .agent(item, decided):
                 AgentApprovalSheet(model: model, item: item, time: relativeTime(item.created_at, now: Date()), decided: decided)
             }
         }
         .onChange(of: unlocks) { _, _ in offerUnlock() }
-        // Unlock requests open as a sheet here, so their pushes need no banner.
-        .approvalScreen(Self.unlockLink)
         .task(id: scenePhase == .active) {
             guard scenePhase == .active else { unlocks = []; return }
             // Delivered unlock notifications go once a read finds none waiting.

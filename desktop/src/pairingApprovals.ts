@@ -38,7 +38,10 @@ const pairingPoller = createSerialPoller(refresh, () => pairingPollInterval(docu
 
 async function refresh(): Promise<boolean> {
   const status = await currentAuthStatus();
-  if (!status.authenticated) return false;
+  if (!status.authenticated) {
+    pairingRequests.value = [];
+    return false;
+  }
   try {
     const response = await getJsonAuth<{ requests: PairingRequest[] }>("/v1/auth/pairing/requests");
     pairingRequests.value = await Promise.all(response.requests.map(async (request) => ({
