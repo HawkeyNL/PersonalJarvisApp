@@ -12,7 +12,7 @@ const two = (n: number) => String(n).padStart(2, "0");
 <template>
   <Transition name="sheet">
     <div v-if="pending.length" class="wrap">
-      <div class="sheet">
+      <div id="unlock-approvals" class="sheet" tabindex="-1">
         <div class="lead"><NavIcon name="link" /> Unlock request</div>
         <template v-for="r in pending" :key="r.id">
           <div class="req">

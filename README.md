@@ -175,21 +175,26 @@ the Home Node. Approving signs the v1 `pairing_approval_message` of
 test against the same golden vector). Without usable
 biometrics the mobile apps say "Biometrics required" and offer no approve or
 deny buttons. The mobile list refreshes every
-30 seconds while open (Core allows five list reads per source IP per minute).
+30 seconds while open (Core allows five list reads per source IP per minute);
+the desktop checks every 30 seconds while its window is visible and every
+minute otherwise. A new pairing or unlock request on the desktop flashes the
+taskbar (bounces the Dock on macOS), shows a banner that leads to it and puts
+the waiting count in the window title.
 The pairing request does not yet send `app_version` or `model`: Core rejects
 unknown fields and exposes no version before sign-in, so a candidate cannot tell
 whether the Home Node accepts them.
 
 ## Notification deep links
 
-Core's owner notifications (ntfy `Click` URL) open the apps through exactly
-two links. A link only navigates: it never approves, denies or changes
+Core's owner notifications (ntfy `Click` URL, APNs `link`) open the apps
+through exactly three links. A link only navigates: it never approves, denies or changes
 anything. A locked or signed-out app shows the screen after unlock and sign-in.
 Any other `jarvis://` link is ignored and the app opens as usual.
 
 | Link | iOS / Android | Desktop |
 |------|---------------|---------|
 | `jarvis://approvals/pairing` | Pairing requests (Context → Devices) | Hub, where pending pairing requests are shown |
+| `jarvis://approvals/unlock` | iOS: opens Jarvis, the request shows as a sheet; Android: Activity, under the unlock row shown above every tab | Not routed: the unlock overlay shows on every page |
 | `jarvis://health/usage` | System Health → Usage | `/health?node=usage` |
 
 iOS registers the scheme in `ios/Jarvis/Info.plist`, Android in the

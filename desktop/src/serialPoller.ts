@@ -1,8 +1,9 @@
 /** A single-flight poller: stopping and immediately restarting never creates
- * a second request while the first one is still in flight. */
+ * a second request while the first one is still in flight. A function interval
+ * is read again before every wait. */
 export function createSerialPoller(
   refresh: () => Promise<unknown>,
-  intervalMs: number,
+  intervalMs: number | (() => number),
   schedule: typeof setTimeout = setTimeout,
   cancel: typeof clearTimeout = clearTimeout,
 ) {
@@ -20,7 +21,7 @@ export function createSerialPoller(
       // A failed read must not stop future checks. The caller owns diagnostics.
     } finally {
       inFlight = false;
-      if (enabled) timer = schedule(poll, intervalMs);
+      if (enabled) timer = schedule(poll, typeof intervalMs === "function" ? intervalMs() : intervalMs);
     }
   }
 

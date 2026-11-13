@@ -966,6 +966,7 @@ struct PairingRequestsSection: View {
     /// so all reads stay at least 30 s apart, as on Android.
     private static var lastRead = Date.distantPast
     private static let minInterval: TimeInterval = 30
+    private static let pushLink = "jarvis://approvals/pairing"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -992,6 +993,7 @@ struct PairingRequestsSection: View {
             }
         }
         .onChange(of: requests.value?.count, initial: true) { _, value in if let count { count.wrappedValue = value } }
+        .approvalScreen(Self.pushLink)
         .onChange(of: refresh) { _, _ in
             if Date().timeIntervalSince(Self.lastRead) >= Self.minInterval { Task { await load() } }
         }
@@ -1129,6 +1131,7 @@ struct PairingRequestsSection: View {
             if approve { try await model.approvePairing(item) } else { try await model.denyPairing(item) }
             // No extra list read: the 30-second poll picks up any other change.
             requests = requests.map { list in list.filter { $0.id != item.id } }
+            if requests.value?.isEmpty == true { clearApprovalNotifications(Self.pushLink) }
         } catch {
             // Server text is shown sanitised and bounded.
             decisionError = PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "The decision could not be completed.", max: 160)
@@ -1143,6 +1146,7 @@ struct PairingRequestsSection: View {
         let result = await model.coreRead("/v1/auth/pairing/requests", as: PairingApprovalList.self)
         guard !Task.isCancelled else { return }
         requests = result.map(\.requests)
+        if requests.value?.isEmpty == true { clearApprovalNotifications(Self.pushLink) }
         biometrics = BiometricLock.biometricsAvailable
     }
 }

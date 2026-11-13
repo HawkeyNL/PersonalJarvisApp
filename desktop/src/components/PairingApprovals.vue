@@ -9,7 +9,7 @@ const time = (seconds: number) => new Date(seconds * 1000).toLocaleString();
 const signer = computed(() => platformCapabilities.value.supportsBiometricSigning);
 </script>
 <template>
-  <aside v-if="pairingRequests.length" class="pairing-approvals">
+  <aside v-if="pairingRequests.length" id="pairing-approvals" class="pairing-approvals" tabindex="-1">
     <section v-for="request in pairingRequests" :key="request.id" class="request">
       <strong>New device: {{ displayHint(request.device_name, 128) }}</strong>
       <dl>

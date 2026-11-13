@@ -6,6 +6,7 @@ import AppLock from "./components/AppLock.vue";
 import AppSidebar from "./components/AppSidebar.vue";
 import UnlockApprovals from "./components/UnlockApprovals.vue";
 import PairingApprovals from "./components/PairingApprovals.vue";
+import ApprovalAlert from "./components/ApprovalAlert.vue";
 import { locked, shownShellMode as mode, initLock, noteActivity } from "./lock";
 import { acceptsShortcuts } from "./lockPolicy";
 import { startApprovalPolling, stopApprovalPolling } from "./unlockApprovals";
@@ -106,6 +107,7 @@ onBeforeUnmount(() => {
     <!-- Other devices' unlock and pairing requests; a Mac approves them. -->
     <UnlockApprovals />
     <PairingApprovals />
+    <ApprovalAlert />
   </div>
   <!-- Full-screen lock: Touch ID on macOS; on Windows the session ends and sign-in needs the account password. -->
   <AppLock v-if="locked" />
