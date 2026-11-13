@@ -19,6 +19,7 @@ import io.ktor.client.request.prepareDelete
 import io.ktor.client.request.prepareGet
 import io.ktor.client.request.preparePatch
 import io.ktor.client.request.preparePost
+import io.ktor.client.request.prepareRequest
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpStatement
 import io.ktor.client.statement.bodyAsChannel
@@ -26,6 +27,7 @@ import io.ktor.http.contentLength
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.contentType
 import io.ktor.http.content.ByteArrayContent
 import io.ktor.http.content.TextContent
@@ -421,6 +423,59 @@ class KtorJarvisApi(
         return jobCall({ requireNotNull(readRunDetail(it)) }) { client.prepareGet(endpoint.url("/v1/jobs/runs/$runId")) { bearerAuth(token) } }
     }
 
+    override suspend fun roadmaps(endpoint: HomeNodeEndpoint, token: String) =
+        jobCall({ requireNotNull(readRoadmapList(it)) }, MAX_ROADMAP_BYTES) { client.prepareGet(endpoint.url("/v1/roadmaps")) { bearerAuth(token) } }
+
+    override suspend fun roadmap(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<RoadmapSnapshot> {
+        if (!isRoadmapId(id)) return ApiResult.InvalidResponse("Invalid roadmap id")
+        return jobCall({ requireNotNull(readSnapshot(it)) }, MAX_ROADMAP_BYTES) { client.prepareGet(endpoint.url("/v1/roadmaps/$id")) { bearerAuth(token) } }
+    }
+
+    override suspend fun roadmapProposals(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<List<Proposal>> {
+        if (!isRoadmapId(id)) return ApiResult.InvalidResponse("Invalid roadmap id")
+        return jobCall({ requireNotNull(readProposals(it)) }, MAX_ROADMAP_BYTES) { client.prepareGet(endpoint.url("/v1/roadmaps/$id/proposals")) { bearerAuth(token) } }
+    }
+
+    override suspend fun roadmapHistory(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<List<HistoryEntry>> {
+        if (!isRoadmapId(id)) return ApiResult.InvalidResponse("Invalid roadmap id")
+        return jobCall({ requireNotNull(readHistory(it)) }, MAX_ROADMAP_BYTES) {
+            client.prepareGet(endpoint.url("/v1/roadmaps/$id/history")) { bearerAuth(token); parameter("limit", 50) }
+        }
+    }
+
+    override suspend fun createRoadmap(endpoint: HomeNodeEndpoint, token: String, body: JsonObject) = jobCall(::readSnapshot, MAX_ROADMAP_BYTES) {
+        client.preparePost(endpoint.url("/v1/roadmaps")) { bearerAuth(token); setBody(TextContent(body.toString(), ContentType.Application.Json)) }
+    }
+
+    override suspend fun writeRoadmap(endpoint: HomeNodeEndpoint, token: String, id: String, revision: Long, write: RoadmapWrite): ApiResult<RoadmapSnapshot?> {
+        val (method, path, body) = when (write) {
+            is RoadmapWrite.Update -> Triple(HttpMethod.Patch, "", write.patch)
+            RoadmapWrite.Archive -> Triple(HttpMethod.Delete, "", null)
+            is RoadmapWrite.CreateItem -> Triple(HttpMethod.Post, "/items", write.item)
+            is RoadmapWrite.UpdateItem -> Triple(HttpMethod.Patch, "/items/${write.itemId}", write.patch)
+            is RoadmapWrite.DeleteItem -> Triple(HttpMethod.Delete, "/items/${write.itemId}", null)
+        }
+        val itemId = (write as? RoadmapWrite.UpdateItem)?.itemId ?: (write as? RoadmapWrite.DeleteItem)?.itemId
+        if (!isRoadmapId(id) || (itemId != null && !isRoadmapId(itemId)) || revision < 0) return ApiResult.InvalidResponse("Invalid roadmap id")
+        return jobCall(::readSnapshot, MAX_ROADMAP_BYTES) {
+            client.prepareRequest(endpoint.url("/v1/roadmaps/$id$path")) {
+                this.method = method
+                bearerAuth(token); parameter("expected_revision", revision)
+                body?.let { setBody(TextContent(it.toString(), ContentType.Application.Json)) }
+            }
+        }
+    }
+
+    override suspend fun decideProposal(endpoint: HomeNodeEndpoint, token: String, id: String, proposalId: String, accept: Boolean): ApiResult<RoadmapSnapshot?> {
+        if (!isRoadmapId(id) || !isRoadmapId(proposalId)) return ApiResult.InvalidResponse("Invalid roadmap id")
+        val decision = if (accept) "accept" else "reject"
+        return jobCall(::readSnapshot, MAX_ROADMAP_BYTES) {
+            client.preparePost(endpoint.url("/v1/roadmaps/$id/proposals/$proposalId/$decision")) {
+                bearerAuth(token); setBody(TextContent("{}", ContentType.Application.Json))
+            }
+        }
+    }
+
     /** A Jobs or Roadmaps call: the answer is read within [limit] and passed through [read],
      *  which throws IllegalArgumentException for a shape the guards refuse. An answer over the
      *  limit fails closed, also for a write. */
@@ -510,6 +565,9 @@ class KtorJarvisApi(
         private const val MAX_REPLY_BYTES = 4 * 1024
         /** A run report with its facts is the largest Jobs answer; Core caps its lists. */
         private const val MAX_JOBS_BYTES = 1024 * 1024
+        /** A full roadmap (300 items with notes and links) can pass 1 MiB; desktop's
+         *  auth_request caps answers at 16 MiB. */
+        private const val MAX_ROADMAP_BYTES = 16 * 1024 * 1024
         private val REPLY_JSON = Json { ignoreUnknownKeys = true }
         private val CONVERSATION_ID = Regex("[A-Za-z0-9_-]{1,128}")
 

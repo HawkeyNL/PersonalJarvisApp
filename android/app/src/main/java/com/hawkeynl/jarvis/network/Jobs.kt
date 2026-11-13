@@ -64,7 +64,7 @@ private val CODE = Regex("^[a-z0-9_]{1,64}$")
 /** Job and run ids go into URL paths; Core's are UUIDs. */
 fun isJobId(id: String): Boolean = JOB_ID.matches(id)
 
-// The parsers below throw IllegalArgumentException (require) on anything unexpected.
+// The parsers below (and Roadmaps.kt) throw IllegalArgumentException (require) on anything unexpected.
 internal fun JsonElement?.obj(): JsonObject = this as? JsonObject ?: throw IllegalArgumentException()
 internal fun JsonObject.optStr(key: String, max: Int = 10_000): String? = when (val v = this[key]) {
     null, JsonNull -> null

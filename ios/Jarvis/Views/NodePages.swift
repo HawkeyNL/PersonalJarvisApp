@@ -513,8 +513,9 @@ func policyFacts(_ policy: ModelPolicySnapshot, catalog: HomeNodeRegistry?) -> [
 
 /// The model catalog Core probed. Set up means a key or local install exists, not that Jarvis may use it.
 func catalogRows(_ models: [HomeNodeRegistry.CatalogModel]) -> [ActivityRow] {
-    models.map { model in
-        ActivityRow(id: "\(model.backend)/\(model.id)", symbol: "square.stack.3d.up", title: model.id,
+    // The position keeps ids unique when Core lists a model twice.
+    models.enumerated().map { index, model in
+        ActivityRow(id: "\(index)/\(model.backend)/\(model.id)", symbol: "square.stack.3d.up", title: model.id,
                     detail: [model.backend, model.modelClass, model.cost.isEmpty ? "" : costLabel(model.cost)]
                         .filter { !$0.isEmpty }.joined(separator: " · "),
                     tone: model.available ? .ok : .idle, toneLabel: model.available ? "Provider set up" : "Provider not set up")
