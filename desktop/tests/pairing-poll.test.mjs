@@ -73,16 +73,3 @@ test("a failed read does not permanently stop pairing checks", async () => {
   assert.equal(calls, 2);
   poller.stop();
 });
-
-test("a function interval is read again before every wait", async () => {
-  const clock = fakeClock();
-  let interval = 30_000;
-  const poller = createSerialPoller(async () => {}, () => interval, clock.schedule, clock.cancel);
-  poller.start();
-  await settle();
-  assert.equal(clock.fire(), 30_000);
-  interval = 60_000;
-  await settle();
-  assert.equal(clock.fire(), 60_000);
-  poller.stop();
-});

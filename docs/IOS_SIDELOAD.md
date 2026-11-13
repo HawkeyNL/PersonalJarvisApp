@@ -54,7 +54,7 @@ device on the Home Node always removes it. A reset also turns the setting
 off. A pairing push shows the device's name, platform, model, IP address and
 a key fingerprint prefix as Core sends them (unverified, and visible to
 Apple's push service); the app never relies on that text. Tapping a pairing
-push opens the pairing requests; tapping an unlock push opens Jarvis, where
+push opens the pairing requests; tapping an unlock push opens Activity, where
 the unlock request opens as a sheet. In the foreground a push shows a banner
 only when its screen is not open (the pairing requests page, or an open
 unlock sheet); an open pairing page then reloads, keeping reads 30 s apart. Delivered approval notifications are removed once a read

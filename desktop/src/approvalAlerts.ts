@@ -25,7 +25,3 @@ export function titleWithCount(title: string, count: number): string {
   const base = title.replace(/^\(\d+\) /, "");
   return count > 0 ? `(${count}) ${base}` : base;
 }
-
-/** Core allows five pairing-list reads per source IP per minute, shared with
- *  candidates creating requests and the phones' 30-second reads. */
-export const pairingPollInterval = (visible: boolean) => (visible ? 30_000 : 60_000);

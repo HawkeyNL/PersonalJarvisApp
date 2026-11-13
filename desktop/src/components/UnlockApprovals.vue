@@ -3,6 +3,7 @@ import { computed } from "vue";
 import NavIcon from "./NavIcon.vue";
 import { pending, approve, deny, pick, picking, approving, approvalError } from "../unlockApprovals";
 import { platformCapabilities } from "../platform";
+import { displayHint } from "../pairingFingerprint";
 
 // Only a Mac approves here, behind Touch ID; other desktops can deny.
 const signer = computed(() => platformCapabilities.value.supportsBiometricSigning);
@@ -17,8 +18,8 @@ const two = (n: number) => String(n).padStart(2, "0");
         <template v-for="r in pending" :key="r.id">
           <div class="req">
             <div class="who">
-              <strong>{{ r.device_name }}</strong>
-              <span class="plat">{{ r.platform }}</span>
+              <strong>{{ displayHint(r.device_name) }}</strong>
+              <span class="plat">{{ displayHint(r.platform, 32) }}</span>
               wants to unlock
             </div>
             <div class="actions">

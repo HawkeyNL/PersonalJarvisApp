@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { alertText, nextAlert, pairingPollInterval, titleWithCount } from "../src/approvalAlerts.ts";
+import { alertText, nextAlert, titleWithCount } from "../src/approvalAlerts.ts";
 
 const pairing = (id, device_name = "Pixel") => ({ kind: "pairing", id, device_name });
 const unlock = (id) => ({ kind: "unlock", id, device_name: "iPad" });
@@ -35,11 +35,4 @@ test("window title carries the waiting count and drops it when none wait", () =>
   assert.equal(titleWithCount("(1) Jarvis", 3), "(3) Jarvis");
   assert.equal(titleWithCount("(3) Jarvis", 0), "Jarvis");
   assert.equal(titleWithCount("Jarvis", 0), "Jarvis");
-});
-
-test("pairing polls faster only while visible and stays inside Core's budget", () => {
-  assert.equal(pairingPollInterval(false), 60_000);
-  assert.equal(pairingPollInterval(true), 30_000);
-  // Five list reads per IP per minute, shared with candidate creates and a phone's 30 s reads.
-  assert.ok(60_000 / pairingPollInterval(true) + 2 < 5);
 });

@@ -8,7 +8,6 @@ import { currentAuthStatus } from "./auth";
 import { getJsonAuth, postJsonAuth } from "./api";
 import { createSerialPoller } from "./serialPoller";
 import { verifiedFingerprint } from "./pairingFingerprint";
-import { pairingPollInterval } from "./approvalAlerts";
 
 export type PairingRequest = {
   id: string;
@@ -34,7 +33,7 @@ export const pairingRequests = ref<CheckedPairingRequest[]>([]);
 export const pairingError = ref<string | null>(null);
 // Core allows five pairing-list reads per source IP per minute. Leave room for
 // manual/other-device requests and never overlap requests across app restarts.
-const pairingPoller = createSerialPoller(refresh, () => pairingPollInterval(document.visibilityState === "visible"));
+const pairingPoller = createSerialPoller(refresh, 60_000);
 
 async function refresh(): Promise<boolean> {
   const status = await currentAuthStatus();
