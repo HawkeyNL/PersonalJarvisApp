@@ -111,7 +111,46 @@ final class VoiceInputSessionTests: XCTestCase {
         XCTAssertFalse(VoiceInput(capture: capture, defaults: defaults).needsServerNotice)
     }
 
-    func testTheLockAConversationChangeAndAReplyStopTheMic() async throws {
+    /// Polls `condition` on the main actor for up to 2 s.
+    private func until(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
+        let deadline = Date().addingTimeInterval(2)
+        while !condition(), Date() < deadline { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertTrue(condition(), file: file, line: line)
+    }
+
+    func testTheSilenceTimerStopsTheMicAndTheFinishTimeoutDeliversWhatWasHeard() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "VoiceInputSessionTests"))
+        voice = VoiceInput(capture: capture, defaults: defaults, silence: 0.3, finishTimeout: .milliseconds(500))
+        await listen()
+        capture.say("hallo", final: false)
+        try await until { !voice.listening }
+        XCTAssertEqual(capture.ended, 1)
+        XCTAssertTrue(voice.finishing)
+        XCTAssertEqual(delivered, [], "the recogniser may still answer")
+        try await until { delivered == ["hallo"] }
+        XCTAssertFalse(voice.finishing)
+    }
+
+    func testAReplyStartingStopsTheMicAndKeepsTheWords() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RefusingCore.self]
+        let api = JarvisAPIClient(baseURL: URL(string: "https://jarvis.example.com")!, session: URLSession(configuration: configuration))
+        let model = JarvisAppModel(signedInChat: ChatService(api: api, tokenLoader: { "fixture-session-not-a-secret" }),
+                                   api: api, realtime: false, voice: voice)
+        await listen()
+        capture.say("en nog iets", final: false)
+        try await settle()
+        let sending = Task { await model.send("typed question") }
+        try await settle()
+        XCTAssertFalse(voice.listening, "a reply is never spoken into a recording")
+        XCTAssertEqual(capture.ended, 1)
+        capture.say("en nog iets", final: true)
+        try await settle()
+        XCTAssertEqual(delivered, ["en nog iets"], "the words go to the draft, not away")
+        _ = await sending.value
+    }
+
+    func testTheLockAndAConversationChangeDropTheWords() async throws {
         let api = JarvisAPIClient(baseURL: URL(string: "https://jarvis.example.com")!)
         let model = JarvisAppModel(signedInChat: ChatService(api: api, tokenLoader: { "fixture-session-not-a-secret" }),
                                    api: api, realtime: false, voice: voice)
@@ -163,3 +202,16 @@ private final class FakeCapture: VoiceCapture {
     func releaseAudio() { released += 1 }
 }
 
+/// A Core that refuses every request (no network in tests).
+private final class RefusingCore: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil,
+                                       headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"error":"refused"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() { }
+}

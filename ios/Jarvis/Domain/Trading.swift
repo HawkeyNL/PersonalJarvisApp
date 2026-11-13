@@ -341,9 +341,9 @@ enum Trading {
     /// when unknown.
     static func changeRatio(_ first: String?, _ last: String?) -> String? {
         guard let a = chartNumber(first), a != 0, let b = chartNumber(last),
-              let three = parse(String(format: "%.3f", (b / a - 1) * 100)) else { return nil }
-        // Rounded on the digits, half away from zero, like desktop's toFixed(2).
-        let p = round(three, 2)
+              let exact = parse(String(format: "%.15f", (b / a - 1) * 100)) else { return nil }
+        // Rounded once, on the digits, half away from zero, like desktop's toFixed(2).
+        let p = round(exact, 2)
         return (p.neg && !isZero(p) ? "-" : "") + p.int + "." + p.frac
     }
 

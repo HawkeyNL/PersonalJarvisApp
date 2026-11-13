@@ -185,15 +185,6 @@ struct Lenient<Value: Decodable>: Decodable {
     init(from decoder: Decoder) throws { value = try? Value(from: decoder) }
 }
 
-/// A roadmap a dependency review can propose upgrades to (/v1/roadmaps).
-struct RoadmapOption: Decodable, Identifiable {
-    let id: String
-    let title: String
-    let archived_at: String?
-}
-
-struct RoadmapList: Decodable { let roadmaps: [RoadmapOption] }
-
 /// The schedule editor's state: the time is minutes after midnight in Europe/Amsterdam.
 struct JobDraft: Equatable {
     var cadence = JobCadence.weekly
@@ -276,10 +267,6 @@ enum Jobs {
     }
 
     static func valid(_ list: JobRunList) -> Bool { list.runs.count <= 50 && list.runs.allSatisfy(valid) }
-
-    static func valid(_ list: RoadmapList) -> Bool {
-        list.roadmaps.count <= 200 && list.roadmaps.allSatisfy { $0.id.count <= 64 && $0.title.count <= 1000 && fits($0.archived_at, 64) }
-    }
 
     // MARK: Schedule and editor
 

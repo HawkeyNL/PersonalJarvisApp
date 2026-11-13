@@ -71,6 +71,8 @@ final class TradingTests: XCTestCase {
         XCTAssertEqual(Trading.changeRatio("1", "1.00005"), "0.01")
         XCTAssertEqual(Trading.changeRatio("8", "9"), "12.50")
         XCTAssertEqual(Trading.changeRatio("100", "100"), "0.00")
+        // Rounded once: 0.0049996 % is 0.00, not 0.005 rounded up.
+        XCTAssertEqual(Trading.changeRatio("100", "100.0049996"), "0.00")
     }
 
     func testMovingAverageWaitsForNBarsAndSkipsGaps() {

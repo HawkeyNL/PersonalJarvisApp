@@ -233,7 +233,8 @@ final class JarvisAppModel: ObservableObject {
         try await auth.denyAgentAction(id, unlocked: stillUnlocked)
     }
 
-    // Scheduled jobs: each write only while unlocked; a late 401 signs out only the session it was sent for.
+    // Scheduled jobs, roadmaps and manual holdings: each write only while unlocked; a late 401
+    // signs out only the session it was sent for.
     func createJob(_ body: NewJob) async throws { try await ownerWrite { try await self.chat.createJob(body) } }
 
     func updateJob(_ id: UUID, revision: Int, patch: JobPatch) async throws {
@@ -241,6 +242,20 @@ final class JarvisAppModel: ObservableObject {
     }
 
     func runJobNow(_ id: UUID) async throws { try await ownerWrite { try await self.chat.runJobNow(id) } }
+
+    func createRoadmap(_ body: NewRoadmap) async throws { try await ownerWrite { try await self.chat.createRoadmap(body) } }
+
+    func createRoadmapItem(_ roadmap: UUID, revision: Int, item: NewRoadmapItem) async throws {
+        try await ownerWrite { try await self.chat.createRoadmapItem(roadmap, revision: revision, item: item) }
+    }
+
+    func updateRoadmapItem(_ roadmap: UUID, revision: Int, item: String, patch: RoadmapItemPatch) async throws {
+        try await ownerWrite { try await self.chat.updateRoadmapItem(roadmap, revision: revision, item: item, patch: patch) }
+    }
+
+    func deleteRoadmapItem(_ roadmap: UUID, revision: Int, item: String) async throws {
+        try await ownerWrite { try await self.chat.deleteRoadmapItem(roadmap, revision: revision, item: item) }
+    }
 
     private func ownerWrite<Answer>(_ call: () async throws -> Answer) async throws -> Answer {
         guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }

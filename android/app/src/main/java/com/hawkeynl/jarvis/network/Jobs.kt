@@ -64,25 +64,25 @@ private val CODE = Regex("^[a-z0-9_]{1,64}$")
 /** Job and run ids go into URL paths; Core's are UUIDs. */
 fun isJobId(id: String): Boolean = JOB_ID.matches(id)
 
-// The parsers below throw IllegalArgumentException (require) on anything unexpected.
-private fun JsonElement?.obj(): JsonObject = this as? JsonObject ?: throw IllegalArgumentException()
-private fun JsonObject.optStr(key: String, max: Int = 10_000): String? = when (val v = this[key]) {
+// The parsers below (and Roadmaps.kt) throw IllegalArgumentException (require) on anything unexpected.
+internal fun JsonElement?.obj(): JsonObject = this as? JsonObject ?: throw IllegalArgumentException()
+internal fun JsonObject.optStr(key: String, max: Int = 10_000): String? = when (val v = this[key]) {
     null, JsonNull -> null
     is JsonPrimitive -> v.content.takeIf { v.isString && it.length <= max } ?: throw IllegalArgumentException()
     else -> throw IllegalArgumentException()
 }
-private fun JsonObject.str(key: String, max: Int = 10_000): String = requireNotNull(optStr(key, max))
-private fun JsonObject.optInt(key: String): Long? = when (val v = this[key]) {
+internal fun JsonObject.str(key: String, max: Int = 10_000): String = requireNotNull(optStr(key, max))
+internal fun JsonObject.optInt(key: String): Long? = when (val v = this[key]) {
     null, JsonNull -> null
     // A safe, non-negative integer as in JavaScript.
     is JsonPrimitive -> v.content.toLongOrNull()?.takeIf { !v.isString && it in 0..9_007_199_254_740_991 } ?: throw IllegalArgumentException()
     else -> throw IllegalArgumentException()
 }
-private fun JsonObject.int(key: String): Long = requireNotNull(optInt(key))
-private fun JsonObject.bool(key: String): Boolean =
+internal fun JsonObject.int(key: String): Long = requireNotNull(optInt(key))
+internal fun JsonObject.bool(key: String): Boolean =
     (this[key] as? JsonPrimitive)?.takeIf { !it.isString }?.content?.toBooleanStrictOrNull() ?: throw IllegalArgumentException()
-private fun JsonObject.array(key: String, max: Int): JsonArray = (this[key] as? JsonArray)?.takeIf { it.size <= max } ?: throw IllegalArgumentException()
-private fun <T> guarded(parse: () -> T): T? = try { parse() } catch (_: IllegalArgumentException) { null }
+internal fun JsonObject.array(key: String, max: Int): JsonArray = (this[key] as? JsonArray)?.takeIf { it.size <= max } ?: throw IllegalArgumentException()
+internal fun <T> guarded(parse: () -> T): T? = try { parse() } catch (_: IllegalArgumentException) { null }
 
 private fun parseJob(x: JsonElement): Job {
     val o = x.obj()
