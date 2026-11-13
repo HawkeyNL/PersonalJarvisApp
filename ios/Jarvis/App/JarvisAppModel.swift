@@ -233,16 +233,31 @@ final class JarvisAppModel: ObservableObject {
         try await auth.denyAgentAction(id, unlocked: stillUnlocked)
     }
 
-    // Scheduled jobs: each write only while unlocked; a late 401 signs out only the session it was sent for.
-    func createJob(_ body: NewJob) async throws { try await jobWrite { try await self.chat.createJob(body) } }
+    // Scheduled jobs and roadmaps: each write only while unlocked; a late 401 signs out only
+    // the session it was sent for.
+    func createJob(_ body: NewJob) async throws { try await ownerWrite { try await self.chat.createJob(body) } }
 
     func updateJob(_ id: UUID, revision: Int, patch: JobPatch) async throws {
-        try await jobWrite { try await self.chat.updateJob(id, revision: revision, patch: patch) }
+        try await ownerWrite { try await self.chat.updateJob(id, revision: revision, patch: patch) }
     }
 
-    func runJobNow(_ id: UUID) async throws { try await jobWrite { try await self.chat.runJobNow(id) } }
+    func runJobNow(_ id: UUID) async throws { try await ownerWrite { try await self.chat.runJobNow(id) } }
 
-    private func jobWrite(_ call: () async throws -> Void) async throws {
+    func createRoadmap(_ body: NewRoadmap) async throws { try await ownerWrite { try await self.chat.createRoadmap(body) } }
+
+    func createRoadmapItem(_ roadmap: UUID, revision: Int, item: NewRoadmapItem) async throws {
+        try await ownerWrite { try await self.chat.createRoadmapItem(roadmap, revision: revision, item: item) }
+    }
+
+    func updateRoadmapItem(_ roadmap: UUID, revision: Int, item: String, patch: RoadmapItemPatch) async throws {
+        try await ownerWrite { try await self.chat.updateRoadmapItem(roadmap, revision: revision, item: item, patch: patch) }
+    }
+
+    func deleteRoadmapItem(_ roadmap: UUID, revision: Int, item: String) async throws {
+        try await ownerWrite { try await self.chat.deleteRoadmapItem(roadmap, revision: revision, item: item) }
+    }
+
+    private func ownerWrite(_ call: () async throws -> Void) async throws {
         guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
         let generation = presentation.id
         do { try await call() } catch { throw failed(error, generation) }

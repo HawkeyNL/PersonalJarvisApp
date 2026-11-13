@@ -140,6 +140,31 @@ actor ChatService {
         try await api.runJobNow(id: id, token: token, expectedBinding: binding)
     }
 
+    // Roadmap writes (Roadmaps pages), bound to the current Home Node like the job writes.
+    func createRoadmap(_ body: NewRoadmap) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.createRoadmap(body, token: token, expectedBinding: binding)
+    }
+
+    func createRoadmapItem(_ roadmap: UUID, revision: Int, item: NewRoadmapItem) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.createRoadmapItem(roadmap: roadmap, revision: revision, item: item, token: token, expectedBinding: binding)
+    }
+
+    func updateRoadmapItem(_ roadmap: UUID, revision: Int, item: String, patch: RoadmapItemPatch) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.updateRoadmapItem(roadmap: roadmap, revision: revision, item: item, patch: patch, token: token, expectedBinding: binding)
+    }
+
+    func deleteRoadmapItem(_ roadmap: UUID, revision: Int, item: String) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.deleteRoadmapItem(roadmap: roadmap, revision: revision, item: item, token: token, expectedBinding: binding)
+    }
+
     private func requiredToken() async throws -> String {
         guard let token = try await loadToken() else { throw JarvisAPIError.unauthorized }
         return token
