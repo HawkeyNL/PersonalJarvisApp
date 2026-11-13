@@ -3,6 +3,7 @@ package com.hawkeynl.jarvis
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
+import android.os.Build
 import android.os.Bundle
 import androidx.biometric.BiometricPrompt
 import javax.crypto.Cipher
@@ -127,6 +128,9 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         container.appearance.applyToSystem()
         super.onCreate(savedInstanceState)
+        // Recents would show the last unlocked screen (chat, photos); Android 13+
+        // can blank that snapshot without blocking the owner's own screenshots.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setRecentsScreenshotEnabled(false)
         container.identity.prompt = signingPrompt
         applySystemBars(container.appearance.mode.isDark(systemDark()))
         setContent {
