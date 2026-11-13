@@ -182,6 +182,86 @@ final class RoadmapsTests: XCTestCase {
     }
 }
 
+/// Proposals, history and the roadmap's own edit; mirrors the rest of roadmaps.test.mjs.
+final class RoadmapParityTests: XCTestCase {
+    private func json(_ object: Any) -> Data { try! JSONSerialization.data(withJSONObject: object) }
+
+    private func item(_ id: String, status: RoadmapStatus = .planned, notes: String? = nil) -> RoadmapItem {
+        RoadmapItem(id: id, title: "Item \(id)", status: status, phase: "Now", position: 0, notes: notes)
+    }
+
+    private func proposals(_ list: [Any]) -> RoadmapProposals? {
+        guard let value = try? JSONDecoder().decode(RoadmapProposals.self, from: json(["proposals": list])), Roadmaps.valid(value) else { return nil }
+        return value
+    }
+
+    func testProposalGuardAndOperationsReadAsBeforeAndAfter() throws {
+        let proposal: [String: Any] = [
+            "id": "p1", "base_revision": 4, "rationale": NSNull(), "created_at": "2026-11-02T10:00:00Z", "expires_at": "2026-11-16T10:00:00Z",
+            "ops": [["op": "create_item", "item": ["title": "New", "phase": "Next", "links": [["kind": "issue", "repo": "o/r", "number": 9]]]],
+                    ["op": "update_item", "item_id": "a", "patch": ["status": "ready", "notes": NSNull(), "depends_on": ["b"]]]] as [Any],
+        ]
+        let read = try XCTUnwrap(proposals([proposal])?.proposals.first)
+        XCTAssertNil(proposals([proposal.merging(["ops": [["op": "delete_item", "item_id": "a"]]]) { $1 }]))
+        XCTAssertNil(proposals([proposal.merging(["ops": [["op": "create_item", "item": [String: Any]()]]]) { $1 }]))
+        XCTAssertNil(proposals([proposal.merging(["id": "../p"]) { $1 }]))
+        let items = [item("a", status: .inProgress, notes: "x"), item("b")]
+        let create = Roadmaps.describe(read.ops[0], items: items)
+        XCTAssertTrue(create.create)
+        XCTAssertEqual(create.rows, [
+            .init(field: "Status", before: "—", after: "Planned"), .init(field: "Phase", before: "—", after: "Next"),
+            .init(field: "Links", before: "—", after: "o/r#9"),
+        ])
+        let update = Roadmaps.describe(read.ops[1], items: items)
+        XCTAssertEqual(update.title, "Item a")
+        XCTAssertEqual(update.rows, [
+            .init(field: "Status", before: "In progress", after: "Ready"), .init(field: "Notes", before: "x", after: "—"),
+            .init(field: "Depends on", before: "—", after: "Item b"),
+        ])
+        let gone = try XCTUnwrap(proposals([proposal.merging(["ops": [["op": "update_item", "item_id": "zz", "patch": ["title": "T"]]]]) { $1 }]))
+        XCTAssertEqual(Roadmaps.describe(gone.proposals[0].ops[0], items: items).rows.first?.before, "—")
+    }
+
+    func testHistoryLinesAndGuard() throws {
+        let change: [String: Any] = [
+            "id": "c1", "revision": 5, "at": "2026-11-02T10:00:00Z", "author": "github", "device_id": NSNull(), "proposal_id": NSNull(),
+            "action": "item_updated", "item_id": "a", "title": "Item a", "fields": ["status", "depends_on"], "from_status": "planned", "to_status": "ready",
+        ]
+        func history(_ list: [Any]) -> RoadmapHistory? {
+            guard let value = try? JSONDecoder().decode(RoadmapHistory.self, from: json(["changes": list])), Roadmaps.valid(value) else { return nil }
+            return value
+        }
+        let read = try XCTUnwrap(history([change])?.changes.first)
+        XCTAssertEqual(read.author.label, "GitHub")
+        XCTAssertNil(history([change.merging(["author": "someone"]) { $1 }]))
+        XCTAssertEqual(Roadmaps.describe(read), "Changed “Item a”: status Planned → Ready, depends on")
+        let added = try XCTUnwrap(history([change.merging(["action": "item_created", "fields": [String](), "from_status": NSNull(), "to_status": NSNull()]) { $1 }]))
+        XCTAssertEqual(Roadmaps.describe(added.changes[0]), "Added “Item a”")
+        let archived = try XCTUnwrap(history([change.merging(["action": "roadmap_archived", "item_id": NSNull()]) { $1 }]))
+        XCTAssertEqual(Roadmaps.describe(archived.changes[0]), "Archived the roadmap")
+    }
+
+    func testTheRoadmapEditSendsOnlyWhatChangedAndWarnsAboutRemovedPhases() throws {
+        let object: [String: Any] = ["id": "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c81", "title": "Example", "description": "Old",
+                                     "phases": ["Now", "Next", "Later"], "revision": 4]
+        let roadmap = try JSONDecoder().decode(Roadmap.self, from: json(object))
+        XCTAssertEqual(try Roadmaps.roadmapPatch(roadmap, title: " Example ", description: "Old", phases: "Now\nNext\nLater").get(), nil)
+        let patch = try XCTUnwrap(Roadmaps.roadmapPatch(roadmap, title: "Renamed", description: "  ", phases: "Now\nLater").get())
+        let sent = try JSONSerialization.jsonObject(with: JSONEncoder().encode(patch)) as? [String: Any]
+        XCTAssertEqual(sent?.keys.sorted(), ["description", "phases", "title"])
+        XCTAssertTrue(sent?["description"] is NSNull, "an empty description clears it")
+        XCTAssertEqual(sent?["phases"] as? [String], ["Now", "Later"])
+        if case let .failure(issue) = Roadmaps.roadmapPatch(roadmap, title: "", description: "", phases: "Now") {
+            XCTAssertEqual(issue.text, "The title must be 1 to 120 characters on one line.")
+        } else { XCTFail("an empty title saved") }
+        let items = [RoadmapItem(id: "a", title: "A", status: .planned, phase: "Next")]
+        XCTAssertEqual(Roadmaps.removedPhases(roadmap, items: items, phases: "Now\nLater"), ["Next"])
+        XCTAssertEqual(Roadmaps.removedPhases(roadmap, items: items, phases: "Now\nNext"), [])
+        XCTAssertEqual(Roadmaps.decisionFailureText(JarvisAPIError.rejected(status: 409, message: nil)),
+                       "Not applied: the roadmap changed since Jarvis proposed this, or a limit is reached. Reloaded.")
+    }
+}
+
 /// Roadmap writes through the app model against a fixture Core: the lock and session
 /// gates, the revision in every write and the item id check.
 @MainActor
@@ -214,12 +294,36 @@ final class RoadmapWriteModelTests: XCTestCase {
         XCTAssertTrue(model.isAuthenticated)
     }
 
+    func testRoadmapWritesOpenTheNewRoadmapAndNameTheRevision() async throws {
+        let created = "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c99"
+        RoadmapCoreProtocol.reset(status: 201, body: #"{"roadmap":{"id":"\#(created)"},"items":[]}"#)
+        let model = signedIn()
+        let id = try await model.createRoadmap(NewRoadmap(title: "Plan", description: nil, phases: ["Now"]))
+        XCTAssertEqual(id, UUID(uuidString: created))
+        RoadmapCoreProtocol.reset(status: 200)
+        let unnamed = try await model.createRoadmap(NewRoadmap(title: "Plan", description: nil, phases: ["Now"]))
+        XCTAssertNil(unnamed, "an answer without an id opens nothing")
+        try await model.updateRoadmap(roadmap, revision: 4, patch: RoadmapPatch(title: "New"))
+        try await model.archiveRoadmap(roadmap, revision: 5)
+        try await model.decideRoadmapProposal(roadmap, proposal: "p-1", accept: true)
+        try await model.decideRoadmapProposal(roadmap, proposal: "p-1", accept: false)
+        do {
+            try await model.decideRoadmapProposal(roadmap, proposal: "../x", accept: true)
+            XCTFail("sent an unsafe proposal id")
+        } catch {}
+        let base = "/v1/roadmaps/0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c81"
+        XCTAssertEqual(RoadmapCoreProtocol.requests(), [
+            "POST /v1/roadmaps", "PATCH \(base)?expected_revision=4", "DELETE \(base)?expected_revision=5",
+            "POST \(base)/proposals/p-1/accept", "POST \(base)/proposals/p-1/reject",
+        ])
+    }
+
     func testALockedAppSendsNoRoadmapWrite() async {
         RoadmapCoreProtocol.reset(status: 200)
         let model = signedIn()
         model.lockWhenBackgrounded()
         do {
-            try await model.createRoadmap(NewRoadmap(title: "Plan", description: nil, phases: ["Now"]))
+            _ = try await model.createRoadmap(NewRoadmap(title: "Plan", description: nil, phases: ["Now"]))
             XCTFail("sent while locked")
         } catch {}
         XCTAssertEqual(RoadmapCoreProtocol.requests(), [])
@@ -249,25 +353,26 @@ private final class RoadmapCoreProtocol: URLProtocol {
     private static var log: [String] = []
     private static var status = 200
     private static var delay: TimeInterval = 0
+    private static var body = "{}"
 
-    static func reset(status: Int, delay: TimeInterval = 0) {
-        lock.withLock { log = []; self.status = status; self.delay = delay }
+    static func reset(status: Int, delay: TimeInterval = 0, body: String = "{}") {
+        lock.withLock { log = []; self.status = status; self.delay = delay; self.body = body }
     }
     static func requests() -> [String] { lock.withLock { log } }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        let (status, delay) = Self.lock.withLock {
+        let (status, delay, body) = Self.lock.withLock {
             let query = request.url?.query.map { "?\($0)" } ?? ""
             Self.log.append("\(request.httpMethod ?? "GET") \(request.url?.path ?? "")\(query)")
-            return (Self.status, Self.delay)
+            return (Self.status, Self.delay, Self.body)
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
             let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
                                            headerFields: ["Content-Type": "application/json"])!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: Data("{}".utf8))
+            client?.urlProtocol(self, didLoad: Data(body.utf8))
             client?.urlProtocolDidFinishLoading(self)
         }
     }

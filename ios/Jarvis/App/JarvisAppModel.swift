@@ -243,7 +243,20 @@ final class JarvisAppModel: ObservableObject {
 
     func runJobNow(_ id: UUID) async throws { try await ownerWrite { try await self.chat.runJobNow(id) } }
 
-    func createRoadmap(_ body: NewRoadmap) async throws { try await ownerWrite { try await self.chat.createRoadmap(body) } }
+    /// The new roadmap's id, when Core's answer names it.
+    func createRoadmap(_ body: NewRoadmap) async throws -> UUID? { try await ownerWrite { try await self.chat.createRoadmap(body) }.id }
+
+    func updateRoadmap(_ roadmap: UUID, revision: Int, patch: RoadmapPatch) async throws {
+        try await ownerWrite { try await self.chat.updateRoadmap(roadmap, revision: revision, patch: patch) }
+    }
+
+    func archiveRoadmap(_ roadmap: UUID, revision: Int) async throws {
+        try await ownerWrite { try await self.chat.archiveRoadmap(roadmap, revision: revision) }
+    }
+
+    func decideRoadmapProposal(_ roadmap: UUID, proposal: String, accept: Bool) async throws {
+        try await ownerWrite { try await self.chat.decideRoadmapProposal(roadmap, proposal: proposal, accept: accept) }
+    }
 
     func createRoadmapItem(_ roadmap: UUID, revision: Int, item: NewRoadmapItem) async throws {
         try await ownerWrite { try await self.chat.createRoadmapItem(roadmap, revision: revision, item: item) }
@@ -257,10 +270,10 @@ final class JarvisAppModel: ObservableObject {
         try await ownerWrite { try await self.chat.deleteRoadmapItem(roadmap, revision: revision, item: item) }
     }
 
-    private func ownerWrite(_ call: () async throws -> Void) async throws {
+    private func ownerWrite<Answer>(_ call: () async throws -> Answer) async throws -> Answer {
         guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
         let generation = presentation.id
-        do { try await call() } catch { throw failed(error, generation) }
+        do { return try await call() } catch { throw failed(error, generation) }
     }
 
     /// Pairing decisions sign or deny only after Face ID / Touch ID on this device.

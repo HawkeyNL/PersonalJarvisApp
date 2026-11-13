@@ -141,10 +141,28 @@ actor ChatService {
     }
 
     // Roadmap writes (Roadmaps pages), bound to the current Home Node like the job writes.
-    func createRoadmap(_ body: NewRoadmap) async throws {
+    func createRoadmap(_ body: NewRoadmap) async throws -> CreatedRoadmap {
         let binding = await api.binding()
         let token = try await requiredToken()
-        try await api.createRoadmap(body, token: token, expectedBinding: binding)
+        return try await api.createRoadmap(body, token: token, expectedBinding: binding)
+    }
+
+    func updateRoadmap(_ roadmap: UUID, revision: Int, patch: RoadmapPatch) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.updateRoadmap(roadmap, revision: revision, patch: patch, token: token, expectedBinding: binding)
+    }
+
+    func archiveRoadmap(_ roadmap: UUID, revision: Int) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.archiveRoadmap(roadmap, revision: revision, token: token, expectedBinding: binding)
+    }
+
+    func decideRoadmapProposal(_ roadmap: UUID, proposal: String, accept: Bool) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.decideRoadmapProposal(roadmap, proposal: proposal, accept: accept, token: token, expectedBinding: binding)
     }
 
     func createRoadmapItem(_ roadmap: UUID, revision: Int, item: NewRoadmapItem) async throws {
