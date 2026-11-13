@@ -16,6 +16,8 @@ struct ChatView: View {
     @State private var confirmingDelete = false
     @State private var deleteError: String?
     @State private var serverNotice = false
+    /// Chip errors held while the mic listens (it would type them), said when it stops.
+    @State private var heldAnnouncements: [String] = []
 
     /// Core's own run after a reply, while its placeholder row is shown.
     private var searchingWeb: Bool {
@@ -104,9 +106,23 @@ struct ChatView: View {
         }
         // Each chip's error is said once, also when two chips fail the same way.
         .onChange(of: model.chips.compactMap { chip in chip.error.map { [chip.id.uuidString, $0] } }) { old, new in
-            // Not while listening: the mic would type the announcement.
-            guard !model.voiceInput.listening else { return }
-            for failure in new where !old.contains(failure) { AccessibilityNotification.Announcement(failure[1]).post() }
+            for failure in new where !old.contains(failure) {
+                // Not while listening: the mic would type the announcement.
+                if model.voiceInput.listening {
+                    if heldAnnouncements.count < 8 { heldAnnouncements.append(failure[1]) }
+                } else {
+                    AccessibilityNotification.Announcement(failure[1]).post()
+                }
+            }
+        }
+        .onChange(of: model.voiceInput.listening) { _, listening in
+            guard !listening else { return }
+            guard !heldAnnouncements.isEmpty else { return }
+            // One announcement, queued behind "Stopped listening".
+            var held = AttributedString(heldAnnouncements.joined(separator: " "))
+            held.accessibilitySpeechAnnouncementPriority = .low
+            AccessibilityNotification.Announcement(held).post()
+            heldAnnouncements = []
         }
         .alert("Speech goes to Apple", isPresented: $serverNotice) {
             Button("Continue") {
@@ -220,7 +236,7 @@ struct ChatView: View {
                 .submitLabel(.send)
                 .onSubmit { send() }
                 .accessibilityLabel("Message to Jarvis")
-            if model.voiceInput.available || model.voiceInput.listening {
+            if model.voiceInput.available || model.voiceInput.listening || model.voiceInput.finishing {
                 MicButton(voice: model.voiceInput, busy: model.isSending, toggle: listen)
             }
             Button(action: send) {
