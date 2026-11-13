@@ -257,6 +257,14 @@ final class RoadmapParityTests: XCTestCase {
         let items = [RoadmapItem(id: "a", title: "A", status: .planned, phase: "Next")]
         XCTAssertEqual(Roadmaps.removedPhases(roadmap, items: items, phases: "Now\nLater"), ["Next"])
         XCTAssertEqual(Roadmaps.removedPhases(roadmap, items: items, phases: "Now\nNext"), [])
+        for error in [JarvisAPIError.unreachable, .timedOut] {
+            XCTAssertEqual(Roadmaps.decisionFailureText(error), "No answer from your Home Node. It is unknown whether it was applied; reloaded to check.")
+        }
+        XCTAssertEqual(Roadmaps.readFailureText(nil), "This Core has no roadmaps yet. Update Core on your Home Node.")
+        XCTAssertEqual(Roadmaps.readFailureText(.network), "No answer from your Home Node. Check the connection.")
+        XCTAssertTrue(Roadmaps.readFailureText(.signin).contains("Sign in again"))
+        // Jarvis-written text is shown without bidi or invisible characters.
+        XCTAssertEqual(Memecoin.plain("Ship\u{202E}it\u{200B}"), "Shipit")
         XCTAssertEqual(Roadmaps.decisionFailureText(JarvisAPIError.rejected(status: 409, message: nil)),
                        "Not applied: the roadmap changed since Jarvis proposed this, or a limit is reached. Reloaded.")
     }

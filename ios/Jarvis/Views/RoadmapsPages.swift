@@ -57,6 +57,8 @@ struct RoadmapsPage: View {
     @State private var cards: Availability<[Card]> = .loading
     @State private var open: UUID?
     @State private var creating = false
+    /// The roadmap just created, opened once its sheet is gone.
+    @State private var created: UUID?
     /// A read already in flight must not overwrite a newer answer.
     @State private var loads = 0
 
@@ -84,14 +86,20 @@ struct RoadmapsPage: View {
                 Button("New roadmap") { creating = true }.disabled(full || cards.value == nil)
             }
         }
-        .sheet(isPresented: $creating) {
+        .sheet(isPresented: $creating, onDismiss: {
+            // Open the new roadmap, as desktop does, once the sheet is gone.
+            if let id = created { created = nil; open = id }
+        }) {
             NewRoadmapSheet(model: model) { id in
+                created = id
                 await load()
-                // Open the new roadmap, as desktop does.
-                if let id { open = id }
             }
         }
         .navigationDestination(item: $open) { id in RoadmapPage(model: model, id: id) }
+        // Back from a roadmap: an archive, rename or new item shows here, and the 20 limit is right.
+        .onChange(of: open) { _, open in
+            if open == nil { Task { await load() } }
+        }
         .refreshable { await load() }
         .task { await load() }
     }
@@ -253,6 +261,9 @@ struct RoadmapPage: View {
     @State private var editing = false
     @State private var archiving = false
     @State private var thisDevice: String?
+    /// Remounts the edit sheet on Core's state after a failed save, with its notice.
+    @State private var editKey = 0
+    @State private var editNotice: String?
     @Environment(\.dismiss) private var dismiss
 
     private var found: RoadmapSnapshot? { snapshot.value }
@@ -266,7 +277,7 @@ struct RoadmapPage: View {
             if let found, found.roadmap.archived_at == nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Button("Edit") { notice = nil; editing = true }
+                        Button("Edit") { notice = nil; editNotice = nil; editing = true }
                         Button("Archive", role: .destructive) { notice = nil; archiving = true }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -279,7 +290,10 @@ struct RoadmapPage: View {
         .sheet(item: $sheet) { state in itemSheet(state) }
         .sheet(isPresented: $editing) {
             if let found {
-                EditRoadmapSheet(roadmap: found.roadmap, items: found.items, busy: busy) { patch in await saveRoadmap(patch) }
+                EditRoadmapSheet(roadmap: found.roadmap, items: found.items, busy: busy, notice: editNotice) { patch, revision in
+                    await saveRoadmap(patch, revision: revision)
+                }
+                .id(editKey)
             }
         }
         .confirmationDialog("Archive this roadmap?", isPresented: $archiving, titleVisibility: .visible) {
@@ -353,7 +367,7 @@ struct RoadmapPage: View {
             }
             ForEach(list.proposals) { proposal in proposalCard(proposal, value) }
         case .unsupported, .error:
-            UnavailableState(title: "Could not load proposals", kind: .error, detail: Roadmaps.failureText(JarvisAPIError.invalidResponse),
+            UnavailableState(title: "Could not load proposals", kind: .error, detail: Roadmaps.readFailureText(failure(proposals)),
                              symbol: "map", action: UnavailableState.Action(label: "Try again", run: load))
         }
     }
@@ -365,7 +379,7 @@ struct RoadmapPage: View {
                             : Badge(text: "Pending", dot: false))
             Text(verbatim: "made \(Roadmaps.timeText(proposal.created_at)) · expires \(Roadmaps.timeText(proposal.expires_at))")
                 .font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
-            if let rationale = proposal.rationale, !rationale.isEmpty {
+            if let rationale = Memecoin.plain(proposal.rationale) {
                 Text(verbatim: "Jarvis's reason: \(rationale)").font(JV.font(13)).foregroundStyle(JV.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -374,10 +388,10 @@ struct RoadmapPage: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: JV.Space.xs) {
                         Badge(text: view.create ? "New item" : "Change", style: view.create ? .accent : .neutral, dot: false)
-                        Text(verbatim: view.title).font(JV.font(14, .semibold)).foregroundStyle(JV.textPrimary)
+                        Text(verbatim: Memecoin.plain(view.title) ?? "—").font(JV.font(14, .semibold)).foregroundStyle(JV.textPrimary)
                     }
                     ForEach(Array(view.rows.enumerated()), id: \.offset) { _, row in
-                        Text(verbatim: "\(row.field): \(row.before) → \(row.after)").font(JV.font(13)).foregroundStyle(JV.textSecondary)
+                        Text(verbatim: "\(row.field): \(Memecoin.plain(row.before) ?? "—") → \(Memecoin.plain(row.after) ?? "—")").font(JV.font(13)).foregroundStyle(JV.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -414,7 +428,7 @@ struct RoadmapPage: View {
                 Text("The 50 newest changes.").font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
             }
         case .unsupported, .error:
-            UnavailableState(title: "Could not load the history", kind: .error, detail: Roadmaps.failureText(JarvisAPIError.invalidResponse),
+            UnavailableState(title: "Could not load the history", kind: .error, detail: Roadmaps.readFailureText(failure(history)),
                              symbol: "clock", action: UnavailableState.Action(label: "Try again", run: loadHistory))
         }
     }
@@ -600,12 +614,18 @@ struct RoadmapPage: View {
         history = result
     }
 
-    /// Nil when saved; else why not, for the edit sheet.
-    private func saveRoadmap(_ patch: RoadmapPatch) async -> String? {
-        if await write({ try await model.updateRoadmap(id, revision: $0, patch: patch) }) { return nil }
-        let text = notice
+    /// Saves on the revision the sheet opened on. After a failure the sheet remounts on
+    /// Core's state with the notice inside, so a later Save cannot overwrite a change made
+    /// elsewhere.
+    private func saveRoadmap(_ patch: RoadmapPatch, revision: Int) async -> Bool {
+        if await write(revision: revision, { try await model.updateRoadmap(id, revision: $0, patch: patch) }) {
+            editNotice = nil
+            return true
+        }
+        editNotice = notice ?? Roadmaps.notConfirmed
         notice = nil
-        return text ?? Roadmaps.notConfirmed
+        editKey += 1
+        return false
     }
 
     private func archive() async {
@@ -636,7 +656,8 @@ struct RoadmapPage: View {
         async let pending = model.coreRead(Roadmaps.proposalsPath(id), as: RoadmapProposals.self)
         let (result, proposed) = (await read.checked(Roadmaps.valid), await pending.checked(Roadmaps.valid))
         guard !Task.isCancelled, mine == loads else { return }
-        proposals = proposed
+        // A failed reload keeps the proposals already on screen.
+        if proposed.value != nil || proposals.value == nil { proposals = proposed }
         if tab == "history" { Task { await loadHistory() } }
         // A failed reload keeps the roadmap already on screen.
         if result.value != nil || found == nil { snapshot = result }
@@ -659,26 +680,30 @@ private struct EditRoadmapSheet: View {
     let roadmap: Roadmap
     let items: [RoadmapItem]
     let busy: Bool
-    /// Nil when saved; else the reason, shown here.
-    let save: (RoadmapPatch) async -> String?
+    /// True when saved; the page remounts this sheet with the reason otherwise.
+    let save: (RoadmapPatch, Int) async -> Bool
     @Environment(\.dismiss) private var dismiss
+    /// The roadmap as opened: a reload must not turn a change made elsewhere into an edit.
+    @State private var opened: Roadmap
     @State private var title: String
     @State private var description: String
     @State private var phases: String
     @State private var error: String?
 
-    init(roadmap: Roadmap, items: [RoadmapItem], busy: Bool, save: @escaping (RoadmapPatch) async -> String?) {
+    init(roadmap: Roadmap, items: [RoadmapItem], busy: Bool, notice: String?, save: @escaping (RoadmapPatch, Int) async -> Bool) {
         self.roadmap = roadmap
         self.items = items
         self.busy = busy
         self.save = save
+        _opened = State(initialValue: roadmap)
+        _error = State(initialValue: notice)
         _title = State(initialValue: roadmap.title)
         _description = State(initialValue: roadmap.description ?? "")
         _phases = State(initialValue: roadmap.phases.joined(separator: "\n"))
     }
 
     var body: some View {
-        let removed = Roadmaps.removedPhases(roadmap, items: items, phases: phases)
+        let removed = Roadmaps.removedPhases(opened, items: items, phases: phases)
         NavigationStack {
             Form {
                 Section { TextField("Title", text: $title) } header: { listHeader("Title") }
@@ -716,12 +741,12 @@ private struct EditRoadmapSheet: View {
     }
 
     private func submit() async {
-        switch Roadmaps.roadmapPatch(roadmap, title: title, description: description, phases: phases) {
+        switch Roadmaps.roadmapPatch(opened, title: title, description: description, phases: phases) {
         case let .failure(issue): error = issue.text
         case .success(nil): dismiss()
         case let .success(patch?):
             error = nil
-            if let failure = await save(patch) { error = failure } else { dismiss() }
+            if await save(patch, opened.revision) { dismiss() }
         }
     }
 }
@@ -905,4 +930,10 @@ private struct ItemSheet: View {
             linkError = nil
         }
     }
+}
+
+/// Nil for "no such route on this Core"; else the read failure.
+private func failure<Value>(_ source: Availability<Value>) -> LoadFailure? {
+    if case let .error(reason) = source { return reason }
+    return nil
 }

@@ -685,9 +685,21 @@ enum Roadmaps {
 
     /// The notice after a refused accept or reject.
     static func decisionFailureText(_ error: Error) -> String {
+        if Jobs.isNetwork(error) { return "No answer from your Home Node. It is unknown whether it was applied; reloaded to check." }
         if Jobs.status(error) == 409 { return "Not applied: the roadmap changed since Jarvis proposed this, or a limit is reached. Reloaded." }
         if let known = error as? JarvisAPIError, known == .invalidResponse || known == .responseTooLarge { return notConfirmed }
         return "Not done. \(failureText(error))"
+    }
+
+    /// Why a read failed, from the read's own outcome; nil is a Core without this route.
+    static func readFailureText(_ reason: LoadFailure?) -> String {
+        switch reason {
+        case nil: return "This Core has no roadmaps yet. Update Core on your Home Node."
+        case .network?: return "No answer from your Home Node. Check the connection."
+        case .signin?: return "Your session is not valid. Sign in again from Settings."
+        case .unavailable?: return "Core could not read the roadmaps just now. Try again in a minute."
+        default: return "Core returned an answer this app does not understand, or an error. Try again later."
+        }
     }
 
     // MARK: Failures, in desktop's words

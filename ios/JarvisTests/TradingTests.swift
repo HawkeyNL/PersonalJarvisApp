@@ -252,7 +252,7 @@ final class TradingTests: XCTestCase {
                        NewHolding(symbol: "AAPL", quantity: "12.5", avg_cost: "101.50"))
         XCTAssertEqual(Trading.newHolding(symbol: "asml", quantity: "3", avgCost: "612,4")?.avg_cost, "612.4")
         // Thousands-looking amounts are refused both ways; non-ASCII digits are no number.
-        for text in ["1,234", "1.234", "12,345", "1,000", "-1,234", " 123.456 "] {
+        for text in ["1,234", "1.234", "12,345", "1,000", "-1,234", " 123.456 ", "01,234", "00.123", "-012,345"] {
             XCTAssertTrue(Trading.ambiguousAmount(text), text)
             XCTAssertNil(Trading.newHolding(symbol: "A", quantity: text, avgCost: "1"), text)
             XCTAssertNil(Trading.newHolding(symbol: "A", quantity: "1", avgCost: text), text)
