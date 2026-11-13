@@ -538,6 +538,7 @@ enum Trading {
     /// is not a plain decimal number.
     static func newHolding(symbol: String, quantity: String, avgCost: String) -> NewHolding? {
         func amount(_ text: String) -> String? {
+            guard !ambiguousAmount(text) else { return nil }
             var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if value.filter({ $0 == "," }).count == 1 && !value.contains(".") { value = value.replacingOccurrences(of: ",", with: ".") }
             return parse(value) != nil && value.count <= 64 ? value : nil
@@ -546,6 +547,13 @@ enum Trading {
         guard !symbol.isEmpty, symbol.count <= 32, let quantity = amount(quantity), let avgCost = amount(avgCost) else { return nil }
         return NewHolding(symbol: symbol, quantity: quantity, avg_cost: avgCost)
     }
+
+    /// "1,234" or "1.234": a thousands group or a decimal, so it is refused both ways.
+    static func ambiguousAmount(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).wholeMatch(of: #/-?[1-9][0-9]{0,2}[.,][0-9]{3}/#) != nil
+    }
+
+    static let ambiguousAmountText = "Ambiguous amount: write 1234, or 1.2340 for a decimal."
 
     static let holdingInputText = "Enter a symbol, and the quantity and average cost as numbers, like 12 or 101,50."
 
