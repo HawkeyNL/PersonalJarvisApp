@@ -323,6 +323,19 @@ actor JarvisAPIClient {
         try await delete("/v1/holdings/\(id)", token: token, expectedBinding: expectedBinding)
     }
 
+    // Memecoin paper trader (desktop memecoinApi.ts): tightening only, no resume or enable.
+    // Core's answer is read; only an exact confirmation counts.
+    func pauseMemecoin(token: String, expectedBinding: UUID) async throws -> MemeAnswer {
+        try await request(path: "/v1/trading/meme/pause", method: "POST", body: [String: String](), token: token,
+                          expectedBinding: expectedBinding, limit: 64 * 1024, response: MemeAnswer.self)
+    }
+
+    func disableMemeStrategy(id: String, token: String, expectedBinding: UUID) async throws -> MemeAnswer {
+        guard Memecoin.isStrategyId(id) else { throw JarvisAPIError.invalidConfiguration }
+        return try await request(path: "/v1/trading/meme/strategies/\(id)/disable", method: "POST", body: [String: String](), token: token,
+                                 expectedBinding: expectedBinding, limit: 64 * 1024, response: MemeAnswer.self)
+    }
+
     private func delete(_ path: String, token: String, expectedBinding: UUID) async throws {
         _ = try await request(path: path, method: "DELETE", token: token,
                               expectedBinding: expectedBinding, response: EmptyOrJSON.self)

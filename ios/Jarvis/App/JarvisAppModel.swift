@@ -268,6 +268,13 @@ final class JarvisAppModel: ObservableObject {
 
     func deleteHolding(_ id: String) async throws { try await ownerWrite { try await self.chat.deleteHolding(id: id) } }
 
+    // The memecoin paper trader's two tightening actions, behind the same gate.
+    func pauseMemecoin() async throws -> MemeAnswer { try await ownerWrite { try await self.chat.pauseMemecoin() } }
+
+    func disableMemeStrategy(_ id: String) async throws -> MemeAnswer {
+        try await ownerWrite { try await self.chat.disableMemeStrategy(id) }
+    }
+
     /// Pairing decisions sign or deny only after Face ID / Touch ID on this device.
     func approvePairing(_ item: PairingApprovalItem) async throws {
         guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
