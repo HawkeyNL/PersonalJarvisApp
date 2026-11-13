@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { alertText, nextAlert, titleWithCount } from "../src/approvalAlerts.ts";
+import { alertText, createSession, nextAlert, titleWithCount } from "../src/approvalAlerts.ts";
 
 const pairing = (id, device_name = "Pixel") => ({ kind: "pairing", id, device_name });
 const unlock = (id) => ({ kind: "unlock", id, device_name: "iPad" });
@@ -35,4 +36,26 @@ test("window title carries the waiting count and drops it when none wait", () =>
   assert.equal(titleWithCount("(1) Jarvis", 3), "(3) Jarvis");
   assert.equal(titleWithCount("(3) Jarvis", 0), "Jarvis");
   assert.equal(titleWithCount("Jarvis", 0), "Jarvis");
+});
+
+test("a read from before a sign-out is dropped and raises no banner", () => {
+  const session = createSession();
+  const token = session.token();
+  let seen = nextAlert(new Set(), [pairing("a")]).seen;
+  // Sign-out: the lists are emptied, then the old read answers.
+  session.end();
+  let list = [];
+  if (session.isCurrent(token)) list = [pairing("a")];
+  assert.deepEqual(list, []);
+  const state = nextAlert(seen, list);
+  assert.equal(state.alert, null);
+  assert.equal(state.seen.size, 0);
+  // A read started in the new session counts.
+  assert.equal(session.isCurrent(session.token()), true);
+});
+
+test("leaving the app clears both approval lists and entering reads at once", () => {
+  const app = readFileSync(new URL("../src/App.vue", import.meta.url), "utf8");
+  const watcher = app.slice(app.indexOf("watch(currentShellMode"), app.indexOf("});", app.indexOf("watch(currentShellMode")));
+  for (const call of ["clearUnlocks()", "clearPairing()", "refreshPending()", "restartPairingPolling()"]) assert.ok(watcher.includes(call), call);
 });

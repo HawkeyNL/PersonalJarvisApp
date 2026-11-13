@@ -54,13 +54,17 @@ final class PushRegistrationTests: XCTestCase {
         XCTAssertEqual(approvalPresentation(nil, visible: [:]), [])
     }
 
-    func testOnlyDeliveredNotificationsOfTheEmptiedKindAreRemoved() {
-        let delivered: [(id: String, userInfo: [AnyHashable: Any])] = [
-            ("a", ["link": "jarvis://approvals/pairing"]), ("b", ["link": "jarvis://approvals/unlock"]),
-            ("c", ["link": "jarvis://approvals/pairing"]), ("d", [:]), ("e", ["link": "jarvis://approvals/pairing?x=1"]),
+    func testOnlyOlderNotificationsOfTheEmptiedKindAreRemoved() {
+        let read = Date(timeIntervalSince1970: 1_000)
+        let old = read.addingTimeInterval(-60)
+        let delivered: [(id: String, date: Date, userInfo: [AnyHashable: Any])] = [
+            ("a", old, ["link": "jarvis://approvals/pairing"]), ("b", old, ["link": "jarvis://approvals/unlock"]),
+            ("c", old, ["link": "jarvis://approvals/pairing"]), ("d", old, [:]), ("e", old, ["link": "jarvis://approvals/pairing?x=1"]),
+            // Arrived during or after the read: may be a new request, so it stays.
+            ("f", read, ["link": "jarvis://approvals/pairing"]), ("g", read.addingTimeInterval(5), ["link": "jarvis://approvals/unlock"]),
         ]
-        XCTAssertEqual(approvalNotificationIDs(delivered, link: "jarvis://approvals/pairing"), ["a", "c"])
-        XCTAssertEqual(approvalNotificationIDs(delivered, link: "jarvis://approvals/unlock"), ["b"])
-        XCTAssertEqual(approvalNotificationIDs([], link: "jarvis://approvals/unlock"), [])
+        XCTAssertEqual(approvalNotificationIDs(delivered, link: "jarvis://approvals/pairing", before: read), ["a", "c"])
+        XCTAssertEqual(approvalNotificationIDs(delivered, link: "jarvis://approvals/unlock", before: read), ["b"])
+        XCTAssertEqual(approvalNotificationIDs([], link: "jarvis://approvals/unlock", before: read), [])
     }
 }

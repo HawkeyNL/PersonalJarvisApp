@@ -997,6 +997,8 @@ struct PairingRequestsSection: View {
         .onChange(of: refresh) { _, _ in
             if Date().timeIntervalSince(Self.lastRead) >= Self.minInterval { Task { await load() } }
         }
+        // A push read sooner than 30 s after the last one is not dropped: the loop
+        // below reads at lastRead + 30 s.
         .onReceive(NotificationCenter.default.publisher(for: .jarvisApprovalPushed)) { _ in
             if Date().timeIntervalSince(Self.lastRead) >= Self.minInterval { Task { await load() } }
         }
@@ -1131,7 +1133,6 @@ struct PairingRequestsSection: View {
             if approve { try await model.approvePairing(item) } else { try await model.denyPairing(item) }
             // No extra list read: the 30-second poll picks up any other change.
             requests = requests.map { list in list.filter { $0.id != item.id } }
-            if requests.value?.isEmpty == true { clearApprovalNotifications(Self.pushLink) }
         } catch {
             // Server text is shown sanitised and bounded.
             decisionError = PairingFingerprint.displayName((error as? LocalizedError)?.errorDescription ?? "The decision could not be completed.", max: 160)
@@ -1143,10 +1144,12 @@ struct PairingRequestsSection: View {
     private func load() async {
         // Claimed before the read, so a second instance does not read in parallel.
         Self.lastRead = Date()
+        let started = Date()
         let result = await model.coreRead("/v1/auth/pairing/requests", as: PairingApprovalList.self)
         guard !Task.isCancelled else { return }
         requests = result.map(\.requests)
-        if requests.value?.isEmpty == true { clearApprovalNotifications(Self.pushLink) }
+        // Only a fresh server answer clears notifications, never the list after a decision.
+        if requests.value?.isEmpty == true { clearApprovalNotifications(Self.pushLink, readStartedAt: started) }
         biometrics = BiometricLock.biometricsAvailable
     }
 }

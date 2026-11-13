@@ -20,6 +20,17 @@ export function alertText(request: WaitingRequest): string {
     : "A device asks to unlock";
 }
 
+/** Session counter for approval lists: a read keeps the token it started with,
+ *  and its answer counts only if the session has not ended since. */
+export function createSession() {
+  let current = 0;
+  return {
+    token: () => current,
+    isCurrent: (token: number) => token === current,
+    end: () => { current++; },
+  };
+}
+
 /** The window title with the waiting count in front, as "(2) Jarvis". */
 export function titleWithCount(title: string, count: number): string {
   const base = title.replace(/^\(\d+\) /, "");

@@ -9,8 +9,8 @@ import PairingApprovals from "./components/PairingApprovals.vue";
 import ApprovalAlert from "./components/ApprovalAlert.vue";
 import { locked, shownShellMode as mode, initLock, noteActivity } from "./lock";
 import { acceptsShortcuts } from "./lockPolicy";
-import { startApprovalPolling, stopApprovalPolling } from "./unlockApprovals";
-import { startPairingPolling, stopPairingPolling } from "./pairingApprovals";
+import { clearUnlocks, refreshPending, startApprovalPolling, stopApprovalPolling } from "./unlockApprovals";
+import { clearPairing, restartPairingPolling, startPairingPolling, stopPairingPolling } from "./pairingApprovals";
 import { maybeStartWake, stopWake } from "./voicewake";
 import { currentAuthStatus, currentShellMode } from "./auth";
 import { loadHomeNodeConfig } from "./homeNode";
@@ -24,10 +24,17 @@ const app = useAppStore();
 
 // Before a Home Node is set and a session exists, only the setup/sign-in
 // screen shows. Leaving the app (sign-out, expired session) returns there.
+// Approval lists belong to one session: cleared on leaving, read at once on entering.
 watch(currentShellMode, (value, previous) => {
   if (value === "app") {
     app.notice = null;
+    if (previous && previous !== "app") {
+      void refreshPending();
+      restartPairingPolling();
+    }
   } else if (previous === "app") {
+    clearUnlocks();
+    clearPairing();
     app.consoleOpen = false;
     void router.replace("/");
   }

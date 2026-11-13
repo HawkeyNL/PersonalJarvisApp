@@ -140,11 +140,12 @@ struct MainTabs: View {
             // Delivered unlock notifications go once a read finds none waiting.
             var cleared = false
             while !Task.isCancelled {
+                let started = Date()
                 let result = await model.pendingUnlocks()
                 guard !Task.isCancelled else { break }
                 unlocks = result ?? []
                 if let result {
-                    if result.isEmpty, !cleared { clearApprovalNotifications(Self.unlockLink) }
+                    if result.isEmpty, !cleared { clearApprovalNotifications(Self.unlockLink, readStartedAt: started) }
                     cleared = result.isEmpty
                 }
                 // An answer with requests or an error returns at once: never spin.

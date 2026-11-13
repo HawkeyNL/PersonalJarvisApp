@@ -73,19 +73,21 @@ func approvalPresentation(_ link: URL?, visible: [String: Int]) -> UNNotificatio
     return [.banner, .sound]
 }
 
-/// Identifiers of delivered notifications for approval `link`. Pushes carry no
-/// request id, so they are cleared per kind once that kind's list is empty.
-func approvalNotificationIDs(_ delivered: [(id: String, userInfo: [AnyHashable: Any])], link: String) -> [String] {
-    delivered.filter { approvalPushLink($0.userInfo)?.absoluteString == link }.map(\.id)
+/// Identifiers of delivered notifications for approval `link` that arrived
+/// before `before`. Pushes carry no request id, so they are cleared per kind,
+/// and only those older than a server read that found that kind empty: a push
+/// that arrived during or after the read may be for a new request.
+func approvalNotificationIDs(_ delivered: [(id: String, date: Date, userInfo: [AnyHashable: Any])], link: String, before: Date) -> [String] {
+    delivered.filter { $0.date < before && approvalPushLink($0.userInfo)?.absoluteString == link }.map(\.id)
 }
 
-/// Removes delivered approval notifications of one kind; call it once a read
-/// shows nothing of that kind is waiting any more.
-func clearApprovalNotifications(_ link: String) {
+/// Removes delivered approval notifications of one kind; call it only with the
+/// start time of a fresh server read that found nothing of that kind waiting.
+func clearApprovalNotifications(_ link: String, readStartedAt: Date) {
     Task {
         let center = UNUserNotificationCenter.current()
         let delivered = await center.deliveredNotifications()
-        let ids = approvalNotificationIDs(delivered.map { ($0.request.identifier, $0.request.content.userInfo) }, link: link)
+        let ids = approvalNotificationIDs(delivered.map { ($0.request.identifier, $0.date, $0.request.content.userInfo) }, link: link, before: readStartedAt)
         if !ids.isEmpty { center.removeDeliveredNotifications(withIdentifiers: ids) }
     }
 }

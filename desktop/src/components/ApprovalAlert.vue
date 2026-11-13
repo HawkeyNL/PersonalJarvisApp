@@ -38,14 +38,20 @@ function review() {
   target?.focus();
   alert.value = null;
 }
+
+// Focus was on the banner's button; hand it back to the page instead of losing it.
+function dismiss() {
+  alert.value = null;
+  document.getElementById("main")?.focus();
+}
 </script>
 
 <template>
   <div class="approval-alert" role="status">
-    <div v-if="alert" class="banner">
+    <div v-if="alert" class="banner" @keydown.escape="dismiss">
       <span>{{ alertText(alert) }}</span>
       <button type="button" class="btn btn-secondary btn-sm" @click="review">Review</button>
-      <button type="button" class="btn btn-secondary btn-sm" @click="alert = null">Dismiss</button>
+      <button type="button" class="btn btn-secondary btn-sm" @click="dismiss">Dismiss</button>
     </div>
   </div>
 </template>

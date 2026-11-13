@@ -57,8 +57,9 @@ Apple's push service); the app never relies on that text. Tapping a pairing
 push opens the pairing requests; tapping an unlock push opens Activity, where
 the unlock request opens as a sheet. In the foreground a push shows a banner
 only when its screen is not open (the pairing requests page, or an open
-unlock sheet); an open pairing page then reloads, keeping reads 30 s apart. Delivered approval notifications are removed once a read
-shows nothing of that kind waiting. Approving still needs Face ID / Touch ID.
+unlock sheet); an open pairing page then reloads, keeping reads 30 s apart.
+Delivered approval notifications that arrived before a server read showing
+nothing of that kind waiting are removed. Approving still needs Face ID / Touch ID.
 No silent pushes, no notification actions and no notification service
 extension.
 
