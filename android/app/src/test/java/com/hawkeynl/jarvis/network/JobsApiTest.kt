@@ -45,6 +45,7 @@ class JobsApiTest {
             val (jobs, engine) = api()
             assertTrue(bad, jobs.updateJob(endpoint, "t", bad, 1, JsonObject(emptyMap())) is ApiResult.InvalidResponse)
             assertTrue(bad, jobs.runJob(endpoint, "t", bad) is ApiResult.InvalidResponse)
+            assertTrue(bad, jobs.deleteJob(endpoint, "t", bad, 1) is ApiResult.InvalidResponse)
             assertTrue(bad, jobs.jobRuns(endpoint, "t", bad) is ApiResult.InvalidResponse)
             assertTrue(bad, jobs.jobRun(endpoint, "t", bad) is ApiResult.InvalidResponse)
             assertTrue(bad, engine.requestHistory.isEmpty())
@@ -65,6 +66,18 @@ class JobsApiTest {
         val read = runsEngine.requestHistory.single()
         assertEquals("/v1/jobs/$id/runs", read.url.encodedPath)
         assertEquals("20", read.url.parameters["limit"])
+    }
+
+    @Test fun `a delete names its revision and a 409 stays a conflict`() = runTest {
+        val (jobs, engine) = api(body = """{"deleted":true}""")
+        assertEquals(ApiResult.Success(Unit), jobs.deleteJob(endpoint, "t", id, 4))
+        val request = engine.requestHistory.single()
+        assertEquals(HttpMethod.Delete, request.method)
+        assertEquals("/v1/jobs/$id", request.url.encodedPath)
+        assertEquals("4", request.url.parameters["expected_revision"])
+        assertEquals("Bearer t", request.headers[HttpHeaders.Authorization])
+        assertEquals(ApiResult.HttpError(409, null), api(HttpStatusCode.Conflict).first.deleteJob(endpoint, "t", id, 4))
+        assertTrue(api(body = "{}" + " ".repeat(1024 * 1024)).first.deleteJob(endpoint, "t", id, 4) is ApiResult.InvalidResponse)
     }
 
     @Test fun `an oversized write answer fails closed instead of counting as saved`() = runTest {

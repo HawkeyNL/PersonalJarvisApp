@@ -441,6 +441,12 @@ class KtorJarvisApi(
         }
     }
 
+    override suspend fun deleteJob(endpoint: HomeNodeEndpoint, token: String, id: String, revision: Long): ApiResult<Unit> {
+        if (!isJobId(id) || revision < 0) return ApiResult.InvalidResponse("Invalid job id")
+        // Only the status matters; the body is read within the bound and dropped.
+        return jobCall({ }) { client.prepareDelete(endpoint.url("/v1/jobs/$id")) { bearerAuth(token); parameter("expected_revision", revision) } }
+    }
+
     override suspend fun runJob(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> {
         if (!isJobId(id)) return ApiResult.InvalidResponse("Invalid job id")
         // Only the status matters; the body is read within the bound and dropped.
