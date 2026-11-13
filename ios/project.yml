@@ -23,8 +23,8 @@ targets:
         # entitlements from the owner's profile instead (docs/IOS_SIDELOAD.md);
         # Core's AltStore source declares it (crates/app-downloads).
         CODE_SIGN_ENTITLEMENTS: Jarvis/Jarvis.entitlements
-        MARKETING_VERSION: "0.1.31"
-        CURRENT_PROJECT_VERSION: "32"
+        MARKETING_VERSION: "0.1.32"
+        CURRENT_PROJECT_VERSION: "33"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
