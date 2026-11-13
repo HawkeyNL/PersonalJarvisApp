@@ -3,7 +3,7 @@
 // the session bearer. Answers are raw: the pages pass them through the guards.
 import { onMounted, onUnmounted } from "vue";
 import { listen } from "@tauri-apps/api/event";
-import { getJsonAuth, patchJsonAuth, postJsonAuth } from "./api";
+import { deleteAuth, getJsonAuth, patchJsonAuth, postJsonAuth } from "./api";
 import { runFinished, type JobPatch, type NewJob, type RunFinished } from "./jobs";
 
 const base = (id: string) => `/v1/jobs/${encodeURIComponent(id)}`;
@@ -12,6 +12,8 @@ export const jobApi = {
   list: () => getJsonAuth<unknown>("/v1/jobs"),
   create: (body: NewJob) => postJsonAuth<unknown>("/v1/jobs", body),
   update: (id: string, revision: number, patch: JobPatch) => patchJsonAuth<unknown>(`${base(id)}?expected_revision=${revision}`, patch),
+  /** Deletes the job and its runs; its conversation stays. */
+  remove: (id: string, revision: number) => deleteAuth(`${base(id)}?expected_revision=${revision}`),
   /** 202 when queued; 429 within an hour of the last owner run. */
   runNow: (id: string) => postJsonAuth<unknown>(`${base(id)}/run`, {}),
   runs: (id: string) => getJsonAuth<unknown>(`${base(id)}/runs?limit=20`),
