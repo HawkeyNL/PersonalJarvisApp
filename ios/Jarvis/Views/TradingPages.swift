@@ -119,59 +119,87 @@ private struct ProgressMeter: View {
     }
 }
 
-private struct ChartPoint: Identifiable {
-    let id: Int
-    let open: Double
-    let high: Double
-    let low: Double
-    let close: Double
-    var volume: Double?
-}
+private struct ChartPoint: Identifiable { let id: Int; let bar: ChartBar }
 
 private struct AveragePoint: Identifiable { let id: Int; let value: Double }
 
 /// One moving average: `id` is its length in bars.
 private struct AverageSeries: Identifiable { let id: Int; let points: [AveragePoint] }
 
-/// A price or value chart: a line or candles, moving averages over the shown bars and
-/// optional volume. Bars are drawn by index, so market gaps take no room. VoiceOver reads
-/// `label`, the summary of the change.
+/// A read's chart, worked out once when it arrives: the series to draw, the change over
+/// the period and the figures VoiceOver reads.
+private struct ChartData {
+    let series: ChartSeries
+    let ratio: String?
+    let last: String?
+    let low: String?
+    let high: String?
+
+    init(bars: [InstrumentBars.Bar]) {
+        series = ChartSeries(bars.compactMap { bar -> ChartBar? in
+            guard let open = Trading.chartNumber(bar.o), let high = Trading.chartNumber(bar.h), let low = Trading.chartNumber(bar.l),
+                  let close = Trading.chartNumber(bar.c) else { return nil }
+            return ChartBar(open: open, high: high, low: low, close: close, volume: bar.volume)
+        }, averages: [50, 200])
+        ratio = bars.last.flatMap { Trading.changeRatio(bars[0].o, $0.c) }
+        last = bars.last?.c
+        low = bars.min { (Trading.chartNumber($0.l) ?? 0) < (Trading.chartNumber($1.l) ?? 0) }?.l
+        high = bars.max { (Trading.chartNumber($0.h) ?? 0) < (Trading.chartNumber($1.h) ?? 0) }?.h
+    }
+
+    init(points: [PortfolioHistory.Point]) {
+        series = ChartSeries(points.compactMap { point in
+            Trading.chartNumber(point.value).map { ChartBar(open: $0, high: $0, low: $0, close: $0) }
+        })
+        ratio = points.count > 1 ? Trading.changeRatio(points[0].value, points[points.count - 1].value) : nil
+        last = points.last?.value
+        low = points.min { (Trading.chartNumber($0.value) ?? 0) < (Trading.chartNumber($1.value) ?? 0) }?.value
+        high = points.max { (Trading.chartNumber($0.value) ?? 0) < (Trading.chartNumber($1.value) ?? 0) }?.value
+    }
+
+    /// "AAPL, 3M: +4.80%. Last $176.40, low $160.00, high $180.00, 63 bars."
+    func label(_ title: String, money: (String?) -> String) -> String {
+        "\(title): \(ratio.map { Trading.formatPercent($0) } ?? "no change data"). Last \(money(last)), low \(money(low)), "
+            + "high \(money(high)), \(plural(series.count, "bar", "bars"))."
+    }
+}
+
+/// A price or value chart: a line or candles, moving averages and optional volume, drawn
+/// from a thinned series. Bars are drawn by index, so market gaps take no room. VoiceOver
+/// reads `label`: the change, last price, the period's low and high and the bar count.
 private struct TradingChart: View {
     enum Mode: String { case line, candle }
 
-    let points: [ChartPoint]
+    let series: ChartSeries
     var mode = Mode.line
     var averages: [Int] = []
     var volume = false
     let label: String
     var height: CGFloat = 220
 
-    private var series: [AverageSeries] {
-        let closes = points.map { Optional($0.close) }
-        return averages.map { n in
-            AverageSeries(id: n, points: Trading.movingAverage(closes, n).enumerated().compactMap { index, value in
+    var body: some View {
+        let points = series.bars.enumerated().map { ChartPoint(id: $0.offset, bar: $0.element) }
+        let lines = averages.map { n in
+            AverageSeries(id: n, points: (series.averages[n] ?? []).enumerated().compactMap { index, value in
                 value.map { AveragePoint(id: index, value: $0) }
             })
         }
-    }
-
-    var body: some View {
         VStack(spacing: JV.Space.xxs) {
             Chart {
                 ForEach(points) { point in
                     if mode == .line {
-                        LineMark(x: .value("Bar", point.id), y: .value("Price", point.close), series: .value("Series", "Price"))
+                        LineMark(x: .value("Bar", point.id), y: .value("Price", point.bar.close), series: .value("Series", "Price"))
                             .foregroundStyle(JV.chartAccent)
                     } else {
-                        let color = point.close >= point.open ? JV.positiveSolid : JV.negativeSolid
-                        RuleMark(x: .value("Bar", point.id), yStart: .value("Low", point.low), yEnd: .value("High", point.high))
+                        let color = point.bar.close >= point.bar.open ? JV.positiveSolid : JV.negativeSolid
+                        RuleMark(x: .value("Bar", point.id), yStart: .value("Low", point.bar.low), yEnd: .value("High", point.bar.high))
                             .foregroundStyle(color)
-                        RectangleMark(x: .value("Bar", point.id), yStart: .value("Open", point.open), yEnd: .value("Close", point.close),
+                        RectangleMark(x: .value("Bar", point.id), yStart: .value("Open", point.bar.open), yEnd: .value("Close", point.bar.close),
                                       width: .ratio(0.6))
                             .foregroundStyle(color)
                     }
                 }
-                ForEach(series) { average in
+                ForEach(lines) { average in
                     ForEach(average.points) { point in
                         LineMark(x: .value("Bar", point.id), y: .value("Average", point.value), series: .value("Series", "Average \(average.id)"))
                             .foregroundStyle(average.id == 50 ? JV.chartMa : JV.textSecondary)
@@ -184,7 +212,7 @@ private struct TradingChart: View {
             .frame(height: height)
             if volume {
                 Chart(points) { point in
-                    BarMark(x: .value("Bar", point.id), y: .value("Volume", point.volume ?? 0)).foregroundStyle(JV.border)
+                    BarMark(x: .value("Bar", point.id), y: .value("Volume", point.bar.volume ?? 0)).foregroundStyle(JV.border)
                 }
                 .chartXAxis(.hidden)
                 .chartYAxis(.hidden)
@@ -280,6 +308,8 @@ struct TradingPage: View {
     @ObservedObject var model: JarvisAppModel
     @State private var portfolio: TradingState<Portfolio> = .loading
     @State private var history: TradingState<PortfolioHistory> = .loading
+    /// Worked out once per history read.
+    @State private var historyChart: ChartData?
     @State private var range = "3M"
     @State private var route: TradingRoute?
     /// Reads already in flight must not overwrite newer answers.
@@ -333,12 +363,10 @@ struct TradingPage: View {
 
     private var valueCard: some View {
         VStack(alignment: .leading, spacing: JV.Space.sm) {
-            let points = history.value?.readable ?? []
-            let ratio = points.count > 1 ? Trading.changeRatio(points[0].value, points[points.count - 1].value) : nil
             HStack(spacing: JV.Space.xs) {
                 Text("Total value").font(JV.font(18, .semibold, relativeTo: .title3)).foregroundStyle(JV.textPrimary)
                     .accessibilityAddTraits(.isHeader)
-                if let ratio {
+                if let ratio = historyChart?.ratio {
                     Badge(text: Trading.formatPercent(ratio), style: Trading.sign(ratio) == 1 ? .positive : Trading.sign(ratio) == -1 ? .negative : .neutral)
                 }
             }
@@ -346,11 +374,10 @@ struct TradingPage: View {
             TradingStatus(state: history, what: "the value history", rows: 1, retry: loadHistory) { data, empty in
                 if empty {
                     Text("Not enough history for this period yet.").font(JV.font(13)).foregroundStyle(JV.textSecondary)
-                } else {
-                    let label = "Total value over \(range == "ALL" ? "all time" : range): \(ratio.map { Trading.formatPercent($0) } ?? "no change data")"
-                    TradingChart(points: data.readable.enumerated().compactMap { index, point in
-                        Trading.chartNumber(point.value).map { ChartPoint(id: index, open: $0, high: $0, low: $0, close: $0) }
-                    }, label: label)
+                } else if let chart = historyChart {
+                    TradingChart(series: chart.series, label: chart.label("Total value over \(range == "ALL" ? "all time" : range)") {
+                        Trading.formatMoney($0, data.base_currency)
+                    })
                 }
             }
         }
@@ -416,9 +443,11 @@ struct TradingPage: View {
         historyLoads += 1
         let mine = historyLoads
         history = .loading
+        historyChart = nil
         let result = await model.coreRead(path, as: PortfolioHistory.self).checked(Trading.valid)
         guard !Task.isCancelled, mine == historyLoads else { return }
         history = Trading.state(result) { $0.readable.count < 2 }
+        historyChart = result.value.map { ChartData(points: $0.readable) }
     }
 }
 
@@ -561,20 +590,21 @@ private struct StockPage: View {
     @State private var ma200 = false
     @State private var volume = true
     @State private var bars: TradingState<InstrumentBars> = .loading
+    /// Worked out once per bars read.
+    @State private var chart: ChartData?
     @State private var portfolio: TradingState<Portfolio> = .loading
     @State private var loads = 0
+    @State private var portfolioLoads = 0
 
     private var data: InstrumentBars? { bars.value }
 
     var body: some View {
-        let readable = data?.readable ?? []
-        let last = readable.last
-        let ratio = last.flatMap { Trading.changeRatio(readable[0].o, $0.c) }
+        let ratio = chart?.ratio
         PageScaffold(title: data.map { $0.name?.value ?? $0.symbol } ?? "Instrument \(conid)",
                      subtitle: data.map { [$0.symbol, $0.exchange?.value].compactMap { $0 }.joined(separator: " · ") } ?? "") {
-            if let data, let last {
+            if let data, let last = chart?.last {
                 HStack(alignment: .firstTextBaseline, spacing: JV.Space.sm) {
-                    Text(verbatim: Trading.formatPrice(last.c, data.currency)).font(JV.number(28, .semibold, relativeTo: .title))
+                    Text(verbatim: Trading.formatPrice(last, data.currency)).font(JV.number(28, .semibold, relativeTo: .title))
                         .foregroundStyle(JV.textPrimary)
                     if let ratio {
                         Text(verbatim: "\(Trading.formatPercent(ratio)) over \(range)").font(JV.number(15, .medium)).foregroundStyle(signColor(ratio))
@@ -582,7 +612,7 @@ private struct StockPage: View {
                 }
                 .accessibilityElement(children: .combine)
             }
-            chartCard(readable, ratio: ratio)
+            chartCard
             notes
             position
         }
@@ -591,13 +621,13 @@ private struct StockPage: View {
         .task { await loadPortfolio() }
     }
 
-    private func chartCard(_ readable: [InstrumentBars.Bar], ratio: String?) -> some View {
+    private var chartCard: some View {
         VStack(alignment: .leading, spacing: JV.Space.sm) {
             SegmentedControl(label: "Period", pairs: Trading.barRanges.map { ($0, $0) }, selection: $range)
             SegmentedControl(label: "Chart type", options: [.init(id: TradingChart.Mode.line, label: "Line"), .init(id: .candle, label: "Candles")],
                              selection: $mode)
-            let count = readable.count
-            let hasVolume = readable.contains { $0.volume != nil }
+            let count = chart?.series.count ?? 0
+            let hasVolume = chart?.series.hasVolume ?? false
             HStack(spacing: JV.Space.xs) {
                 indicator("Average 50", isOn: $ma50, needs: 50, count: count)
                 indicator("Average 200", isOn: $ma200, needs: 200, count: count)
@@ -607,14 +637,11 @@ private struct StockPage: View {
             TradingStatus(state: bars, what: "the price history", rows: 1, retry: loadBars) { data, empty in
                 if empty {
                     note("No prices for this period. The market may not have traded yet.")
-                } else {
-                    let label = "\(data.symbol), \(range): \(ratio.map { Trading.formatPercent($0) } ?? "no change data")"
-                    TradingChart(points: readable.enumerated().compactMap { index, bar -> ChartPoint? in
-                        guard let open = Trading.chartNumber(bar.o), let high = Trading.chartNumber(bar.h),
-                              let low = Trading.chartNumber(bar.l), let close = Trading.chartNumber(bar.c) else { return nil }
-                        return ChartPoint(id: index, open: open, high: high, low: low, close: close, volume: bar.volume)
-                    }, mode: mode, averages: [ma50 && count >= 50 ? 50 : nil, ma200 && count >= 200 ? 200 : nil].compactMap { $0 },
-                    volume: volume && hasVolume, label: label, height: 260)
+                } else if let chart {
+                    TradingChart(series: chart.series, mode: mode,
+                                 averages: [ma50 && count >= 50 ? 50 : nil, ma200 && count >= 200 ? 200 : nil].compactMap { $0 },
+                                 volume: volume && hasVolume, label: chart.label("\(data.symbol), \(range)") { Trading.formatPrice($0, data.currency) },
+                                 height: 260)
                 }
                 note("Prices: \(Trading.sourceLabel(data)) · as of \(Trading.asOfText(data.as_of)). Averages are over the bars of this period.")
             }
@@ -683,14 +710,18 @@ private struct StockPage: View {
         loads += 1
         let mine = loads
         bars = .loading
+        chart = nil
         let result = await model.coreRead(path, as: InstrumentBars.self).checked(Trading.valid)
         guard !Task.isCancelled, mine == loads else { return }
         bars = Trading.state(result, instrument: true) { $0.readable.isEmpty }
+        chart = result.value.map { ChartData(bars: $0.readable) }
     }
 
     private func loadPortfolio() async {
+        portfolioLoads += 1
+        let mine = portfolioLoads
         let result = await model.coreRead("/v1/trading/portfolio", as: Portfolio.self).checked(Trading.valid)
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, mine == portfolioLoads else { return }
         portfolio = Trading.state(result) { _ in false }
     }
 }
@@ -883,10 +914,14 @@ private struct HoldingsPage: View {
 
     private func add() async {
         guard !busy else { return }
+        guard let holding = Trading.newHolding(symbol: symbol, quantity: quantity, avgCost: avgCost) else {
+            error = Trading.holdingInputText
+            return
+        }
         busy = true
         error = nil
         do {
-            try await model.addHolding(NewHolding(symbol: symbol, quantity: quantity, avg_cost: avgCost))
+            try await model.addHolding(holding)
             symbol = ""
             quantity = ""
             avgCost = ""

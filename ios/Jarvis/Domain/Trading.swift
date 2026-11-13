@@ -141,6 +141,43 @@ struct InstrumentBars: Decodable, TradingFreshness {
     }
 }
 
+/// One bar as numbers, for drawing only.
+struct ChartBar: Equatable {
+    let open: Double
+    let high: Double
+    let low: Double
+    let close: Double
+    var volume: Double?
+}
+
+/// A chart's data, worked out once per read: the bars thinned to about one per 2 points of
+/// a phone-wide chart, and the moving averages over all bars, sampled at each bucket's end.
+struct ChartSeries {
+    static let maxPoints = 180
+
+    let bars: [ChartBar]
+    let averages: [Int: [Double?]]
+    /// Bars before thinning.
+    let count: Int
+    let hasVolume: Bool
+    let low: Double?
+    let high: Double?
+
+    init(_ all: [ChartBar], averages lengths: [Int] = [], maxPoints: Int = ChartSeries.maxPoints) {
+        let ranges = Trading.buckets(all.count, max: maxPoints)
+        bars = Trading.thin(all, max: maxPoints)
+        let closes = all.map { Optional($0.close) }
+        averages = Dictionary(uniqueKeysWithValues: lengths.map { n in
+            let full = Trading.movingAverage(closes, n)
+            return (n, ranges.map { full[$0.upperBound - 1] })
+        })
+        count = all.count
+        hasVolume = all.contains { $0.volume != nil }
+        low = all.map(\.low).min()
+        high = all.map(\.high).max()
+    }
+}
+
 /// A position entered by hand (/v1/holdings).
 struct Holding: Decodable, Identifiable {
     let id: String
@@ -303,9 +340,28 @@ enum Trading {
     /// Percent change from the first to the last value as a decimal string ("4.80"); nil
     /// when unknown.
     static func changeRatio(_ first: String?, _ last: String?) -> String? {
-        guard let a = chartNumber(first), a != 0, let b = chartNumber(last) else { return nil }
-        let pct = String(format: "%.2f", (b / a - 1) * 100)
-        return parse(pct) != nil ? pct : nil
+        guard let a = chartNumber(first), a != 0, let b = chartNumber(last),
+              let three = parse(String(format: "%.3f", (b / a - 1) * 100)) else { return nil }
+        // Rounded on the digits, half away from zero, like desktop's toFixed(2).
+        let p = round(three, 2)
+        return (p.neg && !isZero(p) ? "-" : "") + p.int + "." + p.frac
+    }
+
+    /// The source ranges a series of `count` bars is drawn as: one per bar, or `max` buckets.
+    static func buckets(_ count: Int, max: Int) -> [Range<Int>] {
+        guard count > max, max > 0 else { return (0..<count).map { $0..<($0 + 1) } }
+        return (0..<max).map { (($0 * count) / max)..<((($0 + 1) * count) / max) }
+    }
+
+    /// Bars as drawn: at most `max`, each bucket's open, high, low, close and summed volume.
+    static func thin(_ bars: [ChartBar], max: Int) -> [ChartBar] {
+        buckets(bars.count, max: max).compactMap { range in
+            let slice = bars[range]
+            guard let first = slice.first, let last = slice.last else { return nil }
+            let volumes = slice.compactMap(\.volume)
+            return ChartBar(open: first.open, high: slice.map(\.high).max() ?? first.high, low: slice.map(\.low).min() ?? first.low,
+                            close: last.close, volume: volumes.isEmpty ? nil : volumes.reduce(0, +))
+        }
     }
 
     /// Simple moving average of the closes; nil until `n` bars exist.
@@ -477,7 +533,26 @@ enum Trading {
     // MARK: Holdings
 
     /// The notice after a refused add or remove, in fixed words; never Core's own text.
+    /// A manual holding as typed: trimmed, the symbol in capitals, and a single decimal
+    /// comma read as a point ("12,5" is 12.5). Nil when the symbol is empty or an amount
+    /// is not a plain decimal number.
+    static func newHolding(symbol: String, quantity: String, avgCost: String) -> NewHolding? {
+        func amount(_ text: String) -> String? {
+            var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if value.filter({ $0 == "," }).count == 1 && !value.contains(".") { value = value.replacingOccurrences(of: ",", with: ".") }
+            return parse(value) != nil && value.count <= 64 ? value : nil
+        }
+        let symbol = symbol.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !symbol.isEmpty, symbol.count <= 32, let quantity = amount(quantity), let avgCost = amount(avgCost) else { return nil }
+        return NewHolding(symbol: symbol, quantity: quantity, avg_cost: avgCost)
+    }
+
+    static let holdingInputText = "Enter a symbol, and the quantity and average cost as numbers, like 12 or 101,50."
+
     static func holdingFailureText(_ error: Error, adding: Bool) -> String {
+        if let known = error as? JarvisAPIError, known == .invalidResponse || known == .responseTooLarge {
+            return "Not confirmed; reloaded to check."
+        }
         let what = adding ? "Not added." : "Not removed."
         if Jobs.isNetwork(error) {
             return "\(what) No answer from your Home Node. It is unknown whether the change arrived; reloaded to check."
