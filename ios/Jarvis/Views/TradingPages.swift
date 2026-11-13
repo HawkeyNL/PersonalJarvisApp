@@ -11,8 +11,8 @@ private enum TradingRoute: Hashable { case stocks, positions, holdings, ibkr, st
 /// Colour of a signed amount; the sign is always in the text too.
 private func signColor(_ value: String?) -> Color {
     switch Trading.sign(value) {
-    case 1?: JV.positiveText
-    case -1?: JV.negativeText
+    case .some(1): JV.positiveText
+    case .some(-1): JV.negativeText
     default: JV.textSecondary
     }
 }
