@@ -128,6 +128,10 @@ class JobsTest {
         // A 409 on a change is always a revision conflict; only a create can mean "exists".
         assertEquals(CHANGED_ELSEWHERE, writeFailureText(ApiResult.HttpError(409, null), update = true))
         assertTrue(writeFailureText(ApiResult.HttpError(409, null), update = false).contains("already exists"))
+        // A 2xx with an oversized or unreadable answer may have landed.
+        assertEquals(NOT_CONFIRMED, writeFailureText(ApiResult.InvalidResponse("x"), update = true))
+        assertEquals(NOT_CONFIRMED, writeFailureText(ApiResult.InvalidResponse("x"), update = false))
+        assertEquals(NOT_CONFIRMED, runNowFailureText(ApiResult.InvalidResponse("x")))
     }
 
     @Test fun `only a Core UUID can go into a jobs URL`() {

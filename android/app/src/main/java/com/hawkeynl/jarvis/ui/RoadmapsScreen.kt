@@ -176,8 +176,17 @@ private fun RoadmapListPage(actions: JarvisViewModel, back: () -> Unit, open: (S
                     result.value?.let { open(it.roadmap.id) } ?: load()
                 } else {
                     error = roadmapWriteFailureText(result, revisionMoved = false)
-                    // The roadmap may exist although its answer was unreadable.
-                    if (result is ApiResult.InvalidResponse || result is ApiResult.Unreachable) load()
+                    // The roadmap may exist although its answer was unreadable: close the form
+                    // once the reloaded list shows it, else ask to check before a second try.
+                    if (result is ApiResult.InvalidResponse || result is ApiResult.Unreachable) {
+                        load()
+                        if (cards.orEmpty().any { it.roadmap.title == title.trim() }) {
+                            creating = false
+                            error = ""
+                        } else {
+                            error += " Check the list before trying again."
+                        }
+                    }
                 }
             } finally {
                 busy = false
@@ -345,7 +354,7 @@ private fun RoadmapPage(id: String, actions: JarvisViewModel, back: () -> Unit) 
     val latest = rememberLatest()
     // History reads beside loads and writes, never cancelling them; the newest read wins.
     val historyLatest = rememberLatest()
-    val thisDevice = remember { actions.ownDeviceId() }
+    val thisDevice = remember { actions.state.value.ownDeviceId }
 
     suspend fun loadHistory() {
         val result = actions.jobs { e, t -> roadmapHistory(e, t, id) } ?: return

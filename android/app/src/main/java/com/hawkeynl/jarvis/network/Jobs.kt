@@ -299,6 +299,8 @@ fun runNowFailureText(result: ApiResult<*>): String = when {
     result is ApiResult.HttpError && result.status == 429 -> RUN_NOW_REFUSED
     result is ApiResult.HttpError && result.status == 409 -> "Not started: Core's scheduler is off, so no job runs."
     result is ApiResult.Unreachable -> "No answer from your Home Node. It is unknown whether the run was queued; reloaded to check."
+    // A 2xx whose answer is oversized or unreadable: the run may have been queued.
+    result is ApiResult.InvalidResponse -> NOT_CONFIRMED
     else -> "Not started. ${jobFailureText(jobFailureOf(result))}"
 }
 
@@ -311,5 +313,7 @@ fun writeFailureText(result: ApiResult<*>, update: Boolean): String = when {
     result is ApiResult.HttpError && result.status == 400 ->
         "Core refused this as invalid, for example a roadmap that is archived. Check the fields and try again."
     result is ApiResult.Unreachable -> "No answer from your Home Node. It is unknown whether the change arrived; reloaded to check."
+    // A 2xx whose answer is oversized or unreadable: the change may have landed.
+    result is ApiResult.InvalidResponse -> NOT_CONFIRMED
     else -> "Not saved. ${jobFailureText(jobFailureOf(result))}"
 }
