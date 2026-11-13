@@ -554,40 +554,6 @@ struct IbkrPanel: View {
     }
 }
 
-// MARK: - Trading
-
-/// Trading tab. The iPhone app only has Core's read-only IBKR link so far;
-/// the dashboard, pots and proposals of the design are not built yet.
-struct TradingPage: View {
-    @ObservedObject var model: JarvisAppModel
-    @State private var ibkr: Availability<IbkrPortfolio> = .loading
-    @State private var loadedAt = Date()
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: JV.Space.md) {
-                IbkrPanel(source: ibkr, loadedAt: loadedAt, retry: load)
-                UnavailableState(title: "Trading dashboard",
-                                 detail: "Pots, proposals and mandates are coming to the iPhone app. Nothing here can place an order.",
-                                 symbol: "chart.line.uptrend.xyaxis")
-            }
-            .padding(JV.Space.md)
-        }
-        .background(JV.bgPage)
-        .navigationTitle(AppTab.trading.title)
-        .toolbarBackground(JV.bgPage, for: .navigationBar)
-        .refreshable { await load() }
-        .task { await load() }
-    }
-
-    private func load() async {
-        let result = await model.coreRead("/v1/trading/portfolio", as: IbkrPortfolio.self)
-        guard !Task.isCancelled else { return }
-        ibkr = result
-        loadedAt = Date()
-    }
-}
-
 func softwareRows(_ software: [HomeNodeRegistry.Software]) -> [ActivityRow] {
     software.map { item in
         ActivityRow(id: item.name, symbol: "shippingbox", title: item.name + (item.version.map { " \($0)" } ?? ""),

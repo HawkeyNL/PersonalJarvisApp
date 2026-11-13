@@ -242,9 +242,9 @@ actor JarvisAPIClient {
                               expectedBinding: expectedBinding, response: EmptyOrJSON.self)
     }
 
-    // The only bearer-only DELETEs: this device's own APNs push target, and the owner's
-    // own chat data (a conversation, a photo). A device is revoked with a signed approval,
-    // never with a bearer-only DELETE.
+    // The only bearer-only DELETEs: this device's own APNs push target, the owner's own chat
+    // data (a conversation, a photo) and manual holdings. A device is revoked with a signed
+    // approval, never with a bearer-only DELETE.
     func deletePushTarget(token: String, expectedBinding: UUID) async throws {
         try await delete("/v1/devices/self/push", token: token, expectedBinding: expectedBinding)
     }
@@ -286,6 +286,17 @@ actor JarvisAPIClient {
     func runJobNow(id: UUID, token: String, expectedBinding: UUID) async throws {
         _ = try await request(path: "/v1/jobs/\(id.uuidString.lowercased())/run", method: "POST", body: [String: String](),
                               token: token, expectedBinding: expectedBinding, limit: 64 * 1024, response: EmptyOrJSON.self)
+    }
+
+    // Manual holdings (desktop portfolio.ts). The answers are not needed: the page reloads.
+    func addHolding(_ body: NewHolding, token: String, expectedBinding: UUID) async throws {
+        _ = try await request(path: "/v1/holdings", method: "POST", body: body, token: token,
+                              expectedBinding: expectedBinding, limit: 64 * 1024, response: EmptyOrJSON.self)
+    }
+
+    func deleteHolding(id: String, token: String, expectedBinding: UUID) async throws {
+        guard isSafePathSegment(id) else { throw JarvisAPIError.invalidConfiguration }
+        try await delete("/v1/holdings/\(id)", token: token, expectedBinding: expectedBinding)
     }
 
     private func delete(_ path: String, token: String, expectedBinding: UUID) async throws {

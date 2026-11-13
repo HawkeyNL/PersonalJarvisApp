@@ -180,7 +180,7 @@ private struct Plain: Decodable {
 }
 
 /// An array element that is skipped instead of failing the whole array.
-private struct Lenient<Value: Decodable>: Decodable {
+struct Lenient<Value: Decodable>: Decodable {
     let value: Value?
     init(from decoder: Decoder) throws { value = try? Value(from: decoder) }
 }
@@ -358,7 +358,7 @@ enum Jobs {
     /// The owner-facing text for an error code; never the code's own words.
     static func errorText(_ code: String) -> String { errorTexts[code] ?? "Core reported an error this app does not know yet." }
 
-    private static func status(_ error: Error) -> Int? {
+    static func status(_ error: Error) -> Int? {
         switch error as? JarvisAPIError {
         case .unauthorized?: 401
         case let .rejected(status, _)?: status
@@ -366,7 +366,7 @@ enum Jobs {
         }
     }
 
-    private static func isNetwork(_ error: Error) -> Bool {
+    static func isNetwork(_ error: Error) -> Bool {
         let error = error as? JarvisAPIError
         return error == .unreachable || error == .timedOut
     }
