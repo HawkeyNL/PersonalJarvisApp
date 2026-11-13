@@ -90,6 +90,8 @@ data class JarvisUiState(
     val locked: Boolean = false,
     val biometricMessage: String? = null,
     val authenticated: Boolean = false,
+    /** This device's id as Core knows it, read once at sign-in; read it through [ownDeviceId]. */
+    val signedInDeviceId: String? = null,
     val pairingPending: Boolean = false,
     val pairingExpiresAt: Long? = null,
     /** Keystore invalidated the device key; onboarding offers erase and pair again. */
@@ -132,7 +134,10 @@ data class JarvisUiState(
     val dictated: String? = null,
     /** [VOICE_DISCLOSURE] is showing: the next mic tap may use the phone's speech service. */
     val dictationDisclosure: Boolean = false,
-)
+) {
+    /** This device's id, only while signed in (history shows it as "this device"). */
+    val ownDeviceId: String? get() = signedInDeviceId.takeIf { authenticated }
+}
 
 class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     private val speech = RealtimeSpeech(container.localSpeech)
@@ -588,9 +593,6 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         }
     }.await()
 
-    /** This device's id as Core knows it; null before it is enrolled. */
-    fun ownDeviceId(): String? = container.sessions.session().deviceId
-
     /** One Jobs or Roadmaps call for the signed-in Home Node, with its token read here. Null
      *  when the app is locked or signed out, or the sign-in changed before the answer came: a
      *  late answer is dropped, and only a 401 of this sign-in ends it. */
@@ -777,7 +779,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             session.token == null || session.expiresAt?.let { it <= Instant.now().epochSecond } != false ->
                 handleEnrollment(container.enrollment.login(endpoint))
             else -> {
-                _state.update { it.copy(authenticated = true) }
+                _state.update { it.copy(authenticated = true, signedInDeviceId = session.deviceId) }
                 loadConversations(endpoint)
                 startRealtime(endpoint)
                 checkForUpdate(endpoint)
@@ -843,6 +845,8 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                         busy = false,
                         pairingPending = false,
                         authenticated = true,
+                        // A new sign-in: the id is read again after the unlock.
+                        signedInDeviceId = null,
                         activationRequired = false,
                         locked = true,
                         error = null,

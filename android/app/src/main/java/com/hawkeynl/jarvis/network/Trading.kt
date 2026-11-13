@@ -357,12 +357,13 @@ fun holdingNumber(text: String): String? = if (holdingIssue(text) == null) norma
 /** Why a typed amount cannot be sent; null when it can. "1,234" and "1.234" look like
  *  thousands in one convention and decimals in the other, so both are refused. */
 fun holdingIssue(text: String): String? = when {
-    THOUSANDS.matches(text.trim()) -> HOLDING_AMBIGUOUS
+    THOUSANDS.matches(text.trim()) || LEADING_ZERO.containsMatchIn(text.trim()) -> HOLDING_AMBIGUOUS
     !DECIMAL.matches(normalized(text)) -> HOLDING_NUMBER_RULE
     else -> null
 }
 
 private val THOUSANDS = Regex("^-?[1-9][0-9]{0,2}[.,][0-9]{3}$")
+private val LEADING_ZERO = Regex("^-?0[0-9]+[.,]")
 private fun normalized(text: String) = text.trim().let { if (it.count { c -> c == ',' } == 1 && '.' !in it) it.replace(',', '.') else it }
 
 const val HOLDING_NUMBER_RULE = "Quantity and average cost must be numbers, such as 12.5."

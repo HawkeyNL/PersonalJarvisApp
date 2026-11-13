@@ -268,11 +268,12 @@ private fun readFields(o: JsonObject): ItemFields {
     // Only phase and notes may be null (cleared); the others, when present, must hold a value.
     return ItemFields(
         keys.filter { it in o }.toSet(),
-        title = if ("title" in o) o.str("title", 1000) else null,
+        // Written by Jarvis: bidi and format characters are dropped (plain), like memecoin text.
+        title = if ("title" in o) plain(o.str("title", 1000)).orEmpty() else null,
         status = if ("status" in o) requireNotNull(o.status("status")) else null,
         phase = o.optStr("phase", 200),
         position = if ("position" in o) o.int("position") else null,
-        notes = o.optStr("notes", 20_000),
+        notes = o.optStr("notes", 20_000)?.let(::plain),
         dependsOn = if ("depends_on" in o) o.strList("depends_on", RoadmapLimits.DEPENDS_ON) else null,
         links = if ("links" in o) o.array("links", RoadmapLimits.LINKS).map(::readLinkJson) else null,
     )
@@ -291,7 +292,7 @@ fun readProposals(x: JsonElement): List<Proposal>? = guarded {
     x.obj().array("proposals", 100).map {
         val p = it.obj()
         Proposal(
-            p.str("id", 64), p.int("base_revision"), p.array("ops", RoadmapLimits.OPS).map(::parseOp), p.optStr("rationale", 4000),
+            p.str("id", 64), p.int("base_revision"), p.array("ops", RoadmapLimits.OPS).map(::parseOp), p.optStr("rationale", 4000)?.let(::plain),
             p.str("created_at", 64), p.str("expires_at", 64),
         )
     }
@@ -496,6 +497,7 @@ fun proposalFailureText(result: ApiResult<*>): String =
     when {
         result is ApiResult.HttpError && result.status == 409 -> "Not applied: the roadmap changed since Jarvis proposed this, or a limit is reached. Reloaded."
         result is ApiResult.InvalidResponse -> NOT_CONFIRMED
+        result is ApiResult.Unreachable -> "No answer from your Home Node. It is unknown whether it was applied; reloaded to check."
         else -> "Not done. ${roadmapFailureText(jobFailureOf(result))}"
     }
 
