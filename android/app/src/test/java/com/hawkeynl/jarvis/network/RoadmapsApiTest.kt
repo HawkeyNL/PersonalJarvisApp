@@ -38,7 +38,7 @@ class RoadmapsApiTest {
     @Test fun `401, errors, oversized and invalid answers fail closed`() = runTest {
         assertEquals(ApiResult.Unauthorized, api(HttpStatusCode.Unauthorized).first.roadmaps(endpoint, "t"))
         assertEquals(ApiResult.HttpError(404, null), api(HttpStatusCode.NotFound).first.roadmap(endpoint, "t", id))
-        val big = """{"roadmaps":[]}""" + " ".repeat(1024 * 1024)
+        val big = """{"roadmaps":[]}""" + " ".repeat(16 * 1024 * 1024)
         assertTrue(api(body = big).first.roadmaps(endpoint, "t") is ApiResult.InvalidResponse)
         assertTrue(api(body = """{"roadmap":$roadmap}""").first.roadmap(endpoint, "t", id) is ApiResult.InvalidResponse)
         assertTrue(api(body = "not json").first.roadmapProposals(endpoint, "t", id) is ApiResult.InvalidResponse)

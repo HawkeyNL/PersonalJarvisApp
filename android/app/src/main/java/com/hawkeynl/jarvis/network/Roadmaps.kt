@@ -484,13 +484,20 @@ fun roadmapWriteFailureText(result: ApiResult<*>, revisionMoved: Boolean): Strin
         if (revisionMoved) CHANGED_ELSEWHERE else "Core refused this change: the roadmap is archived or a limit is reached."
     result is ApiResult.HttpError && result.status == 400 -> "Core refused this change as invalid. Check the fields and try again."
     result is ApiResult.Unreachable -> "No answer from your Home Node. It is unknown whether the change arrived; reloaded to check."
+    // A 2xx whose answer is oversized or unreadable: the change may have landed.
+    result is ApiResult.InvalidResponse -> NOT_CONFIRMED
     else -> "Not saved. ${roadmapFailureText(jobFailureOf(result))}"
 }
 
+const val NOT_CONFIRMED = "Not confirmed; reloaded to check."
+
 /** The notice after a refused accept or reject of a proposal. */
 fun proposalFailureText(result: ApiResult<*>): String =
-    if (result is ApiResult.HttpError && result.status == 409) "Not applied: the roadmap changed since Jarvis proposed this, or a limit is reached. Reloaded."
-    else "Not done. ${roadmapFailureText(jobFailureOf(result))}"
+    when {
+        result is ApiResult.HttpError && result.status == 409 -> "Not applied: the roadmap changed since Jarvis proposed this, or a limit is reached. Reloaded."
+        result is ApiResult.InvalidResponse -> NOT_CONFIRMED
+        else -> "Not done. ${roadmapFailureText(jobFailureOf(result))}"
+    }
 
 /** One write on a roadmap, sent with the revision it builds on. */
 sealed interface RoadmapWrite {

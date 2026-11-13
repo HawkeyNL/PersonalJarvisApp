@@ -202,6 +202,9 @@ class RoadmapsTest {
         assertTrue(roadmapWriteFailureText(ApiResult.HttpError(400, null), false).contains("invalid"))
         assertTrue(roadmapWriteFailureText(ApiResult.Unreachable(UnreachableReason.TIMEOUT), false).contains("unknown whether"))
         assertTrue(proposalFailureText(conflict).startsWith("Not applied"))
+        // A 2xx with an oversized or unreadable answer may have landed.
+        assertEquals(NOT_CONFIRMED, roadmapWriteFailureText(ApiResult.InvalidResponse("x"), false))
+        assertEquals(NOT_CONFIRMED, proposalFailureText(ApiResult.InvalidResponse("x")))
     }
 
     @Test fun `only path-safe ids reach a URL`() {

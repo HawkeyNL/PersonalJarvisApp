@@ -176,6 +176,8 @@ private fun RoadmapListPage(actions: JarvisViewModel, back: () -> Unit, open: (S
                     result.value?.let { open(it.roadmap.id) } ?: load()
                 } else {
                     error = roadmapWriteFailureText(result, revisionMoved = false)
+                    // The roadmap may exist although its answer was unreadable.
+                    if (result is ApiResult.InvalidResponse || result is ApiResult.Unreachable) load()
                 }
             } finally {
                 busy = false
