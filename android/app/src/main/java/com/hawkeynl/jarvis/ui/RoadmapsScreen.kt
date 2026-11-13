@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.AlertDialog
@@ -28,7 +29,6 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -45,6 +45,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.hawkeynl.jarvis.network.ApiResult
 import com.hawkeynl.jarvis.network.Author
 import com.hawkeynl.jarvis.network.DEFAULT_PHASES
@@ -91,7 +93,6 @@ import com.hawkeynl.jarvis.network.zonedText
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 
 /** Roadmaps (desktop Roadmaps.vue, Roadmap.vue, ItemSheet.vue): the owner's roadmaps, one
@@ -136,7 +137,8 @@ private fun RoadmapListPage(actions: JarvisViewModel, back: () -> Unit, open: (S
     suspend fun load() {
         val list = actions.jobs { e, t -> roadmaps(e, t) } ?: return
         if (list !is ApiResult.Success) {
-            if (cards == null) failure = jobFailureOf(list)
+            // 404 on the list means an older Core without roadmaps.
+            if (cards == null) failure = jobFailureOf(list, list = true)
             return
         }
         // ponytail: one detail and one proposals read per card (at most 20 roadmaps); a summary route in Core if this gets slow.
@@ -156,7 +158,8 @@ private fun RoadmapListPage(actions: JarvisViewModel, back: () -> Unit, open: (S
         }
         failure = null
     }
-    LaunchedEffect(Unit) { latest.launch { load() } }
+    // On open and on every return to the app (desktop reloads on focus); never over a write.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { if (!busy) latest.launch { load() } }
 
     fun create(title: String, description: String, phasesText: String) {
         if (busy) return
@@ -190,12 +193,16 @@ private fun RoadmapListPage(actions: JarvisViewModel, back: () -> Unit, open: (S
         if (creating) {
             RoadmapForm("New roadmap", null, emptyList(), busy, error, "Create", onCancel = { creating = false; error = "" }, onSave = ::create)
         } else {
-            ActionButton("New roadmap", { creating = true; error = "" }, enabled = !full)
+            // Only once the list is known, so the 20-roadmap limit is known too.
+            ActionButton("New roadmap", { creating = true; error = "" }, enabled = shown != null && !full)
         }
         val failed = failure
         when {
             shown == null && failed != null ->
-                Unavailable("Roadmaps", JvIcon.LAYERS, kind = UnavailableKind.ERROR, detail = roadmapFailureText(failed), onRetry = { latest.launch { load() } })
+                Unavailable(
+                    "Roadmaps", JvIcon.LAYERS, kind = UnavailableKind.ERROR, detail = roadmapFailureText(failed),
+                    onRetry = if (busy) null else ({ latest.launch { load() } }),
+                )
             shown == null -> Skeleton("Loading roadmaps…")
             shown.isEmpty() -> ListSection(null) {
                 EmptyState("No roadmaps yet", body = "Start one for a project: its phases, its items and what each is waiting on.", icon = JvIcon.LAYERS)
@@ -268,7 +275,7 @@ internal fun <T> Picker(label: String, options: List<Pair<T, String>>, value: T,
     Column(verticalArrangement = Arrangement.spacedBy(JvSpace.xs)) {
         Text(label, color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.labelMedium)
         Box {
-            GhostButton(current, { open = true }, Modifier.semantics { contentDescription = "$label: $current" }, enabled = enabled)
+            GhostButton(current, { open = true }, Modifier.semantics { contentDescription = "$label: $current, opens choices" }, enabled = enabled)
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 options.forEach { (option, text) ->
                     val chosen = option == value
@@ -334,8 +341,9 @@ private fun RoadmapPage(id: String, actions: JarvisViewModel, back: () -> Unit) 
     var editError by remember { mutableStateOf("") }
     var archiving by remember { mutableStateOf(false) }
     val latest = rememberLatest()
-    // History reads beside loads and writes, never cancelling them.
-    val scope = rememberCoroutineScope()
+    // History reads beside loads and writes, never cancelling them; the newest read wins.
+    val historyLatest = rememberLatest()
+    val thisDevice = remember { actions.ownDeviceId() }
 
     suspend fun loadHistory() {
         val result = actions.jobs { e, t -> roadmapHistory(e, t, id) } ?: return
@@ -357,10 +365,11 @@ private fun RoadmapPage(id: String, actions: JarvisViewModel, back: () -> Unit) 
             failure = jobFailureOf(s)
         }
         proposals = (p as? ApiResult.Success)?.value
-        if (tab == "history") loadHistory()
+        if (tab == "history") historyLatest.launch { loadHistory() }
     }
-    LaunchedEffect(Unit) { latest.launch { load() } }
-    LaunchedEffect(tab) { if (tab == "history") loadHistory() }
+    // On open and on every return to the app (desktop reloads on focus); never over a write.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { if (!busy) latest.launch { load() } }
+    LaunchedEffect(tab) { if (tab == "history") historyLatest.launch { loadHistory() } }
 
     /** One write on [revision] (default: the one on screen); Core answers the whole roadmap.
      *  After any failure the page reloads and explains. [after] gets whether it was saved. */
@@ -500,7 +509,7 @@ private fun RoadmapPage(id: String, actions: JarvisViewModel, back: () -> Unit) 
                         }
                         else -> pending.forEach { p -> ProposalCard(p, current, archived, busy) { accept -> decide(p, accept) } }
                     }
-                    else -> HistoryTab(history, historyFailed) { scope.launch { loadHistory() } }
+                    else -> HistoryTab(history, historyFailed, thisDevice) { historyLatest.launch { loadHistory() } }
                 }
             }
         }
@@ -681,7 +690,7 @@ private fun ProposalCard(proposal: Proposal, snap: RoadmapSnapshot, archived: Bo
 }
 
 @Composable
-private fun HistoryTab(history: List<HistoryEntry>?, failed: Boolean, retry: () -> Unit) {
+private fun HistoryTab(history: List<HistoryEntry>?, failed: Boolean, thisDevice: String?, retry: () -> Unit) {
     when {
         failed -> Unavailable("History", JvIcon.ALERT, kind = UnavailableKind.ERROR, detail = "Could not load the history.", onRetry = retry)
         history == null -> Skeleton("Loading history…")
@@ -692,7 +701,7 @@ private fun HistoryTab(history: List<HistoryEntry>?, failed: Boolean, retry: () 
                     ActivityItem(
                         c.id,
                         when (c.author) { Author.OWNER -> JvIcon.USER; Author.JARVIS -> JvIcon.SPARK; Author.GITHUB -> JvIcon.BRANCH },
-                        describeChange(c), c.deviceId?.let { "device ${it.take(8)}" }, zonedText(c.at),
+                        describeChange(c), c.deviceId?.let { if (it == thisDevice) "this device" else "device ${it.take(8)}" }, zonedText(c.at),
                         tone = if (c.author == Author.GITHUB) Tone.OK else Tone.IDLE, toneLabel = c.author.label,
                     )
                 },
@@ -795,7 +804,12 @@ private fun ItemEditor(
                         linkLabel(link),
                         Modifier.weight(1f).then(
                             // Validated https targets only; without a browser openUri throws and the tap does nothing.
-                            if (href != null) Modifier.clickable(role = Role.Button, onClickLabel = "Open link") { runCatching { uris.openUri(href) } } else Modifier,
+                            if (href != null) {
+                                Modifier.heightIn(min = 48.dp).wrapContentHeight(Alignment.CenterVertically)
+                                    .clickable(role = Role.Button, onClickLabel = "Open link") { runCatching { uris.openUri(href) } }
+                            } else {
+                                Modifier
+                            },
                         ),
                         color = if (href != null) JvTheme.colors.accentText else JvTheme.colors.textPrimary,
                         style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),

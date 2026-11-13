@@ -390,26 +390,26 @@ class KtorJarvisApi(
     }
 
     override suspend fun roadmaps(endpoint: HomeNodeEndpoint, token: String) =
-        jobCall({ requireNotNull(readRoadmapList(it)) }) { client.prepareGet(endpoint.url("/v1/roadmaps")) { bearerAuth(token) } }
+        jobCall({ requireNotNull(readRoadmapList(it)) }, MAX_ROADMAP_BYTES) { client.prepareGet(endpoint.url("/v1/roadmaps")) { bearerAuth(token) } }
 
     override suspend fun roadmap(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<RoadmapSnapshot> {
         if (!isRoadmapId(id)) return ApiResult.InvalidResponse("Invalid roadmap id")
-        return jobCall({ requireNotNull(readSnapshot(it)) }) { client.prepareGet(endpoint.url("/v1/roadmaps/$id")) { bearerAuth(token) } }
+        return jobCall({ requireNotNull(readSnapshot(it)) }, MAX_ROADMAP_BYTES) { client.prepareGet(endpoint.url("/v1/roadmaps/$id")) { bearerAuth(token) } }
     }
 
     override suspend fun roadmapProposals(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<List<Proposal>> {
         if (!isRoadmapId(id)) return ApiResult.InvalidResponse("Invalid roadmap id")
-        return jobCall({ requireNotNull(readProposals(it)) }) { client.prepareGet(endpoint.url("/v1/roadmaps/$id/proposals")) { bearerAuth(token) } }
+        return jobCall({ requireNotNull(readProposals(it)) }, MAX_ROADMAP_BYTES) { client.prepareGet(endpoint.url("/v1/roadmaps/$id/proposals")) { bearerAuth(token) } }
     }
 
     override suspend fun roadmapHistory(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<List<HistoryEntry>> {
         if (!isRoadmapId(id)) return ApiResult.InvalidResponse("Invalid roadmap id")
-        return jobCall({ requireNotNull(readHistory(it)) }) {
+        return jobCall({ requireNotNull(readHistory(it)) }, MAX_ROADMAP_BYTES) {
             client.prepareGet(endpoint.url("/v1/roadmaps/$id/history")) { bearerAuth(token); parameter("limit", 50) }
         }
     }
 
-    override suspend fun createRoadmap(endpoint: HomeNodeEndpoint, token: String, body: JsonObject) = jobCall(::readSnapshot) {
+    override suspend fun createRoadmap(endpoint: HomeNodeEndpoint, token: String, body: JsonObject) = jobCall(::readSnapshot, MAX_ROADMAP_BYTES) {
         client.preparePost(endpoint.url("/v1/roadmaps")) { bearerAuth(token); setBody(TextContent(body.toString(), ContentType.Application.Json)) }
     }
 
@@ -423,7 +423,7 @@ class KtorJarvisApi(
         }
         val itemId = (write as? RoadmapWrite.UpdateItem)?.itemId ?: (write as? RoadmapWrite.DeleteItem)?.itemId
         if (!isRoadmapId(id) || (itemId != null && !isRoadmapId(itemId)) || revision < 0) return ApiResult.InvalidResponse("Invalid roadmap id")
-        return jobCall(::readSnapshot) {
+        return jobCall(::readSnapshot, MAX_ROADMAP_BYTES) {
             client.prepareRequest(endpoint.url("/v1/roadmaps/$id$path")) {
                 this.method = method
                 bearerAuth(token); parameter("expected_revision", revision)
@@ -435,22 +435,25 @@ class KtorJarvisApi(
     override suspend fun decideProposal(endpoint: HomeNodeEndpoint, token: String, id: String, proposalId: String, accept: Boolean): ApiResult<RoadmapSnapshot?> {
         if (!isRoadmapId(id) || !isRoadmapId(proposalId)) return ApiResult.InvalidResponse("Invalid roadmap id")
         val decision = if (accept) "accept" else "reject"
-        return jobCall(::readSnapshot) {
+        return jobCall(::readSnapshot, MAX_ROADMAP_BYTES) {
             client.preparePost(endpoint.url("/v1/roadmaps/$id/proposals/$proposalId/$decision")) {
                 bearerAuth(token); setBody(TextContent("{}", ContentType.Application.Json))
             }
         }
     }
 
-    /** A Jobs or Roadmaps call: the answer is read with a size bound and passed through [read],
-     *  which throws IllegalArgumentException for a shape the guards refuse. */
-    private suspend fun <T> jobCall(read: (JsonElement) -> T, statement: suspend () -> HttpStatement): ApiResult<T> = try {
+    /** A Jobs or Roadmaps call: the answer is read within [limit] and passed through [read],
+     *  which throws IllegalArgumentException for a shape the guards refuse. An answer over the
+     *  limit fails closed, also for a write. */
+    private suspend fun <T> jobCall(
+        read: (JsonElement) -> T, limit: Int = MAX_JOBS_BYTES, statement: suspend () -> HttpStatement,
+    ): ApiResult<T> = try {
         statement().execute { response ->
             when {
                 response.status == HttpStatusCode.Unauthorized -> ApiResult.Unauthorized
                 response.status.value !in 200..299 -> ApiResult.HttpError(response.status.value, null)
                 else -> try {
-                    val json = smallJson(response, MAX_JOBS_BYTES) ?: JsonNull
+                    val json = boundedJson(response, limit)
                     ApiResult.Success(withContext(Dispatchers.Default) { read(json) })
                 } catch (_: IllegalArgumentException) {
                     ApiResult.InvalidResponse("Home Node sent an invalid answer")
@@ -463,14 +466,18 @@ class KtorJarvisApi(
         networkFailure(error)
     }
 
-    /** A small JSON reply, read with a size bound; null when too large or not JSON. */
-    private suspend fun smallJson(response: io.ktor.client.statement.HttpResponse, limit: Int = MAX_REPLY_BYTES): JsonElement? {
-        // Read and parsed off the main thread.
-        return withContext(Dispatchers.IO) {
+    /** A JSON reply read within [limit], off the main thread: JsonNull when empty or not JSON;
+     *  IllegalArgumentException when larger, so an oversized answer never reads as nothing. */
+    private suspend fun boundedJson(response: io.ktor.client.statement.HttpResponse, limit: Int): JsonElement =
+        withContext(Dispatchers.IO) {
             val bytes = response.bodyAsChannel().toInputStream().use { input -> readAtMost(input, limit + 1) }
-            if (bytes.size > limit) null else runCatching { Json.parseToJsonElement(bytes.decodeToString()) }.getOrNull()
+            require(bytes.size <= limit)
+            runCatching { Json.parseToJsonElement(bytes.decodeToString()) }.getOrDefault(JsonNull)
         }
-    }
+
+    /** A small JSON reply, read with a size bound; null when too large or not JSON. */
+    private suspend fun smallJson(response: io.ktor.client.statement.HttpResponse, limit: Int = MAX_REPLY_BYTES): JsonElement? =
+        try { boundedJson(response, limit).takeUnless { it == JsonNull } } catch (_: IllegalArgumentException) { null }
 
     private suspend inline fun <reified T> request(
         crossinline block: suspend () -> io.ktor.client.statement.HttpResponse,
@@ -523,9 +530,10 @@ class KtorJarvisApi(
         /** An upload id or a photo's keep state is tiny. */
         private const val MAX_REPLY_BYTES = 4 * 1024
         /** A run report with its facts is the largest Jobs answer; Core caps its lists. */
-        // ponytail: roadmaps share this cap; a roadmap at all 300 items with full notes could pass it
-        // and then fails closed. A larger roadmap cap if that ever happens.
         private const val MAX_JOBS_BYTES = 1024 * 1024
+        /** A full roadmap (300 items with notes and links) can pass 1 MiB; desktop's
+         *  auth_request caps answers at 16 MiB. */
+        private const val MAX_ROADMAP_BYTES = 16 * 1024 * 1024
         private val REPLY_JSON = Json { ignoreUnknownKeys = true }
         private val CONVERSATION_ID = Regex("[A-Za-z0-9_-]{1,128}")
 

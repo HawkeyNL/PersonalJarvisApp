@@ -588,6 +588,9 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         }
     }.await()
 
+    /** This device's id as Core knows it; null before it is enrolled. */
+    fun ownDeviceId(): String? = container.sessions.session().deviceId
+
     /** One Jobs or Roadmaps call for the signed-in Home Node, with its token read here. Null
      *  when the app is locked or signed out, or the sign-in changed before the answer came: a
      *  late answer is dropped, and only a 401 of this sign-in ends it. */

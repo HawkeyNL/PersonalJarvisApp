@@ -85,6 +85,15 @@ class RoadmapsApiTest {
         assertEquals(ApiResult.HttpError(409, null), api(HttpStatusCode.Conflict).first.writeRoadmap(endpoint, "t", id, 1, RoadmapWrite.Archive))
     }
 
+    @Test fun `roadmaps read up to 16 MiB and an oversized write answer fails closed`() = runTest {
+        // A full roadmap can pass 1 MiB.
+        val large = snapshot.dropLast(1) + ",\"pad\":\"" + "x".repeat(2 * 1024 * 1024) + "\"}"
+        assertTrue(api(body = large).first.roadmap(endpoint, "t", id) is ApiResult.Success)
+        val oversized = "{}" + " ".repeat(16 * 1024 * 1024)
+        assertTrue(api(body = oversized).first.writeRoadmap(endpoint, "t", id, 1, RoadmapWrite.Archive) is ApiResult.InvalidResponse)
+        assertTrue(api(body = oversized).first.decideProposal(endpoint, "t", id, "p1", accept = false) is ApiResult.InvalidResponse)
+    }
+
     @Test fun `proposals are decided without a revision and history asks for 50`() = runTest {
         val (accept, engine) = api(body = snapshot)
         assertTrue(accept.decideProposal(endpoint, "t", id, "p1", accept = true) is ApiResult.Success)

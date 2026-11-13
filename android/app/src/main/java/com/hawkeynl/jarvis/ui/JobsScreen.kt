@@ -426,9 +426,12 @@ private fun JobForm(
     var dayMenu by remember { mutableStateOf(false) }
     // null while loading or when the roadmaps could not be read.
     var choices by remember { mutableStateOf<List<Roadmap>?>(null) }
+    var choicesFailed by remember { mutableStateOf(false) }
     if (kind == JobKind.DEPENDENCY_REVIEW) {
         LaunchedEffect(Unit) {
-            choices = (actions.jobs { e, t -> roadmaps(e, t) } as? ApiResult.Success)?.value?.filter { it.archivedAt == null }
+            val result = actions.jobs { e, t -> roadmaps(e, t) } ?: return@LaunchedEffect
+            choices = (result as? ApiResult.Success)?.value?.filter { it.archivedAt == null }
+            choicesFailed = result !is ApiResult.Success
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
@@ -476,6 +479,7 @@ private fun JobForm(
                 "Propose upgrades to a roadmap (optional)", options, chosen, { draft = draft.copy(roadmapId = it) },
                 enabled = list != null || chosen != null,
             )
+            if (choicesFailed) ErrorText("Roadmaps could not be loaded.", live = false)
             MutedText("Each run then proposes one item per fixable alert. You accept or reject the proposal on the roadmap.")
         }
         Row(
