@@ -195,6 +195,7 @@ enum Roadmaps {
     static let maxDependsOn = 20
     static let defaultPhases = ["Now", "Next", "Later"]
     static let changedElsewhere = "Changed elsewhere, reloaded."
+    static let notConfirmed = "Not confirmed; reloaded to check."
 
     static func path(_ id: UUID) -> String { "/v1/roadmaps/\(id.uuidString.lowercased())" }
 
@@ -434,6 +435,8 @@ enum Roadmaps {
     /// revision; otherwise Core refused for a limit or an archived roadmap. A 400 means a
     /// rule this app did not catch.
     static func writeFailureText(_ error: Error, revisionMoved: Bool) -> String {
+        // A 2xx answer this app could not read: Core may have made the change.
+        if let known = error as? JarvisAPIError, known == .invalidResponse || known == .responseTooLarge { return notConfirmed }
         if Jobs.status(error) == 409 {
             return revisionMoved ? changedElsewhere : "Core refused this change: the roadmap is archived or a limit is reached."
         }

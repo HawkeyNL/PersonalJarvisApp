@@ -115,12 +115,21 @@ struct RoadmapsPage: View {
         loads += 1
         let mine = loads
         let list = await model.coreRead("/v1/roadmaps", as: RoadmapList.self).checked(Roadmaps.valid)
-        var loaded: [Card] = []
-        // ponytail: one detail read per card (at most 20 open roadmaps); a summary route in Core if this gets slow.
-        for roadmap in list.value?.roadmaps ?? [] {
-            let snapshot = await model.coreRead(Roadmaps.path(roadmap.id), as: RoadmapSnapshot.self).checked(Roadmaps.valid)
-            loaded.append(Card(roadmap: roadmap, items: snapshot.value?.items))
+        let roadmaps = list.value?.roadmaps ?? []
+        // ponytail: one detail read per card, side by side, for the first 20 (Core keeps at most 20 open; the list
+        // check allows 200); a summary route in Core if this gets slow.
+        let model = self.model
+        let details = await withTaskGroup(of: (Int, [RoadmapItem]?).self) { group in
+            for (index, roadmap) in roadmaps.prefix(Roadmaps.maxRoadmaps).enumerated() {
+                group.addTask {
+                    (index, await model.coreRead(Roadmaps.path(roadmap.id), as: RoadmapSnapshot.self).checked(Roadmaps.valid).value?.items)
+                }
+            }
+            var found: [Int: [RoadmapItem]] = [:]
+            for await (index, read) in group { found[index] = read }
+            return found
         }
+        let loaded = roadmaps.enumerated().map { Card(roadmap: $0.element, items: details[$0.offset]) }
         guard !Task.isCancelled, mine == loads else { return }
         // A failed reload keeps the cards already on screen.
         if list.value != nil || cards.value == nil { cards = list.map { _ in loaded } }
@@ -185,6 +194,7 @@ private struct NewRoadmapSheet: View {
             dismiss()
         } catch {
             self.error = Roadmaps.writeFailureText(error, revisionMoved: false)
+            await created()
         }
         busy = false
     }

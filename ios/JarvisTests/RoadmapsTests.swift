@@ -174,6 +174,9 @@ final class RoadmapsTests: XCTestCase {
         XCTAssertTrue(Roadmaps.writeFailureText(conflict, revisionMoved: false).contains("archived or a limit"))
         XCTAssertTrue(Roadmaps.writeFailureText(JarvisAPIError.rejected(status: 400, message: "raw"), revisionMoved: false).contains("invalid"))
         XCTAssertTrue(Roadmaps.writeFailureText(JarvisAPIError.unreachable, revisionMoved: false).contains("unknown whether"))
+        for error in [JarvisAPIError.invalidResponse, .responseTooLarge] {
+            XCTAssertEqual(Roadmaps.writeFailureText(error, revisionMoved: false), "Not confirmed; reloaded to check.")
+        }
         XCTAssertEqual(Roadmaps.writeFailureText(JarvisAPIError.rejected(status: 405, message: nil), revisionMoved: false),
                        "Not saved. This Core has no roadmaps yet. Update Core on your Home Node.")
     }
