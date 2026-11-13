@@ -80,6 +80,18 @@ interface JarvisApi {
     suspend fun deleteConversation(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> =
         ApiResult.InvalidResponse("Not supported")
 
+    /** Trading reads (desktop tradingApi.ts) and the manual holdings (desktop portfolio.ts);
+     *  answers pass the guards in Trading.kt. */
+    suspend fun portfolio(endpoint: HomeNodeEndpoint, token: String): ApiResult<Portfolio> = ApiResult.InvalidResponse("Not supported")
+    suspend fun valueHistory(endpoint: HomeNodeEndpoint, token: String, range: String): ApiResult<PortfolioHistory> =
+        ApiResult.InvalidResponse("Not supported")
+    suspend fun instrumentBars(endpoint: HomeNodeEndpoint, token: String, conid: Long, range: String): ApiResult<InstrumentBars> =
+        ApiResult.InvalidResponse("Not supported")
+    suspend fun holdings(endpoint: HomeNodeEndpoint, token: String): ApiResult<Holdings> = ApiResult.InvalidResponse("Not supported")
+    suspend fun addHolding(endpoint: HomeNodeEndpoint, token: String, symbol: String, quantity: String, avgCost: String): ApiResult<Unit> =
+        ApiResult.InvalidResponse("Not supported")
+    suspend fun deleteHolding(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> = ApiResult.InvalidResponse("Not supported")
+
     /** Scheduled jobs (desktop jobsApi.ts); answers pass the guards in Jobs.kt. */
     suspend fun jobs(endpoint: HomeNodeEndpoint, token: String): ApiResult<JobList> = ApiResult.InvalidResponse("Not supported")
     /** The created job, or null when Core's answer cannot be read. */
