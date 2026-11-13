@@ -147,7 +147,7 @@ fun parseLink(input: String, hint: LinkKind = LinkKind.PR): ParsedLink {
         val (repo, kind, rest) = gh.destructured
         if (kind == "releases/tag") {
             // decodeURIComponent: a '+' stays a '+'.
-            val tag = runCatching { URLDecoder.decode(rest.replace("+", "%2B"), Charsets.UTF_8) }.getOrNull()
+            val tag = runCatching { URLDecoder.decode(rest.replace("+", "%2B"), "UTF-8") }.getOrNull()
             if (tag != null && validRepo(repo) && TAG.matches(tag)) return ParsedLink.Ok(RoadmapLink(LinkKind.RELEASE, repo = repo, tag = tag))
             return ParsedLink.Bad("That release link is not valid.")
         }
