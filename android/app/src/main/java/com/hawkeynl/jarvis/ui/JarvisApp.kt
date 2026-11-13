@@ -141,6 +141,7 @@ private fun AuthenticatedShell(
                     HealthScreen(state, data, navigate, core::refreshHealth, actions::checkConnection, modelControls, state.healthNode)
                 }
                 Screen.MEMORY -> MemoryScreen(navigate)
+                Screen.ROADMAPS -> RoadmapsScreen(actions, navigate)
                 Screen.JOBS -> JobsScreen(actions, navigate)
                 Screen.CONTEXT -> ContextScreen(data, navigate, core::refreshContext) { id ->
                     core.revokeDevice(id) { actions.state.value.let { !it.locked && it.authenticated } }

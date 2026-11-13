@@ -50,7 +50,7 @@ import com.hawkeynl.jarvis.chat.realtimeSelectedHistory
 
 /** Where the authenticated app is: a tab root (HUB, TRADING, ACTIVITY, SETTINGS) or a
  *  screen pushed on one of the tabs; see [tabOf]. */
-enum class Screen { HUB, CHAT, SETTINGS, CONVERSATIONS, AGENTS, TASKS, INTEGRATIONS, HEALTH, MEMORY, CONTEXT, PAIRING_APPROVALS, TRADING, ACTIVITY, JOBS, STOCKS, POSITIONS, HOLDINGS, MEMECOIN }
+enum class Screen { HUB, CHAT, SETTINGS, CONVERSATIONS, AGENTS, TASKS, INTEGRATIONS, HEALTH, MEMORY, CONTEXT, PAIRING_APPROVALS, TRADING, ACTIVITY, JOBS, ROADMAPS, STOCKS, POSITIONS, HOLDINGS, MEMECOIN }
 
 sealed interface AndroidUpdateUiState {
     data object Idle : AndroidUpdateUiState
@@ -588,9 +588,12 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         }
     }.await()
 
-    /** One Jobs call for the signed-in Home Node, with its token read here. Null when the app
-     *  is locked or signed out, or the sign-in changed before the answer came: a late answer
-     *  is dropped, and only a 401 of this sign-in ends it. */
+    /** This device's id as Core knows it; null before it is enrolled. */
+    fun ownDeviceId(): String? = container.sessions.session().deviceId
+
+    /** One Jobs or Roadmaps call for the signed-in Home Node, with its token read here. Null
+     *  when the app is locked or signed out, or the sign-in changed before the answer came: a
+     *  late answer is dropped, and only a 401 of this sign-in ends it. */
     suspend fun <T> jobs(call: suspend com.hawkeynl.jarvis.network.JarvisApi.(HomeNodeEndpoint, String) -> ApiResult<T>): ApiResult<T>? =
         viewModelScope.async {
             val current = _state.value

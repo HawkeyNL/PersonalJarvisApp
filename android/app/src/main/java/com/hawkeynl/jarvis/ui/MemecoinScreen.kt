@@ -101,11 +101,11 @@ private class Unconfirmed(val note: String?, val set: (String?) -> Unit)
 
 /** Run a pause or disable; when it is cancelled before its outcome (the page was left), keep
  *  the unconfirmed note for the next page. */
-private suspend fun guardedWrite(left: Unconfirmed, sending: () -> Boolean, block: suspend () -> Unit) {
+private suspend fun guardedWrite(left: Unconfirmed, sentAt: String, sending: () -> Boolean, block: suspend () -> Unit) {
     try {
         block()
     } catch (cancelled: kotlinx.coroutines.CancellationException) {
-        if (sending()) left.set(unconfirmedOutcome(clock(System.currentTimeMillis())).message)
+        if (sending()) left.set(unconfirmedOutcome(sentAt).message)
         throw cancelled
     }
 }
@@ -243,11 +243,13 @@ private fun MemecoinPage(actions: JarvisViewModel, left: Unconfirmed, back: () -
     fun confirmPause() {
         if (step != Step.CONFIRM) return
         step = Step.SENDING
+        // "Sent at" names when it was sent, not when this page gave up on the answer.
+        val sentAt = clock(System.currentTimeMillis())
         scope.launch {
-            guardedWrite(left, { step == Step.SENDING }) {
+            guardedWrite(left, sentAt, { step == Step.SENDING }) {
                 val result = actions.jobs { e, t -> memePause(e, t) }
                 if (result == null) {
-                    note = unconfirmedOutcome(clock(System.currentTimeMillis()))
+                    note = unconfirmedOutcome(sentAt)
                     step = Step.IDLE
                     return@guardedWrite
                 }
@@ -603,10 +605,11 @@ private fun StrategyPage(id: String, actions: JarvisViewModel, left: Unconfirmed
     fun confirmDisable() {
         if (step != Step.CONFIRM) return
         step = Step.SENDING
+        val sentAt = clock(System.currentTimeMillis())
         scope.launch {
-            guardedWrite(left, { step == Step.SENDING }) {
+            guardedWrite(left, sentAt, { step == Step.SENDING }) {
                 val result = actions.jobs { e, t -> memeDisable(e, t, id) }
-                note = if (result == null) unconfirmedOutcome(clock(System.currentTimeMillis())) else disableOutcome(id, result, clock(System.currentTimeMillis()))
+                note = if (result == null) unconfirmedOutcome(sentAt) else disableOutcome(id, result, clock(System.currentTimeMillis()))
                 step = Step.IDLE
                 loader.load()
             }

@@ -235,7 +235,21 @@ class TradingTest {
         assertEquals("12.5", holdingNumber(" 12,5 "))
         assertEquals("12.5", holdingNumber("12.5"))
         assertEquals("3", holdingNumber("3"))
-        for (bad in listOf("", "1.000,50", "1,2,3", "12,5.0", "abc", "1e3", "12.")) assertNull(bad, holdingNumber(bad))
+        assertEquals("0.125", holdingNumber("0,125"))
+        assertEquals("1.2345", holdingNumber("1,2345"))
+        assertEquals("1.5", holdingNumber("1.5"))
+        assertEquals("1234", holdingNumber("1234"))
+        assertEquals("1.2340", holdingNumber("1.2340"))
+        for (bad in listOf("", "1.000,50", "1,2,3", "12,5.0", "abc", "1e3", "12.", "١٢")) {
+            assertNull(bad, holdingNumber(bad))
+            assertEquals(bad, HOLDING_NUMBER_RULE, holdingIssue(bad))
+        }
+        // Thousands in one convention, decimals in the other: refused both ways.
+        for (ambiguous in listOf("1,234", "1.234", "12,345", "1,000", "-1.000", " 123,456 ")) {
+            assertNull(ambiguous, holdingNumber(ambiguous))
+            assertEquals(ambiguous, HOLDING_AMBIGUOUS, holdingIssue(ambiguous))
+        }
+        assertNull(holdingIssue("12,5"))
         assertEquals("Not confirmed; reloaded to check.", holdingsWriteText(ApiResult.InvalidResponse("x")))
         assertTrue(holdingsWriteText(ApiResult.Unreachable(UnreachableReason.NETWORK)).contains("reloaded to check"))
     }

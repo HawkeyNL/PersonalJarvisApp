@@ -66,10 +66,10 @@ data class InstrumentBars(
 
 // ---- decimal strings ----------------------------------------------------
 
-private val DECIMAL = Regex("^(-)?(\\d+)(?:\\.(\\d+))?$")
-private val LEADING_ZEROS = Regex("^0+(?=\\d)")
+private val DECIMAL = Regex("^(-)?([0-9]+)(?:\\.([0-9]+))?$")
+private val LEADING_ZEROS = Regex("^0+(?=[0-9])")
 private val ISO_CODE = Regex("^[A-Z]{3}$")
-private val CONID = Regex("^\\d{1,12}$")
+private val CONID = Regex("^[0-9]{1,12}$")
 const val DASH = "—"
 
 private data class Parsed(val neg: Boolean, val int: String, val frac: String)
@@ -352,12 +352,21 @@ fun chartTime(iso: String, bars: List<Bar>, full: Boolean = false, zone: ZoneId 
 
 /** A typed amount as Core takes it: trimmed, a single decimal comma read as a dot (a Dutch
  *  keyboard); null when it is still not a decimal number. */
-fun holdingNumber(text: String): String? {
-    val t = text.trim().let { if (it.count { c -> c == ',' } == 1 && '.' !in it) it.replace(',', '.') else it }
-    return t.takeIf { DECIMAL.matches(it) }
+fun holdingNumber(text: String): String? = if (holdingIssue(text) == null) normalized(text) else null
+
+/** Why a typed amount cannot be sent; null when it can. "1,234" and "1.234" look like
+ *  thousands in one convention and decimals in the other, so both are refused. */
+fun holdingIssue(text: String): String? = when {
+    THOUSANDS.matches(text.trim()) -> HOLDING_AMBIGUOUS
+    !DECIMAL.matches(normalized(text)) -> HOLDING_NUMBER_RULE
+    else -> null
 }
 
+private val THOUSANDS = Regex("^-?[1-9][0-9]{0,2}[.,][0-9]{3}$")
+private fun normalized(text: String) = text.trim().let { if (it.count { c -> c == ',' } == 1 && '.' !in it) it.replace(',', '.') else it }
+
 const val HOLDING_NUMBER_RULE = "Quantity and average cost must be numbers, such as 12.5."
+const val HOLDING_AMBIGUOUS = "Ambiguous amount: write 1234, or 1.2340 for a decimal."
 
 /** The notice after a failed holdings write. A 2xx with an oversized answer, or no answer at
  *  all, may have landed: the list reloads to check. */
