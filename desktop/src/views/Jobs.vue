@@ -28,7 +28,7 @@ async function load(): Promise<void> {
   try {
     const list = readJobList(await jobApi.list());
     if (!list) throw new Error("invalid");
-    // ponytail: one runs read per job, at most 14 (10 yours, 3 of Jarvis's, 1 review); a newest-run field on the list if that grows.
+    // ponytail: one runs read per job, about 14 (10 yours, 3 of Jarvis's, 1 review); a newest-run field on the list if that grows.
     const rows = await Promise.all(list.jobs.map(async (job): Promise<Row> => {
       const runs = await jobApi.runs(job.id).then(readRuns, () => null);
       return { job, last: runs ? runs[0] ?? null : undefined };

@@ -100,7 +100,7 @@ function openChat(conversation: string): void {
         <h2 id="jb-sources">Sources</h2>
         <ul class="jb-list t-sm">
           <li v-for="s in run.sources" :key="s.url">
-            <a :href="s.url" class="jb-wrap" :title="s.url" @click.prevent="openUrl(s.url)">{{ s.label }}</a>
+            <a :href="s.url" class="jb-wrap" :title="s.url" @click.prevent="void openUrl(s.url)">{{ s.label }}</a>
           </li>
         </ul>
         <p class="t-xs t-2">From the web: opens in your browser.</p>

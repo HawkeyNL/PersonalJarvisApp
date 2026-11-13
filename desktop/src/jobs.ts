@@ -145,7 +145,7 @@ function readJob(x: unknown): Job | null {
 }
 
 export function readJobList(x: unknown): JobList | null {
-  if (!isObj(x) || (x.status !== "ok" && x.status !== "not_configured") || !Array.isArray(x.jobs) || x.jobs.length > 50) return null;
+  if (!isObj(x) || (x.status !== "ok" && x.status !== "not_configured") || !Array.isArray(x.jobs) || x.jobs.length > 100) return null;
   const jobs = x.jobs.map(readJob).filter((j): j is Job => j !== null);
   return { configured: x.status === "ok", jobs, unsupported: x.jobs.length - jobs.length };
 }

@@ -86,7 +86,7 @@ test("one job this build cannot read never fails the list", () => {
   assert.equal(j.paused_reason, null);
   assert.equal(j.conversation_id, null);
   // The list itself still fails closed.
-  for (const broken of [null, [], { jobs: [job] }, { status: "ok" }, { status: "maybe", jobs: [] }, { status: "ok", jobs: Array(51).fill(job) }]) {
+  for (const broken of [null, [], { jobs: [job] }, { status: "ok" }, { status: "maybe", jobs: [] }, { status: "ok", jobs: Array(101).fill(job) }]) {
     assert.equal(readJobList(broken), null, JSON.stringify(broken)?.slice(0, 80));
   }
   assert.equal(unsupportedText(1), "1 job this app cannot show yet. Update the app to see it.");

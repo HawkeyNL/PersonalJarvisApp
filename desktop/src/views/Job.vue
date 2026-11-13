@@ -32,7 +32,7 @@ let seq = 0;
 
 async function load(): Promise<void> {
   const mine = ++seq;
-  // Core has no single-job read; the list holds at most 14 jobs.
+  // Core has no single-job read; the list is small (10 yours, 3 of Jarvis's, 1 review).
   const [l, r] = await Promise.allSettled([jobApi.list(), jobApi.runs(id.value)]);
   if (mine !== seq) return;
   if (l.status === "fulfilled") {
