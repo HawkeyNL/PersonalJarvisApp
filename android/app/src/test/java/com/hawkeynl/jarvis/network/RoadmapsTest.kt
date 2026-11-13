@@ -205,6 +205,13 @@ class RoadmapsTest {
         // A 2xx with an oversized or unreadable answer may have landed.
         assertEquals(NOT_CONFIRMED, roadmapWriteFailureText(ApiResult.InvalidResponse("x"), false))
         assertEquals(NOT_CONFIRMED, proposalFailureText(ApiResult.InvalidResponse("x")))
+        assertTrue(proposalFailureText(ApiResult.Unreachable(UnreachableReason.TIMEOUT)).contains("unknown whether it was applied"))
+        // Jarvis-written proposal text loses bidi and format characters.
+        val p = readProposals(json("""{"proposals":[{"id":"p1","base_revision":1,"created_at":"x","expires_at":"y","rationale":"evil\u202Etext",
+            "ops":[{"op":"create_item","item":{"title":"Ti\u200Btle","notes":"a\u2066b"}}]}]}"""))!!.single()
+        assertEquals("eviltext", p.rationale)
+        assertEquals("Title", p.ops[0].fields.title)
+        assertEquals("ab", p.ops[0].fields.notes)
     }
 
     @Test fun `only path-safe ids reach a URL`() {

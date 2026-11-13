@@ -258,7 +258,8 @@ fun disableOutcome(id: String, result: ApiResult<JsonElement>, at: String): Writ
         429 -> WriteOutcome(false, at, "Too many strategy changes at $at (HTTP 429). Wait a minute, then try again.")
         else -> WriteOutcome(false, at, "Disable failed at $at (HTTP ${result.status}). It is not confirmed; try again.")
     }
-    is ApiResult.InvalidResponse -> WriteOutcome(false, at, "Disable could not be sent at $at. It is not confirmed; try again.")
+    // A 2xx whose answer is oversized or unreadable: the disable may have landed.
+    is ApiResult.InvalidResponse -> unconfirmedOutcome(at)
 }
 
 const val NO_EDGE_TEXT =

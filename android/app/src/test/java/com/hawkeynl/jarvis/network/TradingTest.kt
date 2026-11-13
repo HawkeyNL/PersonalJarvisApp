@@ -245,7 +245,7 @@ class TradingTest {
             assertEquals(bad, HOLDING_NUMBER_RULE, holdingIssue(bad))
         }
         // Thousands in one convention, decimals in the other: refused both ways.
-        for (ambiguous in listOf("1,234", "1.234", "12,345", "1,000", "-1.000", " 123,456 ")) {
+        for (ambiguous in listOf("1,234", "1.234", "12,345", "1,000", "-1.000", " 123,456 ", "01,234", "00.5", "-01,2")) {
             assertNull(ambiguous, holdingNumber(ambiguous))
             assertEquals(ambiguous, HOLDING_AMBIGUOUS, holdingIssue(ambiguous))
         }

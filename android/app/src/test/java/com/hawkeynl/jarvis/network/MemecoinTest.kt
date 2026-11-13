@@ -152,7 +152,8 @@ class MemecoinTest {
         assertTrue(fail(ApiResult.HttpError(404, null)).message!!.contains("no memecoin pause"))
         assertTrue(Regex("HTTP 500.*not confirmed").containsMatchIn(fail(ApiResult.HttpError(500, null)).message!!))
         assertTrue(fail(ApiResult.Unreachable(UnreachableReason.TIMEOUT)).message!!.contains("unknown whether the pause arrived"))
-        assertTrue(fail(ApiResult.InvalidResponse("x")).message!!.contains("could not be sent"))
+        assertEquals("Sent at 10:42:18 UTC but not confirmed; reload to check.", fail(ApiResult.InvalidResponse("x")).message)
+        assertEquals(unconfirmedOutcome(at), disableOutcome(id, ApiResult.InvalidResponse("x"), at))
     }
 
     @Test fun `a write whose answer never came back is not confirmed`() {

@@ -300,7 +300,8 @@ fun pauseOutcome(result: ApiResult<JsonElement>, at: String): WriteOutcome = whe
         404, 405, 501 -> WriteOutcome(false, at, "Pause not available at $at (HTTP ${result.status}): this Core has no memecoin pause, so nothing changed.")
         else -> WriteOutcome(false, at, "Pause failed at $at (HTTP ${result.status}). The pause is not confirmed; try again.")
     }
-    is ApiResult.InvalidResponse -> WriteOutcome(false, at, "Pause could not be sent at $at. The pause is not confirmed; try again.")
+    // A 2xx whose answer is oversized or unreadable: the pause may have landed.
+    is ApiResult.InvalidResponse -> unconfirmedOutcome(at)
 }
 
 /** A pause or disable whose answer never came back to this page: the sign-in changed, the app
