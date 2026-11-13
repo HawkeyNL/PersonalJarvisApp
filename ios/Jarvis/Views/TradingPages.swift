@@ -98,7 +98,7 @@ private func valueKpis(_ data: Portfolio) -> [Kpi] {
 }
 
 /// A filled bar of 0..100 with an optional target mark.
-private struct Meter: View {
+private struct ProgressMeter: View {
     let value: Double
     var target: Double?
     var over = false
@@ -379,7 +379,7 @@ struct TradingPage: View {
                                 Text(verbatim: "\(Trading.onTarget(allocation)) of \(allocation.count)").font(JV.mono(13)).foregroundStyle(JV.textSecondary)
                             }
                             .accessibilityElement(children: .combine)
-                            Meter(value: Double(Trading.onTarget(allocation)) / Double(allocation.count) * 100)
+                            ProgressMeter(value: Double(Trading.onTarget(allocation)) / Double(allocation.count) * 100)
                         } else {
                             note("No allocation targets set.")
                         }
@@ -526,7 +526,7 @@ private struct StocksPage: View {
                             Text(verbatim: "target \(Trading.formatDecimal(bucket.target_pct, places: 0))%").font(JV.font(13)).foregroundStyle(JV.textSecondary)
                         }
                         if let off { Badge(text: off.text, style: off.over ? .negative : .accent) }
-                        Meter(value: Trading.chartNumber(bucket.current_pct) ?? 0, target: Trading.chartNumber(bucket.target_pct), over: off?.over == true)
+                        ProgressMeter(value: Trading.chartNumber(bucket.current_pct) ?? 0, target: Trading.chartNumber(bucket.target_pct), over: off?.over == true)
                     }
                     .accessibilityElement(children: .combine)
                 }
@@ -850,7 +850,7 @@ private struct HoldingsPage: View {
                     Text(verbatim: holding.cost_basis).font(JV.number(15, .medium)).foregroundStyle(JV.textPrimary)
                 }
                 note("\(holding.quantity) at \(holding.avg_cost) \(holding.currency) · weight \(holding.weight_pct)%")
-                Meter(value: Trading.chartNumber(holding.weight_pct) ?? 0)
+                ProgressMeter(value: Trading.chartNumber(holding.weight_pct) ?? 0)
             }
             .accessibilityElement(children: .combine)
             Button("Remove") { Task { await remove(holding) } }
