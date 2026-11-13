@@ -91,6 +91,22 @@ interface JarvisApi {
     suspend fun addHolding(endpoint: HomeNodeEndpoint, token: String, symbol: String, quantity: String, avgCost: String): ApiResult<Unit> =
         ApiResult.InvalidResponse("Not supported")
     suspend fun deleteHolding(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> = ApiResult.InvalidResponse("Not supported")
+    /** The memecoin PAPER trader (desktop memecoinApi.ts); answers pass the guards in
+     *  Memecoin.kt and MemeStrategies.kt. Pause and disable answer Core's raw JSON, which only
+     *  counts when it confirms. */
+    suspend fun memeOverview(endpoint: HomeNodeEndpoint, token: String): ApiResult<MemeOverview> = ApiResult.InvalidResponse("Not supported")
+    suspend fun memeCandidates(endpoint: HomeNodeEndpoint, token: String): ApiResult<List<Candidate>> = ApiResult.InvalidResponse("Not supported")
+    suspend fun memeTrades(endpoint: HomeNodeEndpoint, token: String): ApiResult<List<ClosedTrade>> = ApiResult.InvalidResponse("Not supported")
+    /** Tightening only: stops new paper entries. There is no resume route. */
+    suspend fun memePause(endpoint: HomeNodeEndpoint, token: String): ApiResult<kotlinx.serialization.json.JsonElement> =
+        ApiResult.InvalidResponse("Not supported")
+    suspend fun memeStrategies(endpoint: HomeNodeEndpoint, token: String): ApiResult<List<Strategy>> = ApiResult.InvalidResponse("Not supported")
+    suspend fun memeStrategy(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<StrategyDetail> =
+        ApiResult.InvalidResponse("Not supported")
+    suspend fun memeDecisions(endpoint: HomeNodeEndpoint, token: String): ApiResult<List<Decision>> = ApiResult.InvalidResponse("Not supported")
+    /** Immediate and unsigned: it only stops this strategy's entries. */
+    suspend fun memeDisable(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<kotlinx.serialization.json.JsonElement> =
+        ApiResult.InvalidResponse("Not supported")
 
     /** Scheduled jobs (desktop jobsApi.ts); answers pass the guards in Jobs.kt. */
     suspend fun jobs(endpoint: HomeNodeEndpoint, token: String): ApiResult<JobList> = ApiResult.InvalidResponse("Not supported")

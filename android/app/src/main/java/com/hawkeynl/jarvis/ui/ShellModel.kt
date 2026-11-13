@@ -13,7 +13,7 @@ enum class Tab(val root: Screen) {
 /** The tab a screen belongs to. Exhaustive, so a new screen cannot compile without a tab. */
 fun tabOf(screen: Screen): Tab = when (screen) {
     Screen.HUB, Screen.CHAT, Screen.CONVERSATIONS, Screen.MEMORY, Screen.JOBS -> Tab.JARVIS
-    Screen.TRADING, Screen.STOCKS, Screen.POSITIONS, Screen.HOLDINGS -> Tab.TRADING
+    Screen.TRADING, Screen.STOCKS, Screen.MEMECOIN, Screen.POSITIONS, Screen.HOLDINGS -> Tab.TRADING
     Screen.ACTIVITY, Screen.PAIRING_APPROVALS, Screen.TASKS, Screen.AGENTS -> Tab.ACTIVITY
     Screen.SETTINGS, Screen.INTEGRATIONS, Screen.HEALTH, Screen.CONTEXT -> Tab.SETTINGS
 }
@@ -22,7 +22,7 @@ fun tabOf(screen: Screen): Tab = when (screen) {
 fun linksOf(tab: Tab): List<Screen> = when (tab) {
     // CHAT opens from the "Ask Jarvis" bar on the Jarvis tab.
     Tab.JARVIS -> listOf(Screen.CHAT, Screen.CONVERSATIONS, Screen.MEMORY, Screen.JOBS)
-    Tab.TRADING -> listOf(Screen.STOCKS, Screen.POSITIONS, Screen.HOLDINGS)
+    Tab.TRADING -> listOf(Screen.STOCKS, Screen.MEMECOIN, Screen.POSITIONS, Screen.HOLDINGS)
     Tab.ACTIVITY -> listOf(Screen.PAIRING_APPROVALS, Screen.TASKS, Screen.AGENTS)
     Tab.SETTINGS -> listOf(Screen.INTEGRATIONS, Screen.HEALTH, Screen.CONTEXT)
 }
@@ -39,6 +39,7 @@ fun screenTitle(screen: Screen): String = when (screen) {
     Screen.MEMORY -> "Memory"
     Screen.JOBS -> "Jobs"
     Screen.STOCKS -> "Stocks"
+    Screen.MEMECOIN -> "Memecoin"
     Screen.POSITIONS -> "Positions"
     Screen.HOLDINGS -> "Holdings"
     Screen.PAIRING_APPROVALS -> "Pairing requests"

@@ -127,6 +127,7 @@ private fun AuthenticatedShell(
                 Screen.HUB -> HomeScreen(state, data, navigate) { core.refreshHome(); core.refreshPairingIfStale() }
                 Screen.TRADING -> TradingScreen(actions, navigate)
                 Screen.STOCKS -> StocksScreen(actions, navigate)
+                Screen.MEMECOIN -> MemecoinScreen(actions, navigate)
                 Screen.POSITIONS -> PositionsScreen(actions, navigate)
                 Screen.HOLDINGS -> HoldingsScreen(actions, navigate)
                 Screen.ACTIVITY -> ActivityScreen(data, navigate, { core.refreshActivity(); core.refreshPairingIfStale() }, agentApprovals)

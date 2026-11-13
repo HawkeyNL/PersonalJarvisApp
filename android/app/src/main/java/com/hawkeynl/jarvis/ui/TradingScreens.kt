@@ -120,7 +120,7 @@ private val noValue: (Portfolio) -> Boolean = { it.positions.isEmpty() && decima
 
 /** Colour of a signed amount (desktop td-pos / td-neg). */
 @Composable
-private fun signColor(value: String?): Color = when (decimalSign(value)) {
+internal fun signColor(value: String?): Color = when (decimalSign(value)) {
     1 -> JvTheme.colors.positiveText
     -1 -> JvTheme.colors.negativeText
     else -> JvTheme.colors.textPrimary
@@ -168,7 +168,7 @@ private fun StateCard(title: String, detail: String, error: Boolean, retry: () -
 
 /** A note band (desktop td-banner); [warn] tints it. Announced when it appears. */
 @Composable
-private fun Banner(text: String, warn: Boolean = false, retry: (() -> Unit)? = null) {
+internal fun Banner(text: String, warn: Boolean = false, retry: (() -> Unit)? = null) {
     val c = JvTheme.colors
     Column(
         Modifier.fillMaxWidth().clip(JvShapes.lg).background(if (warn) c.negativeSubtle else c.accentSubtle)
@@ -182,7 +182,7 @@ private fun Banner(text: String, warn: Boolean = false, retry: (() -> Unit)? = n
 
 /** One key figure (desktop td-kpi). */
 @Composable
-private fun RowScope.Kpi(label: String, value: String, sub: String, color: Color = JvTheme.colors.textPrimary) {
+internal fun RowScope.Kpi(label: String, value: String, sub: String, color: Color = JvTheme.colors.textPrimary) {
     Column(
         Modifier.weight(1f).clip(JvShapes.lg).background(JvTheme.colors.bgSurface).padding(JvSpace.md).semantics(mergeDescendants = true) {},
         verticalArrangement = Arrangement.spacedBy(JvSpace.xxs),
@@ -196,7 +196,7 @@ private fun RowScope.Kpi(label: String, value: String, sub: String, color: Color
 /** A progress bar (desktop td-meter), clamped; [mark] draws the target. Decorative: the
  *  numbers next to it carry the meaning. */
 @Composable
-private fun Meter(percent: Double, mark: Double? = null, over: Boolean = false) {
+internal fun Meter(percent: Double, mark: Double? = null, over: Boolean = false) {
     val c = JvTheme.colors
     Box(Modifier.fillMaxWidth().height(8.dp).clip(JvShapes.pill).background(c.bgSunken)) {
         Box(Modifier.fillMaxWidth((percent.coerceIn(0.0, 100.0) / 100).toFloat()).fillMaxHeight().background(if (over) c.negativeSolid else c.accentSolid))
@@ -303,6 +303,7 @@ fun TradingScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
                 }
                 MutedText("Solana · paper")
                 MutedText("A paper simulation on Solana market data, off by default. No wallet, no real money.")
+                GhostButton("Open memecoin", { onNavigate(Screen.MEMECOIN) })
             }
         }
         ListSection(null) {
@@ -319,6 +320,7 @@ fun TradingScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
                 if (i > 0) ListDivider()
                 when (screen) {
                     Screen.STOCKS -> NavRow(JvIcon.TREND, "Stocks", "Holdings, allocation, deposit and dividends", { onNavigate(screen) })
+                    Screen.MEMECOIN -> NavRow(JvIcon.SPARK, "Memecoin", "The paper trader, its strategies and Claude's decisions", { onNavigate(screen) })
                     Screen.POSITIONS -> NavRow(JvIcon.LINES, "Positions", "Every open IBKR position", { onNavigate(screen) })
                     Screen.HOLDINGS -> NavRow(JvIcon.BRIEFCASE, "Holdings", "Manual holdings and the IBKR status", { onNavigate(screen) })
                     else -> MissingLinkRow(Tab.TRADING, screen, onNavigate)
