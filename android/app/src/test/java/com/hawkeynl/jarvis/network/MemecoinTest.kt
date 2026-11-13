@@ -155,6 +155,12 @@ class MemecoinTest {
         assertTrue(fail(ApiResult.InvalidResponse("x")).message!!.contains("could not be sent"))
     }
 
+    @Test fun `a write whose answer never came back is not confirmed`() {
+        val r = unconfirmedOutcome(at)
+        assertFalse(r.ok)
+        assertEquals("Sent at 10:42:18 UTC but not confirmed; reload to check.", r.message)
+    }
+
     @Test fun `display helpers`() {
         assertEquals("7xKX…gAsU", shortMint(mint))
         assertEquals("short", shortMint("short"))

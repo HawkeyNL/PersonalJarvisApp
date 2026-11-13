@@ -63,6 +63,7 @@ import com.hawkeynl.jarvis.network.reportAge
 import com.hawkeynl.jarvis.network.shortMint
 import com.hawkeynl.jarvis.network.strategyState
 import com.hawkeynl.jarvis.network.stuckCount
+import com.hawkeynl.jarvis.network.unconfirmedOutcome
 import com.hawkeynl.jarvis.network.usd
 import com.hawkeynl.jarvis.network.versionOwner
 import kotlinx.coroutines.delay
@@ -78,17 +79,34 @@ import kotlinx.coroutines.launch
 fun MemecoinScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
     var strategies by rememberSaveable { mutableStateOf(false) }
     var strategyId by rememberSaveable { mutableStateOf<String?>(null) }
+    // A pause or disable still running when its page was left: said on the next page.
+    var unconfirmed by rememberSaveable { mutableStateOf<String?>(null) }
+    val left = Unconfirmed(unconfirmed) { unconfirmed = it }
     val id = strategyId
     when {
         id != null -> {
             BackHandler { strategyId = null }
-            key(id) { StrategyPage(id, actions) { strategyId = null } }
+            key(id) { StrategyPage(id, actions, left) { strategyId = null } }
         }
         strategies -> {
             BackHandler { strategies = false }
-            StrategiesPage(actions, { strategies = false }) { strategyId = it }
+            StrategiesPage(actions, left, { strategies = false }) { strategyId = it }
         }
-        else -> MemecoinPage(actions, { onNavigate(backOf(Screen.MEMECOIN)) }) { strategies = true }
+        else -> MemecoinPage(actions, left, { onNavigate(backOf(Screen.MEMECOIN)) }) { strategies = true }
+    }
+}
+
+/** The note of a write whose page was left before Core answered, and how to set or clear it. */
+private class Unconfirmed(val note: String?, val set: (String?) -> Unit)
+
+/** Run a pause or disable; when it is cancelled before its outcome (the page was left), keep
+ *  the unconfirmed note for the next page. */
+private suspend fun guardedWrite(left: Unconfirmed, sending: () -> Boolean, block: suspend () -> Unit) {
+    try {
+        block()
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        if (sending()) left.set(unconfirmedOutcome(clock(System.currentTimeMillis())).message)
+        throw cancelled
     }
 }
 
@@ -197,7 +215,7 @@ private fun GateMeters(rows: List<Triple<String, Long, Long>>, met: List<Boolean
 // ---- the paper trader --------------------------------------------------------
 
 @Composable
-private fun MemecoinPage(actions: JarvisViewModel, back: () -> Unit, openStrategies: () -> Unit) {
+private fun MemecoinPage(actions: JarvisViewModel, left: Unconfirmed, back: () -> Unit, openStrategies: () -> Unit) {
     val overview = rememberMeme(actions) { e, t -> memeOverview(e, t) }
     val candidates = rememberMeme(actions) { e, t -> memeCandidates(e, t) }
     val trades = rememberMeme(actions) { e, t -> memeTrades(e, t) }
@@ -216,6 +234,7 @@ private fun MemecoinPage(actions: JarvisViewModel, back: () -> Unit, openStrateg
 
     fun refresh() {
         pausedHere = false
+        left.set(null)
         scope.launch { overview.load() }
         scope.launch { candidates.load() }
         scope.launch { trades.load() }
@@ -225,22 +244,25 @@ private fun MemecoinPage(actions: JarvisViewModel, back: () -> Unit, openStrateg
         if (step != Step.CONFIRM) return
         step = Step.SENDING
         scope.launch {
-            val result = actions.jobs { e, t -> memePause(e, t) }
-            if (result == null) {
+            guardedWrite(left, { step == Step.SENDING }) {
+                val result = actions.jobs { e, t -> memePause(e, t) }
+                if (result == null) {
+                    note = unconfirmedOutcome(clock(System.currentTimeMillis()))
+                    step = Step.IDLE
+                    return@guardedWrite
+                }
+                val outcome = pauseOutcome(result, clock(System.currentTimeMillis()))
+                note = outcome
                 step = Step.IDLE
-                return@launch
-            }
-            val outcome = pauseOutcome(result, clock(System.currentTimeMillis()))
-            note = outcome
-            step = Step.IDLE
-            if (outcome.ok) {
-                // Bridge until Core's own overview arrives; from then on it is the truth.
-                pausedHere = true
-                overview.load()
-                pausedHere = false
-            } else if (outcome.status == 503) {
-                // Core paused in memory but did not save it: show what it reports now.
-                overview.load()
+                if (outcome.ok) {
+                    // Bridge until Core's own overview arrives; from then on it is the truth.
+                    pausedHere = true
+                    overview.load()
+                    pausedHere = false
+                } else if (outcome.status == 503) {
+                    // Core paused in memory but did not save it: show what it reports now.
+                    overview.load()
+                }
             }
         }
     }
@@ -253,6 +275,7 @@ private fun MemecoinPage(actions: JarvisViewModel, back: () -> Unit, openStrateg
             status?.let { StatusBadge(it.label, tone = tone(it.tone)) }
             StatusBadge("Paper")
         }
+        left.note?.let { Banner(it, warn = true) }
         if (canPause) GhostButton("Pause paper entries", { note = null; step = Step.CONFIRM }, enabled = step != Step.SENDING)
 
         // Above every report figure, the paper gate included.
@@ -460,7 +483,7 @@ private fun changedBy(by: String) = when (by) {
 /** The paper strategies side by side and Claude's decision log. Read-only: disabling happens
  *  on a strategy's own page. */
 @Composable
-private fun StrategiesPage(actions: JarvisViewModel, back: () -> Unit, open: (String) -> Unit) {
+private fun StrategiesPage(actions: JarvisViewModel, left: Unconfirmed, back: () -> Unit, open: (String) -> Unit) {
     val strategies = rememberMeme(actions) { e, t -> memeStrategies(e, t) }
     val decisions = rememberMeme(actions) { e, t -> memeDecisions(e, t) }
     val overview = rememberMeme(actions) { e, t -> memeOverview(e, t) }
@@ -469,6 +492,7 @@ private fun StrategiesPage(actions: JarvisViewModel, back: () -> Unit, open: (St
     val listed = (strategies.state as? MemeRead.Ok)?.data.orEmpty()
 
     fun refresh() {
+        left.set(null)
         scope.launch { strategies.load() }
         scope.launch { decisions.load() }
         scope.launch { overview.load() }
@@ -479,6 +503,7 @@ private fun StrategiesPage(actions: JarvisViewModel, back: () -> Unit, open: (St
         trailing = { GhostButton("Refresh", ::refresh) },
     ) {
         StatusBadge("Paper")
+        left.note?.let { Banner(it, warn = true) }
         Banner(NO_EDGE_TEXT)
         ListSection("Strategies · results over all versions, net of every cost") {
             when (val state = strategies.state) {
@@ -566,7 +591,7 @@ private fun StrategiesPage(actions: JarvisViewModel, back: () -> Unit, open: (St
  *  (AI-written, plain text) and the backtest. Disable is immediate and confirmed first; enable
  *  needs desktop's signer, so it is not offered here. */
 @Composable
-private fun StrategyPage(id: String, actions: JarvisViewModel, back: () -> Unit) {
+private fun StrategyPage(id: String, actions: JarvisViewModel, left: Unconfirmed, back: () -> Unit) {
     val loader = rememberMeme(actions) { e, t -> memeStrategy(e, t, id) }
     val scope = rememberCoroutineScope()
     val now = rememberNow()
@@ -579,21 +604,20 @@ private fun StrategyPage(id: String, actions: JarvisViewModel, back: () -> Unit)
         if (step != Step.CONFIRM) return
         step = Step.SENDING
         scope.launch {
-            val result = actions.jobs { e, t -> memeDisable(e, t, id) }
-            if (result == null) {
+            guardedWrite(left, { step == Step.SENDING }) {
+                val result = actions.jobs { e, t -> memeDisable(e, t, id) }
+                note = if (result == null) unconfirmedOutcome(clock(System.currentTimeMillis())) else disableOutcome(id, result, clock(System.currentTimeMillis()))
                 step = Step.IDLE
-                return@launch
+                loader.load()
             }
-            note = disableOutcome(id, result, clock(System.currentTimeMillis()))
-            step = Step.IDLE
-            loader.load()
         }
     }
 
     PushedPage(
         id, s?.family?.let { "Family ${FAMILY_LABEL[it]} · paper simulation" } ?: "Paper simulation", back,
-        trailing = { GhostButton("Refresh", { scope.launch { loader.load() } }) },
+        trailing = { GhostButton("Refresh", { left.set(null); scope.launch { loader.load() } }) },
     ) {
+        left.note?.let { Banner(it, warn = true) }
         Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
             s?.let { val (label, t) = strategyState(it); StatusBadge(label, tone = tone(t)) }
             StatusBadge("Paper")

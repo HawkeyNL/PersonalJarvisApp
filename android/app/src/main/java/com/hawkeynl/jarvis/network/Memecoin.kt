@@ -303,6 +303,10 @@ fun pauseOutcome(result: ApiResult<JsonElement>, at: String): WriteOutcome = whe
     is ApiResult.InvalidResponse -> WriteOutcome(false, at, "Pause could not be sent at $at. The pause is not confirmed; try again.")
 }
 
+/** A pause or disable whose answer never came back to this page: the sign-in changed, the app
+ *  locked, or the page was left while it ran. It may have landed. */
+fun unconfirmedOutcome(at: String): WriteOutcome = WriteOutcome(false, at, "Sent at $at but not confirmed; reload to check.")
+
 private fun signinRefused(what: String, at: String) =
     "$what refused at $at (HTTP 401): your session is not valid, so nothing changed. Sign this device in again, then ${what.lowercase()} again."
 
