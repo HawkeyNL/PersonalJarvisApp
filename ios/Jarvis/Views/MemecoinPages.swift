@@ -128,7 +128,7 @@ struct MemecoinPage: View {
     @State private var overview: Availability<MemeOverview> = .loading
     @State private var candidates: Availability<MemeCandidates> = .loading
     @State private var trades: Availability<MemeTrades> = .loading
-    /// Set only once Core confirmed a pause, until the following overview read.
+    /// Set only once Core confirmed a pause, until an overview read succeeds.
     @State private var pausedHere = false
     @State private var confirming = false
     @State private var sending = false
@@ -359,7 +359,6 @@ struct MemecoinPage: View {
             // Bridge until Core's own overview arrives; from then on it is the truth.
             pausedHere = true
             await loadOverview()
-            pausedHere = false
         } else if next.unsaved {
             // Core paused in memory but did not save it: show what it reports now.
             await loadOverview()
@@ -367,7 +366,6 @@ struct MemecoinPage: View {
     }
 
     private func load() async {
-        pausedHere = false
         now = Date()
         async let first: Void = loadOverview()
         async let second: Void = loadCandidates()
@@ -381,6 +379,8 @@ struct MemecoinPage: View {
         let result = await model.coreRead(Memecoin.overviewPath, as: MemeOverview.self).checked(Memecoin.valid)
         guard !Task.isCancelled, mine == overviewLoads else { return }
         overview = result
+        // A confirmed pause is shown until Core's own overview has been read.
+        if result.value != nil { pausedHere = false }
     }
 
     private func loadCandidates() async {
