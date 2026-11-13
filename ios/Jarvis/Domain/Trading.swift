@@ -549,8 +549,9 @@ enum Trading {
     }
 
     /// "1,234" or "1.234": a thousands group or a decimal, so it is refused both ways.
+    /// "01,234" (a leading zero before more digits) reads the same way, so it is refused too.
     static func ambiguousAmount(_ text: String) -> Bool {
-        text.trimmingCharacters(in: .whitespacesAndNewlines).wholeMatch(of: #/-?[1-9][0-9]{0,2}[.,][0-9]{3}/#) != nil
+        text.trimmingCharacters(in: .whitespacesAndNewlines).wholeMatch(of: #/-?(?:[1-9][0-9]{0,2}|0[0-9]{1,2})[.,][0-9]{3}/#) != nil
     }
 
     static let ambiguousAmountText = "Ambiguous amount: write 1234, or 1.2340 for a decimal."

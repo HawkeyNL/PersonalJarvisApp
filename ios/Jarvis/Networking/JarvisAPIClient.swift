@@ -243,8 +243,9 @@ actor JarvisAPIClient {
     }
 
     // The only bearer-only DELETEs: this device's own APNs push target, the owner's own chat
-    // data (a conversation, a photo), roadmap items and manual holdings. A device is revoked
-    // with a signed approval, never with a bearer-only DELETE.
+    // data (a conversation, a photo), roadmap items, manual holdings, and archiving a roadmap
+    // (Core deletes nothing). A device is revoked with a signed approval, never with a
+    // bearer-only DELETE.
     func deletePushTarget(token: String, expectedBinding: UUID) async throws {
         try await delete("/v1/devices/self/push", token: token, expectedBinding: expectedBinding)
     }
@@ -290,9 +291,27 @@ actor JarvisAPIClient {
 
     // Roadmaps (desktop roadmapsApi.ts). Each write names the revision it builds on; Core
     // answers 409 when the roadmap moved on. The answers are not needed: the page reloads.
-    func createRoadmap(_ body: NewRoadmap, token: String, expectedBinding: UUID) async throws {
-        _ = try await request(path: "/v1/roadmaps", method: "POST", body: body, token: token,
-                              expectedBinding: expectedBinding, response: EmptyOrJSON.self)
+    /// The answer names the new roadmap, so the app can open it.
+    func createRoadmap(_ body: NewRoadmap, token: String, expectedBinding: UUID) async throws -> CreatedRoadmap {
+        try await request(path: "/v1/roadmaps", method: "POST", body: body, token: token,
+                          expectedBinding: expectedBinding, response: CreatedRoadmap.self)
+    }
+
+    func updateRoadmap(_ roadmap: UUID, revision: Int, patch: RoadmapPatch, token: String, expectedBinding: UUID) async throws {
+        _ = try await request(path: "\(Roadmaps.path(roadmap))?expected_revision=\(revision)", method: "PATCH", body: patch,
+                              token: token, expectedBinding: expectedBinding, response: EmptyOrJSON.self)
+    }
+
+    /// Archives; Core deletes nothing.
+    func archiveRoadmap(_ roadmap: UUID, revision: Int, token: String, expectedBinding: UUID) async throws {
+        try await delete("\(Roadmaps.path(roadmap))?expected_revision=\(revision)", token: token, expectedBinding: expectedBinding)
+    }
+
+    /// Accepting or rejecting takes no revision: Core marks a proposal made on an older one stale (409).
+    func decideRoadmapProposal(_ roadmap: UUID, proposal: String, accept: Bool, token: String, expectedBinding: UUID) async throws {
+        guard isSafePathSegment(proposal) else { throw JarvisAPIError.invalidConfiguration }
+        _ = try await request(path: "\(Roadmaps.proposalsPath(roadmap))/\(proposal)/\(accept ? "accept" : "reject")", method: "POST",
+                              body: [String: String](), token: token, expectedBinding: expectedBinding, response: EmptyOrJSON.self)
     }
 
     func createRoadmapItem(roadmap: UUID, revision: Int, item: NewRoadmapItem, token: String, expectedBinding: UUID) async throws {

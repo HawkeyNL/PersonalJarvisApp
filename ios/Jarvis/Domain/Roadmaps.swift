@@ -130,6 +130,128 @@ struct NewRoadmap: Encodable, Equatable {
     let phases: [String]
 }
 
+/// The roadmap's own fields; absent ones are left as they are, a nil description clears it.
+struct RoadmapPatch: Encodable, Equatable {
+    var title: String?
+    var description: String??
+    var phases: [String]?
+
+    private enum Keys: String, CodingKey { case title, description, phases }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: Keys.self)
+        try container.encodeIfPresent(title, forKey: .title)
+        if let description {
+            if let description { try container.encode(description, forKey: .description) } else { try container.encodeNil(forKey: .description) }
+        }
+        try container.encodeIfPresent(phases, forKey: .phases)
+    }
+}
+
+/// The new roadmap's id from Core's answer to a create; nil when it cannot be read.
+struct CreatedRoadmap: Decodable {
+    let id: UUID?
+
+    private enum Keys: String, CodingKey { case roadmap }
+    private struct Inner: Decodable { let id: UUID }
+
+    init(from decoder: Decoder) throws {
+        id = (try? decoder.container(keyedBy: Keys.self).decode(Inner.self, forKey: .roadmap))?.id
+    }
+}
+
+/// Item fields in a Jarvis proposal, with which of them it sets (null included).
+struct RoadmapFields: Decodable {
+    enum Field: String, CaseIterable { case title, status, phase, position, notes, depends_on, links }
+
+    let present: Set<Field>
+    let title: String?
+    let status: RoadmapStatus?
+    let phase: String?
+    let position: Int?
+    let notes: String?
+    let depends_on: [String]?
+    let links: [RoadmapLink]?
+
+    private struct Keys: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(_ field: Field) { stringValue = field.rawValue }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: Keys.self)
+        present = Set(Field.allCases.filter { container.contains(Keys($0)) })
+        title = try container.decodeIfPresent(String.self, forKey: Keys(.title))
+        status = try container.decodeIfPresent(RoadmapStatus.self, forKey: Keys(.status))
+        phase = try container.decodeIfPresent(String.self, forKey: Keys(.phase))
+        position = try container.decodeIfPresent(Int.self, forKey: Keys(.position))
+        notes = try container.decodeIfPresent(String.self, forKey: Keys(.notes))
+        depends_on = try container.decodeIfPresent([String].self, forKey: Keys(.depends_on))
+        links = try container.decodeIfPresent([RoadmapLink].self, forKey: Keys(.links))
+    }
+}
+
+/// Changes Jarvis proposes; the owner accepts or rejects them as a whole.
+struct RoadmapProposal: Decodable, Identifiable {
+    enum Op: Decodable {
+        case create(RoadmapFields)
+        case update(itemId: String, patch: RoadmapFields)
+
+        private enum Keys: String, CodingKey { case op, item, item_id, patch }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: Keys.self)
+            switch try container.decode(String.self, forKey: .op) {
+            case "create_item": self = .create(try container.decode(RoadmapFields.self, forKey: .item))
+            case "update_item":
+                self = .update(itemId: try container.decode(String.self, forKey: .item_id), patch: try container.decode(RoadmapFields.self, forKey: .patch))
+            default: throw DecodingError.dataCorruptedError(forKey: .op, in: container, debugDescription: "unknown op")
+            }
+        }
+    }
+
+    let id: String
+    let base_revision: Int
+    let ops: [Op]
+    let rationale: String?
+    let created_at: String
+    let expires_at: String
+}
+
+struct RoadmapProposals: Decodable { let proposals: [RoadmapProposal] }
+
+/// One line of the roadmap's history.
+struct RoadmapChange: Decodable, Identifiable {
+    enum Author: String, Decodable {
+        case owner, jarvis, github
+        var label: String {
+            switch self {
+            case .owner: "You"
+            case .jarvis: "Jarvis"
+            case .github: "GitHub"
+            }
+        }
+    }
+
+    let id: String
+    let revision: Int
+    let at: String
+    let author: Author
+    let device_id: String?
+    let proposal_id: String?
+    let action: String
+    let item_id: String?
+    let title: String
+    let fields: [String]
+    let from_status: RoadmapStatus?
+    let to_status: RoadmapStatus?
+}
+
+struct RoadmapHistory: Decodable { let changes: [RoadmapChange] }
+
 struct NewRoadmapItem: Encodable, Equatable {
     let title: String
     let phase: String?
@@ -198,6 +320,9 @@ enum Roadmaps {
     static let notConfirmed = "Not confirmed; reloaded to check."
 
     static func path(_ id: UUID) -> String { "/v1/roadmaps/\(id.uuidString.lowercased())" }
+    static func historyPath(_ id: UUID) -> String { "\(path(id))/history?limit=50" }
+    static func proposalsPath(_ id: UUID) -> String { "\(path(id))/proposals" }
+
 
     // MARK: Response checks: anything unexpected reads as failed (fail closed).
 
@@ -416,6 +541,165 @@ enum Roadmaps {
             return "Notes must be at most 4000 characters, without hidden characters."
         }
         return nil
+    }
+
+    // MARK: Proposals and history
+
+    private static func valid(_ fields: RoadmapFields) -> Bool {
+        fits(fields.title, 1000) && fits(fields.phase, 200) && (fields.position ?? 0) >= 0 && fits(fields.notes, 20_000)
+            && (fields.depends_on.map { $0.count <= maxDependsOn && $0.allSatisfy { $0.count <= 200 } } ?? true)
+            && (fields.links.map { $0.count <= maxLinks && $0.allSatisfy(valid) } ?? true)
+    }
+
+    static func valid(_ list: RoadmapProposals) -> Bool {
+        list.proposals.count <= 100 && list.proposals.allSatisfy { p in
+            isSafePathSegment(p.id) && p.id.count <= 64 && p.base_revision >= 0 && p.ops.count <= 20 && fits(p.rationale, 4000)
+                && p.created_at.count <= 64 && p.expires_at.count <= 64 && p.ops.allSatisfy { op in
+                    switch op {
+                    case let .create(item): return item.title != nil && valid(item)
+                    case let .update(itemId, patch): return itemId.count <= 64 && valid(patch)
+                    }
+                }
+        }
+    }
+
+    static func valid(_ history: RoadmapHistory) -> Bool {
+        history.changes.count <= 100 && history.changes.allSatisfy { c in
+            c.id.count <= 64 && c.revision >= 0 && c.at.count <= 64 && fits(c.device_id, 64) && fits(c.proposal_id, 64)
+                && c.action.count <= 40 && fits(c.item_id, 64) && c.title.count <= 1000 && c.fields.count <= 20 && c.fields.allSatisfy { $0.count <= 200 }
+        }
+    }
+
+    private static func fieldLabel(_ field: RoadmapFields.Field) -> String {
+        switch field {
+        case .title: "Title"
+        case .status: "Status"
+        case .phase: "Phase"
+        case .position: "Position"
+        case .notes: "Notes"
+        case .depends_on: "Depends on"
+        case .links: "Links"
+        }
+    }
+
+    struct DiffRow: Equatable { let field: String; let before: String; let after: String }
+    struct OpView: Equatable { let create: Bool; let title: String; let rows: [DiffRow] }
+
+    /// One proposal operation as before → after rows, in the roadmap's words.
+    static func describe(_ op: RoadmapProposal.Op, items: [RoadmapItem]) -> OpView {
+        let none = "—"
+        let byId = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        func text(_ value: String?) -> String { value.flatMap { $0.isEmpty ? nil : $0 } ?? none }
+        func deps(_ ids: [String]?) -> String { ids.flatMap { $0.isEmpty ? nil : $0.map { byId[$0]?.title ?? "Unknown item" }.joined(separator: ", ") } ?? none }
+        func links(_ list: [RoadmapLink]?) -> String { list.flatMap { $0.isEmpty ? nil : $0.map(linkLabel).joined(separator: ", ") } ?? none }
+        func fieldValue(_ field: RoadmapFields.Field, _ f: RoadmapFields) -> String {
+            switch field {
+            case .title: text(f.title)
+            case .status: f.status?.label ?? none
+            case .phase: text(f.phase)
+            case .position: f.position.map(String.init) ?? none
+            case .notes: text(f.notes)
+            case .depends_on: deps(f.depends_on)
+            case .links: links(f.links)
+            }
+        }
+        func itemValue(_ field: RoadmapFields.Field, _ item: RoadmapItem) -> String {
+            switch field {
+            case .title: text(item.title)
+            case .status: item.status.label
+            case .phase: text(item.phase)
+            case .position: String(item.position)
+            case .notes: text(item.notes)
+            case .depends_on: deps(item.depends_on)
+            case .links: links(item.links)
+            }
+        }
+        switch op {
+        case let .create(item):
+            let rows = RoadmapFields.Field.allCases.filter { $0 != .title && $0 != .position && ($0 == .status || item.present.contains($0)) }
+                .map { field in
+                    DiffRow(field: fieldLabel(field), before: none, after: field == .status ? (item.status ?? .planned).label : fieldValue(field, item))
+                }
+            return OpView(create: true, title: item.title ?? "", rows: rows)
+        case let .update(itemId, patch):
+            let current = byId[itemId]
+            let rows = RoadmapFields.Field.allCases.filter { patch.present.contains($0) }
+                .map { field in DiffRow(field: fieldLabel(field), before: current.map { itemValue(field, $0) } ?? none, after: fieldValue(field, patch)) }
+            return OpView(create: false, title: current?.title ?? "An item that no longer exists", rows: rows)
+        }
+    }
+
+    private static let actionLabels = [
+        "roadmap_created": "Created the roadmap", "roadmap_updated": "Changed the roadmap", "roadmap_archived": "Archived the roadmap",
+        "item_created": "Added", "item_updated": "Changed", "item_deleted": "Deleted",
+    ]
+
+    /// One history line, e.g. `Changed “Sync”: status Planned → Ready`.
+    static func describe(_ change: RoadmapChange) -> String {
+        let action = actionLabels[change.action] ?? "Changed"
+        let subject = change.item_id != nil ? "\(action) “\(change.title)”" : action
+        let status = change.from_status.flatMap { from in change.to_status.map { "status \(from.label) → \($0.label)" } }
+        let others = change.fields.filter { !(status != nil && $0 == "status") }.map { $0.replacingOccurrences(of: "_", with: " ") }
+        let detail = ([status].compactMap { $0 } + others).joined(separator: ", ")
+        return !detail.isEmpty && change.action.hasSuffix("updated") ? "\(subject): \(detail)" : subject
+    }
+
+    /// Why a roadmap edit cannot be saved yet, or the patch (nil: nothing changed).
+    static func roadmapPatch(_ roadmap: Roadmap, title: String, description: String, phases: String) -> Result<RoadmapPatch?, PatchIssue> {
+        let newTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newDescription: String? = description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : description
+        if !validText(newTitle, max: 120) { return .failure(PatchIssue("The title must be 1 to 120 characters on one line.")) }
+        if let newDescription, !validText(newDescription, max: 2000, multiline: true) {
+            return .failure(PatchIssue("The description must be at most 2000 characters."))
+        }
+        guard let parsed = parsePhases(phases) else {
+            return .failure(PatchIssue("Phases: at most 20 different names of 1 to 60 characters, one per line."))
+        }
+        var patch = RoadmapPatch()
+        if newTitle != roadmap.title { patch.title = newTitle }
+        if newDescription != roadmap.description { patch.description = .some(newDescription) }
+        if parsed != roadmap.phases { patch.phases = parsed }
+        return .success(patch == RoadmapPatch() ? nil : patch)
+    }
+
+    struct PatchIssue: Error, Equatable {
+        let text: String
+        init(_ text: String) { self.text = text }
+    }
+
+    /// Phases being removed that still hold items; their items move to No phase.
+    static func removedPhases(_ roadmap: Roadmap, items: [RoadmapItem], phases: String) -> [String] {
+        let next = parsePhases(phases) ?? []
+        return roadmap.phases.filter { phase in !next.contains(phase) && items.contains { $0.phase == phase } }
+    }
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_GB")
+        formatter.dateFormat = "d MMM, HH:mm"
+        return formatter
+    }()
+
+    /// "5 Nov, 10:42" in this device's time zone.
+    static func timeText(_ iso: String) -> String { parseCoreDate(iso).map(timeFormatter.string(from:)) ?? "an unknown time" }
+
+    /// The notice after a refused accept or reject.
+    static func decisionFailureText(_ error: Error) -> String {
+        if Jobs.isNetwork(error) { return "No answer from your Home Node. It is unknown whether it was applied; reloaded to check." }
+        if Jobs.status(error) == 409 { return "Not applied: the roadmap changed since Jarvis proposed this, or a limit is reached. Reloaded." }
+        if let known = error as? JarvisAPIError, known == .invalidResponse || known == .responseTooLarge { return notConfirmed }
+        return "Not done. \(failureText(error))"
+    }
+
+    /// Why a read failed, from the read's own outcome; nil is a Core without this route.
+    static func readFailureText(_ reason: LoadFailure?) -> String {
+        switch reason {
+        case nil: return "This Core has no roadmaps yet. Update Core on your Home Node."
+        case .network?: return "No answer from your Home Node. Check the connection."
+        case .signin?: return "Your session is not valid. Sign in again from Settings."
+        case .unavailable?: return "Core could not read the roadmaps just now. Try again in a minute."
+        default: return "Core returned an answer this app does not understand, or an error. Try again later."
+        }
     }
 
     // MARK: Failures, in desktop's words
