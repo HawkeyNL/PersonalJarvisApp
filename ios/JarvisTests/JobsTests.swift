@@ -40,15 +40,58 @@ final class JobsTests: XCTestCase {
         let ok = try XCTUnwrap(list(#"{"status":"ok","time_zone":"Europe/Amsterdam","jobs":[\#(job())]}"#))
         XCTAssertTrue(ok.configured)
         XCTAssertNil(ok.jobs[0].roadmapId)
+        XCTAssertEqual(ok.unsupported, 0)
         XCTAssertEqual(list(#"{"status":"not_configured","jobs":[\#(job(["params": ["roadmap_id": "r1"]]))]}"#)?.jobs[0].roadmapId, "r1")
         XCTAssertEqual(list(#"{"status":"not_configured","jobs":[]}"#)?.configured, false)
-        let shapes: [String] = ["null", "[]", #"{"jobs":[\#(job())]}"#, #"{"status":"ok"}"#, #"{"status":"maybe","jobs":[]}"#]
+        let shapes: [String] = ["null", "[]", #"{"jobs":[\#(job())]}"#, #"{"status":"ok"}"#, #"{"status":"maybe","jobs":[]}"#,
+                                #"{"status":"ok","jobs":{}}"#]
+        for json in shapes { XCTAssertNil(list(json), json) }
+    }
+
+    func testOneJobTheAppCannotShowNeverFailsTheList() throws {
+        // A newer Core's kind or cadence, and entries that break the contract, are left out and counted.
         let fields: [[String: Any]] = [
-            ["kind": "free_text"], ["cadence": "hourly"], ["weekday": 8], ["at_minute": 1440], ["revision": "3"],
-            ["params": ["roadmap_id": 5]], ["id": "../x"],
+            ["kind": "weather"], ["cadence": "hourly"], ["weekday": 8], ["month_day": 32], ["every": 0], ["max_runs": 101],
+            ["at_minute": 1440], ["revision": "3"], ["params": ["roadmap_id": 5]], ["id": "../x"],
         ]
-        let broken = shapes + fields.map { #"{"status":"ok","jobs":[\#(job($0))]}"# }
-        for json in broken { XCTAssertNil(list(json), json) }
+        let entries = [job(["colour": "blue", "params": ["roadmap_id": "r1", "future": true]])] + fields.map { job($0) } + ["7"]
+        let value = try XCTUnwrap(list(#"{"status":"ok","jobs":[\#(entries.joined(separator: ","))]}"#))
+        XCTAssertEqual(value.jobs.count, 1, "unknown fields are ignored")
+        XCTAssertEqual(value.jobs[0].roadmapId, "r1")
+        XCTAssertEqual(value.unsupported, fields.count + 1)
+        let many = Array(repeating: job(), count: 51).joined(separator: ",")
+        XCTAssertNil(list(#"{"status":"ok","jobs":[\#(many)]}"#), "at most 50 entries")
+    }
+
+    func testNewKindsReadWithCoresOwnFields() throws {
+        let prompt = job([
+            "kind": "prompt", "cadence": "monthly", "weekday": NSNull(), "month_day": 1, "every": 6, "start_date": "2027-01-01",
+            "max_runs": 2, "run_count": 2, "at_minute": 540, "enabled": false,
+            "params": ["title": "Energy prices", "instruction": "Dutch energy price outlook", "notify": false],
+            "origin": "jarvis", "owner_id": "u", "conversation_id": "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c79",
+            "expires_at": "2026-12-13T08:00:00Z", "failure_count": 3, "paused_reason": "paused_after_failures",
+            "created_at": "2026-11-13T08:00:00Z", "updated_at": "2026-11-13T08:00:00Z", "next_run_at": NSNull(),
+        ])
+        let reminder = job(["kind": "reminder", "cadence": "once", "weekday": NSNull(), "start_date": "2026-12-01", "at_minute": 540,
+                            "params": ["title": "Call the bank"], "origin": "owner", "id": "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c73"])
+        let disk = job(["kind": "disk_check", "cadence": "daily", "weekday": NSNull(), "params": ["threshold_percent": 85],
+                        "id": "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c74"])
+        let value = try XCTUnwrap(list(#"{"status":"ok","jobs":[\#(prompt),\#(reminder),\#(disk),\#(job(["id": u1]))]}"#))
+        XCTAssertEqual(value.unsupported, 0)
+        XCTAssertEqual(value.ownerJobs, 2, "neither Jarvis's job nor the dependency review counts")
+        let research = value.jobs[0]
+        XCTAssertEqual(research.title, "Energy prices")
+        XCTAssertEqual(research.conversation_id, UUID(uuidString: "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c79"))
+        XCTAssertEqual(Jobs.scheduleText(research), "Every 6 months on the 1st at 09:00")
+        XCTAssertEqual(Jobs.runsDoneText(research), "2 of 2 runs done")
+        XCTAssertEqual(Jobs.originText(research), "Set up by Jarvis · expires 13 Dec")
+        XCTAssertEqual(Jobs.stateText(research), "Paused after 3 failed runs")
+        XCTAssertEqual(value.jobs[1].title, "Call the bank")
+        XCTAssertNil(Jobs.originText(value.jobs[1]))
+        XCTAssertNil(Jobs.runsDoneText(value.jobs[1]))
+        XCTAssertEqual(value.jobs[2].title, "Disk check")
+        XCTAssertEqual(JobDraft(value.jobs[2]).threshold, 85)
+        XCTAssertEqual(Jobs.stateText(value.jobs[3]), "Next run \(Jobs.zonedText("2026-11-16T06:00:00Z"))")
     }
 
     func testRunsOrderPrioritiesKeepTextAsDataAndFailClosed() throws {
@@ -87,17 +130,33 @@ final class JobsTests: XCTestCase {
         XCTAssertEqual(Jobs.errorText("something_new"), "Core reported an error this app does not know yet.")
     }
 
-    func testScheduleTextAndTimeConversion() throws {
+    func testScheduleInWordsAndTimeConversion() throws {
         XCTAssertEqual(Jobs.timeText(420), "07:00")
         XCTAssertEqual(Jobs.timeText(1439), "23:59")
         let weekly = try XCTUnwrap(list(#"{"status":"ok","jobs":[\#(job(["weekday": 7, "at_minute": 1290]))]}"#)?.jobs[0])
-        XCTAssertEqual(Jobs.cadenceText(weekly), "Every Sunday at 21:30 (Europe/Amsterdam)")
+        XCTAssertEqual(Jobs.scheduleText(weekly), "Every Sunday at 21:30")
         let daily = try XCTUnwrap(list(#"{"status":"ok","jobs":[\#(job(["cadence": "daily", "weekday": NSNull(), "at_minute": 0]))]}"#)?.jobs[0])
-        XCTAssertEqual(Jobs.cadenceText(daily), "Daily at 00:00 (Europe/Amsterdam)")
+        XCTAssertEqual(Jobs.scheduleText(daily), "Daily at 00:00")
+        var draft = JobDraft()
+        draft.weekday = 5; draft.every = 2; draft.minute = 480
+        XCTAssertEqual(Jobs.scheduleText(draft), "Every 2 weeks on Friday at 08:00")
+        draft.cadence = .daily; draft.every = 3; draft.minute = 420
+        XCTAssertEqual(Jobs.scheduleText(draft), "Every 3 days at 07:00")
+        draft.cadence = .monthly; draft.every = 1; draft.monthDay = 31; draft.minute = 0
+        XCTAssertEqual(Jobs.scheduleText(draft), "Every month on the 31st at 00:00")
+        let year = Jobs.today().prefix(4)
+        draft.cadence = .once; draft.startDate = "\(year)-12-01"; draft.minute = 540
+        XCTAssertEqual(Jobs.scheduleText(draft), "Once on 1 Dec at 09:00")
+        draft.startDate = "2099-12-01"
+        XCTAssertEqual(Jobs.scheduleText(draft), "Once on 1 Dec 2099 at 09:00")
+        XCTAssertEqual([1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 31].map(Jobs.ordinal),
+                       ["1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "23rd", "31st"])
         // 06:00 UTC in November is 07:00 in Amsterdam.
         XCTAssertTrue(Jobs.zonedText("2026-11-16T06:00:00Z").hasSuffix("07:00"))
         XCTAssertEqual(Jobs.zonedText("nope"), "an unknown time")
         for minute in [0, 59, 120, 150, 420, 1439] { XCTAssertEqual(Jobs.minute(of: Jobs.date(minute: minute)), minute) }
+        for day in ["2026-03-29", "2026-10-25", "2028-02-29"] { XCTAssertEqual(Jobs.date(day: day).map(Jobs.day(of:)), day) }
+        for day in ["2026-02-30", "2026-1-05", "nope", ""] { XCTAssertNil(Jobs.date(day: day), day) }
     }
 
     func testTheEditorSendsOnlyWhatChangedAndNeverADailyWeekday() throws {
@@ -129,15 +188,162 @@ final class JobsTests: XCTestCase {
         XCTAssertEqual(json?.keys.sorted(), ["at_minute", "cadence", "enabled", "kind", "params"])
     }
 
+    private func keys(_ body: some Encodable) throws -> [String: Any] {
+        try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(body)) as? [String: Any])
+    }
+
+    private func sorted(_ body: some Encodable) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return String(decoding: try encoder.encode(body), as: UTF8.self)
+    }
+
+    /// Core's own fields: a body that names one is refused.
+    private let serverSet: Set<String> = ["id", "revision", "origin", "owner_id", "conversation_id", "expires_at", "run_count",
+                                          "failure_count", "paused_reason", "created_at", "updated_at", "next_run_at", "last_slot_at"]
+
+    func testNewKindsSendOnlyTheirOwnFields() throws {
+        var draft = JobDraft()
+        draft.title = "  AI news "; draft.instruction = "Summarize this week's AI news"; draft.weekday = 3
+        // A one-time job's leftovers (every, run limit) and other kinds' fields are never sent.
+        draft.text = "ignored"; draft.threshold = 90; draft.roadmapId = "r1"
+        let prompt = try keys(Jobs.newJob(.prompt, draft))
+        XCTAssertEqual(prompt.keys.sorted(), ["at_minute", "cadence", "enabled", "kind", "params", "weekday"])
+        XCTAssertEqual(try sorted(Jobs.newJob(.prompt, draft).params), #"{"instruction":"Summarize this week's AI news","notify":true,"title":"AI news"}"#)
+
+        draft.cadence = .once; draft.startDate = "2026-12-01"; draft.every = 3; draft.maxRuns = 4; draft.text = ""
+        let reminder = try keys(Jobs.newJob(.reminder, draft))
+        XCTAssertEqual(reminder.keys.sorted(), ["at_minute", "cadence", "enabled", "kind", "params", "start_date"])
+        XCTAssertEqual(try sorted(Jobs.newJob(.reminder, draft).params), #"{"title":"AI news"}"#, "no text: none sent")
+
+        draft.cadence = .monthly; draft.monthDay = 1; draft.every = 6; draft.maxRuns = 2; draft.notify = false
+        let monthly = try keys(Jobs.newJob(.prompt, draft))
+        XCTAssertEqual(monthly.keys.sorted(), ["at_minute", "cadence", "enabled", "every", "kind", "max_runs", "month_day", "params", "start_date"])
+        XCTAssertTrue(try sorted(Jobs.newJob(.prompt, draft).params).contains(#""notify":false"#))
+
+        let disk = try keys(Jobs.newJob(.diskCheck, draft))
+        XCTAssertEqual(try sorted(Jobs.newJob(.diskCheck, draft).params), #"{"threshold_percent":90}"#)
+        // A dependency review keeps its old schedules: no every, start date or run limit.
+        draft.cadence = .weekly
+        XCTAssertEqual(try keys(Jobs.newJob(.dependencyReview, draft)).keys.sorted(), ["at_minute", "cadence", "enabled", "kind", "params", "weekday"])
+        for body in [prompt, reminder, monthly, disk] { XCTAssertTrue(serverSet.isDisjoint(with: body.keys)) }
+    }
+
+    func testChangesToNewKindsSendWholeParamsAndNullsToClear() throws {
+        let stored = job([
+            "kind": "prompt", "cadence": "weekly", "weekday": 5, "every": 2, "start_date": "2026-11-13", "max_runs": 4, "run_count": 1,
+            "params": ["title": "AI news", "instruction": "Summarize"], "origin": "jarvis", "conversation_id": u1,
+            "expires_at": "2026-12-13T08:00:00Z", "failure_count": 3, "paused_reason": "paused_after_failures", "enabled": false,
+        ])
+        let j = try XCTUnwrap(list(#"{"status":"ok","jobs":[\#(stored)]}"#)?.jobs[0])
+        XCTAssertNil(Jobs.patch(j, JobDraft(j)), "a stored prompt without notify reads as notify on")
+        var draft = JobDraft(j)
+        draft.title = "AI news, weekly"
+        XCTAssertEqual(Jobs.patch(j, draft), JobPatch(params: JobParamsBody(title: "AI news, weekly", instruction: "Summarize", notify: true)))
+        draft = JobDraft(j)
+        draft.startDate = nil; draft.maxRuns = nil
+        let clear = try XCTUnwrap(Jobs.patch(j, draft))
+        XCTAssertEqual(try sorted(clear), #"{"max_runs":null,"start_date":null}"#)
+        // Core sets `every` back to 1 when the cadence changes: only another value is sent.
+        draft = JobDraft(j)
+        draft.cadence = .monthly; draft.every = 1
+        XCTAssertEqual(Jobs.patch(j, draft), JobPatch(cadence: .monthly, month_day: 1))
+        draft.every = 2
+        XCTAssertEqual(Jobs.patch(j, draft), JobPatch(cadence: .monthly, month_day: 1, every: 2))
+        // To a one-time job: no run limit, every 1.
+        draft = JobDraft(j)
+        draft.cadence = .once; draft.startDate = "2026-12-01"
+        XCTAssertEqual(Jobs.patch(j, draft), JobPatch(cadence: .once, start_date: .some("2026-12-01"), max_runs: .some(nil)))
+        draft = JobDraft(j)
+        draft.enabled = true
+        let enable = try XCTUnwrap(Jobs.patch(j, draft))
+        XCTAssertEqual(enable, JobPatch(enabled: true))
+        XCTAssertTrue(serverSet.isDisjoint(with: try keys(enable).keys))
+        XCTAssertTrue(serverSet.isDisjoint(with: try keys(JobPatch(cadence: .daily, weekday: 1, month_day: 1, every: 2, start_date: .some(nil),
+                                                                   max_runs: .some(3), at_minute: 1, enabled: true, params: JobParamsBody())).keys))
+    }
+
+    func testTheEditorExplainsCoresBoundsEarly() {
+        var draft = JobDraft()
+        XCTAssertEqual(Jobs.issue(.prompt, draft), "The title must be 1 to 60 characters on one line.")
+        draft.title = String(repeating: "a", count: 61)
+        XCTAssertNotNil(Jobs.issue(.reminder, draft))
+        draft.title = "Two\nlines"
+        XCTAssertNotNil(Jobs.issue(.reminder, draft))
+        draft.title = "Hidden\u{200B}"
+        XCTAssertNotNil(Jobs.issue(.reminder, draft))
+        draft.title = "Call the bank"
+        XCTAssertNil(Jobs.issue(.reminder, draft), "a reminder's text is optional")
+        draft.text = String(repeating: "a", count: 501)
+        XCTAssertEqual(Jobs.issue(.reminder, draft), "The text must be at most 500 characters on one line.")
+        XCTAssertEqual(Jobs.issue(.prompt, draft), "The instruction must be 1 to 500 characters on one line.")
+        draft.instruction = "Dutch energy price outlook"
+        XCTAssertNil(Jobs.issue(.prompt, draft))
+        draft.cadence = .once
+        XCTAssertEqual(Jobs.issue(.prompt, draft), "Pick the day this job runs.")
+        draft.startDate = Jobs.today(adding: -1)
+        XCTAssertEqual(Jobs.issue(.prompt, draft), "A one-time job must be in the future.")
+        draft.enabled = false
+        XCTAssertNil(Jobs.issue(.prompt, draft), "a paused one-time job may be in the past")
+        draft.startDate = Jobs.today(adding: Jobs.maxStartDays + 1)
+        XCTAssertEqual(Jobs.issue(.prompt, draft), "The start date can be at most two years ahead.")
+        draft.cadence = .weekly; draft.startDate = nil; draft.every = 105
+        XCTAssertNotNil(Jobs.issue(.diskCheck, draft))
+        draft.every = 104; draft.maxRuns = 101
+        XCTAssertEqual(Jobs.issue(.diskCheck, draft), "Stop after 1 to 100 runs.")
+        draft.maxRuns = 100; draft.threshold = 49
+        XCTAssertEqual(Jobs.issue(.diskCheck, draft), "The threshold must be 50 to 99%.")
+        XCTAssertNil(Jobs.issue(.dependencyReview, JobDraft()))
+    }
+
     func testRefusalsGetFixedWording() {
         XCTAssertEqual(Jobs.runNowFailureText(JarvisAPIError.rejected(status: 429, message: nil)), Jobs.runNowRefused)
         XCTAssertTrue(Jobs.runNowFailureText(JarvisAPIError.rejected(status: 409, message: nil)).contains("scheduler is off"))
-        // A 409 on a change is always a revision conflict; only a create can mean "exists".
+        // A 409 on a change is always a revision conflict; on a create, a second review or no room.
         XCTAssertEqual(Jobs.writeFailureText(JarvisAPIError.rejected(status: 409, message: nil), update: true), Jobs.changedElsewhere)
         XCTAssertTrue(Jobs.writeFailureText(JarvisAPIError.rejected(status: 409, message: nil), update: false).contains("already exists"))
+        XCTAssertEqual(Jobs.writeFailureText(JarvisAPIError.rejected(status: 409, message: "raw"), update: false, kind: .reminder), Jobs.full)
+        XCTAssertTrue(Jobs.writeFailureText(JarvisAPIError.rejected(status: 400, message: "raw"), update: false, kind: .prompt)
+            .contains("personal or financial details"))
+        XCTAssertTrue(Jobs.writeFailureText(JarvisAPIError.rejected(status: 422, message: nil), update: false, kind: .diskCheck)
+            .contains("Update Core"))
         XCTAssertTrue(Jobs.writeFailureText(JarvisAPIError.timedOut, update: true).contains("unknown whether the change arrived"))
         XCTAssertEqual(Jobs.writeFailureText(JarvisAPIError.rejected(status: 405, message: nil), update: true),
                        "Not saved. Needs Jarvis Core v0.0.80 or later. Update Core on your Home Node.")
+        // A 2xx answer this app could not read: Core may have made the change.
+        for error in [JarvisAPIError.invalidResponse, .responseTooLarge] {
+            XCTAssertEqual(Jobs.writeFailureText(error, update: true), Jobs.notConfirmed)
+            XCTAssertEqual(Jobs.runNowFailureText(error), Jobs.notConfirmed)
+            XCTAssertEqual(Jobs.deleteFailureText(error), Jobs.notConfirmed)
+        }
+        XCTAssertEqual(Jobs.deleteFailureText(JarvisAPIError.rejected(status: 409, message: nil)), Jobs.changedElsewhere)
+        XCTAssertTrue(Jobs.deleteFailureText(JarvisAPIError.unreachable).contains("unknown whether the job was deleted"))
+    }
+
+    func testResearchCodesAndReportGetTheirOwnWording() throws {
+        XCTAssertTrue(Jobs.errorText("not_configured", kind: .prompt).contains("Research is off"))
+        XCTAssertTrue(Jobs.errorText("timed_out", kind: .prompt).contains("5 minutes"))
+        XCTAssertTrue(Jobs.errorText("timed_out", kind: .reminder).contains("15 minutes"))
+        for code in ["private_instruction", "holdings_unavailable", "research_unavailable", "conversation_unavailable",
+                     "disk_unavailable", "internal"] {
+            XCTAssertNotEqual(Jobs.errorText(code, kind: .prompt), Jobs.errorText("something_new"), code)
+        }
+        let facts: [String: Any] = [
+            "conversation_id": "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c79", "message_id": "m1",
+            "sources": ["https://example.com/a", "http://example.com/b", "https://user:pw@example.com/c", "javascript:alert(1)",
+                        "https://example.com/a", 5, "https://example.org/e f"] as [Any],
+        ]
+        let detail = runJSON(["summary": "**Prices** rise", "summary_source": "web", "priorities": [Any](), "facts": facts])
+        let report = try JSONDecoder().decode(JobRunReport.self, from: Data(detail.utf8))
+        XCTAssertEqual(report.sources.map(\.url.absoluteString), ["https://example.com/a"], "https only, distinct, ASCII host, no user info")
+        XCTAssertEqual(report.conversationId, UUID(uuidString: "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c79"))
+        XCTAssertEqual(report.run.summary, "**Prices** rise", "kept verbatim; the page shows it as text")
+        XCTAssertEqual(report.run.summary_source?.label, "From a web search")
+        let many = (1...25).map { "https://example.com/\($0)" }
+        let capped = try JSONDecoder().decode(JobRunReport.self, from: Data(runJSON(["facts": ["sources": many]]).utf8))
+        XCTAssertEqual(capped.sources.count, 20)
+        let bad = try JSONDecoder().decode(JobRunReport.self, from: Data(runJSON(["facts": ["conversation_id": "../x"]]).utf8))
+        XCTAssertNil(bad.conversationId)
     }
 }
 
@@ -179,6 +385,34 @@ final class JobWriteModelTests: XCTestCase {
         XCTAssertEqual(JobCoreProtocol.requests().count, 1)
         XCTAssertTrue(later.isAuthenticated, "a late 401 from before the lock keeps the session")
     }
+
+    func testDeleteNamesTheRevisionAndIsGatedLikeEveryWrite() async throws {
+        let id = UUID()
+        JobCoreProtocol.reset(status: 200)
+        let model = signedIn()
+        try await model.deleteJob(id, revision: 4)
+        XCTAssertEqual(JobCoreProtocol.requests(), ["DELETE /v1/jobs/\(id.uuidString.lowercased())?expected_revision=4"])
+
+        JobCoreProtocol.reset(status: 200)
+        model.lockWhenBackgrounded()
+        do {
+            try await model.deleteJob(id, revision: 4)
+            XCTFail("sent while locked")
+        } catch {}
+        XCTAssertEqual(JobCoreProtocol.requests(), [])
+    }
+
+    func testAnUnreadable2xxWriteIsNotConfirmed() async {
+        JobCoreProtocol.reset(status: 200, body: "<html>ok</html>")
+        let model = signedIn()
+        do {
+            try await model.updateJob(UUID(), revision: 1, patch: JobPatch(enabled: false))
+            XCTFail("an unreadable answer is not a confirmation")
+        } catch {
+            XCTAssertEqual(Jobs.writeFailureText(error, update: true), Jobs.notConfirmed)
+        }
+        XCTAssertEqual(JobCoreProtocol.requests().count, 1)
+    }
 }
 
 private final class JobCoreProtocol: URLProtocol {
@@ -186,24 +420,25 @@ private final class JobCoreProtocol: URLProtocol {
     private static var log: [String] = []
     private static var status = 202
     private static var delay: TimeInterval = 0
+    private static var body = "{}"
 
-    static func reset(status: Int, delay: TimeInterval = 0) {
-        lock.withLock { log = []; self.status = status; self.delay = delay }
+    static func reset(status: Int, delay: TimeInterval = 0, body: String = "{}") {
+        lock.withLock { log = []; self.status = status; self.delay = delay; self.body = body }
     }
     static func requests() -> [String] { lock.withLock { log } }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        let (status, delay) = Self.lock.withLock {
-            Self.log.append("\(request.httpMethod ?? "GET") \(request.url?.path ?? "")")
-            return (Self.status, Self.delay)
+        let (status, delay, body) = Self.lock.withLock {
+            Self.log.append("\(request.httpMethod ?? "GET") \(request.url?.path ?? "")" + (request.url?.query.map { "?\($0)" } ?? ""))
+            return (Self.status, Self.delay, Self.body)
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
             let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
                                            headerFields: ["Content-Type": "application/json"])!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: Data("{}".utf8))
+            client?.urlProtocol(self, didLoad: Data(body.utf8))
             client?.urlProtocolDidFinishLoading(self)
         }
     }
