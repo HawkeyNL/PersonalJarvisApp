@@ -165,6 +165,19 @@ actor ChatService {
         try await api.deleteRoadmapItem(roadmap: roadmap, revision: revision, item: item, token: token, expectedBinding: binding)
     }
 
+    // Manual holdings (Trading › Holdings), bound to the current Home Node like the job writes.
+    func addHolding(_ body: NewHolding) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.addHolding(body, token: token, expectedBinding: binding)
+    }
+
+    func deleteHolding(id: String) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.deleteHolding(id: id, token: token, expectedBinding: binding)
+    }
+
     private func requiredToken() async throws -> String {
         guard let token = try await loadToken() else { throw JarvisAPIError.unauthorized }
         return token
