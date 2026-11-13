@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -77,7 +78,10 @@ import com.hawkeynl.jarvis.network.formatDecimal
 import com.hawkeynl.jarvis.network.formatMoney
 import com.hawkeynl.jarvis.network.formatPercent
 import com.hawkeynl.jarvis.network.formatPrice
+import com.hawkeynl.jarvis.network.HOLDING_NUMBER_RULE
+import com.hawkeynl.jarvis.network.holdingNumber
 import com.hawkeynl.jarvis.network.holdingsErrorText
+import com.hawkeynl.jarvis.network.holdingsWriteText
 import com.hawkeynl.jarvis.network.ibkrLinkState
 import com.hawkeynl.jarvis.network.isStock
 import com.hawkeynl.jarvis.network.movingAverage
@@ -93,8 +97,9 @@ import kotlinx.coroutines.launch
 // and the manual holdings of Trading.vue). Read-only towards IBKR: this app places no orders.
 // The only writes are the owner's own manual holdings.
 
-/** One trading read as a state, read again when [key] changes or on [TradingRead.reload].
- *  The newest read wins; a null answer (locked or signed out) leaves the state as it is. */
+/** One trading read as a state, read again when [key] changes or on [TradingRead.reload]. Each
+ *  read starts from loading and a newer one cancels it, so the newest wins; a null answer
+ *  (locked or signed out) leaves it loading, as the page is about to go. */
 private class TradingRead<T>(val state: TradingState<T>, val reload: () -> Unit)
 
 @Composable
@@ -262,7 +267,7 @@ fun TradingScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
                     if (empty) {
                         MutedText("Not enough history for this period yet.")
                     } else {
-                        val series = data.points.map { Bar(it.t, it.value, it.value, it.value, it.value) }
+                        val series = remember(data) { data.points.map { Bar(it.t, it.value, it.value, it.value, it.value) } }
                         val label = "Total value over ${if (range == "ALL") "all time" else range}: ${ratio?.let { formatPercent(it) } ?: "no change data"}"
                         PriceChart(series, data.baseCurrency, label, height = 220)
                     }
@@ -581,51 +586,72 @@ private fun StockPage(conid: Long, actions: JarvisViewModel, back: () -> Unit) {
     }
 }
 
+/** The chart's numbers, computed once per input: decimal strings become doubles only here
+ *  (NaN where a value is missing). The guards keep only bars with readable prices. */
+private class ChartData(bars: List<Bar>, candle: Boolean, ma: List<Int>, volume: Boolean) {
+    val size = bars.size
+    val open = DoubleArray(size) { chartNumber(bars[it].o) ?: Double.NaN }
+    val high = DoubleArray(size) { chartNumber(bars[it].h) ?: Double.NaN }
+    val low = DoubleArray(size) { chartNumber(bars[it].l) ?: Double.NaN }
+    val close = DoubleArray(size) { chartNumber(bars[it].c) ?: Double.NaN }
+    val volumes = if (volume) DoubleArray(size) { chartNumber(bars[it].v) ?: Double.NaN } else null
+    val maxVolume = volumes?.filter { !it.isNaN() }?.maxOrNull()?.takeIf { it > 0 }
+    val averages = ma.map { n -> n to movingAverage(close.toList(), n).map { it ?: Double.NaN }.toDoubleArray() }
+    private val drawn = (if (candle) high.asList() + low.asList() else close.asList()) + averages.flatMap { it.second.asList() }
+    val top = drawn.filter { !it.isNaN() }.maxOrNull()
+    val bottom = drawn.filter { !it.isNaN() }.minOrNull()
+    /** Indexes of the highest high and the lowest low, for the spoken summary. */
+    val highest = high.indices.maxByOrNull { if (high[it].isNaN()) Double.NEGATIVE_INFINITY else high[it] }
+    val lowest = low.indices.minByOrNull { if (low[it].isNaN()) Double.POSITIVE_INFINITY else low[it] }
+}
+
 /** A price or value chart drawn on a Canvas: a line with its area, or candles (wick low–high,
- *  body open–close), moving averages and volume along the bottom. Decimal strings become
- *  numbers only here; the values table shows the original strings. */
+ *  body open–close), moving averages and volume along the bottom. The values table and the
+ *  spoken summary show the original strings. */
 @Composable
 private fun PriceChart(
     bars: List<Bar>, currency: String, label: String, height: Int = 300, candle: Boolean = false, ma: List<Int> = emptyList(), volume: Boolean = false,
 ) {
     val c = JvTheme.colors
     var table by rememberSaveable { mutableStateOf(false) }
-    val closes = remember(bars) { bars.map { chartNumber(it.c) } }
-    val averages = remember(closes, ma) { ma.map { it to movingAverage(closes, it) } }
-    Canvas(Modifier.fillMaxWidth().height(height.dp).semantics { contentDescription = label }) {
-        if (bars.isEmpty()) return@Canvas
-        val volumeBand = if (volume) size.height * 0.25f else 0f
+    val d = remember(bars, candle, ma, volume) { ChartData(bars, candle, ma, volume) }
+    val summary = remember(bars, label, currency) {
+        listOfNotNull(
+            label, bars.lastOrNull()?.let { "last ${formatPrice(it.c, currency)}" },
+            d.highest?.let { "high ${formatPrice(bars[it].h, currency)}" }, d.lowest?.let { "low ${formatPrice(bars[it].l, currency)}" },
+        ).joinToString(", ")
+    }
+    Canvas(Modifier.fillMaxWidth().height(height.dp).semantics { contentDescription = summary }) {
+        val high = d.top ?: return@Canvas
+        val low = d.bottom ?: return@Canvas
+        val volumeBand = if (d.volumes != null) size.height * 0.25f else 0f
         val plot = size.height - volumeBand
-        val values = (if (candle) bars.flatMap { listOf(chartNumber(it.h), chartNumber(it.l)) } else closes) + averages.flatMap { it.second }
-        val high = values.filterNotNull().maxOrNull() ?: return@Canvas
-        val low = values.filterNotNull().minOrNull() ?: return@Canvas
         val pad = if (high == low) maxOf(1.0, high * 0.01) else (high - low) * 0.05
         val top = high + pad
         val span = (top - (low - pad)).toFloat()
-        val slot = size.width / bars.size
+        val slot = size.width / d.size
         fun x(i: Int) = slot * (i + 0.5f)
         fun y(v: Double) = ((top - v) / span * plot).toFloat()
 
         for (g in 1..3) drawLine(c.separator, Offset(0f, plot * g / 4), Offset(size.width, plot * g / 4), strokeWidth = 1f)
 
-        if (volume) {
-            val vols = bars.map { chartNumber(it.v) }
-            val maxVol = vols.filterNotNull().maxOrNull()?.takeIf { it > 0 }
-            if (maxVol != null) vols.forEachIndexed { i, v ->
-                if (v == null) return@forEachIndexed
+        val maxVol = d.maxVolume
+        if (d.volumes != null && maxVol != null) {
+            for (i in 0 until d.size) {
+                val v = d.volumes[i]
+                if (v.isNaN()) continue
                 val h = (v / maxVol * volumeBand).toFloat()
-                val up = (chartNumber(bars[i].c) ?: 0.0) >= (chartNumber(bars[i].o) ?: Double.MAX_VALUE)
-                drawRect(if (up) c.borderStrong else c.border, Offset(x(i) - slot * 0.35f, size.height - h), Size(slot * 0.7f, h))
+                drawRect(if (d.close[i] >= d.open[i]) c.borderStrong else c.border, Offset(x(i) - slot * 0.35f, size.height - h), Size(slot * 0.7f, h))
             }
         }
 
         if (candle) {
-            bars.forEachIndexed { i, b ->
-                val o = chartNumber(b.o)
-                val cl = chartNumber(b.c)
-                val color = if (o == null || cl == null) c.borderStrong else if (cl >= o) c.positiveSolid else c.negativeSolid
-                drawLine(color, Offset(x(i), y(chartNumber(b.h) ?: return@forEachIndexed)), Offset(x(i), y(chartNumber(b.l) ?: return@forEachIndexed)), strokeWidth = 1.dp.toPx())
-                if (o != null && cl != null) {
+            for (i in 0 until d.size) {
+                val o = d.open[i]
+                val cl = d.close[i]
+                val color = if (o.isNaN() || cl.isNaN()) c.borderStrong else if (cl >= o) c.positiveSolid else c.negativeSolid
+                if (!d.high[i].isNaN() && !d.low[i].isNaN()) drawLine(color, Offset(x(i), y(d.high[i])), Offset(x(i), y(d.low[i])), strokeWidth = 1.dp.toPx())
+                if (!o.isNaN() && !cl.isNaN()) {
                     val bodyTop = y(maxOf(o, cl))
                     drawRect(color, Offset(x(i) - slot * 0.35f, bodyTop), Size(slot * 0.7f, maxOf(1f, y(minOf(o, cl)) - bodyTop)))
                 }
@@ -634,11 +660,13 @@ private fun PriceChart(
             val line = Path()
             val area = Path()
             var start = -1
-            closes.forEachIndexed { i, v ->
-                if (v == null) return@forEachIndexed
+            var end = -1
+            for (i in 0 until d.size) {
+                val v = d.close[i]
+                if (v.isNaN()) continue
                 if (start < 0) { start = i; line.moveTo(x(i), y(v)); area.moveTo(x(i), plot); area.lineTo(x(i), y(v)) } else { line.lineTo(x(i), y(v)); area.lineTo(x(i), y(v)) }
+                end = i
             }
-            val end = closes.indexOfLast { it != null }
             if (start >= 0) {
                 area.lineTo(x(end), plot)
                 area.close()
@@ -647,11 +675,12 @@ private fun PriceChart(
             }
         }
 
-        averages.forEach { (n, series) ->
+        d.averages.forEach { (n, series) ->
             val path = Path()
             var started = false
-            series.forEachIndexed { i, v ->
-                if (v == null) return@forEachIndexed
+            for (i in series.indices) {
+                val v = series[i]
+                if (v.isNaN()) continue
                 if (!started) { path.moveTo(x(i), y(v)); started = true } else path.lineTo(x(i), y(v))
             }
             val long = n >= 200
@@ -750,13 +779,18 @@ fun HoldingsScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
     val scope = rememberCoroutineScope()
     val now = System.currentTimeMillis()
 
-    // A null answer means locked or signed out: this page is about to go.
+    val reads = remember { intArrayOf(0) }
+
+    // Only the newest read may set the list; loading always ends, also when the answer is
+    // null (locked or signed out: this page is about to go).
     suspend fun refresh() {
+        val mine = ++reads[0]
         loading = true
         error = null
-        val result = actions.jobs { e, t -> holdings(e, t) } ?: return
-        if (result is ApiResult.Success) manual = result.value else error = holdingsErrorText(result)
+        val result = actions.jobs { e, t -> holdings(e, t) }
+        if (mine != reads[0]) return
         loading = false
+        if (result is ApiResult.Success) manual = result.value else if (result != null) error = holdingsErrorText(result)
     }
     LaunchedEffect(Unit) { refresh() }
 
@@ -771,7 +805,9 @@ fun HoldingsScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
                     done()
                     refresh()
                 } else {
-                    error = holdingsErrorText(result)
+                    // An unreadable 2xx or no answer may have landed: reload to check.
+                    if (result is ApiResult.InvalidResponse || result is ApiResult.Unreachable) refresh()
+                    error = holdingsWriteText(result)
                 }
             } finally {
                 busy = false
@@ -802,11 +838,18 @@ fun HoldingsScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
             ListSection("Manual positions") {
                 Column(Modifier.padding(JvSpace.lg), verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
                     HoldingField("Symbol (AAPL)", "Symbol", symbol, KeyboardType.Text) { symbol = it }
-                    HoldingField("Quantity", "Quantity", quantity, KeyboardType.Decimal) { quantity = it }
-                    HoldingField("Avg. cost", "Average cost", avgCost, KeyboardType.Decimal) { avgCost = it }
+                    val invalid = error == HOLDING_NUMBER_RULE
+                    HoldingField("Quantity", "Quantity", quantity, KeyboardType.Decimal, invalid && holdingNumber(quantity) == null) { quantity = it }
+                    HoldingField("Avg. cost", "Average cost", avgCost, KeyboardType.Decimal, invalid && holdingNumber(avgCost) == null) { avgCost = it }
                     ActionButton("Add", {
-                        val (s, q, a) = Triple(symbol, quantity, avgCost)
-                        write({ e, t -> addHolding(e, t, s, q, a) }) { symbol = ""; quantity = ""; avgCost = "" }
+                        val s = symbol.trim()
+                        val q = holdingNumber(quantity)
+                        val a = holdingNumber(avgCost)
+                        if (q == null || a == null) {
+                            error = HOLDING_NUMBER_RULE
+                        } else {
+                            write({ e, t -> addHolding(e, t, s, q, a) }) { symbol = ""; quantity = ""; avgCost = "" }
+                        }
                     }, enabled = !busy)
                     error?.let { ErrorText(it) }
                 }
@@ -873,11 +916,12 @@ fun HoldingsScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
 }
 
 @Composable
-private fun HoldingField(placeholder: String, label: String, value: String, keyboard: KeyboardType, onChange: (String) -> Unit) {
+private fun HoldingField(placeholder: String, label: String, value: String, keyboard: KeyboardType, invalid: Boolean = false, onChange: (String) -> Unit) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().semantics { if (invalid) error(HOLDING_NUMBER_RULE) },
+        isError = invalid,
         label = { Text(label) },
         placeholder = { Text(placeholder) },
         keyboardOptions = KeyboardOptions(keyboardType = keyboard),

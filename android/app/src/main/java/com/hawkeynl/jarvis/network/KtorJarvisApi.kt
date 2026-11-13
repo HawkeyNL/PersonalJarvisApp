@@ -457,15 +457,18 @@ class KtorJarvisApi(
         return jobCall({ requireNotNull(readRunDetail(it)) }) { client.prepareGet(endpoint.url("/v1/jobs/runs/$runId")) { bearerAuth(token) } }
     }
 
-    /** A Jobs call: the answer is read with a size bound and passed through [read], which
-     *  throws IllegalArgumentException for a shape the guards refuse. */
-    private suspend fun <T> jobCall(read: (JsonElement) -> T, statement: suspend () -> HttpStatement): ApiResult<T> = try {
+    /** A Jobs or Roadmaps call: the answer is read within [limit] and passed through [read],
+     *  which throws IllegalArgumentException for a shape the guards refuse. An answer over the
+     *  limit fails closed, also for a write. */
+    private suspend fun <T> jobCall(
+        read: (JsonElement) -> T, limit: Int = MAX_JOBS_BYTES, statement: suspend () -> HttpStatement,
+    ): ApiResult<T> = try {
         statement().execute { response ->
             when {
                 response.status == HttpStatusCode.Unauthorized -> ApiResult.Unauthorized
                 response.status.value !in 200..299 -> ApiResult.HttpError(response.status.value, null)
                 else -> try {
-                    val json = smallJson(response, MAX_JOBS_BYTES) ?: JsonNull
+                    val json = boundedJson(response, limit)
                     ApiResult.Success(withContext(Dispatchers.Default) { read(json) })
                 } catch (_: IllegalArgumentException) {
                     ApiResult.InvalidResponse("Home Node sent an invalid answer")
@@ -478,14 +481,18 @@ class KtorJarvisApi(
         networkFailure(error)
     }
 
-    /** A small JSON reply, read with a size bound; null when too large or not JSON. */
-    private suspend fun smallJson(response: io.ktor.client.statement.HttpResponse, limit: Int = MAX_REPLY_BYTES): JsonElement? {
-        // Read and parsed off the main thread.
-        return withContext(Dispatchers.IO) {
+    /** A JSON reply read within [limit], off the main thread: JsonNull when empty or not JSON;
+     *  IllegalArgumentException when larger, so an oversized answer never reads as nothing. */
+    private suspend fun boundedJson(response: io.ktor.client.statement.HttpResponse, limit: Int): JsonElement =
+        withContext(Dispatchers.IO) {
             val bytes = response.bodyAsChannel().toInputStream().use { input -> readAtMost(input, limit + 1) }
-            if (bytes.size > limit) null else runCatching { Json.parseToJsonElement(bytes.decodeToString()) }.getOrNull()
+            require(bytes.size <= limit)
+            runCatching { Json.parseToJsonElement(bytes.decodeToString()) }.getOrDefault(JsonNull)
         }
-    }
+
+    /** A small JSON reply, read with a size bound; null when too large or not JSON. */
+    private suspend fun smallJson(response: io.ktor.client.statement.HttpResponse, limit: Int = MAX_REPLY_BYTES): JsonElement? =
+        try { boundedJson(response, limit).takeUnless { it == JsonNull } } catch (_: IllegalArgumentException) { null }
 
     private suspend inline fun <reified T> request(
         crossinline block: suspend () -> io.ktor.client.statement.HttpResponse,

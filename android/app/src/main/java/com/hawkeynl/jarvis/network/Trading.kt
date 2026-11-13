@@ -67,13 +67,16 @@ data class InstrumentBars(
 // ---- decimal strings ----------------------------------------------------
 
 private val DECIMAL = Regex("^(-)?(\\d+)(?:\\.(\\d+))?$")
+private val LEADING_ZEROS = Regex("^0+(?=\\d)")
+private val ISO_CODE = Regex("^[A-Z]{3}$")
+private val CONID = Regex("^\\d{1,12}$")
 const val DASH = "—"
 
 private data class Parsed(val neg: Boolean, val int: String, val frac: String)
 
 private fun parse(value: String?): Parsed? {
     val m = DECIMAL.matchEntire(value?.trim() ?: return null) ?: return null
-    return Parsed(m.groupValues[1].isNotEmpty(), m.groupValues[2].replace(Regex("^0+(?=\\d)"), ""), m.groupValues[3])
+    return Parsed(m.groupValues[1].isNotEmpty(), m.groupValues[2].replace(LEADING_ZEROS, ""), m.groupValues[3])
 }
 
 /** Round half away from zero to [places] fraction digits, on the digits. */
@@ -116,10 +119,19 @@ private data class CurrencyStyle(val symbol: String, val after: Boolean, val dig
 
 /** Symbol and fraction digits of an ISO code; anything else is text after the amount. */
 private fun currencyStyle(code: String): CurrencyStyle {
-    if (!Regex("^[A-Z]{3}$").matches(code)) return CurrencyStyle(code, true, 2)
+    if (!ISO_CODE.matches(code)) return CurrencyStyle(code, true, 2)
     val currency = runCatching { Currency.getInstance(code) }.getOrNull() ?: return CurrencyStyle(code, true, 2)
-    return CurrencyStyle(currency.getSymbol(Locale.US), false, currency.defaultFractionDigits.takeIf { it >= 0 } ?: 2)
+    val symbol = NARROW[code] ?: currency.getSymbol(Locale.US)
+    return CurrencyStyle(symbol, false, currency.defaultFractionDigits.takeIf { it >= 0 } ?: 2)
 }
+
+// ponytail: desktop uses Intl's "en" narrowSymbol, which java.util.Currency lacks; this map
+// covers the common codes where the two differ. Add a code when one shows wrongly.
+private val NARROW = mapOf(
+    "AUD" to "$", "CAD" to "$", "HKD" to "$", "MXN" to "$", "NZD" to "$", "SGD" to "$", "TWD" to "$",
+    "CNY" to "¥", "DKK" to "kr", "NOK" to "kr", "SEK" to "kr", "PLN" to "zł", "CZK" to "Kč", "HUF" to "Ft",
+    "TRY" to "₺", "ZAR" to "R", "RUB" to "₽", "KRW" to "₩", "ILS" to "₪", "INR" to "₹", "THB" to "฿", "PHP" to "₱",
+)
 
 /** Money in its currency: "€23,820.00", "+$3.23", "−€63.10". Fraction digits follow the
  *  currency (JPY 0, EUR 2) unless [places] is given. */
@@ -271,9 +283,12 @@ fun changeRatio(first: String?, last: String?): String? {
     val a = chartNumber(first)
     val b = chartNumber(last)
     if (a == null || a == 0.0 || b == null) return null
-    val pct = String.format(Locale.ROOT, "%.2f", (b / a - 1) * 100)
-    return pct.takeIf { parse(it) != null }
+    return fixed2((b / a - 1) * 100).takeIf { parse(it) != null }
 }
+
+/** JavaScript's toFixed(2): the exact binary value, rounded half away from zero. */
+internal fun fixed2(x: Double): String =
+    if (x.isFinite()) java.math.BigDecimal(x).setScale(2, java.math.RoundingMode.HALF_UP).toPlainString() else "NaN"
 
 /** "+4.80%" change from the first to the last value; "—" when unknown. */
 fun changePercent(first: String?, last: String?): String = formatPercent(changeRatio(first, last))
@@ -335,6 +350,23 @@ fun chartTime(iso: String, bars: List<Bar>, full: Boolean = false, zone: ZoneId 
     return format.format(Instant.ofEpochMilli(at).atZone(zone))
 }
 
+/** A typed amount as Core takes it: trimmed, a single decimal comma read as a dot (a Dutch
+ *  keyboard); null when it is still not a decimal number. */
+fun holdingNumber(text: String): String? {
+    val t = text.trim().let { if (it.count { c -> c == ',' } == 1 && '.' !in it) it.replace(',', '.') else it }
+    return t.takeIf { DECIMAL.matches(it) }
+}
+
+const val HOLDING_NUMBER_RULE = "Quantity and average cost must be numbers, such as 12.5."
+
+/** The notice after a failed holdings write. A 2xx with an oversized answer, or no answer at
+ *  all, may have landed: the list reloads to check. */
+fun holdingsWriteText(result: ApiResult<*>): String = when (result) {
+    is ApiResult.InvalidResponse -> "Not confirmed; reloaded to check."
+    is ApiResult.Unreachable -> "No answer from your Home Node. It is unknown whether the change arrived; reloaded to check."
+    else -> holdingsErrorText(result)
+}
+
 /** The notice after a failed holdings read or write. */
 fun holdingsErrorText(result: ApiResult<*>): String = when (result) {
     is ApiResult.Unreachable -> "No answer from your Home Node. Check the connection."
@@ -363,7 +395,7 @@ object TradingLimits {
 private const val MAX_SAFE = 9_007_199_254_740_991L
 
 /** A conid from a route or a response: a positive safe integer, else null. */
-fun parseConid(value: String): Long? = value.takeIf { Regex("^\\d{1,12}$").matches(it) }?.toLongOrNull()?.takeIf { it in 1..MAX_SAFE }
+fun parseConid(value: String): Long? = value.takeIf { CONID.matches(it) }?.toLongOrNull()?.takeIf { it in 1..MAX_SAFE }
 
 /** A conid in an answer: a positive safe integer, as a number or (like desktop) its digits. */
 private fun JsonObject.conid(key: String): Long {
@@ -404,7 +436,7 @@ private fun skipped(o: JsonObject): Pair<Long, List<SkippedPosition>> {
         val s = it.obj()
         // Core counts code points, not UTF-16 units.
         val symbol = s.str("symbol").also { sym -> require(sym.codePointCount(0, sym.length) in 1..32) }
-        val currency = if ("currency" !in s) null else s.str("currency").also { c -> require(Regex("^[A-Z]{3}$").matches(c)) }
+        val currency = if ("currency" !in s) null else s.str("currency").also { c -> require(ISO_CODE.matches(c)) }
         SkippedPosition(symbol, currency)
     }
     return count to list
