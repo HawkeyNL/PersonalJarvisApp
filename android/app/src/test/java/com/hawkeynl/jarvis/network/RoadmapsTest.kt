@@ -222,6 +222,13 @@ class RoadmapsTest {
         assertTrue(describeOp(p.ops[1], emptyList()).hidden)
         assertEquals("one\ntwo", p.ops[2].fields.notes)
         assertFalse(describeOp(p.ops[2], emptyList()).hidden)
+        // The Before side reads the same way; an empty cleaned title reads as "—".
+        val stored = RoadmapItem("a", "It\u200Bem a", RoadmapStatus.PLANNED, null, "Now", 0, "x\u202E\ny", listOf("b"), emptyList(), "t")
+        val dep = stored.copy(id = "b", title = "B\u2066", dependsOn = emptyList())
+        val update = describeOp(ProposalOp("a", ItemFields(setOf("notes", "depends_on"), notes = "one", dependsOn = listOf("b"))), listOf(stored, dep))
+        assertEquals("Item a", update.title)
+        assertEquals(listOf(DiffRow("Notes", "x\ny", "one"), DiffRow("Depends on", "B", "B")), update.rows)
+        assertEquals("—", describeOp(ProposalOp(null, ItemFields(setOf("title"), title = "")), emptyList()).title)
     }
 
     @Test fun `shown text drops Core's hidden characters and keeps line breaks only in multi-line text`() {

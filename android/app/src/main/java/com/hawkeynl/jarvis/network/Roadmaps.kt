@@ -442,7 +442,10 @@ private val FIELD_LABEL = linkedMapOf(
 /** One proposal operation as before → after rows, in the roadmap's words. */
 fun describeOp(op: ProposalOp, items: List<RoadmapItem>): OpView {
     val byId = items.associateBy { it.id }
-    fun deps(ids: List<String>?) = if (ids.isNullOrEmpty()) NONE else ids.joinToString(", ") { byId[it]?.title ?: "Unknown item" }
+    // Item text on the Before side reads the same way as Jarvis's text (shownText).
+    fun clean(v: String?, multiline: Boolean = false) = v?.let { shownText(it, multiline).text }
+    fun deps(ids: List<String>?) =
+        if (ids.isNullOrEmpty()) NONE else ids.joinToString(", ") { id -> byId[id]?.let { clean(it.title) ?: NONE } ?: "Unknown item" }
     fun links(list: List<RoadmapLink>?) = if (list.isNullOrEmpty()) NONE else list.joinToString(", ", transform = ::linkLabel)
     fun text(v: Any?) = v?.toString()?.takeIf { it.isNotEmpty() } ?: NONE
     fun value(field: String, f: ItemFields): String = when (field) {
@@ -455,19 +458,19 @@ fun describeOp(op: ProposalOp, items: List<RoadmapItem>): OpView {
         else -> links(f.links)
     }
     fun fieldsOf(item: RoadmapItem) = ItemFields(
-        FIELD_LABEL.keys, item.title, item.status, item.phase, item.position, item.notes, item.dependsOn, item.links,
+        FIELD_LABEL.keys, clean(item.title), item.status, clean(item.phase), item.position, clean(item.notes, multiline = true), item.dependsOn, item.links,
     )
     if (op.itemId == null) {
         // A new item is planned unless the proposal says otherwise.
         val item = if ("status" in op.fields.present) op.fields else op.fields.copy(present = op.fields.present + "status", status = RoadmapStatus.PLANNED)
         val rows = FIELD_LABEL.filterKeys { it != "title" && it != "position" && it in item.present }
             .map { (field, label) -> DiffRow(label, NONE, value(field, item)) }
-        return OpView(true, op.fields.title.orEmpty(), rows, op.fields.hidden)
+        return OpView(true, text(op.fields.title), rows, op.fields.hidden)
     }
     val current = byId[op.itemId]
     val rows = FIELD_LABEL.filterKeys { it in op.fields.present }
         .map { (field, label) -> DiffRow(label, current?.let { value(field, fieldsOf(it)) } ?: NONE, value(field, op.fields)) }
-    return OpView(false, current?.title ?: "An item that no longer exists", rows, op.fields.hidden)
+    return OpView(false, current?.let { text(clean(it.title)) } ?: "An item that no longer exists", rows, op.fields.hidden)
 }
 
 private val ACTION_LABEL = mapOf(
