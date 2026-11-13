@@ -8,6 +8,7 @@ import { currentAuthStatus } from "./auth";
 import { getJsonAuth, postJsonAuth } from "./api";
 import { createSerialPoller } from "./serialPoller";
 import { verifiedFingerprint } from "./pairingFingerprint";
+import { createSession } from "./approvalAlerts";
 
 export type PairingRequest = {
   id: string;
@@ -34,18 +35,33 @@ export const pairingError = ref<string | null>(null);
 // Core allows five pairing-list reads per source IP per minute. Leave room for
 // manual/other-device requests and never overlap requests across app restarts.
 const pairingPoller = createSerialPoller(refresh, 60_000);
+const session = createSession();
 
 async function refresh(): Promise<boolean> {
+  const token = session.token();
   const status = await currentAuthStatus();
-  if (!status.authenticated) return false;
+  if (!status.authenticated) {
+    if (session.isCurrent(token)) pairingRequests.value = [];
+    return false;
+  }
   try {
     const response = await getJsonAuth<{ requests: PairingRequest[] }>("/v1/auth/pairing/requests");
-    pairingRequests.value = await Promise.all(response.requests.map(async (request) => ({
+    const checked = await Promise.all(response.requests.map(async (request) => ({
       ...request,
       verified_fingerprint: await verifiedFingerprint(request).catch(() => null),
     })));
+    // A read from before a sign-out never fills the next session's list.
+    if (!session.isCurrent(token)) return false;
+    pairingRequests.value = checked;
     return true;
   } catch { return false; }
+}
+
+/** Leaving the app (sign-out, expired session): drop the list and any read in flight. */
+export function clearPairing(): void {
+  session.end();
+  pairingRequests.value = [];
+  pairingError.value = null;
 }
 
 export async function approvePairing(request: PairingRequest): Promise<void> {
@@ -66,6 +82,11 @@ export async function denyPairing(request: PairingRequest): Promise<void> {
 }
 
 export function startPairingPolling(): void {
+  pairingPoller.start();
+}
+/** Reads at once (single-flight) and polls on from there. */
+export function restartPairingPolling(): void {
+  pairingPoller.stop();
   pairingPoller.start();
 }
 export function stopPairingPolling(): void { pairingPoller.stop(); }

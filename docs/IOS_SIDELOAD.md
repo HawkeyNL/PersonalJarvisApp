@@ -51,12 +51,17 @@ registers this device's APNs token with Core (`PUT /v1/devices/self/push`).
 Turning it off, logging out or resetting the device removes the token when
 the Home Node is reachable (best effort, a few seconds at most); revoking the
 device on the Home Node always removes it. A reset also turns the setting
-off. A push only says "Approval waiting". Tapping a pairing push opens the
-pairing requests; tapping an unlock push opens Jarvis, where the unlock
-request is shown once the app has its unlock approval view. In the
-foreground a push shows no banner; an open pairing requests page reloads at
-once. Approving still needs Face ID / Touch ID. No silent pushes, no
-notification actions and no notification service extension.
+off. A pairing push shows the device's name, platform, model, IP address and
+a key fingerprint prefix as Core sends them (unverified, and visible to
+Apple's push service); the app never relies on that text. Tapping a pairing
+push opens the pairing requests; tapping an unlock push opens Activity, where
+the unlock request opens as a sheet. In the foreground a push shows a banner
+only when its screen is not open (the pairing requests page, or an open
+unlock sheet); an open pairing page then reloads, keeping reads 30 s apart.
+Delivered approval notifications that arrived before a server read showing
+nothing of that kind waiting are removed. Approving still needs Face ID / Touch ID.
+No silent pushes, no notification actions and no notification service
+extension.
 
 How sideloading affects it (from the AltStore and SideStore signing code; not
 yet confirmed on a device):

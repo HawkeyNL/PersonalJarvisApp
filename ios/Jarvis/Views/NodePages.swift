@@ -966,6 +966,7 @@ struct PairingRequestsSection: View {
     /// so all reads stay at least 30 s apart, as on Android.
     private static var lastRead = Date.distantPast
     private static let minInterval: TimeInterval = 30
+    private static let pushLink = "jarvis://approvals/pairing"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -992,9 +993,12 @@ struct PairingRequestsSection: View {
             }
         }
         .onChange(of: requests.value?.count, initial: true) { _, value in if let count { count.wrappedValue = value } }
+        .approvalScreen(Self.pushLink)
         .onChange(of: refresh) { _, _ in
             if Date().timeIntervalSince(Self.lastRead) >= Self.minInterval { Task { await load() } }
         }
+        // A push read sooner than 30 s after the last one is not dropped: the loop
+        // below reads at lastRead + 30 s.
         .onReceive(NotificationCenter.default.publisher(for: .jarvisApprovalPushed)) { _ in
             if Date().timeIntervalSince(Self.lastRead) >= Self.minInterval { Task { await load() } }
         }
@@ -1140,9 +1144,12 @@ struct PairingRequestsSection: View {
     private func load() async {
         // Claimed before the read, so a second instance does not read in parallel.
         Self.lastRead = Date()
+        let started = Date()
         let result = await model.coreRead("/v1/auth/pairing/requests", as: PairingApprovalList.self)
         guard !Task.isCancelled else { return }
         requests = result.map(\.requests)
+        // Only a fresh server answer clears notifications, never the list after a decision.
+        if requests.value?.isEmpty == true { clearApprovalNotifications(Self.pushLink, readStartedAt: started) }
         biometrics = BiometricLock.biometricsAvailable
     }
 }

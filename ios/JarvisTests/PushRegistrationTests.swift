@@ -1,3 +1,4 @@
+import UserNotifications
 import XCTest
 @testable import Jarvis
 
@@ -38,5 +39,32 @@ final class PushRegistrationTests: XCTestCase {
                                           ["link": "jarvis://approvals/unlock?approve=1"], ["link": 1]] {
             XCTAssertNil(approvalPushLink(other))
         }
+    }
+
+    func testForegroundBannerOnlyForApprovalsWhoseScreenIsClosed() {
+        let pairing = approvalPushLink(["link": "jarvis://approvals/pairing"])
+        let unlock = approvalPushLink(["link": "jarvis://approvals/unlock"])
+        XCTAssertEqual(approvalPresentation(pairing, visible: [:]), [.banner, .sound])
+        XCTAssertEqual(approvalPresentation(pairing, visible: ["jarvis://approvals/unlock": 1]), [.banner, .sound])
+        XCTAssertEqual(approvalPresentation(pairing, visible: ["jarvis://approvals/pairing": 0]), [.banner, .sound])
+        XCTAssertEqual(approvalPresentation(pairing, visible: ["jarvis://approvals/pairing": 2]), [])
+        XCTAssertEqual(approvalPresentation(unlock, visible: ["jarvis://approvals/unlock": 1]), [])
+        // Anything that is not an approval push never shows a banner.
+        XCTAssertEqual(approvalPresentation(approvalPushLink(["link": "jarvis://health/usage"]), visible: [:]), [])
+        XCTAssertEqual(approvalPresentation(nil, visible: [:]), [])
+    }
+
+    func testOnlyOlderNotificationsOfTheEmptiedKindAreRemoved() {
+        let read = Date(timeIntervalSince1970: 1_000)
+        let old = read.addingTimeInterval(-60)
+        let delivered: [(id: String, date: Date, userInfo: [AnyHashable: Any])] = [
+            ("a", old, ["link": "jarvis://approvals/pairing"]), ("b", old, ["link": "jarvis://approvals/unlock"]),
+            ("c", old, ["link": "jarvis://approvals/pairing"]), ("d", old, [:]), ("e", old, ["link": "jarvis://approvals/pairing?x=1"]),
+            // Arrived during or after the read: may be a new request, so it stays.
+            ("f", read, ["link": "jarvis://approvals/pairing"]), ("g", read.addingTimeInterval(5), ["link": "jarvis://approvals/unlock"]),
+        ]
+        XCTAssertEqual(approvalNotificationIDs(delivered, link: "jarvis://approvals/pairing", before: read), ["a", "c"])
+        XCTAssertEqual(approvalNotificationIDs(delivered, link: "jarvis://approvals/unlock", before: read), ["b"])
+        XCTAssertEqual(approvalNotificationIDs([], link: "jarvis://approvals/unlock", before: read), [])
     }
 }

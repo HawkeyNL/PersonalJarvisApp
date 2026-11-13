@@ -107,6 +107,7 @@ struct MainTabs: View {
     @State private var sheet: ShellSheet?
     /// Requests already offered as a sheet; a dismissed one stays on Activity.
     @State private var offered: Set<UUID> = []
+    private static let unlockLink = "jarvis://approvals/unlock"
 
     var body: some View {
         TabView(selection: $tab) {
@@ -126,6 +127,9 @@ struct MainTabs: View {
             switch current {
             case let .unlock(item):
                 UnlockSheet(model: model, item: item) { id in unlocks.removeAll { $0.id == id } }
+                    // Only an open unlock sheet silences unlock pushes; any other
+                    // sheet would hold the next request back.
+                    .approvalScreen(Self.unlockLink)
             case let .agent(item, decided):
                 AgentApprovalSheet(model: model, item: item, time: relativeTime(item.created_at, now: Date()), decided: decided)
             }
@@ -133,10 +137,17 @@ struct MainTabs: View {
         .onChange(of: unlocks) { _, _ in offerUnlock() }
         .task(id: scenePhase == .active) {
             guard scenePhase == .active else { unlocks = []; return }
+            // Delivered unlock notifications go once a read finds none waiting.
+            var cleared = false
             while !Task.isCancelled {
+                let started = Date()
                 let result = await model.pendingUnlocks()
                 guard !Task.isCancelled else { break }
                 unlocks = result ?? []
+                if let result {
+                    if result.isEmpty, !cleared { clearApprovalNotifications(Self.unlockLink, readStartedAt: started) }
+                    cleared = result.isEmpty
+                }
                 // An answer with requests or an error returns at once: never spin.
                 try? await Task.sleep(for: .seconds(result == nil || !unlocks.isEmpty ? 10 : 2))
             }

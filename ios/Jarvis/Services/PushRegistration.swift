@@ -53,8 +53,48 @@ func approvalPushLink(_ userInfo: [AnyHashable: Any]) -> URL? {
     return URL(string: link)
 }
 
-/// Receives APNs callbacks. Foreground pushes show no banner; they only trigger
-/// an immediate fetch. Notifications have no actions and there is no silent push.
+/// Approval screens on screen now, counted by the push link they answer. A
+/// foreground push for one of them shows no banner: that screen already reloads.
+@MainActor var visibleApprovalScreens: [String: Int] = [:]
+
+extension View {
+    /// Counts this view as an approval screen for `link` while it is on screen.
+    @MainActor func approvalScreen(_ link: String) -> some View {
+        onAppear { visibleApprovalScreens[link, default: 0] += 1 }
+            .onDisappear { visibleApprovalScreens[link, default: 0] -= 1 }
+    }
+}
+
+/// How a push shows while Jarvis is in the foreground: a banner with sound for an
+/// approval whose screen the owner is not on, nothing otherwise. The banner is
+/// the push itself, so it never shows more than the lock screen would.
+func approvalPresentation(_ link: URL?, visible: [String: Int]) -> UNNotificationPresentationOptions {
+    guard let link, visible[link.absoluteString, default: 0] <= 0 else { return [] }
+    return [.banner, .sound]
+}
+
+/// Identifiers of delivered notifications for approval `link` that arrived
+/// before `before`. Pushes carry no request id, so they are cleared per kind,
+/// and only those older than a server read that found that kind empty: a push
+/// that arrived during or after the read may be for a new request.
+func approvalNotificationIDs(_ delivered: [(id: String, date: Date, userInfo: [AnyHashable: Any])], link: String, before: Date) -> [String] {
+    delivered.filter { $0.date < before && approvalPushLink($0.userInfo)?.absoluteString == link }.map(\.id)
+}
+
+/// Removes delivered approval notifications of one kind; call it only with the
+/// start time of a fresh server read that found nothing of that kind waiting.
+func clearApprovalNotifications(_ link: String, readStartedAt: Date) {
+    Task {
+        let center = UNUserNotificationCenter.current()
+        let delivered = await center.deliveredNotifications()
+        let ids = approvalNotificationIDs(delivered.map { ($0.request.identifier, $0.date, $0.request.content.userInfo) }, link: link, before: readStartedAt)
+        if !ids.isEmpty { center.removeDeliveredNotifications(withIdentifiers: ids) }
+    }
+}
+
+/// Receives APNs callbacks. A foreground approval push triggers an immediate fetch
+/// and shows a banner only when its screen is not open. Notifications have no
+/// actions and there is no silent push.
 final class JarvisAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
@@ -70,8 +110,11 @@ final class JarvisAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificati
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        await MainActor.run { NotificationCenter.default.post(name: .jarvisApprovalPushed, object: nil) }
-        return []
+        let link = approvalPushLink(notification.request.content.userInfo)
+        return await MainActor.run {
+            NotificationCenter.default.post(name: .jarvisApprovalPushed, object: nil)
+            return approvalPresentation(link, visible: visibleApprovalScreens)
+        }
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
@@ -84,8 +127,7 @@ final class JarvisAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificati
 }
 
 /// The "Approval notifications" setting. Asks for permission only when the owner
-/// turns it on, then registers this device's APNs token with Core; the push itself
-/// carries no details.
+/// turns it on, then registers this device's APNs token with Core.
 @MainActor
 final class ApprovalPush: ObservableObject {
     private static let enabledKey = "jarvis.push.approvals"
@@ -224,7 +266,7 @@ struct ApprovalNotificationsView: View {
                 }))
                 .disabled(busy)
             } footer: {
-                Text("Your Home Node tells this iPhone when an approval is waiting. The notification only says \"Approval waiting\"; Jarvis loads the request after you open it, and approving still needs Face ID or Touch ID.")
+                Text("Your Home Node tells this iPhone when an approval is waiting. The notification shows the device's name, platform, model, IP address and part of its key fingerprint, and passes through Apple's servers. These details are unverified: open the request and compare the full fingerprint in Jarvis. Approving still needs Face ID or Touch ID.")
             }
             if let status = push.status { Section("Status") { Text(verbatim: status) } }
         }

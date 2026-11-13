@@ -9,6 +9,7 @@ import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { currentAuthStatus } from "./auth";
 import { getJsonAuth, postJsonAuth } from "./api";
+import { createSession } from "./approvalAlerts";
 
 export interface UnlockReq {
   id: string;
@@ -25,25 +26,37 @@ export const approvalError = ref<string | null>(null);
 export const picking = ref<{ id: string; choices: number[] } | null>(null);
 
 let polling = false;
+const session = createSession();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Fetch pending requests. `wait` (secs) long-polls: returns as soon as one
  *  appears, or after the timeout empty. Returns whether the fetch succeeded. */
 async function fetchPending(wait: number): Promise<boolean> {
+  const token = session.token();
   const status = await currentAuthStatus();
   if (!status.authenticated) {
-    pending.value = [];
+    if (session.isCurrent(token)) pending.value = [];
     return false;
   }
   try {
     const res = await getJsonAuth<{ requests: UnlockReq[] }>(
       `/v1/auth/unlock/pending?wait=${wait}`,
     );
+    // A long poll from before a sign-out never fills the next session's list.
+    if (!session.isCurrent(token)) return false;
     pending.value = res.requests;
     return true;
   } catch {
     return false; // transient — keep the last snapshot
   }
+}
+
+/** Leaving the app (sign-out, expired session): drop the list and any read in flight. */
+export function clearUnlocks(): void {
+  session.end();
+  pending.value = [];
+  picking.value = null;
+  approvalError.value = null;
 }
 
 export function refreshPending(): Promise<boolean> {

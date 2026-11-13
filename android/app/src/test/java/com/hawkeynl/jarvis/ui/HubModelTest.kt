@@ -25,8 +25,10 @@ class HubModelTest {
     private val now = Instant.parse("2026-10-04T12:00:00Z").toEpochMilli()
 
     @Test
-    fun `deep links only map the two supported routes`() {
+    fun `deep links only map the supported routes`() {
         assertEquals(DeepLink(Screen.PAIRING_APPROVALS), parseDeepLink("jarvis://approvals/pairing"))
+        assertEquals(DeepLink(Screen.ACTIVITY), parseDeepLink("jarvis://approvals/unlock"))
+        assertNull(parseDeepLink("jarvis://approvals/unlock/approve"))
         assertEquals(DeepLink(Screen.HEALTH, "usage"), parseDeepLink("JARVIS://Health/usage"))
         assertEquals(DeepLink(Screen.HEALTH, "usage"), parseDeepLink("jarvis://health/usage?approve=1"))
         assertNull(parseDeepLink("jarvis://approvals/pairing/approve"))

@@ -17,6 +17,8 @@ func deepLinkRoute(_ url: URL) -> HubRoute? {
           components.scheme?.lowercased() == "jarvis" else { return nil }
     switch (components.host?.lowercased(), components.path) {
     case ("approvals", "/pairing"): return .pairingApprovals
+    // Activity's root (see AppTab.root); unlock requests open as a sheet over it.
+    case ("approvals", "/unlock"): return AppTab.activity.root
     case ("health", "/usage"): return .healthUsage
     default: return nil
     }
