@@ -125,7 +125,10 @@ private fun AuthenticatedShell(
         Box(Modifier.weight(1f)) {
             when (screen) {
                 Screen.HUB -> HomeScreen(state, data, navigate) { core.refreshHome(); core.refreshPairingIfStale() }
-                Screen.TRADING -> TradingScreen(data, core::refreshTrading)
+                Screen.TRADING -> TradingScreen(actions, navigate)
+                Screen.STOCKS -> StocksScreen(actions, navigate)
+                Screen.POSITIONS -> PositionsScreen(actions, navigate)
+                Screen.HOLDINGS -> HoldingsScreen(actions, navigate)
                 Screen.ACTIVITY -> ActivityScreen(data, navigate, { core.refreshActivity(); core.refreshPairingIfStale() }, agentApprovals)
                 Screen.SETTINGS -> SettingsScreen(state, actions, data, onInstallUpdate, core::refreshSettings)
                 Screen.CHAT -> ChatScreen(state, actions, pickPhotos)

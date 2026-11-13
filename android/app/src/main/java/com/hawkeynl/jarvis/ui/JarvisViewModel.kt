@@ -50,7 +50,7 @@ import com.hawkeynl.jarvis.chat.realtimeSelectedHistory
 
 /** Where the authenticated app is: a tab root (HUB, TRADING, ACTIVITY, SETTINGS) or a
  *  screen pushed on one of the tabs; see [tabOf]. */
-enum class Screen { HUB, CHAT, SETTINGS, CONVERSATIONS, AGENTS, TASKS, INTEGRATIONS, HEALTH, MEMORY, CONTEXT, PAIRING_APPROVALS, TRADING, ACTIVITY, JOBS }
+enum class Screen { HUB, CHAT, SETTINGS, CONVERSATIONS, AGENTS, TASKS, INTEGRATIONS, HEALTH, MEMORY, CONTEXT, PAIRING_APPROVALS, TRADING, ACTIVITY, JOBS, STOCKS, POSITIONS, HOLDINGS }
 
 sealed interface AndroidUpdateUiState {
     data object Idle : AndroidUpdateUiState
