@@ -270,7 +270,7 @@ final class JobsTests: XCTestCase {
         XCTAssertNotNil(Jobs.issue(.reminder, draft))
         draft.title = "Two\nlines"
         XCTAssertNotNil(Jobs.issue(.reminder, draft))
-        draft.title = "Hidden\u{200B}"
+        draft.title = "Hid\u{200B}den"
         XCTAssertNotNil(Jobs.issue(.reminder, draft))
         draft.title = "Call the bank"
         XCTAssertNil(Jobs.issue(.reminder, draft), "a reminder's text is optional")
