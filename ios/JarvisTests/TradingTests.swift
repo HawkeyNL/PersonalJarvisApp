@@ -249,6 +249,19 @@ final class TradingTests: XCTestCase {
         XCTAssertEqual(Trading.newHolding(symbol: " aapl ", quantity: "12,5", avgCost: " 101.50 "),
                        NewHolding(symbol: "AAPL", quantity: "12.5", avg_cost: "101.50"))
         XCTAssertEqual(Trading.newHolding(symbol: "asml", quantity: "3", avgCost: "612,4")?.avg_cost, "612.4")
+        // Thousands-looking amounts are refused both ways; non-ASCII digits are no number.
+        for text in ["1,234", "1.234", "12,345", "1,000", "-1,234", " 123.456 "] {
+            XCTAssertTrue(Trading.ambiguousAmount(text), text)
+            XCTAssertNil(Trading.newHolding(symbol: "A", quantity: text, avgCost: "1"), text)
+            XCTAssertNil(Trading.newHolding(symbol: "A", quantity: "1", avgCost: text), text)
+        }
+        for (text, read) in [("12,5", "12.5"), ("0,125", "0.125"), ("1,2345", "1.2345"), ("1.5", "1.5"), ("1234", "1234"), ("1.2340", "1.2340")] {
+            XCTAssertFalse(Trading.ambiguousAmount(text), text)
+            XCTAssertEqual(Trading.newHolding(symbol: "A", quantity: text, avgCost: "1")?.quantity, read, text)
+        }
+        XCTAssertNil(Trading.newHolding(symbol: "A", quantity: "\u{0661}\u{0662}", avgCost: "1"), "Arabic-Indic digits")
+        XCTAssertFalse(Trading.ambiguousAmount("\u{0661},\u{0662}\u{0663}\u{0664}"))
+        XCTAssertNil(Trading.newHolding(symbol: "A", quantity: "\u{0661},\u{0662}\u{0663}\u{0664}", avgCost: "1"))
         for (symbol, quantity, cost) in [("", "1", "1"), ("A", "1.234,5", "1"), ("A", "1,2,3", "1"), ("A", "abc", "1"), ("A", "1", "")] {
             XCTAssertNil(Trading.newHolding(symbol: symbol, quantity: quantity, avgCost: cost), "\(symbol) \(quantity) \(cost)")
         }
