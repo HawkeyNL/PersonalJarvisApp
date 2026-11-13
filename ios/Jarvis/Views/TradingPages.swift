@@ -6,10 +6,10 @@ import SwiftUI
 // prices, every open position and the manual holdings. Towards IBKR this is read-only:
 // nothing here can place an order. Amounts are Core's decimal strings, formatted as text.
 
-private enum TradingRoute: Hashable { case stocks, positions, holdings, ibkr, stock(Int) }
+private enum TradingRoute: Hashable { case stocks, positions, holdings, ibkr, memecoin, stock(Int) }
 
 /// Colour of a signed amount; the sign is always in the text too.
-private func signColor(_ value: String?) -> Color {
+func signColor(_ value: String?) -> Color {
     switch Trading.sign(value) {
     case 1?: JV.positiveText
     case -1?: JV.negativeText
@@ -17,7 +17,7 @@ private func signColor(_ value: String?) -> Color {
     }
 }
 
-private func plural(_ count: Int, _ one: String, _ many: String) -> String { count == 1 ? "1 \(one)" : "\(count) \(many)" }
+func plural(_ count: Int, _ one: String, _ many: String) -> String { count == 1 ? "1 \(one)" : "\(count) \(many)" }
 
 // MARK: - Shared parts
 
@@ -55,7 +55,7 @@ private struct TradingStatus<Value, Content: View>: View {
     }
 }
 
-private struct Kpi: Identifiable {
+struct Kpi: Identifiable {
     let label: String
     let value: String
     var color = JV.textPrimary
@@ -64,7 +64,7 @@ private struct Kpi: Identifiable {
 }
 
 /// Key figures as small cards, two per row; one per row at accessibility text sizes.
-private struct KpiGrid: View {
+struct KpiGrid: View {
     let kpis: [Kpi]
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -98,7 +98,7 @@ private func valueKpis(_ data: Portfolio) -> [Kpi] {
 }
 
 /// A filled bar of 0..100 with an optional target mark.
-private struct ProgressMeter: View {
+struct ProgressMeter: View {
     let value: Double
     var target: Double?
     var over = false
@@ -253,7 +253,7 @@ private struct PositionList: View {
 }
 
 /// Plain text lines for notes and sources.
-private func note(_ text: String) -> some View {
+func tradingNote(_ text: String) -> some View {
     Text(verbatim: text).font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary).fixedSize(horizontal: false, vertical: true)
 }
 
@@ -268,6 +268,7 @@ private struct TradingDestination: View {
         case .holdings: HoldingsPage(model: model, ibkr: false)
         case .ibkr: HoldingsPage(model: model, ibkr: true)
         case let .stock(conid): StockPage(model: model, conid: conid)
+        case .memecoin: MemecoinPage(model: model)
         }
     }
 }
@@ -290,7 +291,7 @@ struct TradingPage: View {
         PageScaffold(title: AppTab.trading.title, subtitle: "Read-only: this app places no orders.") {
             Text("All pots in one place.").font(JV.font(14)).foregroundStyle(JV.textSecondary)
             if let data = portfolio.value {
-                note("\(Trading.sourceLabel(data)) · as of \(Trading.asOfText(data.as_of))")
+                tradingNote("\(Trading.sourceLabel(data)) · as of \(Trading.asOfText(data.as_of))")
             }
             TradingStatus(state: portfolio, what: "your portfolio", retry: loadPortfolio) { data, empty in
                 if empty {
@@ -381,14 +382,14 @@ struct TradingPage: View {
                             .accessibilityElement(children: .combine)
                             ProgressMeter(value: Double(Trading.onTarget(allocation)) / Double(allocation.count) * 100)
                         } else {
-                            note("No allocation targets set.")
+                            tradingNote("No allocation targets set.")
                         }
                     case .ok:
-                        note("Connected; nothing held yet.")
+                        tradingNote("Connected; nothing held yet.")
                     case .loading:
                         LoadingState(label: "Loading the stocks pot", rows: 1)
                     case .notConnected, .error:
-                        note("No IBKR data yet; see above.")
+                        tradingNote("No IBKR data yet; see above.")
                     }
                     PanelButton(title: "Open stocks") { route = .stocks }
                 }
@@ -396,7 +397,9 @@ struct TradingPage: View {
                 .jvCard(padding: JV.Space.md)
                 NodePanel(item: NodeItem(id: "memecoin", label: "Memecoin", title: "Memecoin", icon: "bitcoinsign.circle",
                                          detail: "A paper simulation on Solana market data, off by default. No wallet, no real money.",
-                                         tone: .idle, status: "Paper only"))
+                                         tone: .idle, status: "Paper only")) {
+                    PanelButton(title: "Open memecoin") { route = .memecoin }
+                }
                 NodePanel(item: .planned("futures", "Futures", "Futures", icon: "chart.xyaxis.line",
                                          detail: "Futures through IBKR come later: paper and read-only first, then a signed mandate."))
             }
@@ -434,7 +437,7 @@ private struct StocksPage: View {
 
     var body: some View {
         PageScaffold(title: "Stocks", subtitle: state.value.map { "\(Trading.sourceLabel($0)) · read-only" } ?? "Read-only") {
-            if let data = state.value { note("As of \(Trading.asOfText(data.as_of)).") }
+            if let data = state.value { tradingNote("As of \(Trading.asOfText(data.as_of)).") }
             TradingStatus(state: state, what: "your holdings", retry: load) { data, empty in
                 if empty {
                     UnavailableState(title: "No holdings yet", kind: .empty,
@@ -464,9 +467,9 @@ private struct StocksPage: View {
                 if let deposit = data.monthly_deposit {
                     Text(verbatim: Trading.formatMoney(deposit.amount, data.base_currency))
                         .font(JV.number(20, .semibold, relativeTo: .title3)).foregroundStyle(JV.textPrimary)
-                    note("Every month on day \(deposit.day_of_month). Next deposit: \(Trading.dayText(deposit.next_date)).")
+                    tradingNote("Every month on day \(deposit.day_of_month). Next deposit: \(Trading.dayText(deposit.next_date)).")
                 } else {
-                    note("No monthly deposit set.")
+                    tradingNote("No monthly deposit set.")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -487,7 +490,7 @@ private struct StocksPage: View {
         ListSection(title: "Coming dividends") {
             VStack(alignment: .leading, spacing: JV.Space.xs) {
                 let dividends = data.upcoming_dividends ?? []
-                if dividends.isEmpty { note("No dividends announced for your holdings.") }
+                if dividends.isEmpty { tradingNote("No dividends announced for your holdings.") }
                 ForEach(Array(dividends.enumerated()), id: \.offset) { _, dividend in
                     HStack(alignment: .firstTextBaseline, spacing: JV.Space.sm) {
                         Text(verbatim: Trading.dayText(dividend.ex_date)).font(JV.mono(13)).foregroundStyle(JV.textSecondary)
@@ -530,9 +533,9 @@ private struct StocksPage: View {
                     }
                     .accessibilityElement(children: .combine)
                 }
-                note("The mark is your target. Computed by code from your IBKR positions; Jarvis never sells just to rebalance.")
+                tradingNote("The mark is your target. Computed by code from your IBKR positions; Jarvis never sells just to rebalance.")
             } else {
-                note("No targets set yet. Core reports targets once you set them for the stocks pot.")
+                tradingNote("No targets set yet. Core reports targets once you set them for the stocks pot.")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -606,7 +609,7 @@ private struct StockPage: View {
             .font(JV.font(13))
             TradingStatus(state: bars, what: "the price history", rows: 1, retry: loadBars) { data, empty in
                 if empty {
-                    note("No prices for this period. The market may not have traded yet.")
+                    tradingNote("No prices for this period. The market may not have traded yet.")
                 } else {
                     let label = "\(data.symbol), \(range): \(ratio.map { Trading.formatPercent($0) } ?? "no change data")"
                     TradingChart(points: readable.enumerated().compactMap { index, bar -> ChartPoint? in
@@ -616,7 +619,7 @@ private struct StockPage: View {
                     }, mode: mode, averages: [ma50 && count >= 50 ? 50 : nil, ma200 && count >= 200 ? 200 : nil].compactMap { $0 },
                     volume: volume && hasVolume, label: label, height: 260)
                 }
-                note("Prices: \(Trading.sourceLabel(data)) · as of \(Trading.asOfText(data.as_of)). Averages are over the bars of this period.")
+                tradingNote("Prices: \(Trading.sourceLabel(data)) · as of \(Trading.asOfText(data.as_of)). Averages are over the bars of this period.")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -642,13 +645,13 @@ private struct StockPage: View {
                                 Text(verbatim: Trading.dayText(item.t)).font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
                             }
                             Text(verbatim: item.text).font(JV.font(14)).foregroundStyle(JV.textPrimary).fixedSize(horizontal: false, vertical: true)
-                            if let sources = item.sources, !sources.isEmpty { note("Sources: \(sources.joined(separator: ", "))") }
+                            if let sources = item.sources, !sources.isEmpty { tradingNote("Sources: \(sources.joined(separator: ", "))") }
                         }
                         .accessibilityElement(children: .combine)
                     }
-                    note("Fact: from a source. Calculation: computed by code. AI inference: Jarvis's estimate, which can be wrong.")
+                    tradingNote("Fact: from a source. Calculation: computed by code. AI inference: Jarvis's estimate, which can be wrong.")
                 } else {
-                    note("No notes from Jarvis for this period.")
+                    tradingNote("No notes from Jarvis for this period.")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -668,12 +671,12 @@ private struct StockPage: View {
                         TileData(label: "Result", value: Trading.formatMoney(held.unrealized_pnl?.value, data.base_currency, sign: true)),
                     ])
                 } else {
-                    note("You do not hold this instrument.")
+                    tradingNote("You do not hold this instrument.")
                 }
             case .loading:
                 LoadingState(label: "Loading your position", rows: 1)
             case .notConnected, .error:
-                note("Your position shows once Core reports your IBKR portfolio.")
+                tradingNote("Your position shows once Core reports your IBKR portfolio.")
             }
         }
     }
@@ -707,10 +710,10 @@ private struct PositionsPage: View {
 
     var body: some View {
         PageScaffold(title: "Positions", subtitle: state.value.map { "\(Trading.sourceLabel($0)) · read-only" } ?? "Read-only") {
-            if let data = state.value { note("As of \(Trading.asOfText(data.as_of)).") }
+            if let data = state.value { tradingNote("As of \(Trading.asOfText(data.as_of)).") }
             TradingStatus(state: state, what: "your positions", retry: load) { data, empty in
                 ListSection(title: data.positions.isEmpty ? "Open positions · nothing open" : "Open positions · \(data.positions.count) open") {
-                    if let skipped = Trading.skippedText(data) { note(skipped) }
+                    if let skipped = Trading.skippedText(data) { tradingNote(skipped) }
                     if empty {
                         UnavailableState(title: "No open positions", kind: .empty, detail: "Your IBKR account has no open positions.",
                                          symbol: "list.bullet.rectangle")
@@ -725,7 +728,7 @@ private struct PositionsPage: View {
             }
             VStack(alignment: .leading, spacing: JV.Space.xs) {
                 TitleBadgeRow(title: "Open orders", badge: Badge(text: "Not available", dot: false))
-                note("The IBKR connection is read-only, and Core does not report orders yet. Orders come with trading, behind risk checks and your confirmation.")
+                tradingNote("The IBKR connection is read-only, and Core does not report orders yet. Orders come with trading, behind risk checks and your confirmation.")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .jvCard(padding: JV.Space.md)
@@ -849,7 +852,7 @@ private struct HoldingsPage: View {
                     Spacer(minLength: 4)
                     Text(verbatim: holding.cost_basis).font(JV.number(15, .medium)).foregroundStyle(JV.textPrimary)
                 }
-                note("\(holding.quantity) at \(holding.avg_cost) \(holding.currency) · weight \(holding.weight_pct)%")
+                tradingNote("\(holding.quantity) at \(holding.avg_cost) \(holding.currency) · weight \(holding.weight_pct)%")
                 ProgressMeter(value: Trading.chartNumber(holding.weight_pct) ?? 0)
             }
             .accessibilityElement(children: .combine)
@@ -865,12 +868,12 @@ private struct HoldingsPage: View {
     private func ibkrSection(_ link: (Tone, String)) -> some View {
         VStack(alignment: .leading, spacing: JV.Space.sm) {
             TitleBadgeRow(title: "IBKR", badge: Badge(text: link.1, style: link.0.badge))
-            note("Read-only through Core's IBKR connection; Jarvis only reads, it never places orders.")
+            tradingNote("Read-only through Core's IBKR connection; Jarvis only reads, it never places orders.")
             TradingStatus(state: ibkr, what: "the IBKR portfolio", rows: 2, retry: loadIbkr) { data, empty in
-                note("Last sync \(Trading.asOfText(data.as_of)).")
-                if let skipped = Trading.skippedText(data) { note(skipped) }
+                tradingNote("Last sync \(Trading.asOfText(data.as_of)).")
+                if let skipped = Trading.skippedText(data) { tradingNote(skipped) }
                 if empty {
-                    note("No open positions in your IBKR account.")
+                    tradingNote("No open positions in your IBKR account.")
                 } else {
                     PositionList(positions: data.positions, base: data.base_currency, detail: { p in
                         "Quantity \(Trading.formatDecimal(p.quantity, maxPlaces: 8)) · Last \(Trading.formatPrice(p.last_price, p.currency))"
