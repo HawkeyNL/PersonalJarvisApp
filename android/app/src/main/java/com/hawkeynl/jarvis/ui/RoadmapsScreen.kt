@@ -678,12 +678,15 @@ private fun ProposalCard(proposal: Proposal, snap: RoadmapSnapshot, archived: Bo
             MutedText("made ${zonedText(proposal.createdAt)} · expires ${zonedText(proposal.expiresAt)}")
             if (proposal.baseRevision != snap.roadmap.revision) StatusBadge("Made on an older version", tone = Tone.WARN)
             proposal.rationale?.let { Text("Jarvis's reason: $it", style = MaterialTheme.typography.bodyMedium) }
+            // The stored text holds characters that are not shown, so it differs from what reads here.
+            if (proposal.rationaleHidden) StatusBadge("Contains hidden characters", tone = Tone.WARN)
             proposal.ops.map { describeOp(it, snap.items) }.forEach { op ->
                 Column(verticalArrangement = Arrangement.spacedBy(JvSpace.xs)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm), verticalAlignment = Alignment.CenterVertically) {
                         StatusBadge(if (op.create) "New item" else "Change", tone = if (op.create) Tone.OK else Tone.IDLE)
                         Text(op.title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
                     }
+                    if (op.hidden) StatusBadge("Contains hidden characters", tone = Tone.WARN)
                     op.rows.forEach { row ->
                         Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
                             Text(row.field, color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.labelMedium)

@@ -59,6 +59,8 @@ data class HistoryEntry(
 data class ItemFields(
     val present: Set<String>, val title: String? = null, val status: RoadmapStatus? = null, val phase: String? = null,
     val position: Long? = null, val notes: String? = null, val dependsOn: List<String>? = null, val links: List<RoadmapLink>? = null,
+    /** Jarvis's text held characters that are not shown (see [shownText]). */
+    val hidden: Boolean = false,
 )
 
 /** A create ([itemId] null) or a change of one item. */
@@ -66,7 +68,7 @@ data class ProposalOp(val itemId: String?, val fields: ItemFields)
 
 data class Proposal(
     val id: String, val baseRevision: Long, val ops: List<ProposalOp>, val rationale: String?,
-    val createdAt: String, val expiresAt: String,
+    val createdAt: String, val expiresAt: String, val rationaleHidden: Boolean = false,
 )
 
 object RoadmapLimits {
@@ -106,6 +108,19 @@ private val HIDDEN = Regex(
 fun validText(value: String, max: Int, multiline: Boolean = false): Boolean {
     if (value.isBlank() || value.codePointCount(0, value.length) > max) return false
     return !HIDDEN.containsMatchIn(if (multiline) value.replace("\n", "").replace("\t", "") else value)
+}
+
+private val NOT_SHOWN = Regex(HIDDEN.pattern + "|\\p{Cf}")
+
+/** Jarvis-written text as shown: Core's hidden characters and other format characters
+ *  dropped, tabs as spaces, line breaks kept when [multiline] (single-line text reads them
+ *  as spaces). [hidden] says something was dropped: the stored text differs from what is shown. */
+data class ShownText(val text: String?, val hidden: Boolean)
+
+fun shownText(raw: String, multiline: Boolean = false): ShownText {
+    val spaced = (if (multiline) raw else raw.replace('\n', ' ')).replace('\t', ' ')
+    val clean = spaced.split('\n').joinToString("\n") { it.replace(NOT_SHOWN, "") }
+    return ShownText(clean.ifEmpty { null }, clean != spaced)
 }
 
 /** Phases typed one per line: trimmed, blank lines dropped. Null when they break Core's rule
@@ -265,17 +280,21 @@ fun readHistory(x: JsonElement): List<HistoryEntry>? = guarded {
 
 private fun readFields(o: JsonObject): ItemFields {
     val keys = listOf("title", "status", "phase", "position", "notes", "depends_on", "links")
+    // Written by Jarvis: hidden characters are dropped from the text and flagged (shownText).
+    val title = if ("title" in o) shownText(o.str("title", 1000)) else null
+    val phase = o.optStr("phase", 200)?.let { shownText(it) }
+    val notes = o.optStr("notes", 20_000)?.let { shownText(it, multiline = true) }
     // Only phase and notes may be null (cleared); the others, when present, must hold a value.
     return ItemFields(
         keys.filter { it in o }.toSet(),
-        // Written by Jarvis: bidi and format characters are dropped (plain), like memecoin text.
-        title = if ("title" in o) plain(o.str("title", 1000)).orEmpty() else null,
+        title = title?.let { it.text.orEmpty() },
         status = if ("status" in o) requireNotNull(o.status("status")) else null,
-        phase = o.optStr("phase", 200),
+        phase = phase?.text,
         position = if ("position" in o) o.int("position") else null,
-        notes = o.optStr("notes", 20_000)?.let(::plain),
+        notes = notes?.text,
         dependsOn = if ("depends_on" in o) o.strList("depends_on", RoadmapLimits.DEPENDS_ON) else null,
         links = if ("links" in o) o.array("links", RoadmapLimits.LINKS).map(::readLinkJson) else null,
+        hidden = listOfNotNull(title, phase, notes).any { it.hidden },
     )
 }
 
@@ -291,9 +310,10 @@ private fun parseOp(x: JsonElement): ProposalOp {
 fun readProposals(x: JsonElement): List<Proposal>? = guarded {
     x.obj().array("proposals", 100).map {
         val p = it.obj()
+        val rationale = p.optStr("rationale", 4000)?.let { r -> shownText(r, multiline = true) }
         Proposal(
-            p.str("id", 64), p.int("base_revision"), p.array("ops", RoadmapLimits.OPS).map(::parseOp), p.optStr("rationale", 4000)?.let(::plain),
-            p.str("created_at", 64), p.str("expires_at", 64),
+            p.str("id", 64), p.int("base_revision"), p.array("ops", RoadmapLimits.OPS).map(::parseOp), rationale?.text,
+            p.str("created_at", 64), p.str("expires_at", 64), rationale?.hidden == true,
         )
     }
 }
@@ -411,7 +431,7 @@ fun roadmapPatch(roadmap: Roadmap, title: String, description: String, phases: L
 }
 
 data class DiffRow(val field: String, val before: String, val after: String)
-data class OpView(val create: Boolean, val title: String, val rows: List<DiffRow>)
+data class OpView(val create: Boolean, val title: String, val rows: List<DiffRow>, val hidden: Boolean = false)
 
 private const val NONE = "—"
 private val FIELD_LABEL = linkedMapOf(
@@ -442,12 +462,12 @@ fun describeOp(op: ProposalOp, items: List<RoadmapItem>): OpView {
         val item = if ("status" in op.fields.present) op.fields else op.fields.copy(present = op.fields.present + "status", status = RoadmapStatus.PLANNED)
         val rows = FIELD_LABEL.filterKeys { it != "title" && it != "position" && it in item.present }
             .map { (field, label) -> DiffRow(label, NONE, value(field, item)) }
-        return OpView(true, op.fields.title.orEmpty(), rows)
+        return OpView(true, op.fields.title.orEmpty(), rows, op.fields.hidden)
     }
     val current = byId[op.itemId]
     val rows = FIELD_LABEL.filterKeys { it in op.fields.present }
         .map { (field, label) -> DiffRow(label, current?.let { value(field, fieldsOf(it)) } ?: NONE, value(field, op.fields)) }
-    return OpView(false, current?.title ?: "An item that no longer exists", rows)
+    return OpView(false, current?.title ?: "An item that no longer exists", rows, op.fields.hidden)
 }
 
 private val ACTION_LABEL = mapOf(

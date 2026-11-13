@@ -918,7 +918,7 @@ private struct HoldingsPage: View {
     private func add() async {
         guard !busy else { return }
         guard let holding = Trading.newHolding(symbol: symbol, quantity: quantity, avgCost: avgCost) else {
-            error = Trading.ambiguousAmount(quantity) || Trading.ambiguousAmount(avgCost) ? Trading.ambiguousAmountText : Trading.holdingInputText
+            error = Trading.holdingIssueText(quantity: quantity, avgCost: avgCost)
             return
         }
         busy = true

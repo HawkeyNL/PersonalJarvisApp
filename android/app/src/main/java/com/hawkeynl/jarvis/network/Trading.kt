@@ -357,7 +357,8 @@ fun holdingNumber(text: String): String? = if (holdingIssue(text) == null) norma
 /** Why a typed amount cannot be sent; null when it can. "1,234" and "1.234" look like
  *  thousands in one convention and decimals in the other, so both are refused. */
 fun holdingIssue(text: String): String? = when {
-    THOUSANDS.matches(text.trim()) || LEADING_ZERO.containsMatchIn(text.trim()) -> HOLDING_AMBIGUOUS
+    THOUSANDS.matches(text.trim()) -> HOLDING_AMBIGUOUS
+    LEADING_ZERO.containsMatchIn(text.trim()) -> HOLDING_LEADING_ZERO
     !DECIMAL.matches(normalized(text)) -> HOLDING_NUMBER_RULE
     else -> null
 }
@@ -368,6 +369,7 @@ private fun normalized(text: String) = text.trim().let { if (it.count { c -> c =
 
 const val HOLDING_NUMBER_RULE = "Quantity and average cost must be numbers, such as 12.5."
 const val HOLDING_AMBIGUOUS = "Ambiguous amount: write 1234, or 1.2340 for a decimal."
+const val HOLDING_LEADING_ZERO = "Remove the leading zero, like 0.5 or 1234."
 
 /** The notice after a failed holdings write. A 2xx with an oversized answer, or no answer at
  *  all, may have landed: the list reloads to check. */

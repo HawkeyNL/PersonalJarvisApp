@@ -206,12 +206,31 @@ class RoadmapsTest {
         assertEquals(NOT_CONFIRMED, roadmapWriteFailureText(ApiResult.InvalidResponse("x"), false))
         assertEquals(NOT_CONFIRMED, proposalFailureText(ApiResult.InvalidResponse("x")))
         assertTrue(proposalFailureText(ApiResult.Unreachable(UnreachableReason.TIMEOUT)).contains("unknown whether it was applied"))
-        // Jarvis-written proposal text loses bidi and format characters.
-        val p = readProposals(json("""{"proposals":[{"id":"p1","base_revision":1,"created_at":"x","expires_at":"y","rationale":"evil\u202Etext",
-            "ops":[{"op":"create_item","item":{"title":"Ti\u200Btle","notes":"a\u2066b"}}]}]}"""))!!.single()
-        assertEquals("eviltext", p.rationale)
+        // Jarvis-written proposal text loses Core's hidden and other format characters, keeps
+        // line breaks in notes and the rationale, and says when it held hidden characters.
+        val p = readProposals(json("""{"proposals":[{"id":"p1","base_revision":1,"created_at":"x","expires_at":"y","rationale":"evil\u202Etext\nline two",
+            "ops":[{"op":"create_item","item":{"title":"Ti\u200Btle","notes":"a\u2066b\n\tc\u034F","phase":"N\u3164ow"}},
+                {"op":"update_item","item_id":"a","patch":{"phase":"Now\uFE0F"}},
+                {"op":"update_item","item_id":"a","patch":{"notes":"one\ntwo"}}]}]}"""))!!.single()
+        assertEquals("eviltext\nline two", p.rationale)
+        assertTrue(p.rationaleHidden)
         assertEquals("Title", p.ops[0].fields.title)
-        assertEquals("ab", p.ops[0].fields.notes)
+        assertEquals("ab\n c", p.ops[0].fields.notes)
+        assertEquals("Now", p.ops[0].fields.phase)
+        assertTrue(describeOp(p.ops[0], emptyList()).hidden)
+        assertEquals("Now", p.ops[1].fields.phase)
+        assertTrue(describeOp(p.ops[1], emptyList()).hidden)
+        assertEquals("one\ntwo", p.ops[2].fields.notes)
+        assertFalse(describeOp(p.ops[2], emptyList()).hidden)
+    }
+
+    @Test fun `shown text drops Core's hidden characters and keeps line breaks only in multi-line text`() {
+        assertEquals(ShownText("a b c", false), shownText("a\nb\tc"))
+        assertEquals(ShownText("a\nb c", false), shownText("a\nb\tc", multiline = true))
+        assertEquals(ShownText(null, true), shownText("\u200B"))
+        for (hidden in listOf("\u034F", "\u115F", "\u1160", "\u3164", "\uFE00", "\uFE0F", "\u202E", "\u200B", "\uDB40\uDC01", "\r")) {
+            assertEquals(hidden, ShownText("ab", true), shownText("a${hidden}b", multiline = true))
+        }
     }
 
     @Test fun `only path-safe ids reach a URL`() {

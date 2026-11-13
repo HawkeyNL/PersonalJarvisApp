@@ -222,6 +222,36 @@ final class RoadmapParityTests: XCTestCase {
         XCTAssertEqual(Roadmaps.describe(gone.proposals[0].ops[0], items: items).rows.first?.before, "—")
     }
 
+    func testProposalTextKeepsLineBreaksAndFlagsHiddenCharacters() throws {
+        XCTAssertEqual(Roadmaps.shownText("a\nb\tc").text, "a b c")
+        XCTAssertEqual(Roadmaps.shownText("a\nb\tc", multiline: true).text, "a\nb c")
+        XCTAssertFalse(Roadmaps.shownText("a\nb", multiline: true).hidden)
+        XCTAssertNil(Roadmaps.shownText("\u{200B}").text)
+        // Core's hidden characters, beyond the format category, and format characters.
+        for hidden in ["\u{34F}", "\u{115F}", "\u{1160}", "\u{3164}", "\u{FE00}", "\u{FE0F}", "\u{202E}", "\u{200B}", "\u{E0001}", "\r"] {
+            let shown = Roadmaps.shownText("a\(hidden)b", multiline: true)
+            XCTAssertEqual(shown.text, "ab", hidden.unicodeScalars.first.map { String($0.value, radix: 16) } ?? "")
+            XCTAssertTrue(shown.hidden)
+        }
+        let proposal: [String: Any] = [
+            "id": "p1", "base_revision": 4, "rationale": "Why\nnow", "created_at": "2026-11-02T10:00:00Z", "expires_at": "2026-11-16T10:00:00Z",
+            "ops": [["op": "create_item", "item": ["title": "Ti\u{200B}tle", "phase": "N\u{3164}ext", "notes": "one\ntwo"]],
+                    ["op": "update_item", "item_id": "a", "patch": ["notes": "one\ntwo"]]] as [Any],
+        ]
+        let read = try XCTUnwrap(proposals([proposal])?.proposals.first)
+        XCTAssertEqual(Roadmaps.shownText(read.rationale, multiline: true).text, "Why\nnow")
+        let create = Roadmaps.describe(read.ops[0], items: [])
+        XCTAssertEqual(create.title, "Title")
+        XCTAssertTrue(create.hidden)
+        XCTAssertEqual(create.rows, [
+            .init(field: "Status", before: "—", after: "Planned"), .init(field: "Phase", before: "—", after: "Next"),
+            .init(field: "Notes", before: "—", after: "one\ntwo"),
+        ])
+        let update = Roadmaps.describe(read.ops[1], items: [item("a", notes: "x\ny")])
+        XCTAssertFalse(update.hidden)
+        XCTAssertEqual(update.rows, [.init(field: "Notes", before: "x\ny", after: "one\ntwo")])
+    }
+
     func testHistoryLinesAndGuard() throws {
         let change: [String: Any] = [
             "id": "c1", "revision": 5, "at": "2026-11-02T10:00:00Z", "author": "github", "device_id": NSNull(), "proposal_id": NSNull(),
@@ -261,6 +291,9 @@ final class RoadmapParityTests: XCTestCase {
             XCTAssertEqual(Roadmaps.decisionFailureText(error), "No answer from your Home Node. It is unknown whether it was applied; reloaded to check.")
         }
         XCTAssertEqual(Roadmaps.readFailureText(nil), "This Core has no roadmaps yet. Update Core on your Home Node.")
+        XCTAssertEqual(Roadmaps.readFailureText(nil, missing: "proposals"), "This Core has no proposals yet. Update Core on your Home Node.")
+        XCTAssertEqual(Roadmaps.readFailureText(nil, missing: "history"), "This Core has no history yet. Update Core on your Home Node.")
+        XCTAssertEqual(Roadmaps.readFailureText(.network, missing: "history"), "No answer from your Home Node. Check the connection.")
         XCTAssertEqual(Roadmaps.readFailureText(.network), "No answer from your Home Node. Check the connection.")
         XCTAssertTrue(Roadmaps.readFailureText(.signin).contains("Sign in again"))
         // Jarvis-written text is shown without bidi or invisible characters.

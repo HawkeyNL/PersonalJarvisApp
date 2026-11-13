@@ -245,9 +245,14 @@ class TradingTest {
             assertEquals(bad, HOLDING_NUMBER_RULE, holdingIssue(bad))
         }
         // Thousands in one convention, decimals in the other: refused both ways.
-        for (ambiguous in listOf("1,234", "1.234", "12,345", "1,000", "-1.000", " 123,456 ", "01,234", "00.5", "-01,2")) {
+        for (ambiguous in listOf("1,234", "1.234", "12,345", "1,000", "-1.000", " 123,456 ")) {
             assertNull(ambiguous, holdingNumber(ambiguous))
             assertEquals(ambiguous, HOLDING_AMBIGUOUS, holdingIssue(ambiguous))
+        }
+        // A leading zero gets its own message.
+        for (leading in listOf("01,234", "00.5", "-01,2")) {
+            assertNull(leading, holdingNumber(leading))
+            assertEquals(leading, "Remove the leading zero, like 0.5 or 1234.", holdingIssue(leading))
         }
         assertNull(holdingIssue("12,5"))
         assertEquals("Not confirmed; reloaded to check.", holdingsWriteText(ApiResult.InvalidResponse("x")))
