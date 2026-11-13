@@ -168,6 +168,8 @@ private fun RoadmapListPage(actions: JarvisViewModel, back: () -> Unit, open: (S
         val body = newRoadmap(title, description, phases ?: return)
         busy = true
         error = ""
+        // Ids on screen before the create: only a new one with this title can be it.
+        val before = cards.orEmpty().map { it.roadmap.id }.toSet()
         latest.launch {
             try {
                 val result = actions.jobs { e, t -> createRoadmap(e, t, body) } ?: return@launch
@@ -177,10 +179,11 @@ private fun RoadmapListPage(actions: JarvisViewModel, back: () -> Unit, open: (S
                 } else {
                     error = roadmapWriteFailureText(result, revisionMoved = false)
                     // The roadmap may exist although its answer was unreadable: close the form
-                    // once the reloaded list shows it, else ask to check before a second try.
+                    // once the reloaded list shows a new one with this title, else ask to check
+                    // before a second try.
                     if (result is ApiResult.InvalidResponse || result is ApiResult.Unreachable) {
                         load()
-                        if (cards.orEmpty().any { it.roadmap.title == title.trim() }) {
+                        if (cards.orEmpty().any { it.roadmap.id !in before && it.roadmap.title == title.trim() }) {
                             creating = false
                             error = ""
                         } else {
