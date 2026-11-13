@@ -233,8 +233,8 @@ final class JarvisAppModel: ObservableObject {
         try await auth.denyAgentAction(id, unlocked: stillUnlocked)
     }
 
-    // Scheduled jobs and roadmaps: each write only while unlocked; a late 401 signs out only
-    // the session it was sent for.
+    // Scheduled jobs, roadmaps and manual holdings: each write only while unlocked; a late 401
+    // signs out only the session it was sent for.
     func createJob(_ body: NewJob) async throws { try await ownerWrite { try await self.chat.createJob(body) } }
 
     func updateJob(_ id: UUID, revision: Int, patch: JobPatch) async throws {
@@ -274,6 +274,18 @@ final class JarvisAppModel: ObservableObject {
         guard isAuthenticated, lockState == .unlocked else { throw JarvisAPIError.unauthorized }
         let generation = presentation.id
         do { return try await call() } catch { throw failed(error, generation) }
+    }
+
+    // Manual holdings: the same gate as the jobs.
+    func addHolding(_ body: NewHolding) async throws { try await ownerWrite { try await self.chat.addHolding(body) } }
+
+    func deleteHolding(_ id: String) async throws { try await ownerWrite { try await self.chat.deleteHolding(id: id) } }
+
+    // The memecoin paper trader's two tightening actions, behind the same gate.
+    func pauseMemecoin() async throws -> MemeAnswer { try await ownerWrite { try await self.chat.pauseMemecoin() } }
+
+    func disableMemeStrategy(_ id: String) async throws -> MemeAnswer {
+        try await ownerWrite { try await self.chat.disableMemeStrategy(id) }
     }
 
     /// Pairing decisions sign or deny only after Face ID / Touch ID on this device.

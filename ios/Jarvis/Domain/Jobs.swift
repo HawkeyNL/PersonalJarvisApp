@@ -180,7 +180,7 @@ private struct Plain: Decodable {
 }
 
 /// An array element that is skipped instead of failing the whole array.
-private struct Lenient<Value: Decodable>: Decodable {
+struct Lenient<Value: Decodable>: Decodable {
     let value: Value?
     init(from decoder: Decoder) throws { value = try? Value(from: decoder) }
 }

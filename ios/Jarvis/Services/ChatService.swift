@@ -183,6 +183,32 @@ actor ChatService {
         try await api.deleteRoadmapItem(roadmap: roadmap, revision: revision, item: item, token: token, expectedBinding: binding)
     }
 
+    // Manual holdings (Trading › Holdings), bound to the current Home Node like the job writes.
+    func addHolding(_ body: NewHolding) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.addHolding(body, token: token, expectedBinding: binding)
+    }
+
+    func deleteHolding(id: String) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.deleteHolding(id: id, token: token, expectedBinding: binding)
+    }
+
+    // Memecoin paper trader (Trading › Memecoin): tightening only, bound like the job writes.
+    func pauseMemecoin() async throws -> MemeAnswer {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        return try await api.pauseMemecoin(token: token, expectedBinding: binding)
+    }
+
+    func disableMemeStrategy(_ id: String) async throws -> MemeAnswer {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        return try await api.disableMemeStrategy(id: id, token: token, expectedBinding: binding)
+    }
+
     private func requiredToken() async throws -> String {
         guard let token = try await loadToken() else { throw JarvisAPIError.unauthorized }
         return token
