@@ -202,13 +202,6 @@ enum Roadmaps {
 
     private static func fits(_ text: String?, _ max: Int) -> Bool { (text?.count ?? 0) <= max }
 
-    /// An item id as this app puts it in a path: 1 to 64 letters, digits, - or _.
-    static func validId(_ id: String) -> Bool {
-        (1...64).contains(id.utf8.count) && id.utf8.allSatisfy {
-            (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 95
-        }
-    }
-
     static func valid(_ link: RoadmapLink) -> Bool {
         fits(link.repo, 200) && fits(link.tag, 200) && fits(link.url, 500) && (link.number ?? 0) >= 0
     }
@@ -219,7 +212,7 @@ enum Roadmaps {
     }
 
     static func valid(_ item: RoadmapItem) -> Bool {
-        validId(item.id) && item.title.count <= 1000 && fits(item.phase, 200) && item.position >= 0 && fits(item.notes, 20_000)
+        isSafePathSegment(item.id) && item.id.count <= 64 && item.title.count <= 1000 && fits(item.phase, 200) && item.position >= 0 && fits(item.notes, 20_000)
             && item.depends_on.count <= maxDependsOn && item.depends_on.allSatisfy { $0.count <= 200 }
             && item.links.count <= maxLinks && item.links.allSatisfy(valid)
     }

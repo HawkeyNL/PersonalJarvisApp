@@ -25,7 +25,7 @@ extension JobRunStatus {
     }
 }
 
-/// A status line on a tinted card; `warn` for the scheduler-off notice. Roadmaps use it too.
+/// A status line on a tinted card; `warn` for the scheduler-off notice. Other pages use it too.
 struct JobNotice: View {
     let text: String
     var style = Badge.Style.accent

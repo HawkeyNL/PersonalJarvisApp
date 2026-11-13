@@ -302,13 +302,13 @@ actor JarvisAPIClient {
 
     func updateRoadmapItem(roadmap: UUID, revision: Int, item: String, patch: RoadmapItemPatch,
                            token: String, expectedBinding: UUID) async throws {
-        guard Roadmaps.validId(item) else { throw JarvisAPIError.invalidConfiguration }
+        guard isSafePathSegment(item) else { throw JarvisAPIError.invalidConfiguration }
         _ = try await request(path: "\(Roadmaps.path(roadmap))/items/\(item)?expected_revision=\(revision)", method: "PATCH",
                               body: patch, token: token, expectedBinding: expectedBinding, response: EmptyOrJSON.self)
     }
 
     func deleteRoadmapItem(roadmap: UUID, revision: Int, item: String, token: String, expectedBinding: UUID) async throws {
-        guard Roadmaps.validId(item) else { throw JarvisAPIError.invalidConfiguration }
+        guard isSafePathSegment(item) else { throw JarvisAPIError.invalidConfiguration }
         try await delete("\(Roadmaps.path(roadmap))/items/\(item)?expected_revision=\(revision)", token: token, expectedBinding: expectedBinding)
     }
 
