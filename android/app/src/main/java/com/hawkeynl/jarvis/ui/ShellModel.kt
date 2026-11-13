@@ -12,7 +12,7 @@ enum class Tab(val root: Screen) {
 
 /** The tab a screen belongs to. Exhaustive, so a new screen cannot compile without a tab. */
 fun tabOf(screen: Screen): Tab = when (screen) {
-    Screen.HUB, Screen.CHAT, Screen.CONVERSATIONS, Screen.MEMORY, Screen.JOBS -> Tab.JARVIS
+    Screen.HUB, Screen.CHAT, Screen.CONVERSATIONS, Screen.MEMORY, Screen.ROADMAPS, Screen.JOBS -> Tab.JARVIS
     Screen.TRADING -> Tab.TRADING
     Screen.ACTIVITY, Screen.PAIRING_APPROVALS, Screen.TASKS, Screen.AGENTS -> Tab.ACTIVITY
     Screen.SETTINGS, Screen.INTEGRATIONS, Screen.HEALTH, Screen.CONTEXT -> Tab.SETTINGS
@@ -21,7 +21,7 @@ fun tabOf(screen: Screen): Tab = when (screen) {
 /** Pushed screens each tab root links to; the root pages render exactly these links. */
 fun linksOf(tab: Tab): List<Screen> = when (tab) {
     // CHAT opens from the "Ask Jarvis" bar on the Jarvis tab.
-    Tab.JARVIS -> listOf(Screen.CHAT, Screen.CONVERSATIONS, Screen.MEMORY, Screen.JOBS)
+    Tab.JARVIS -> listOf(Screen.CHAT, Screen.CONVERSATIONS, Screen.MEMORY, Screen.ROADMAPS, Screen.JOBS)
     Tab.TRADING -> emptyList()
     Tab.ACTIVITY -> listOf(Screen.PAIRING_APPROVALS, Screen.TASKS, Screen.AGENTS)
     Tab.SETTINGS -> listOf(Screen.INTEGRATIONS, Screen.HEALTH, Screen.CONTEXT)
@@ -37,6 +37,7 @@ fun screenTitle(screen: Screen): String = when (screen) {
     Screen.CHAT -> "Chat"
     Screen.CONVERSATIONS -> "Conversations"
     Screen.MEMORY -> "Memory"
+    Screen.ROADMAPS -> "Roadmaps"
     Screen.JOBS -> "Jobs"
     Screen.PAIRING_APPROVALS -> "Pairing requests"
     Screen.TASKS -> "Tasks"

@@ -67,6 +67,7 @@ fun HomeScreen(state: JarvisUiState, data: CoreData, onNavigate: (Screen) -> Uni
                             NavRow(JvIcon.CHAT, "Conversations", it.detail, { onNavigate(screen) }, it.tone)
                         }
                         Screen.MEMORY -> NavRow(JvIcon.MEMORY, "Memory", "Not yet available · needs Core support", { onNavigate(screen) }, Tone.IDLE)
+                        Screen.ROADMAPS -> NavRow(JvIcon.LAYERS, "Roadmaps", "Your plans: what is live, ready, in progress, planned or blocked", { onNavigate(screen) })
                         Screen.JOBS -> NavRow(JvIcon.CLOCK, "Jobs", "Work Core does by itself on a schedule you set", { onNavigate(screen) })
                         else -> MissingLinkRow(Tab.JARVIS, screen, onNavigate)
                     }

@@ -94,6 +94,24 @@ interface JarvisApi {
     suspend fun jobRuns(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<List<JobRun>> = ApiResult.InvalidResponse("Not supported")
     suspend fun jobRun(endpoint: HomeNodeEndpoint, token: String, runId: String): ApiResult<RunDetail> = ApiResult.InvalidResponse("Not supported")
 
+    /** Roadmaps (desktop roadmapsApi.ts); answers pass the guards in Roadmaps.kt. A write
+     *  answers the whole roadmap, or null when Core's answer cannot be read (the page reloads). */
+    suspend fun roadmaps(endpoint: HomeNodeEndpoint, token: String): ApiResult<List<Roadmap>> = ApiResult.InvalidResponse("Not supported")
+    suspend fun roadmap(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<RoadmapSnapshot> = ApiResult.InvalidResponse("Not supported")
+    suspend fun roadmapProposals(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<List<Proposal>> =
+        ApiResult.InvalidResponse("Not supported")
+    /** The 50 newest changes. */
+    suspend fun roadmapHistory(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<List<HistoryEntry>> =
+        ApiResult.InvalidResponse("Not supported")
+    suspend fun createRoadmap(endpoint: HomeNodeEndpoint, token: String, body: kotlinx.serialization.json.JsonObject): ApiResult<RoadmapSnapshot?> =
+        ApiResult.InvalidResponse("Not supported")
+    /** One write built on [revision]; HttpError(409) when the roadmap moved on. */
+    suspend fun writeRoadmap(endpoint: HomeNodeEndpoint, token: String, id: String, revision: Long, write: RoadmapWrite): ApiResult<RoadmapSnapshot?> =
+        ApiResult.InvalidResponse("Not supported")
+    /** Accept (answers the roadmap) or reject a pending Jarvis proposal. */
+    suspend fun decideProposal(endpoint: HomeNodeEndpoint, token: String, id: String, proposalId: String, accept: Boolean): ApiResult<RoadmapSnapshot?> =
+        ApiResult.InvalidResponse("Not supported")
+
     suspend fun androidUpdate(
         endpoint: HomeNodeEndpoint,
         token: String,

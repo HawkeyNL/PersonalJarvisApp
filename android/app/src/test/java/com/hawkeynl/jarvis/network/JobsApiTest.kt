@@ -67,6 +67,12 @@ class JobsApiTest {
         assertEquals("20", read.url.parameters["limit"])
     }
 
+    @Test fun `an oversized write answer fails closed instead of counting as saved`() = runTest {
+        val big = "{}" + " ".repeat(1024 * 1024)
+        assertTrue(api(body = big).first.updateJob(endpoint, "t", id, 3, JsonObject(emptyMap())) is ApiResult.InvalidResponse)
+        assertTrue(api(HttpStatusCode.Accepted, big).first.runJob(endpoint, "t", id) is ApiResult.InvalidResponse)
+    }
+
     @Test fun `run now succeeds on an empty 202 and keeps 429 for its wording`() = runTest {
         val (jobs, engine) = api(HttpStatusCode.Accepted, "")
         assertEquals(ApiResult.Success(Unit), jobs.runJob(endpoint, "t", id))
