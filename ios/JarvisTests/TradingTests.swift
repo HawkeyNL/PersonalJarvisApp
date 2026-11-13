@@ -49,6 +49,10 @@ final class TradingTests: XCTestCase {
         XCTAssertEqual(Trading.formatPrice("0.00041200", "USD"), "$0.000412")
         XCTAssertEqual(Trading.formatPrice("176.40", "USD"), "$176.40")
         XCTAssertEqual(Trading.formatPrice("2850.00", "JPY"), "¥2,850")
+        // Desktop's Intl "en" narrow symbols (node: new Intl.NumberFormat("en", { currencyDisplay: "narrowSymbol" })).
+        for (code, text) in [("CAD", "$10.00"), ("AUD", "$10.00"), ("HKD", "$10.00"), ("GBP", "£10.00"), ("SEK", "kr10.00"), ("PLN", "zł10.00")] {
+            XCTAssertEqual(Trading.formatMoney("10", code), text, code)
+        }
     }
 
     func testPercentagesSignsAndChartNumbers() {
@@ -62,6 +66,11 @@ final class TradingTests: XCTestCase {
         XCTAssertNil(Trading.changeRatio("0", "1"))
         XCTAssertEqual(Trading.changeRatio("100", "95"), "-5.00")
         XCTAssertNil(Trading.changeRatio(nil, "1"))
+        // Rounded like desktop's toFixed(2).
+        XCTAssertEqual(Trading.changeRatio("3", "4"), "33.33")
+        XCTAssertEqual(Trading.changeRatio("1", "1.00005"), "0.01")
+        XCTAssertEqual(Trading.changeRatio("8", "9"), "12.50")
+        XCTAssertEqual(Trading.changeRatio("100", "100"), "0.00")
     }
 
     func testMovingAverageWaitsForNBarsAndSkipsGaps() {
@@ -217,7 +226,39 @@ final class TradingTests: XCTestCase {
         XCTAssertEqual(Trading.historyPath("ALL"), "/v1/trading/portfolio/history?range=ALL")
     }
 
+    func testAChartIsThinnedOnceWithItsAveragesOverEveryBar() {
+        let bars = (0..<1000).map { i in ChartBar(open: Double(i), high: Double(i) + 2, low: Double(i) - 1, close: Double(i) + 1, volume: 1) }
+        let series = ChartSeries(bars, averages: [50])
+        XCTAssertEqual(series.count, 1000)
+        XCTAssertEqual(series.bars.count, ChartSeries.maxPoints)
+        XCTAssertEqual(series.bars.first?.open, 0)
+        XCTAssertEqual(series.bars.last?.close, 1000)
+        XCTAssertEqual(series.bars.first?.high, Double(1000 / 180) + 1)
+        XCTAssertEqual(series.bars.map { $0.volume ?? 0 }.reduce(0, +), 1000)
+        XCTAssertEqual(series.averages[50]?.count, ChartSeries.maxPoints)
+        XCTAssertEqual(series.averages[50]?.last ?? nil, Trading.movingAverage(bars.map { Optional($0.close) }, 50).last ?? nil)
+        XCTAssertEqual(series.low, -1)
+        XCTAssertEqual(series.high, 1001)
+        XCTAssertTrue(series.hasVolume)
+        let short = ChartSeries(Array(bars.prefix(10)))
+        XCTAssertEqual(short.bars, Array(bars.prefix(10)))
+        XCTAssertEqual(Trading.buckets(1000, max: 180).map(\.count).reduce(0, +), 1000)
+    }
+
+    func testAHoldingIsReadAsTypedWithADecimalComma() {
+        XCTAssertEqual(Trading.newHolding(symbol: " aapl ", quantity: "12,5", avgCost: " 101.50 "),
+                       NewHolding(symbol: "AAPL", quantity: "12.5", avg_cost: "101.50"))
+        XCTAssertEqual(Trading.newHolding(symbol: "asml", quantity: "3", avgCost: "612,4")?.avg_cost, "612.4")
+        for (symbol, quantity, cost) in [("", "1", "1"), ("A", "1.234,5", "1"), ("A", "1,2,3", "1"), ("A", "abc", "1"), ("A", "1", "")] {
+            XCTAssertNil(Trading.newHolding(symbol: symbol, quantity: quantity, avgCost: cost), "\(symbol) \(quantity) \(cost)")
+        }
+    }
+
     func testHoldingsNeedSafeIdsAndRefusalsGetFixedWording() throws {
+        for error in [JarvisAPIError.invalidResponse, .responseTooLarge] {
+            XCTAssertEqual(Trading.holdingFailureText(error, adding: true), "Not confirmed; reloaded to check.")
+            XCTAssertEqual(Trading.holdingFailureText(error, adding: false), "Not confirmed; reloaded to check.")
+        }
         let holding: [String: Any] = ["id": "h-1", "symbol": "AAPL", "quantity": "2", "avg_cost": "100", "currency": "USD",
                                       "cost_basis": "200", "weight_pct": "100"]
         let list = try JSONDecoder().decode(HoldingList.self, from: json(["holdings": [holding], "total_cost": "200"]))
