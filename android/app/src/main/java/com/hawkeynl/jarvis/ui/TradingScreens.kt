@@ -78,7 +78,9 @@ import com.hawkeynl.jarvis.network.formatDecimal
 import com.hawkeynl.jarvis.network.formatMoney
 import com.hawkeynl.jarvis.network.formatPercent
 import com.hawkeynl.jarvis.network.formatPrice
+import com.hawkeynl.jarvis.network.HOLDING_AMBIGUOUS
 import com.hawkeynl.jarvis.network.HOLDING_NUMBER_RULE
+import com.hawkeynl.jarvis.network.holdingIssue
 import com.hawkeynl.jarvis.network.holdingNumber
 import com.hawkeynl.jarvis.network.holdingsErrorText
 import com.hawkeynl.jarvis.network.holdingsWriteText
@@ -836,15 +838,15 @@ fun HoldingsScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
             ListSection("Manual positions") {
                 Column(Modifier.padding(JvSpace.lg), verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
                     HoldingField("Symbol (AAPL)", "Symbol", symbol, KeyboardType.Text) { symbol = it }
-                    val invalid = error == HOLDING_NUMBER_RULE
-                    HoldingField("Quantity", "Quantity", quantity, KeyboardType.Decimal, invalid && holdingNumber(quantity) == null) { quantity = it }
-                    HoldingField("Avg. cost", "Average cost", avgCost, KeyboardType.Decimal, invalid && holdingNumber(avgCost) == null) { avgCost = it }
+                    val invalid = error == HOLDING_NUMBER_RULE || error == HOLDING_AMBIGUOUS
+                    HoldingField("Quantity", "Quantity", quantity, KeyboardType.Decimal, if (invalid) holdingIssue(quantity) else null) { quantity = it }
+                    HoldingField("Avg. cost", "Average cost", avgCost, KeyboardType.Decimal, if (invalid) holdingIssue(avgCost) else null) { avgCost = it }
                     ActionButton("Add", {
                         val s = symbol.trim()
                         val q = holdingNumber(quantity)
                         val a = holdingNumber(avgCost)
                         if (q == null || a == null) {
-                            error = HOLDING_NUMBER_RULE
+                            error = holdingIssue(quantity) ?: holdingIssue(avgCost)
                         } else {
                             write({ e, t -> addHolding(e, t, s, q, a) }) { symbol = ""; quantity = ""; avgCost = "" }
                         }
@@ -914,12 +916,12 @@ fun HoldingsScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
 }
 
 @Composable
-private fun HoldingField(placeholder: String, label: String, value: String, keyboard: KeyboardType, invalid: Boolean = false, onChange: (String) -> Unit) {
+private fun HoldingField(placeholder: String, label: String, value: String, keyboard: KeyboardType, issue: String? = null, onChange: (String) -> Unit) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
-        modifier = Modifier.fillMaxWidth().semantics { if (invalid) error(HOLDING_NUMBER_RULE) },
-        isError = invalid,
+        modifier = Modifier.fillMaxWidth().semantics { if (issue != null) error(issue) },
+        isError = issue != null,
         label = { Text(label) },
         placeholder = { Text(placeholder) },
         keyboardOptions = KeyboardOptions(keyboardType = keyboard),
