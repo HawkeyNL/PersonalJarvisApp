@@ -8,10 +8,10 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -57,8 +57,11 @@ class MemecoinApiTest {
         assertEquals(JsonPrimitive(true), answer.jsonObject["paused"])
         assertEquals(HttpMethod.Post, pEngine.requestHistory.single().method)
         assertEquals("/v1/trading/meme/pause", pEngine.requestHistory.single().url.encodedPath)
-        // A non-JSON answer reads as nothing, which never confirms.
-        assertEquals(ApiResult.Success(JsonNull), api(body = "ok").first.memePause(endpoint, "t"))
+        // An answer that is not Core's confirmation never confirms.
+        for (body in listOf("ok", "", "{}", """{"paused":"true"}""")) {
+            val raw = api(body = body).first.memePause(endpoint, "t")
+            assertFalse(body, pauseOutcome(raw, "now").ok)
+        }
         assertEquals(ApiResult.HttpError(503, null), api(HttpStatusCode.ServiceUnavailable).first.memePause(endpoint, "t"))
 
         val (disable, dEngine) = api(body = """{"strategy_id":"a-survivor-momentum","enabled":false}""")
