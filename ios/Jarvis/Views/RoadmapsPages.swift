@@ -288,7 +288,7 @@ struct RoadmapPage: View {
             }
         }
         .sheet(item: $sheet) { state in itemSheet(state) }
-        .sheet(isPresented: $editing) {
+        .sheet(isPresented: $editing, onDismiss: { notice = nil }) {
             if let found {
                 EditRoadmapSheet(roadmap: found.roadmap, items: found.items, busy: busy, notice: editNotice) { patch, revision in
                     await saveRoadmap(patch, revision: revision)
@@ -367,7 +367,7 @@ struct RoadmapPage: View {
             }
             ForEach(list.proposals) { proposal in proposalCard(proposal, value) }
         case .unsupported, .error:
-            UnavailableState(title: "Could not load proposals", kind: .error, detail: Roadmaps.readFailureText(failure(proposals)),
+            UnavailableState(title: "Could not load proposals", kind: .error, detail: Roadmaps.readFailureText(failure(proposals), missing: "proposals"),
                              symbol: "map", action: UnavailableState.Action(label: "Try again", run: load))
         }
     }
@@ -379,19 +379,23 @@ struct RoadmapPage: View {
                             : Badge(text: "Pending", dot: false))
             Text(verbatim: "made \(Roadmaps.timeText(proposal.created_at)) · expires \(Roadmaps.timeText(proposal.expires_at))")
                 .font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
-            if let rationale = Memecoin.plain(proposal.rationale) {
-                Text(verbatim: "Jarvis's reason: \(rationale)").font(JV.font(13)).foregroundStyle(JV.textPrimary)
+            let rationale = Roadmaps.shownText(proposal.rationale, multiline: true)
+            if let text = rationale.text {
+                Text(verbatim: "Jarvis's reason: \(text)").font(JV.font(13)).foregroundStyle(JV.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            // The stored text holds characters that are not shown, so it differs from what reads here.
+            if rationale.hidden { Badge(text: "Contains hidden characters", style: .negative, dot: false) }
             ForEach(Array(proposal.ops.enumerated()), id: \.offset) { _, op in
                 let view = Roadmaps.describe(op, items: value.items)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: JV.Space.xs) {
                         Badge(text: view.create ? "New item" : "Change", style: view.create ? .accent : .neutral, dot: false)
-                        Text(verbatim: Memecoin.plain(view.title) ?? "—").font(JV.font(14, .semibold)).foregroundStyle(JV.textPrimary)
+                        Text(verbatim: view.title.isEmpty ? "—" : view.title).font(JV.font(14, .semibold)).foregroundStyle(JV.textPrimary)
                     }
+                    if view.hidden { Badge(text: "Contains hidden characters", style: .negative, dot: false) }
                     ForEach(Array(view.rows.enumerated()), id: \.offset) { _, row in
-                        Text(verbatim: "\(row.field): \(Memecoin.plain(row.before) ?? "—") → \(Memecoin.plain(row.after) ?? "—")").font(JV.font(13)).foregroundStyle(JV.textSecondary)
+                        Text(verbatim: "\(row.field): \(row.before) → \(row.after)").font(JV.font(13)).foregroundStyle(JV.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -428,7 +432,7 @@ struct RoadmapPage: View {
                 Text("The 50 newest changes.").font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
             }
         case .unsupported, .error:
-            UnavailableState(title: "Could not load the history", kind: .error, detail: Roadmaps.readFailureText(failure(history)),
+            UnavailableState(title: "Could not load the history", kind: .error, detail: Roadmaps.readFailureText(failure(history), missing: "history"),
                              symbol: "clock", action: UnavailableState.Action(label: "Try again", run: loadHistory))
         }
     }
@@ -619,6 +623,7 @@ struct RoadmapPage: View {
     /// elsewhere.
     private func saveRoadmap(_ patch: RoadmapPatch, revision: Int) async -> Bool {
         if await write(revision: revision, { try await model.updateRoadmap(id, revision: $0, patch: patch) }) {
+            notice = nil
             editNotice = nil
             return true
         }

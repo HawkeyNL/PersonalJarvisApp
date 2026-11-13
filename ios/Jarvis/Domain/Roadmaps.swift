@@ -368,6 +368,25 @@ enum Roadmaps {
         return value.unicodeScalars.allSatisfy { (multiline && ($0 == "\n" || $0 == "\t")) || !isHidden($0) }
     }
 
+    /// Jarvis-written text as shown: Core's hidden characters and other format characters
+    /// dropped, tabs as spaces, line breaks kept when `multiline` (single-line text reads them
+    /// as spaces). `hidden` says something was dropped: the stored text differs from what is shown.
+    static func shownText(_ raw: String?, multiline: Bool = false) -> (text: String?, hidden: Bool) {
+        guard let raw else { return (nil, false) }
+        var out = String.UnicodeScalarView()
+        var hidden = false
+        for scalar in raw.unicodeScalars {
+            if scalar == "\t" || (scalar == "\n" && !multiline) {
+                out.append(" ")
+            } else if scalar != "\n" && (isHidden(scalar) || scalar.properties.generalCategory == .format) {
+                hidden = true
+            } else {
+                out.append(scalar)
+            }
+        }
+        return (out.isEmpty ? nil : String(out), hidden)
+    }
+
     /// Phases typed one per line: trimmed, blank lines dropped. Nil when they break Core's
     /// rule (at most 20 distinct names of 1 to 60 characters).
     static func parsePhases(_ text: String) -> [String]? {
@@ -583,14 +602,18 @@ enum Roadmaps {
     }
 
     struct DiffRow: Equatable { let field: String; let before: String; let after: String }
-    struct OpView: Equatable { let create: Bool; let title: String; let rows: [DiffRow] }
+    /// `hidden`: Jarvis's text held characters that are not shown (see `shownText`).
+    struct OpView: Equatable { let create: Bool; let title: String; let rows: [DiffRow]; var hidden = false }
 
     /// One proposal operation as before → after rows, in the roadmap's words.
     static func describe(_ op: RoadmapProposal.Op, items: [RoadmapItem]) -> OpView {
         let none = "—"
         let byId = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        func text(_ value: String?) -> String { value.flatMap { $0.isEmpty ? nil : $0 } ?? none }
-        func deps(_ ids: [String]?) -> String { ids.flatMap { $0.isEmpty ? nil : $0.map { byId[$0]?.title ?? "Unknown item" }.joined(separator: ", ") } ?? none }
+        func text(_ value: String?, multiline: Bool = false) -> String { shownText(value, multiline: multiline).text ?? none }
+        func hidden(_ f: RoadmapFields) -> Bool {
+            shownText(f.title).hidden || shownText(f.phase).hidden || shownText(f.notes, multiline: true).hidden
+        }
+        func deps(_ ids: [String]?) -> String { ids.flatMap { $0.isEmpty ? nil : $0.map { text(byId[$0]?.title ?? "Unknown item") }.joined(separator: ", ") } ?? none }
         func links(_ list: [RoadmapLink]?) -> String { list.flatMap { $0.isEmpty ? nil : $0.map(linkLabel).joined(separator: ", ") } ?? none }
         func fieldValue(_ field: RoadmapFields.Field, _ f: RoadmapFields) -> String {
             switch field {
@@ -598,7 +621,7 @@ enum Roadmaps {
             case .status: f.status?.label ?? none
             case .phase: text(f.phase)
             case .position: f.position.map(String.init) ?? none
-            case .notes: text(f.notes)
+            case .notes: text(f.notes, multiline: true)
             case .depends_on: deps(f.depends_on)
             case .links: links(f.links)
             }
@@ -609,7 +632,7 @@ enum Roadmaps {
             case .status: item.status.label
             case .phase: text(item.phase)
             case .position: String(item.position)
-            case .notes: text(item.notes)
+            case .notes: text(item.notes, multiline: true)
             case .depends_on: deps(item.depends_on)
             case .links: links(item.links)
             }
@@ -620,12 +643,12 @@ enum Roadmaps {
                 .map { field in
                     DiffRow(field: fieldLabel(field), before: none, after: field == .status ? (item.status ?? .planned).label : fieldValue(field, item))
                 }
-            return OpView(create: true, title: item.title ?? "", rows: rows)
+            return OpView(create: true, title: shownText(item.title).text ?? "", rows: rows, hidden: hidden(item))
         case let .update(itemId, patch):
             let current = byId[itemId]
             let rows = RoadmapFields.Field.allCases.filter { patch.present.contains($0) }
                 .map { field in DiffRow(field: fieldLabel(field), before: current.map { itemValue(field, $0) } ?? none, after: fieldValue(field, patch)) }
-            return OpView(create: false, title: current?.title ?? "An item that no longer exists", rows: rows)
+            return OpView(create: false, title: current.map { text($0.title) } ?? "An item that no longer exists", rows: rows, hidden: hidden(patch))
         }
     }
 
@@ -691,10 +714,11 @@ enum Roadmaps {
         return "Not done. \(failureText(error))"
     }
 
-    /// Why a read failed, from the read's own outcome; nil is a Core without this route.
-    static func readFailureText(_ reason: LoadFailure?) -> String {
+    /// Why a read failed, from the read's own outcome; nil is a Core without this route,
+    /// which has no `missing` (roadmaps, proposals or history) yet.
+    static func readFailureText(_ reason: LoadFailure?, missing: String = "roadmaps") -> String {
         switch reason {
-        case nil: return "This Core has no roadmaps yet. Update Core on your Home Node."
+        case nil: return "This Core has no \(missing) yet. Update Core on your Home Node."
         case .network?: return "No answer from your Home Node. Check the connection."
         case .signin?: return "Your session is not valid. Sign in again from Settings."
         case .unavailable?: return "Core could not read the roadmaps just now. Try again in a minute."

@@ -79,6 +79,7 @@ import com.hawkeynl.jarvis.network.formatMoney
 import com.hawkeynl.jarvis.network.formatPercent
 import com.hawkeynl.jarvis.network.formatPrice
 import com.hawkeynl.jarvis.network.HOLDING_AMBIGUOUS
+import com.hawkeynl.jarvis.network.HOLDING_LEADING_ZERO
 import com.hawkeynl.jarvis.network.HOLDING_NUMBER_RULE
 import com.hawkeynl.jarvis.network.holdingIssue
 import com.hawkeynl.jarvis.network.holdingNumber
@@ -840,7 +841,7 @@ fun HoldingsScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
             ListSection("Manual positions") {
                 Column(Modifier.padding(JvSpace.lg), verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
                     HoldingField("Symbol (AAPL)", "Symbol", symbol, KeyboardType.Text) { symbol = it }
-                    val invalid = error == HOLDING_NUMBER_RULE || error == HOLDING_AMBIGUOUS
+                    val invalid = error == HOLDING_NUMBER_RULE || error == HOLDING_AMBIGUOUS || error == HOLDING_LEADING_ZERO
                     HoldingField("Quantity", "Quantity", quantity, KeyboardType.Decimal, if (invalid) holdingIssue(quantity) else null) { quantity = it }
                     HoldingField("Avg. cost", "Average cost", avgCost, KeyboardType.Decimal, if (invalid) holdingIssue(avgCost) else null) { avgCost = it }
                     ActionButton("Add", {

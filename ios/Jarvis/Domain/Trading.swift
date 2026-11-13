@@ -538,7 +538,7 @@ enum Trading {
     /// is not a plain decimal number.
     static func newHolding(symbol: String, quantity: String, avgCost: String) -> NewHolding? {
         func amount(_ text: String) -> String? {
-            guard !ambiguousAmount(text) else { return nil }
+            guard !ambiguousAmount(text), !leadingZero(text) else { return nil }
             var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if value.filter({ $0 == "," }).count == 1 && !value.contains(".") { value = value.replacingOccurrences(of: ",", with: ".") }
             return parse(value) != nil && value.count <= 64 ? value : nil
@@ -549,12 +549,24 @@ enum Trading {
     }
 
     /// "1,234" or "1.234": a thousands group or a decimal, so it is refused both ways.
-    /// "01,234" (a leading zero before more digits) reads the same way, so it is refused too.
     static func ambiguousAmount(_ text: String) -> Bool {
-        text.trimmingCharacters(in: .whitespacesAndNewlines).wholeMatch(of: #/-?(?:[1-9][0-9]{0,2}|0[0-9]{1,2})[.,][0-9]{3}/#) != nil
+        text.trimmingCharacters(in: .whitespacesAndNewlines).wholeMatch(of: #/-?[1-9][0-9]{0,2}[.,][0-9]{3}/#) != nil
+    }
+
+    /// "00.5" or "01,234": a leading zero before more digits, refused with its own message.
+    static func leadingZero(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).prefixMatch(of: #/-?0[0-9]+[.,]/#) != nil
     }
 
     static let ambiguousAmountText = "Ambiguous amount: write 1234, or 1.2340 for a decimal."
+    static let leadingZeroText = "Remove the leading zero, like 0.5 or 1234."
+
+    /// Why `newHolding` refused the typed amounts.
+    static func holdingIssueText(quantity: String, avgCost: String) -> String {
+        if leadingZero(quantity) || leadingZero(avgCost) { return leadingZeroText }
+        if ambiguousAmount(quantity) || ambiguousAmount(avgCost) { return ambiguousAmountText }
+        return holdingInputText
+    }
 
     static let holdingInputText = "Enter a symbol, and the quantity and average cost as numbers, like 12 or 101,50."
 

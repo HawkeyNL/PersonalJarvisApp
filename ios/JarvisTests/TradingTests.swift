@@ -252,13 +252,22 @@ final class TradingTests: XCTestCase {
                        NewHolding(symbol: "AAPL", quantity: "12.5", avg_cost: "101.50"))
         XCTAssertEqual(Trading.newHolding(symbol: "asml", quantity: "3", avgCost: "612,4")?.avg_cost, "612.4")
         // Thousands-looking amounts are refused both ways; non-ASCII digits are no number.
-        for text in ["1,234", "1.234", "12,345", "1,000", "-1,234", " 123.456 ", "01,234", "00.123", "-012,345"] {
+        for text in ["1,234", "1.234", "12,345", "1,000", "-1,234", " 123.456 "] {
             XCTAssertTrue(Trading.ambiguousAmount(text), text)
             XCTAssertNil(Trading.newHolding(symbol: "A", quantity: text, avgCost: "1"), text)
             XCTAssertNil(Trading.newHolding(symbol: "A", quantity: "1", avgCost: text), text)
+            XCTAssertEqual(Trading.holdingIssueText(quantity: text, avgCost: "1"), "Ambiguous amount: write 1234, or 1.2340 for a decimal.")
         }
+        // A leading zero gets its own message.
+        for text in ["01,234", "00.123", "00.5", "-012,345", "-01,2"] {
+            XCTAssertTrue(Trading.leadingZero(text), text)
+            XCTAssertNil(Trading.newHolding(symbol: "A", quantity: text, avgCost: "1"), text)
+            XCTAssertNil(Trading.newHolding(symbol: "A", quantity: "1", avgCost: text), text)
+            XCTAssertEqual(Trading.holdingIssueText(quantity: "1", avgCost: text), "Remove the leading zero, like 0.5 or 1234.")
+        }
+        XCTAssertEqual(Trading.holdingIssueText(quantity: "abc", avgCost: "1"), Trading.holdingInputText)
         for (text, read) in [("12,5", "12.5"), ("0,125", "0.125"), ("1,2345", "1.2345"), ("1.5", "1.5"), ("1234", "1234"), ("1.2340", "1.2340")] {
-            XCTAssertFalse(Trading.ambiguousAmount(text), text)
+            XCTAssertFalse(Trading.ambiguousAmount(text) || Trading.leadingZero(text), text)
             XCTAssertEqual(Trading.newHolding(symbol: "A", quantity: text, avgCost: "1")?.quantity, read, text)
         }
         XCTAssertNil(Trading.newHolding(symbol: "A", quantity: "\u{0661}\u{0662}", avgCost: "1"), "Arabic-Indic digits")
