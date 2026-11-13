@@ -243,8 +243,8 @@ actor JarvisAPIClient {
     }
 
     // The only bearer-only DELETEs: this device's own APNs push target, the owner's own chat
-    // data (a conversation, a photo) and manual holdings. A device is revoked with a signed
-    // approval, never with a bearer-only DELETE.
+    // data (a conversation, a photo), roadmap items and manual holdings. A device is revoked
+    // with a signed approval, never with a bearer-only DELETE.
     func deletePushTarget(token: String, expectedBinding: UUID) async throws {
         try await delete("/v1/devices/self/push", token: token, expectedBinding: expectedBinding)
     }
@@ -286,6 +286,30 @@ actor JarvisAPIClient {
     func runJobNow(id: UUID, token: String, expectedBinding: UUID) async throws {
         _ = try await request(path: "/v1/jobs/\(id.uuidString.lowercased())/run", method: "POST", body: [String: String](),
                               token: token, expectedBinding: expectedBinding, limit: 64 * 1024, response: EmptyOrJSON.self)
+    }
+
+    // Roadmaps (desktop roadmapsApi.ts). Each write names the revision it builds on; Core
+    // answers 409 when the roadmap moved on. The answers are not needed: the page reloads.
+    func createRoadmap(_ body: NewRoadmap, token: String, expectedBinding: UUID) async throws {
+        _ = try await request(path: "/v1/roadmaps", method: "POST", body: body, token: token,
+                              expectedBinding: expectedBinding, response: EmptyOrJSON.self)
+    }
+
+    func createRoadmapItem(roadmap: UUID, revision: Int, item: NewRoadmapItem, token: String, expectedBinding: UUID) async throws {
+        _ = try await request(path: "\(Roadmaps.path(roadmap))/items?expected_revision=\(revision)", method: "POST", body: item,
+                              token: token, expectedBinding: expectedBinding, response: EmptyOrJSON.self)
+    }
+
+    func updateRoadmapItem(roadmap: UUID, revision: Int, item: String, patch: RoadmapItemPatch,
+                           token: String, expectedBinding: UUID) async throws {
+        guard isSafePathSegment(item) else { throw JarvisAPIError.invalidConfiguration }
+        _ = try await request(path: "\(Roadmaps.path(roadmap))/items/\(item)?expected_revision=\(revision)", method: "PATCH",
+                              body: patch, token: token, expectedBinding: expectedBinding, response: EmptyOrJSON.self)
+    }
+
+    func deleteRoadmapItem(roadmap: UUID, revision: Int, item: String, token: String, expectedBinding: UUID) async throws {
+        guard isSafePathSegment(item) else { throw JarvisAPIError.invalidConfiguration }
+        try await delete("\(Roadmaps.path(roadmap))/items/\(item)?expected_revision=\(revision)", token: token, expectedBinding: expectedBinding)
     }
 
     // Manual holdings (desktop portfolio.ts). The answers are not needed: the page reloads.

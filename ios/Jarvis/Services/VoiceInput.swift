@@ -35,8 +35,8 @@ enum VoiceInputRules {
         max(previous * 0.7, min(1, rms * 4))
     }
 
-    static func isQuiet(since lastSpeech: Date, now: Date) -> Bool {
-        now.timeIntervalSince(lastSpeech) >= silence
+    static func isQuiet(since lastSpeech: Date, now: Date, after quiet: TimeInterval = silence) -> Bool {
+        now.timeIntervalSince(lastSpeech) >= quiet
     }
 
     /// The draft with the recognised words added after it.
@@ -97,14 +97,20 @@ final class VoiceInput {
     @ObservationIgnored private var deliver: ((String) -> Void)?
     /// The silence watch while listening, the finish timeout after.
     @ObservationIgnored private var timer: Task<Void, Never>?
+    /// The rules' timings; tests shorten them, nothing can lengthen them.
+    @ObservationIgnored private let silence: TimeInterval
+    @ObservationIgnored private let finishTimeout: Duration
 
     private static let serverNoticeKey = "jarvis.voice.serverNoticeShown"
 
     convenience init() { self.init(capture: SpeechCapture(), defaults: .standard) }
 
-    init(capture: VoiceCapture, defaults: UserDefaults) {
+    init(capture: VoiceCapture, defaults: UserDefaults, silence: TimeInterval = VoiceInputRules.silence,
+         finishTimeout: Duration = VoiceInputRules.finishTimeout) {
         self.capture = capture
         self.defaults = defaults
+        self.silence = min(max(silence, 0.1), VoiceInputRules.silence)
+        self.finishTimeout = min(max(finishTimeout, .milliseconds(100)), VoiceInputRules.finishTimeout)
         available = capture.isAvailable
         capture.availabilityChanged = { [weak self] available in self?.available = available }
     }
@@ -169,8 +175,9 @@ final class VoiceInput {
         release()
         finishing = true
         let generation = session.id
+        let wait = finishTimeout
         timer = Task { [weak self] in
-            try? await Task.sleep(for: VoiceInputRules.finishTimeout)
+            try? await Task.sleep(for: wait)
             guard !Task.isCancelled, let self, self.session.accepts(generation) else { return }
             self.finish()
         }
@@ -182,7 +189,7 @@ final class VoiceInput {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled, let self, self.listening, self.session.accepts(generation) else { return }
-                if VoiceInputRules.isQuiet(since: self.lastSpeech, now: Date()) {
+                if VoiceInputRules.isQuiet(since: self.lastSpeech, now: Date(), after: self.silence) {
                     self.stop()
                     return
                 }

@@ -234,7 +234,7 @@ enum AppTab: String, CaseIterable, Hashable {
     /// screens draw their rows from this list.
     var links: [HubRoute] {
         switch self {
-        case .jarvis: [.chat, .voice, .conversations, .memory]
+        case .jarvis: [.chat, .voice, .conversations, .memory, .roadmaps]
         case .trading: []
         case .activity: [.tasks, .agents, .jobs]
         case .settings: [.health, .healthUsage, .integrations, .models, .context]
@@ -247,7 +247,7 @@ func tabDestination(_ route: HubRoute) -> (tab: AppTab, path: [HubRoute]) {
     switch route {
     case .settings: (.settings, [])
     case .pairingApprovals: (.activity, [])
-    case .chat, .voice, .conversations, .memory: (.jarvis, [route])
+    case .chat, .voice, .conversations, .memory, .roadmaps: (.jarvis, [route])
     case .tasks, .agents, .jobs: (.activity, [route])
     case .health, .healthUsage, .integrations, .models, .context: (.settings, [route])
     }
