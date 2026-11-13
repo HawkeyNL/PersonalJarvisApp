@@ -1,19 +1,12 @@
 package com.hawkeynl.jarvis.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.hawkeynl.jarvis.network.Availability
 import com.hawkeynl.jarvis.network.LoadFailure
@@ -120,7 +113,7 @@ fun IntegrationsScreen(data: CoreData, onNavigate: (Screen) -> Unit, onRefresh: 
     }
 }
 
-/** The IBKR link from GET /v1/trading/portfolio, on Integrations and the Trading tab. */
+/** The IBKR link from GET /v1/trading/portfolio, on Integrations. */
 @Composable
 fun IbkrDetails(data: CoreData, onRetry: (() -> Unit)? = null) {
     if (data.ibkr == Availability.Failed(LoadFailure.UNAVAILABLE)) {
@@ -138,27 +131,6 @@ fun IbkrDetails(data: CoreData, onRetry: (() -> Unit)? = null) {
             ListDivider()
             FactRow("Access", "Read-only")
         }
-    }
-}
-
-/** The Trading tab: the read-only IBKR link Core reports today. Dashboards, proposals
- *  and orders are not built yet, so the tab says so instead of showing sample data. */
-@Composable
-fun TradingScreen(data: CoreData, onRefresh: () -> Unit) {
-    LaunchedEffect(Unit) { onRefresh() }
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(JvSpace.lg),
-        verticalArrangement = Arrangement.spacedBy(JvSpace.xl),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TabTitle("Trading", "Your read-only link to Interactive Brokers", Modifier.weight(1f))
-            GhostButton("Refresh", onRefresh)
-        }
-        IbkrDetails(data, onRefresh)
-        Unavailable(
-            "Dashboard and proposals", JvIcon.TREND,
-            detail = "Coming soon: totals per pot, trade proposals to approve and orders. Today Jarvis only reads from IBKR; it never places orders.",
-        )
     }
 }
 

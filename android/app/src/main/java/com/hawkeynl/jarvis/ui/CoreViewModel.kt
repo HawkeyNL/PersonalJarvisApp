@@ -92,7 +92,6 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
     private val pairing = source("/v1/auth/pairing/requests", PairingRequestList.serializer()) { copy(pairing = it) }
 
     fun refreshHome() = refresh("home", pending, ibkr)
-    fun refreshTrading() = refresh("trading", ibkr)
     fun refreshActivity() = refresh("activity", pending, sessions, agentAudit, agents)
     fun refreshSettings() = refresh("settings", registry, devices, services)
     fun refreshAgents() = refresh("agents", agents)

@@ -15,6 +15,7 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
+import io.ktor.client.request.prepareDelete
 import io.ktor.client.request.prepareGet
 import io.ktor.client.request.preparePatch
 import io.ktor.client.request.preparePost
@@ -352,6 +353,75 @@ class KtorJarvisApi(
     override suspend fun deleteConversation(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> {
         if (!CONVERSATION_ID.matches(id)) return ApiResult.InvalidResponse("Invalid conversation id")
         return request<Unit> { client.delete(endpoint.url("/v1/conversations/$id")) { bearerAuth(token) } }
+    }
+
+    override suspend fun portfolio(endpoint: HomeNodeEndpoint, token: String) =
+        jobCall({ requireNotNull(readPortfolio(it)) }) { client.prepareGet(endpoint.url("/v1/trading/portfolio")) { bearerAuth(token) } }
+
+    override suspend fun valueHistory(endpoint: HomeNodeEndpoint, token: String, range: String): ApiResult<PortfolioHistory> {
+        if (range !in HISTORY_RANGES) return ApiResult.InvalidResponse("Invalid range")
+        return jobCall({ requireNotNull(readValueHistory(it)) }) {
+            client.prepareGet(endpoint.url("/v1/trading/portfolio/history")) { bearerAuth(token); parameter("range", range) }
+        }
+    }
+
+    override suspend fun instrumentBars(endpoint: HomeNodeEndpoint, token: String, conid: Long, range: String): ApiResult<InstrumentBars> {
+        if (parseConid(conid.toString()) == null || range !in BAR_RANGES) return ApiResult.InvalidResponse("Invalid instrument request")
+        return jobCall({ requireNotNull(readBars(it)) }) {
+            client.prepareGet(endpoint.url("/v1/trading/instruments/$conid/bars")) { bearerAuth(token); parameter("range", range) }
+        }
+    }
+
+    override suspend fun holdings(endpoint: HomeNodeEndpoint, token: String) =
+        jobCall({ requireNotNull(readHoldings(it)) }) { client.prepareGet(endpoint.url("/v1/holdings")) { bearerAuth(token) } }
+
+    override suspend fun addHolding(endpoint: HomeNodeEndpoint, token: String, symbol: String, quantity: String, avgCost: String): ApiResult<Unit> {
+        val body = buildJsonObject { put("symbol", symbol); put("quantity", quantity); put("avg_cost", avgCost) }
+        // Only the status matters; the body is read within the bound and dropped.
+        return jobCall({ }) {
+            client.preparePost(endpoint.url("/v1/holdings")) { bearerAuth(token); setBody(TextContent(body.toString(), ContentType.Application.Json)) }
+        }
+    }
+
+    override suspend fun deleteHolding(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> {
+        if (!isHoldingId(id)) return ApiResult.InvalidResponse("Invalid holding id")
+        return jobCall({ }) { client.prepareDelete(endpoint.url("/v1/holdings/$id")) { bearerAuth(token) } }
+    }
+
+    override suspend fun memeOverview(endpoint: HomeNodeEndpoint, token: String) =
+        jobCall({ requireNotNull(readOverview(it)) }) { client.prepareGet(endpoint.url("/v1/trading/meme/overview")) { bearerAuth(token) } }
+
+    override suspend fun memeCandidates(endpoint: HomeNodeEndpoint, token: String) = jobCall({ requireNotNull(readCandidates(it)) }) {
+        client.prepareGet(endpoint.url("/v1/trading/meme/candidates")) { bearerAuth(token); parameter("limit", MEME_LIST_LIMIT) }
+    }
+
+    override suspend fun memeTrades(endpoint: HomeNodeEndpoint, token: String) = jobCall({ requireNotNull(readTrades(it)) }) {
+        client.prepareGet(endpoint.url("/v1/trading/meme/trades")) { bearerAuth(token); parameter("limit", MEME_LIST_LIMIT) }
+    }
+
+    override suspend fun memePause(endpoint: HomeNodeEndpoint, token: String) = jobCall({ it }) {
+        client.preparePost(endpoint.url("/v1/trading/meme/pause")) { bearerAuth(token); setBody(TextContent("{}", ContentType.Application.Json)) }
+    }
+
+    override suspend fun memeStrategies(endpoint: HomeNodeEndpoint, token: String) =
+        jobCall({ requireNotNull(readStrategies(it)) }) { client.prepareGet(endpoint.url("/v1/trading/meme/strategies")) { bearerAuth(token) } }
+
+    override suspend fun memeStrategy(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<StrategyDetail> {
+        if (!isStrategyId(id)) return ApiResult.InvalidResponse("Invalid strategy id")
+        return jobCall({ requireNotNull(readStrategy(it, id)) }) { client.prepareGet(endpoint.url("/v1/trading/meme/strategies/$id")) { bearerAuth(token) } }
+    }
+
+    override suspend fun memeDecisions(endpoint: HomeNodeEndpoint, token: String) = jobCall({ requireNotNull(readDecisions(it)) }) {
+        client.prepareGet(endpoint.url("/v1/trading/meme/decisions")) { bearerAuth(token); parameter("limit", MEME_LIST_LIMIT) }
+    }
+
+    override suspend fun memeDisable(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<JsonElement> {
+        if (!isStrategyId(id)) return ApiResult.InvalidResponse("Invalid strategy id")
+        return jobCall({ it }) {
+            client.preparePost(endpoint.url("/v1/trading/meme/strategies/$id/disable")) {
+                bearerAuth(token); setBody(TextContent("{}", ContentType.Application.Json))
+            }
+        }
     }
 
     override suspend fun jobs(endpoint: HomeNodeEndpoint, token: String) =
