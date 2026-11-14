@@ -14,6 +14,9 @@ import { startRealtime, type RealtimeEvent, type CanonicalMessage } from "./real
 import { mergeCanonical, appendVisualDelta, dropFailedRun, runRequest } from "./realtimeProjection";
 import { PendingRuns } from "./pendingRuns";
 import { offerFrom, type ResearchOffer } from "./researchOffer";
+import { addJob, readProposals, withProposals, type ProposalCard } from "./jobProposals";
+import { todayInZone, type NewJob } from "./jobs";
+import { jobApi } from "./jobsApi";
 import { isWebModel, startsWebSearch } from "./webAnswer";
 import { chatSession } from "./chatSession";
 import { currentAuthStatus } from "./auth";
@@ -55,12 +58,16 @@ export const messages = ref<Msg[]>([]);
 export const thinking = ref(false); // true while the brain is generating a reply
 /** A web search Core advised after the last reply; only a click sends it. */
 export const researchOffer = ref<ResearchOffer|null>(null);
+/** Jobs answers in this conversation proposed; only Add or a saved edit makes one. */
+export const jobProposals = ref<ProposalCard[]>([]);
+// Each proposal shows once per session, also after a replayed event.
+const seenProposals=new Set<string>();
 let idc = 0;
 let realtimeAvailable=false;
 const pending=new PendingRuns();
 const reconciliation=new ReconcileLoop();
 let buffered:RealtimeEvent[]=[];
-chatSession.onReset(()=>{pending.clear();messages.value=[];thinking.value=false;researchOffer.value=null;buffered=[];reconciliation.reset();realtimeAvailable=false;});
+chatSession.onReset(()=>{pending.clear();messages.value=[];thinking.value=false;researchOffer.value=null;jobProposals.value=[];seenProposals.clear();buffered=[];reconciliation.reset();realtimeAvailable=false;});
 
 function upsertCanonical(message:CanonicalMessage,requestId?:string,runId?:string) {
   if(currentId.value!==message.conversation_id) return;
@@ -143,7 +150,11 @@ function receiveRealtime(event:RealtimeEvent) {
     case "assistant.completed":
       upsertCanonical(event.payload.message,undefined,event.payload.run.run_id);
       pending.delete(event.payload.run.request_id);
-      if(currentId.value===event.payload.run.conversation_id) {thinking.value=false;researchOffer.value=offerFrom(event.payload);}
+      if(currentId.value===event.payload.run.conversation_id) {
+        thinking.value=false;researchOffer.value=offerFrom(event.payload);
+        const proposals=readProposals(event.payload.job_proposals,todayInZone());
+        jobProposals.value=withProposals(jobProposals.value,seenProposals,proposals,event.payload.run.conversation_id,event.payload.message.id);
+      }
       break;
     case "assistant.failed": {
       const run=event.payload.run;
@@ -199,6 +210,7 @@ async function ask(epoch:number): Promise<ChatReply> {
 /** Load a conversation's history into the view and make it the current tab. */
 export async function openConversation(id: string): Promise<void> {
   researchOffer.value = null;
+  jobProposals.value = [];
   setCurrent(id);
   await reloadConversation(id);
 }
@@ -237,6 +249,28 @@ export function startNewConversation(): void {
   messages.value = [];
   thinking.value = false;
   researchOffer.value = null;
+  jobProposals.value = [];
+}
+
+/** Creates the proposed job: `body` is the proposal's own, or an edited one.
+ *  Never behind the lock or twice at once; a result for a session or
+ *  conversation the owner has left is dropped. */
+export async function addProposal(id: string, body?: NewJob): Promise<void> {
+  const card=jobProposals.value.find(c=>c.id===id);
+  if(!card || locked.value || card.state!=="open") return;
+  const epoch=chatSession.capture();
+  const conversation=currentId.value;
+  card.state="adding";
+  card.error="";
+  // Without an edit, the body goes exactly as Core sent it (checked by readProposals).
+  const result=await addJob(body ?? card.body as NewJob,jobApi.create);
+  if(!chatSession.current(epoch) || currentId.value!==conversation) return;
+  const now=jobProposals.value.find(c=>c.id===id);
+  if(now) Object.assign(now,result);
+}
+
+export function dismissProposal(id: string): void {
+  jobProposals.value=jobProposals.value.filter(c=>c.id!==id);
 }
 
 /** On launch, restore the tab list and reopen the last (or most recent) chat,
