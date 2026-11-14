@@ -114,15 +114,16 @@ fun proposalDetail(d: JobDraft): String? = when (d.kind) {
 
 data class AddResult(val state: ProposalState, val jobId: String?, val error: String)
 
-/** Sends [body] exactly as given. Only an HTTP refusal (4xx, or Core's 503 "not saved") lets
- *  the owner try again; anything else (a 2xx this build cannot read, no answer, a broken
- *  answer, a gateway 5xx, an answer the lock dropped: [create] gave null) is not confirmed
- *  and Add stays off, since the job may exist. [kind] picks the wording of a 409. */
+/** Sends [body] exactly as given. Only an HTTP refusal (4xx) lets the owner try again;
+ *  anything else (a 2xx this build cannot read, no answer, a broken answer, any 5xx, Core's
+ *  503 included since it also covers a timed-out write, an answer the lock dropped: [create]
+ *  gave null) is not confirmed and Add stays off, since the job may exist. [kind] picks the
+ *  wording of a 409. */
 suspend fun addJob(body: JsonObject, kind: JobKind, create: suspend (JsonObject) -> ApiResult<Job?>?): AddResult {
     val unconfirmed = AddResult(ProposalState.UNCONFIRMED, null, PROPOSAL_NOT_CONFIRMED)
     val result = create(body) ?: return unconfirmed
     val job = (result as? ApiResult.Success)?.value
-    val refused = result == ApiResult.Unauthorized || (result is ApiResult.HttpError && (result.status in 400..499 || result.status == 503))
+    val refused = result == ApiResult.Unauthorized || (result is ApiResult.HttpError && result.status in 400..499)
     return when {
         job != null -> AddResult(ProposalState.ADDED, job.id, "")
         !refused -> unconfirmed

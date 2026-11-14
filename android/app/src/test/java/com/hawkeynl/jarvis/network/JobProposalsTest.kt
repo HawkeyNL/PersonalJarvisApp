@@ -124,16 +124,16 @@ class JobProposalsTest {
         assertEquals(unconfirmed, addJob(prompt, JobKind.PROMPT) { ApiResult.InvalidResponse("Home Node sent an invalid answer") })
         assertEquals(unconfirmed, addJob(prompt, JobKind.PROMPT) { ApiResult.Unreachable(UnreachableReason.TIMEOUT) })
         assertEquals(unconfirmed, addJob(prompt, JobKind.PROMPT) { null })
-        for (status in listOf(500, 502, 504, 599, 302)) assertEquals("$status", unconfirmed, addJob(prompt, JobKind.PROMPT) { ApiResult.HttpError(status, null) })
+        for (status in listOf(500, 502, 503, 504, 599, 302)) assertEquals("$status", unconfirmed, addJob(prompt, JobKind.PROMPT) { ApiResult.HttpError(status, null) })
         assertEquals("Not confirmed: it may have been added.", PROPOSAL_NOT_CONFIRMED)
     }
 
-    @Test fun `a 409, 400 or other refusal lets the owner try again`() = runBlocking<Unit> {
+    @Test fun `a 409, 400 or other 4xx refusal lets the owner try again`() = runBlocking<Unit> {
         assertEquals(AddResult(ProposalState.OPEN, null, "Core refused this. $JOBS_FULL_TEXT"), addJob(prompt, JobKind.PROMPT) { ApiResult.HttpError(409, null) })
         assertEquals(AddResult(ProposalState.OPEN, null, PROPOSAL_INVALID), addJob(prompt, JobKind.PROMPT) { ApiResult.HttpError(400, null) })
-        val down = addJob(disk, JobKind.DISK_CHECK) { ApiResult.HttpError(503, null) }
-        assertEquals(ProposalState.OPEN, down.state)
-        assertTrue(down.error.startsWith("Not saved"))
+        val gone = addJob(disk, JobKind.DISK_CHECK) { ApiResult.HttpError(404, null) }
+        assertEquals(ProposalState.OPEN, gone.state)
+        assertTrue(gone.error.startsWith("Not saved"))
         for (refusal in listOf(ApiResult.HttpError(404, null), ApiResult.HttpError(429, null), ApiResult.Unauthorized)) {
             assertEquals("$refusal", ProposalState.OPEN, addJob(prompt, JobKind.PROMPT) { refusal }.state)
         }
