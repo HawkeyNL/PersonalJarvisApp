@@ -136,7 +136,7 @@ private fun AuthenticatedShell(
                 Screen.CONVERSATIONS -> ConversationsScreen(state, actions)
                 Screen.AGENTS -> AgentsScreen(data, navigate, core::refreshAgents)
                 Screen.TASKS -> TasksScreen(data, navigate, core::refreshTasks, agentApprovals)
-                Screen.INTEGRATIONS -> IntegrationsScreen(data, navigate, core::refreshIntegrations)
+                Screen.INTEGRATIONS -> IntegrationsScreen(data, navigate, core::refreshIntegrations, core::refreshIbkrStatus)
                 Screen.HEALTH -> key(state.healthNode) {
                     HealthScreen(state, data, navigate, core::refreshHealth, actions::checkConnection, modelControls, state.healthNode)
                 }

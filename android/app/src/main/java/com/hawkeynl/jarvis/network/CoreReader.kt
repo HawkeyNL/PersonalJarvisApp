@@ -25,4 +25,11 @@ class CoreReader(
             Availability.Failed(LoadFailure.FAILED)
         }
     }
+
+    /** GET /v1/trading/ibkr/status; 404/405 (an older Core) is [Availability.Unsupported]. */
+    suspend fun ibkrStatus(endpoint: HomeNodeEndpoint): Availability<IbkrStatus> {
+        val token = sessions.session().token ?: return Availability.Failed(LoadFailure.SIGNIN)
+        val result = api.ibkrStatus(endpoint, token)
+        return if (result is ApiResult.Success) Availability.Ok(result.value) else result.failure()
+    }
 }

@@ -1,14 +1,37 @@
 package com.hawkeynl.jarvis.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.dp
 import com.hawkeynl.jarvis.network.Availability
+import com.hawkeynl.jarvis.network.IbkrError
+import com.hawkeynl.jarvis.network.IbkrProblem
 import com.hawkeynl.jarvis.network.LoadFailure
 import com.hawkeynl.jarvis.network.valueOrNull
 
@@ -31,7 +54,7 @@ private val COST = mapOf("plan" to "Subscription", "metered" to "Pay per use", "
  *  policy and the IBKR link, one view at a time. Codex, GitHub and OpenSandbox are not
  *  reported by Core yet. */
 @Composable
-fun IntegrationsScreen(data: CoreData, onNavigate: (Screen) -> Unit, onRefresh: () -> Unit) {
+fun IntegrationsScreen(data: CoreData, onNavigate: (Screen) -> Unit, onRefresh: () -> Unit, onRefreshIbkr: () -> Unit) {
     LaunchedEffect(Unit) { onRefresh() }
     val policy = data.models.valueOrNull?.models.orEmpty()
     val allowed = policy.filter { it.enabled }
@@ -107,13 +130,117 @@ fun IntegrationsScreen(data: CoreData, onNavigate: (Screen) -> Unit, onRefresh: 
             "tools" -> Loaded(data.registry, "Host tools", JvIcon.SANDBOX, "Loading registry…", onRetry = onRefresh) { registry ->
                 ActivityList("Host tools", softwareRows(registry.software), "Core reported no host tools.")
             }
-            else -> IbkrDetails(data, onRefresh)
+            else -> IbkrPane(data, onRefresh, onRefreshIbkr)
         }
         LaterSection(LATER, "Core does not report Codex, GitHub or OpenSandbox to the app yet.")
     }
 }
 
-/** The IBKR link from GET /v1/trading/portfolio, on Integrations. */
+/** The IBKR pane from GET /v1/trading/ibkr/status; an older Core without it (404/405) keeps
+ *  the link inferred from the portfolio. Its Refresh re-reads the status only. */
+@Composable
+private fun IbkrPane(data: CoreData, onRefresh: () -> Unit, onRefreshStatus: () -> Unit) {
+    if (data.ibkrStatus == Availability.Unsupported) {
+        IbkrDetails(data, onRefresh)
+        return
+    }
+    Loaded(data.ibkrStatus, "IBKR", JvIcon.TREND, "Checking the IBKR link…", onRetry = onRefreshStatus) { s ->
+        val now = data.loadedAt
+        val (tone, label) = ibkrOverall(s)
+        ListSection("IBKR link") {
+            FactRow("Status", label, tone)
+            ListDivider()
+            val (brokerTone, broker) = ibkrBroker(s)
+            FactRow("Broker", broker, brokerTone)
+            ListDivider()
+            val (syncTone, sync) = ibkrSync(s)
+            FactRow("Portfolio sync", sync, syncTone)
+            ListDivider()
+            FactRow("Session token", ibkrToken(s.token, now))
+            ListDivider()
+            FactRow("Last successful sync", ibkrLastSync(s, now))
+            ibkrLastError(s)?.let {
+                ListDivider()
+                LastErrorRow(it, now)
+            }
+            s.ibkr?.let {
+                ListDivider()
+                FactRow("Brokerage session", ibkrBrokerage(it.brokerageSession))
+            }
+            ibkrRateLimit(s, now)?.let {
+                ListDivider()
+                FactRow("Rate limited until", it)
+            }
+        }
+        if (s.ibkr != null) MutedText("The brokerage session is only needed for charts.", Modifier.padding(horizontal = JvSpace.xs))
+        if (s.problems.isNotEmpty()) {
+            ListSection("What to fix") {
+                s.problems.forEachIndexed { i, problem ->
+                    if (i > 0) ListDivider()
+                    ProblemRow(problem)
+                }
+            }
+            MutedText("Run these yourself on the Home Node. Jarvis never runs them.", Modifier.padding(horizontal = JvSpace.xs))
+        }
+        GhostButton("Refresh", onRefreshStatus)
+    }
+}
+
+/** A [FactRow] whose code shows in monospace when this app has no label for it. */
+@Composable
+private fun LastErrorRow(error: IbkrError, now: Long) {
+    val label = ibkrErrorLabel(error.code)
+    val ago = relativeTime(error.at, now)
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 52.dp).semantics(mergeDescendants = true) {}.padding(horizontal = JvSpace.lg, vertical = JvSpace.md),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(JvSpace.lg),
+    ) {
+        Text("Last error", style = MaterialTheme.typography.bodyMedium)
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+            Text(
+                buildAnnotatedString {
+                    if (label != null) append(label) else withStyle(SpanStyle(fontFamily = PlexMono)) { append(error.code.orEmpty()) }
+                    if (ago.isNotEmpty()) append(" · $ago")
+                },
+                color = JvTheme.colors.textSecondary, textAlign = TextAlign.End, style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
+}
+
+/** Severity, Core's summary as plain text and each command to copy: selectable, never run,
+ *  linked or opened. */
+@Composable
+private fun ProblemRow(problem: IbkrProblem) {
+    val (tone, severity) = problemSeverity(problem.severity)
+    Column(Modifier.fillMaxWidth().padding(horizontal = JvSpace.lg, vertical = JvSpace.md), verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+        StatusBadge(severity, tone = tone)
+        Text(problem.summary ?: "Unknown", style = MaterialTheme.typography.bodyMedium)
+        problem.commands.forEach { CommandRow(it) }
+    }
+}
+
+@Composable
+private fun CommandRow(command: String) {
+    val context = LocalContext.current
+    var copied by remember(command) { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+        SelectionContainer(Modifier.weight(1f)) {
+            Text(command, fontFamily = PlexMono, style = MaterialTheme.typography.bodySmall)
+        }
+        GhostButton(
+            if (copied) "Copied" else "Copy",
+            {
+                context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Command", command))
+                copied = true
+            },
+            Modifier.semantics { contentDescription = "Copy command: $command" },
+        )
+    }
+}
+
+/** The IBKR link from GET /v1/trading/portfolio, on Integrations (older Core). */
 @Composable
 fun IbkrDetails(data: CoreData, onRetry: (() -> Unit)? = null) {
     if (data.ibkr == Availability.Failed(LoadFailure.UNAVAILABLE)) {

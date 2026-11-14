@@ -87,6 +87,8 @@ interface JarvisApi {
         ApiResult.InvalidResponse("Not supported")
     suspend fun instrumentBars(endpoint: HomeNodeEndpoint, token: String, conid: Long, range: String): ApiResult<InstrumentBars> =
         ApiResult.InvalidResponse("Not supported")
+    /** Health of the IBKR portfolio sync; the answer passes readIbkrStatus (CoreDtos.kt). */
+    suspend fun ibkrStatus(endpoint: HomeNodeEndpoint, token: String): ApiResult<IbkrStatus> = ApiResult.InvalidResponse("Not supported")
     suspend fun holdings(endpoint: HomeNodeEndpoint, token: String): ApiResult<Holdings> = ApiResult.InvalidResponse("Not supported")
     suspend fun addHolding(endpoint: HomeNodeEndpoint, token: String, symbol: String, quantity: String, avgCost: String): ApiResult<Unit> =
         ApiResult.InvalidResponse("Not supported")
