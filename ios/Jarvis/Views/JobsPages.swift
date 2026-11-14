@@ -63,18 +63,23 @@ struct JobsPage: View {
     @State private var last: [UUID: Availability<JobRun?>] = [:]
     @State private var open: UUID?
     @State private var creating = false
+    /// The kinds there was room for when "New job" was tapped: a reload behind the sheet,
+    /// failed or not, never empties it.
+    @State private var newKinds: [JobKind] = []
     /// A read already in flight must not overwrite a newer answer.
     @State private var loads = 0
 
     var body: some View {
         PageScaffold(title: "Jobs", subtitle: "Work Core does by itself on a schedule you set, in \(Jobs.timeZoneName) time.") {
-            Loaded(source: list, title: "Jobs", symbol: "clock", retry: load) { value in content(value) }
+            if Jobs.zoneAvailable {
+                Loaded(source: list, title: "Jobs", symbol: "clock", retry: load) { value in content(value) }
+            } else {
+                UnavailableState(title: "Could not show jobs", kind: .error, detail: Jobs.zoneUnavailable, symbol: "clock")
+            }
         }
         .navigationDestination(item: $open) { id in JobPage(model: model, id: id, navigate: navigate) }
         .sheet(isPresented: $creating) {
-            if let value = list.value {
-                NewJobSheet(model: model, kinds: kinds(value)) { await load() }
-            }
+            NewJobSheet(model: model, kinds: newKinds) { await load() }
         }
         .refreshable { await load() }
         .task { await load() }
@@ -82,19 +87,16 @@ struct JobsPage: View {
 
     @ViewBuilder private func content(_ value: JobList) -> some View {
         if !value.configured { JobNotice(text: Jobs.notConfigured, style: .negative) }
-        if value.unsupported > 0 {
-            JobNotice(text: value.unsupported == 1 ? Jobs.unsupportedText : "\(value.unsupported) unsupported jobs — update the app.",
-                      style: .negative)
-        }
+        if value.unsupported > 0 { JobNotice(text: Jobs.unsupportedText(value.unsupported), style: .negative) }
         ActivityList(rows: value.jobs.map(row), emptyText: "No jobs yet.") { open = UUID(uuidString: $0.id) }
         VStack(alignment: .leading, spacing: JV.Space.xs) {
-            Text(verbatim: "\(value.ownerJobs) of \(Jobs.maxOwnerJobs) jobs")
+            Text(verbatim: Jobs.countText(value.ownerJobs, unsupported: value.unsupported))
                 .font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
             if value.ownerJobs >= Jobs.maxOwnerJobs {
                 Text(verbatim: Jobs.full).font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Button("New job") { creating = true }
+            Button("New job") { newKinds = kinds(value); creating = true }
                 .buttonStyle(JVButtonStyle(kind: .primary))
                 .disabled(kinds(value).isEmpty)
         }
@@ -119,8 +121,8 @@ struct JobsPage: View {
         let parts = [kind, Jobs.scheduleText(job), Jobs.runsDoneText(job), Jobs.stateText(job), newest, Jobs.originText(job)]
         return ActivityRow(id: job.id.uuidString, symbol: jobSymbol(job.kind), title: job.title,
                            detail: parts.compactMap { $0 }.joined(separator: " · "),
-                           tone: job.enabled ? .ok : job.pausedAfterFailures ? .warn : .idle,
-                           toneLabel: job.enabled ? "Enabled" : "Paused")
+                           tone: job.enabled ? .ok : job.pausedAfterFailures ? .error : .idle,
+                           toneLabel: Jobs.stateLabel(job))
     }
 
     private func load() async {
@@ -141,6 +143,8 @@ struct JobsPage: View {
             return found
         }
         guard !Task.isCancelled, mine == loads else { return }
+        // As on desktop: a failed reload keeps the list already shown.
+        guard result.value != nil || list.value == nil else { return }
         list = result
         last = newest
     }
@@ -261,8 +265,7 @@ struct JobPage: View {
             Button("Delete", role: .destructive) { if let found { Task { await delete(found) } } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(found?.kind.hasConversation == true ? "The job and its runs are deleted. Its conversation stays."
-                 : "The job and its runs are deleted.")
+            Text(verbatim: found.map(Jobs.deleteNote) ?? "")
         }
         .navigationDestination(item: $open) { run in JobRunPage(model: model, id: run, kind: found?.kind, navigate: navigate) }
         .refreshable { await load() }
@@ -274,12 +277,13 @@ struct JobPage: View {
 
     private func summary(_ job: ScheduledJob) -> some View {
         VStack(alignment: .leading, spacing: JV.Space.sm) {
-            TitleBadgeRow(title: job.kind.label, badge: Badge(text: job.enabled ? "Enabled" : "Paused", style: job.enabled ? .positive : .neutral))
+            TitleBadgeRow(title: job.kind.label, badge: Badge(text: Jobs.stateLabel(job),
+                                                              style: job.enabled ? .positive : job.pausedAfterFailures ? .danger : .neutral))
             let lines = [Jobs.scheduleText(job), Jobs.runsDoneText(job), Jobs.stateText(job), Jobs.originText(job)]
             Text(verbatim: lines.compactMap { $0 }.joined(separator: "\n"))
                 .font(JV.font(13)).foregroundStyle(JV.textSecondary).fixedSize(horizontal: false, vertical: true)
             if job.pausedAfterFailures {
-                JobNotice(text: "Core paused this job after 3 failed runs in a row. Enable it to run it on its schedule again.", style: .negative)
+                JobNotice(text: Jobs.pausedNotice, style: .danger)
             }
             HStack(spacing: JV.Space.xs) {
                 Button("Run now") { Task { await runNow(job) } }
@@ -290,7 +294,7 @@ struct JobPage: View {
                     .disabled(busy)
             }
             if let conversation = job.conversation_id {
-                PanelButton(title: "Open its conversation", symbol: "bubble.left") { openConversation(conversation) }
+                PanelButton(title: "Open in chat", symbol: "bubble.left") { openConversation(conversation) }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -362,7 +366,7 @@ struct JobPage: View {
         notice = nil
         do {
             try await model.runJobNow(job.id)
-            notice = "Started. The run shows up below when it ends; pull down to refresh."
+            notice = Jobs.runNowStarted
         } catch {
             notice = Jobs.runNowFailureText(error)
         }
@@ -451,7 +455,7 @@ struct JobRunPage: View {
             ListSection(title: "Repositories that could not be read") {
                 VStack(alignment: .leading, spacing: JV.Space.xs) {
                     ForEach(Array(report.errors.enumerated()), id: \.offset) { _, error in
-                        Text(verbatim: "\(error.repo): \(Jobs.errorText(error.code))").font(JV.font(13)).foregroundStyle(JV.textPrimary)
+                        Text(verbatim: "\(error.repo): \(Jobs.errorText(error.code, kind: kind))").font(JV.font(13)).foregroundStyle(JV.textPrimary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -642,7 +646,7 @@ struct JobForm: View {
             TextField("Title", text: $draft.title).textFieldStyle(.roundedBorder)
             TextField("What to research", text: $draft.instruction, axis: .vertical).lineLimit(2...6).textFieldStyle(.roundedBorder)
             caption(Jobs.privacyHint)
-            Toggle("Notify me when a run ends", isOn: $draft.notify)
+            Toggle("Send me a push when a run ends", isOn: $draft.notify)
         case .reminder:
             TextField("Title", text: $draft.title).textFieldStyle(.roundedBorder)
             TextField("Text (optional)", text: $draft.text, axis: .vertical).lineLimit(2...6).textFieldStyle(.roundedBorder)

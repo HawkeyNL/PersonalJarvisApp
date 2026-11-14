@@ -21,15 +21,12 @@ enum JobKind: String, Codable, CaseIterable {
 
     var detail: String {
         switch self {
-        case .prompt: "Searches the web for your instruction and posts the answer in the job's conversation."
-        case .reminder: "Posts your text in the job's conversation at the time you set and sends you a push."
-        case .diskCheck: "Tells you when a Home Node disk is fuller than the threshold you set. It changes nothing on the host."
+        case .prompt: "Searches the web for your instruction and posts the answer to the job's conversation."
+        case .reminder: "Posts your text to the job's conversation and sends you a push with the title."
+        case .diskCheck: "Tells you when a Home Node disk is fuller than the threshold. It changes nothing on the host."
         case .dependencyReview: "Reads the open Dependabot alerts and pull requests of your repositories and puts them in order."
         }
     }
-
-    /// Research, reminders and disk checks write to a conversation of their own.
-    var hasConversation: Bool { self != .dependencyReview }
 }
 
 enum JobCadence: String, Codable, CaseIterable {
@@ -171,15 +168,35 @@ struct JobRun: Decodable, Identifiable {
     let status: JobRunStatus
     let error_code: String?
     let summary: String?
-    let summary_source: SummarySource?
+    /// Only a label: a source this app does not know shows none.
+    private let source: Lenient<String>?
     let priorities: [Priority]?
     let started_at: String
     let finished_at: String?
 
+    var summary_source: SummarySource? { source?.value.flatMap(SummarySource.init(rawValue:)) }
     var ranked: [Priority] { (priorities ?? []).sorted { $0.rank < $1.rank } }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, job_id, slot_at, trigger, status, error_code, summary, source = "summary_source", priorities, started_at, finished_at
+    }
 }
 
-struct JobRunList: Decodable { let runs: [JobRun] }
+struct JobRunList: Decodable {
+    /// The runs this app can read; one it cannot (a newer status or trigger, a field out of
+    /// bounds) is left out instead of failing the list.
+    let runs: [JobRun]
+    /// The entries Core sent, readable or not.
+    let count: Int
+
+    private enum Keys: String, CodingKey { case runs }
+
+    init(from decoder: Decoder) throws {
+        let entries = try decoder.container(keyedBy: Keys.self).decode([Lenient<JobRun>].self, forKey: .runs)
+        runs = entries.compactMap(\.value).filter(Jobs.valid)
+        count = entries.count
+    }
+}
 
 /// One run's report: the run, the facts its priorities point at as plain strings, the
 /// repositories that could not be read, whether entries were left out, and for a research
@@ -393,7 +410,12 @@ struct JobPatch: Encodable, Equatable {
 
 enum Jobs {
     static let timeZoneName = "Europe/Amsterdam"
-    static let timeZone = TimeZone(identifier: timeZoneName) ?? .current
+    private static let zone = TimeZone(identifier: timeZoneName)
+    /// False when this device cannot read the schedule's zone: the Jobs page then shows no
+    /// times at all rather than wrong ones (fail closed); `timeZone` is never shown then.
+    static let zoneAvailable = zone != nil
+    static let timeZone = zone ?? .gmt
+    static let zoneUnavailable = "This device cannot read the Europe/Amsterdam time zone, so job times cannot be shown."
     static let weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     /// The runs read per job: the newest 20.
     static let runsShown = 20
@@ -408,9 +430,11 @@ enum Jobs {
     static let changedElsewhere = "Changed elsewhere, reloaded."
     static let notFound = "This does not exist on your Home Node (any more)."
     static let notConfirmed = "Not confirmed; reloaded to check."
-    static let full = "You have 10 jobs, the most Core keeps. Delete one first."
-    static let unsupportedText = "Unsupported job — update the app."
+    static let full = "You have 10 jobs, the most Core keeps. Delete one to add another."
     static let pausedAfterFailuresText = "Paused after 3 failed runs"
+    static let pausedNotice =
+        "Core paused this job after 3 failed runs in a row. Check the latest run, change the job if needed, then enable it again."
+    static let runNowStarted = "Started. Refresh to see the run when it ends."
     static let privacyHint =
         "The instruction leaves your Home Node in a web search: leave out personal or financial details and symbols you hold."
 
@@ -450,7 +474,7 @@ enum Jobs {
             && priorities.allSatisfy { $0.ref.count <= 16 && $0.rank >= 0 && $0.reason.count <= 600 }
     }
 
-    static func valid(_ list: JobRunList) -> Bool { list.runs.count <= 50 && list.runs.allSatisfy(valid) }
+    static func valid(_ list: JobRunList) -> Bool { list.count <= 50 }
 
     // MARK: Schedule in words
 
@@ -462,31 +486,35 @@ enum Jobs {
         return "\(day)\(suffix)"
     }
 
-    /// "Every 2 weeks on Friday at 08:00", "Once on 1 Dec at 09:00", "Daily at 07:00".
+    /// "Every 2 weeks on Friday at 08:00", "Once on 1 Dec at 09:00", "Monthly on the 1st at
+    /// 09:00", plus ", from 1 Jan 2027" while a repeating job's start date is ahead.
     static func scheduleText(_ job: ScheduledJob) -> String {
         scheduleText(JobDraft(job))
     }
 
     static func scheduleText(_ draft: JobDraft) -> String {
-        let at = "at \(timeText(draft.minute))"
+        let at = " at \(timeText(draft.minute))"
         let every = draft.every
+        let base: String
         switch draft.cadence {
         case .once:
-            return "Once on \(draft.startDate.flatMap(dayLabel) ?? "a day not set") \(at)"
+            return draft.startDate.map { "Once on \(dayLabel($0) ?? $0)\(at)" } ?? "Once\(at)"
         case .daily:
-            return every == 1 ? "Daily \(at)" : "Every \(every) days \(at)"
+            base = every > 1 ? "Every \(every) days" : "Daily"
         case .weekly:
             let day = weekdays[min(max(draft.weekday - 1, 0), 6)]
-            return every == 1 ? "Every \(day) \(at)" : "Every \(every) weeks on \(day) \(at)"
+            base = every > 1 ? "Every \(every) weeks on \(day)" : "Every \(day)"
         case .monthly:
-            return (every == 1 ? "Every month" : "Every \(every) months") + " on the \(ordinal(draft.monthDay)) \(at)"
+            base = (every > 1 ? "Every \(every) months" : "Monthly") + " on the \(ordinal(draft.monthDay))"
         }
+        let from = draft.startDate.map { $0 > today() ? ", from \(dayLabel($0) ?? $0)" : "" } ?? ""
+        return base + at + from
     }
 
-    /// "2 of 2 runs done" for a job with a run limit.
+    /// "2 of 5 runs done" for a job with a run limit.
     static func runsDoneText(_ job: ScheduledJob) -> String? {
-        guard let most = job.max_runs, job.cadence != .once else { return nil }
-        return "\(job.run_count ?? 0) of \(most) \(most == 1 ? "run" : "runs") done"
+        guard let most = job.max_runs else { return nil }
+        return "\(min(job.run_count ?? 0, most)) of \(most) runs done"
     }
 
     /// "Set up by Jarvis · expires 13 Dec" for a job Jarvis made for itself.
@@ -496,11 +524,36 @@ enum Jobs {
         return "Set up by Jarvis · expires \(shortDay.string(from: expires))"
     }
 
-    /// Paused, its next run, or why it does not run.
-    static func stateText(_ job: ScheduledJob) -> String {
+    /// A one-time job after its slot, or a job that reached its run limit: Core disabled it
+    /// because it is done, not paused.
+    static func isFinished(_ job: ScheduledJob) -> Bool {
+        !job.enabled && ((job.cadence == .once && job.last_slot_at != nil) || job.max_runs.map { (job.run_count ?? 0) >= $0 } == true)
+    }
+
+    /// The job's state badge.
+    static func stateLabel(_ job: ScheduledJob) -> String {
+        if job.enabled { return "Enabled" }
         if job.pausedAfterFailures { return pausedAfterFailuresText }
-        if !job.enabled { return "Paused" }
+        return isFinished(job) ? "Finished" : "Paused"
+    }
+
+    /// Its next run, or its state when it does not run.
+    static func stateText(_ job: ScheduledJob) -> String {
+        if !job.enabled { return stateLabel(job) }
         return job.next_run_at.map { "Next run \(zonedText($0))" } ?? "Not scheduled"
+    }
+
+    /// "3 of 10 jobs"; jobs this app cannot show may count towards Core's limit too.
+    static func countText(_ owned: Int, unsupported: Int) -> String {
+        "\(owned) of \(maxOwnerJobs) jobs" + (unsupported > 0 ? ", not counting any this app cannot show" : "")
+    }
+
+    static func unsupportedText(_ count: Int) -> String {
+        "\(count == 1 ? "1 job" : "\(count) jobs") this app cannot show yet. Update the app to see \(count == 1 ? "it" : "them")."
+    }
+
+    static func deleteNote(_ job: ScheduledJob) -> String {
+        job.conversation_id != nil ? "Its runs are deleted too. Its conversation stays in chat." : "Its runs are deleted too."
     }
 
     private static func formatter(_ format: String, locale: String = "en_GB") -> DateFormatter {
@@ -628,10 +681,17 @@ enum Jobs {
     // MARK: Fixed wording
 
     private static let errorTexts: [String: String] = [
-        "not_configured": "Not set up on Core: the GitHub token or the repository list (JARVIS_GITHUB_REPOS) is missing on your Home Node.",
+        "not_configured": "Not set up on Core: something this job needs is turned off on your Home Node.",
         "timed_out": "The run took longer than 15 minutes and was stopped.",
         "interrupted": "Core stopped during the run, so it did not finish.",
         "invalid_result": "Core refused to store the result of this run.",
+        "internal": "Something went wrong in Core during the run.",
+        "private_instruction":
+            "Not searched: the title or instruction may hold personal or financial details or a symbol you hold. Change the job to leave them out.",
+        "holdings_unavailable": "Not searched: Core could not read your holdings to check the instruction for private details.",
+        "research_unavailable": "The web search did not run or was stopped.",
+        "conversation_unavailable": "The answer could not be stored in the job's conversation.",
+        "disk_unavailable": "No Home Node disk could be read.",
         "token_needs_dependabot_alerts_read":
             "GitHub refused the Dependabot alerts. Give the GitHub token the \"Dependabot alerts: Read-only\" permission for the repository, and turn on Dependabot alerts in its settings.",
         "github_access_refused": "GitHub refused the list of pull requests. The repository's alerts were kept.",
@@ -644,24 +704,22 @@ enum Jobs {
         "roadmap_changed": "The roadmap changed while the run read it. The next run proposes again.",
         "roadmap_limit": "The roadmap holds its maximum of items or pending proposals, so no proposal was made.",
         "roadmap_proposal_failed": "The roadmap proposal could not be made.",
-        "private_instruction":
-            "Not run: the title or instruction may hold personal or financial details or a symbol you hold. Change them and leave those out.",
-        "holdings_unavailable": "Not run: Core could not read your holdings to check the instruction for private details.",
-        "research_unavailable": "The web search did not run or was stopped.",
-        "conversation_unavailable": "The result could not be stored in the job's conversation.",
-        "disk_unavailable": "No Home Node disk could be read.",
-        "internal": "The run failed inside Core.",
     ]
 
-    /// Research runs share two codes with the dependency review, with another meaning.
-    private static let researchErrorTexts: [String: String] = [
-        "not_configured": "Research is off on your Home Node, or no Claude subscription worker can run it.",
-        "timed_out": "The web search took longer than 5 minutes and was stopped.",
+    /// Where a code means something else for one kind of job.
+    private static let kindErrorTexts: [JobKind: [String: String]] = [
+        .dependencyReview: [
+            "not_configured": "Not set up on Core: the GitHub token or the repository list (JARVIS_GITHUB_REPOS) is missing on your Home Node.",
+        ],
+        .prompt: [
+            "not_configured": "Not searched: Research is off, or no subscription worker can run it.",
+            "timed_out": "The web search took longer than 5 minutes and was stopped.",
+        ],
     ]
 
     /// The owner-facing text for an error code of a run of `kind`; never the code's own words.
     static func errorText(_ code: String, kind: JobKind? = nil) -> String {
-        if kind == .prompt, let text = researchErrorTexts[code] { return text }
+        if let kind, let text = kindErrorTexts[kind]?[code] { return text }
         return errorTexts[code] ?? "Core reported an error this app does not know yet."
     }
 
@@ -705,26 +763,21 @@ enum Jobs {
         return "Not started. \(failureText(error))"
     }
 
+    static let invalidText =
+        "Core refused this as invalid: for example a one-time job that is not in the future, an archived roadmap, or a research title or instruction that may hold personal or financial details. Check the fields and try again."
+
     /// The notice after a failed write. A 409 on a change is a revision conflict; on a
-    /// create, a second dependency review or no room for another job.
+    /// create, no room: a second dependency review, or the owner's 10 jobs.
     static func writeFailureText(_ error: Error, update: Bool, kind: JobKind = .dependencyReview) -> String {
         if isUnreadable(error) { return notConfirmed }
         if status(error) == 409 {
             if update { return changedElsewhere }
-            return kind == .dependencyReview ? "Core refused this: a job of this kind already exists." : full
+            return kind == .dependencyReview ? "Core refused this: a dependency review already exists." : "Core refused this. \(full)"
         }
-        if status(error) == 400 {
-            switch kind {
-            case .dependencyReview:
-                return "Core refused this as invalid, for example a roadmap that is archived. Check the fields and try again."
-            case .prompt:
-                return "Core refused this as invalid. Check the fields: the title and instruction may not hold personal or financial details or a symbol you hold."
-            case .reminder, .diskCheck:
-                return "Core refused this as invalid, for example a one-time job that is not in the future. Check the fields and try again."
-            }
+        if status(error) == 400 { return invalidText }
+        if status(error) == 503 {
+            return "Not saved: Core could not check this just now (its database or your holdings could not be read). Try again in a minute."
         }
-        // An unknown kind or field: a Core from before these jobs.
-        if status(error) == 422, kind != .dependencyReview { return "Not saved. This Core does not know this kind of job yet. Update Core on your Home Node." }
         if isNetwork(error) { return "No answer from your Home Node. It is unknown whether the change arrived; reloaded to check." }
         return "Not saved. \(failureText(error))"
     }

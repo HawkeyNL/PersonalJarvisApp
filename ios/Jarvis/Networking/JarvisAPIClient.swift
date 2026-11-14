@@ -271,16 +271,19 @@ actor JarvisAPIClient {
                           expectedBinding: expectedBinding, limit: 4 * 1024, resourceTimeout: 120, response: PhotoUpload.self)
     }
 
-    // Scheduled jobs (desktop jobsApi.ts). The answers are not needed: the page reloads.
+    // Scheduled jobs (desktop jobsApi.ts). A create or change answers with the job; one
+    // that does not read as a job throws `invalidResponse` ("Not confirmed"). The page reloads.
     func createJob(_ body: NewJob, token: String, expectedBinding: UUID) async throws {
-        _ = try await request(path: "/v1/jobs", method: "POST", body: body, token: token,
-                              expectedBinding: expectedBinding, limit: 64 * 1024, response: EmptyOrJSON.self)
+        let job = try await request(path: "/v1/jobs", method: "POST", body: body, token: token,
+                                    expectedBinding: expectedBinding, limit: 64 * 1024, response: ScheduledJob.self)
+        guard Jobs.valid(job) else { throw JarvisAPIError.invalidResponse }
     }
 
     /// Core answers 409 when the job moved past `revision`.
     func updateJob(id: UUID, revision: Int, patch: JobPatch, token: String, expectedBinding: UUID) async throws {
-        _ = try await request(path: "\(Jobs.jobPath(id))?expected_revision=\(revision)", method: "PATCH",
-                              body: patch, token: token, expectedBinding: expectedBinding, limit: 64 * 1024, response: EmptyOrJSON.self)
+        let job = try await request(path: "\(Jobs.jobPath(id))?expected_revision=\(revision)", method: "PATCH",
+                                    body: patch, token: token, expectedBinding: expectedBinding, limit: 64 * 1024, response: ScheduledJob.self)
+        guard Jobs.valid(job), job.id == id else { throw JarvisAPIError.invalidResponse }
     }
 
     /// Deletes the job and its runs; its conversation stays. Core answers 409 when the job
