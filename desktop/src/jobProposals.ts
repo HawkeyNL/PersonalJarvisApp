@@ -28,14 +28,22 @@ const optStr = (x: unknown) => x == null || typeof x === "string";
 // What a chat marker can carry (no `enabled`, no roadmap): the card shows
 // all of it, so what is added is what was shown.
 const BODY_KEYS = ["kind", "cadence", "weekday", "month_day", "every", "start_date", "max_runs", "at_minute", "params"];
-const PARAM_KEYS = ["title", "instruction", "text", "notify", "threshold_percent"];
+// The params each kind takes, and the fields only some cadences take (Core
+// refuses the rest, so a card never shows a job Core would not make).
+const PARAM_KEYS: Record<string, string[]> = {
+  prompt: ["title", "instruction", "notify"], reminder: ["title", "text"], disk_check: ["threshold_percent"],
+};
 
 /** The editor's draft for a body, with Core's defaults for what it leaves
  *  out; null when a field has the wrong type or the job breaks a rule. */
 function proposalDraft(body: Record<string, unknown>, today: string): Draft | null {
   const p = body.params ?? {};
-  if (!isObj(p) || !Object.keys(body).every((k) => BODY_KEYS.includes(k)) || !Object.keys(p).every((k) => PARAM_KEYS.includes(k))) return null;
+  if (!isObj(p) || !Object.keys(body).every((k) => BODY_KEYS.includes(k))) return null;
   if (!(NEW_KINDS as readonly unknown[]).includes(body.kind) || (body.cadence != null && !(CADENCES as readonly unknown[]).includes(body.cadence))) return null;
+  if (!Object.keys(p).every((k) => PARAM_KEYS[body.kind as string].includes(k))) return null;
+  const cadence = body.cadence ?? "weekly";
+  if ((body.weekday != null && cadence !== "weekly") || (body.month_day != null && cadence !== "monthly")) return null;
+  if (body.max_runs != null && cadence === "once") return null;
   if (![body.weekday, body.month_day, body.every, body.max_runs, body.at_minute, p.threshold_percent].every(optInt)) return null;
   if (![body.start_date, p.title, p.instruction, p.text].every(optStr) || (p.notify != null && typeof p.notify !== "boolean")) return null;
   const at = (body.at_minute as number | undefined) ?? 420;
@@ -106,9 +114,10 @@ export function proposalDetail(d: Draft): string | null {
 
 export type AddResult = Pick<ProposalCard, "state" | "jobId" | "error">;
 
-/** Sends `body` exactly as given. A 2xx this build cannot read, or no answer
- *  at all, is not confirmed (Add stays off: the job may exist); a refusal
- *  lets the owner try again. */
+/** Sends `body` exactly as given. Only an HTTP refusal (4xx, or Core's 503
+ *  "not saved") lets the owner try again; anything else (a 2xx this build
+ *  cannot read, no answer, a broken answer, a gateway 5xx) is not confirmed
+ *  and Add stays off, since the job may exist. */
 export async function addJob(body: NewJob, create: (body: NewJob) => Promise<unknown>): Promise<AddResult> {
   const unconfirmed: AddResult = { state: "unconfirmed", jobId: null, error: ADD_NOT_CONFIRMED };
   try {
@@ -116,7 +125,7 @@ export async function addJob(body: NewJob, create: (body: NewJob) => Promise<unk
     return job ? { state: "added", jobId: job.id, error: "" } : unconfirmed;
   } catch (e) {
     const err = e as { name?: string; status?: number } | null;
-    if (err?.name === "NetworkError") return unconfirmed;
+    if (err?.name !== "ApiError" || ((err.status ?? 500) >= 500 && err.status !== 503)) return unconfirmed;
     return { state: "open", jobId: null, error: err?.name === "ApiError" && err.status === 400 ? ADD_INVALID : writeFailureText(e, false) };
   }
 }
@@ -128,14 +137,19 @@ export type AddGuards = {
   create: (body: NewJob) => Promise<unknown>;
 };
 
-/** Adds `card`'s job (its own body, or an edited one): only from "open" and
- *  never behind the lock. The card turns "adding" before the request, so a
- *  second click does nothing; a result that is no longer current is dropped. */
-export async function addProposalCard(card: ProposalCard | undefined, body: NewJob | undefined, g: AddGuards): Promise<void> {
+/** Adds `card`'s job (its own body, or an edited one with its draft): only
+ *  from "open" and never behind the lock. The card turns "adding" before the
+ *  request, so a second click does nothing; a result that is no longer
+ *  current is dropped. Once an edited job may exist, the card shows it. */
+export async function addProposalCard(
+  card: ProposalCard | undefined, edited: { body: NewJob; draft: Draft } | undefined, g: AddGuards,
+): Promise<void> {
   if (!card || g.locked() || card.state !== "open") return;
   card.state = "adding";
   card.error = "";
   // Without an edit, the body goes exactly as Core sent it (checked by readProposals).
-  const result = await addJob(body ?? (card.body as NewJob), g.create);
-  if (g.current()) Object.assign(card, result);
+  const result = await addJob(edited?.body ?? (card.body as NewJob), g.create);
+  if (!g.current()) return;
+  Object.assign(card, result);
+  if (edited && result.state !== "open") card.draft = edited.draft;
 }

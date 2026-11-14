@@ -26,7 +26,7 @@ watch(() => props.card.state, (state) => { if (state === "added" || state === "u
 
 function save(draft: Draft): void {
   const body = newJob(draft, todayInZone());
-  if (body) void addProposal(props.card.id, body);
+  if (body) void addProposal(props.card.id, { body, draft: { ...draft } });
 }
 </script>
 

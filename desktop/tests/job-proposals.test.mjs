@@ -50,6 +50,11 @@ test("a bad id, unknown kind or cadence, or malformed body is skipped; the rest 
     { id: id(9), body: { ...prompt, params: { ...prompt.params, roadmap_id: "x" } } },
     { id: id(1), body: { ...disk, params: { threshold_percent: 10 } } },
     { id: id(2), body: { ...reminder, start_date: "2026-01-01" } },
+    { id: id(3), body: { ...reminder, max_runs: 2 } },
+    { id: id(4), body: { ...disk, weekday: 1 } },
+    { id: id(5), body: { ...prompt, month_day: 1 } },
+    { id: id(6), body: { ...reminder, params: { ...reminder.params, notify: true } } },
+    { id: id(7), body: { ...disk, params: { threshold_percent: 90, title: "x" } } },
     null,
   ];
   for (const item of bad) assert.deepEqual(readProposals([item], today), [], JSON.stringify(item));
@@ -79,7 +84,7 @@ test("the card's wording", () => {
   assert.equal(proposalSchedule(limited({ ...disk, max_runs: 1 }), today), "Daily at 07:00, 1 run");
   assert.equal(proposalSchedule(limited({ ...prompt, max_runs: 3 }), today), "Every Friday at 08:30, 3 runs · No push");
   assert.equal(proposalSchedule(limited({ ...prompt, params: { ...prompt.params, notify: true } }), today), "Every Friday at 08:30");
-  assert.equal(proposalSchedule(limited({ ...disk, params: { notify: false } }), today), "Daily at 07:00");
+  assert.deepEqual(readProposals([{ id: id(5), body: { ...disk, params: { notify: false } } }], today), []);
   assert.equal(proposalDetail(p.draft), "Summarize this week's AI news");
   assert.equal(proposalDetail(r.draft), "Ask about the card");
   assert.equal(proposalDetail(d.draft), "Threshold 90%");
@@ -102,6 +107,10 @@ test("an unreadable 2xx or no answer is not confirmed; a refusal lets the owner 
   const unconfirmed = { state: "unconfirmed", jobId: null, error: ADD_NOT_CONFIRMED };
   assert.deepEqual(await addJob(prompt, async () => ({ ok: true })), unconfirmed);
   assert.deepEqual(await addJob(prompt, async () => { throw Object.assign(new Error("x"), { name: "NetworkError" }); }), unconfirmed);
+  // The answer broke after Core may have made the job, or a gateway gave up.
+  assert.deepEqual(await addJob(prompt, async () => { throw new Error("Home Node response is invalid"); }), unconfirmed);
+  for (const status of [500, 502, 504]) assert.deepEqual(await addJob(prompt, async () => { throw apiError(status); }), unconfirmed);
+  assert.equal((await addJob(prompt, async () => { throw apiError(503); })).state, "open");
   assert.equal(ADD_NOT_CONFIRMED, "Not confirmed: it may have been added.");
   const full = await addJob(prompt, async () => { throw apiError(409); });
   assert.deepEqual(full, { state: "open", jobId: null, error: `Core refused this. ${FULL_TEXT}` });
@@ -137,9 +146,12 @@ test("Add guards: the lock, a missing or finished card send nothing; an edit sen
   await addProposalCard({ ...card(), state: "unconfirmed" }, undefined, guards({ create }));
   assert.equal(calls, 0);
   const sent = [];
-  const edited = { ...prompt, params: { ...prompt.params, title: "Edited" } };
-  await addProposalCard(card(), edited, guards({ create: async (b) => { sent.push(b); return job; } }));
-  assert.deepEqual(sent, [edited]);
+  const body = { ...prompt, params: { ...prompt.params, title: "Edited" } };
+  const shown = card();
+  const draft = { ...shown.draft, title: "Edited" };
+  await addProposalCard(shown, { body, draft }, guards({ create: async (b) => { sent.push(b); return job; } }));
+  assert.deepEqual(sent, [body]);
+  assert.equal(proposalTitle(shown.draft), "Edited");
 });
 
 test("Add guards: a result after leaving the session or conversation is dropped; no answer is unconfirmed", async () => {

@@ -15,7 +15,7 @@ import { mergeCanonical, appendVisualDelta, dropFailedRun, runRequest } from "./
 import { PendingRuns } from "./pendingRuns";
 import { offerFrom, type ResearchOffer } from "./researchOffer";
 import { addProposalCard, readProposals, withProposals, type ProposalCard } from "./jobProposals";
-import { todayInZone, type NewJob } from "./jobs";
+import { todayInZone, type Draft, type NewJob } from "./jobs";
 import { jobApi } from "./jobsApi";
 import { isWebModel, startsWebSearch } from "./webAnswer";
 import { chatSession } from "./chatSession";
@@ -253,10 +253,10 @@ export function startNewConversation(): void {
 }
 
 /** Creates the proposed job: `body` is the proposal's own, or an edited one. */
-export function addProposal(id: string, body?: NewJob): Promise<void> {
+export function addProposal(id: string, edited?: { body: NewJob; draft: Draft }): Promise<void> {
   const epoch=chatSession.capture();
   const conversation=currentId.value;
-  return addProposalCard(jobProposals.value.find(c=>c.id===id),body,{
+  return addProposalCard(jobProposals.value.find(c=>c.id===id),edited,{
     locked:()=>locked.value,
     current:()=>chatSession.current(epoch) && currentId.value===conversation,
     create:jobApi.create,
