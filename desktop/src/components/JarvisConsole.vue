@@ -4,11 +4,13 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { nextSpeechStatus } from "../speechStatus";
 import NavIcon from "./NavIcon.vue";
 import ChatPhoto from "./chat/ChatPhoto.vue";
+import JobProposalCard from "./chat/JobProposalCard.vue";
 import {
   messages,
   send,
   thinking,
   researchOffer,
+  jobProposals,
   openConversation,
   startNewConversation,
   initChat,
@@ -370,6 +372,7 @@ onMounted(async () => {
               </li>
             </ul>
           </div>
+          <JobProposalCard v-for="card in jobProposals.filter((c) => c.messageId === m.canonicalId)" :key="card.id" :card="card" />
         </template>
       </div>
       <div v-if="researchOffer && researchOffer.conversationId === currentId && !thinking && !chips.length" class="offer">
