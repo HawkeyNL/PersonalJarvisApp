@@ -95,12 +95,13 @@ fun newCards(seen: MutableSet<String>, proposals: List<JobProposal>, conversatio
 fun proposalTitle(d: JobDraft): String = d.title.ifEmpty { d.kind.label }
 
 /** The schedule in words, as on the Jobs page, then the run limit and " · No push" when
- *  the body has them: "Daily at 08:00, 2 runs · No push". */
+ *  the body has them: "Daily at 08:00, 2 runs · No push". A one-time job has no run limit (an
+ *  edited draft may keep a hidden one that [newJob] drops). */
 fun proposalSchedule(d: JobDraft, today: LocalDate = jobsToday()): String = scheduleText(
     Job("", d.kind, d.cadence, d.weekday, d.monthDay, d.every.toIntOrNull() ?: 1, d.startDate.ifEmpty { null }, null,
         timeToMinute(d.time) ?: 0, true, 0, JobParams(), null, null),
     today,
-) + d.maxRuns.ifEmpty { null }?.let { ", $it run" + if (it == "1") "" else "s" }.orEmpty() + if (d.kind == JobKind.PROMPT && !d.notify) " · $PROPOSAL_NO_PUSH" else ""
+) + d.maxRuns.ifEmpty { null }?.takeIf { d.cadence != Cadence.ONCE }?.let { ", $it run" + if (it == "1") "" else "s" }.orEmpty() + if (d.kind == JobKind.PROMPT && !d.notify) " · $PROPOSAL_NO_PUSH" else ""
 
 /** The whole instruction or text (one line of at most 500 characters), or the threshold;
  *  null when none. */

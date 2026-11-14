@@ -97,6 +97,8 @@ class JobProposalsTest {
         assertEquals("Once on 1 Dec at 09:00", proposalSchedule(r.draft, today))
         assertEquals("Daily at 08:00, 2 runs", proposalSchedule(read(item(4, withField(withField(disk, "at_minute", "480"), "max_runs", "2"))).single().draft, today))
         assertEquals("Daily at 08:00, 1 run", proposalSchedule(read(item(4, withField(withField(disk, "at_minute", "480"), "max_runs", "1"))).single().draft, today))
+        // An edited draft switched to once keeps a hidden run limit that is not sent: not shown.
+        assertEquals("Once on 1 Dec at 09:00", proposalSchedule(r.draft.copy(maxRuns = "3"), today))
         // No cadence is weekly, so a weekday is fine.
         assertEquals("Every Tuesday at 07:00", proposalSchedule(read(item(5, """{"kind":"disk_check","weekday":2}""")).single().draft, today))
         assertEquals("Summarize this week's AI news", proposalDetail(p.draft))
