@@ -21,7 +21,7 @@ import kotlinx.serialization.json.put
 // is display only; error codes are shown only through the fixed wording below.
 
 const val JOBS_TIME_ZONE = "Europe/Amsterdam"
-const val JOBS_NEED_CORE = "Needs Jarvis Core v0.0.80 or later."
+const val JOBS_NEED_CORE = "Needs Jarvis Core v0.0.87 or later."
 
 enum class JobKind(val wire: String, val label: String, val detail: String) {
     DEPENDENCY_REVIEW(
@@ -153,7 +153,7 @@ private fun parseJob(x: JsonElement): Job {
 fun readJobList(x: JsonElement): JobList? = guarded {
     val o = x.obj()
     val status = o.str("status").also { require(it == "ok" || it == "not_configured") }
-    val jobs = o.array("jobs", 50).map { guarded { parseJob(it) } }
+    val jobs = o.array("jobs", 100).map { guarded { parseJob(it) } }
     JobList(status == "ok", jobs.filterNotNull(), jobs.count { it == null })
 }
 
@@ -388,7 +388,8 @@ fun draftError(d: JobDraft, today: LocalDate = jobsToday()): String? {
         if (d.cadence == Cadence.ONCE) return "Pick the day it runs."
     } else {
         val date = parseDate(start) ?: return "Write the date as YYYY-MM-DD."
-        if (date.year < 2000 || date > today.plusDays(732)) return "Pick a date at most two years ahead."
+        if (date.year < 2000) return "Pick a day from today on."
+        if (date > today.plusDays(732)) return "Pick a date at most two years ahead."
         if (d.cadence == Cadence.ONCE && d.enabled && date < today) return "Pick a day from today on."
     }
     if (d.cadence != Cadence.ONCE && d.maxRuns.isNotBlank() && d.maxRuns.trim().toIntOrNull() !in 1..100) return "Stop after 1 to 100 runs, or leave it empty."
@@ -551,6 +552,10 @@ fun runNowFailureText(result: ApiResult<*>): String = when {
 
 const val CHANGED_ELSEWHERE = "Changed elsewhere, reloaded."
 
+/** A create Core refused as unreadable (422): a Core before v0.0.87 knows only the dependency
+ *  review and refuses a body with a kind it does not know. */
+const val KIND_NOT_KNOWN = "Not saved: your Core does not know this kind of job yet. Update Core on your Home Node."
+
 const val INVALID_TEXT =
     "Core refused this as invalid: for example a one-time job that is not in the future, an archived roadmap, or a research title or instruction that may hold personal or financial details. Check the fields and try again."
 
@@ -563,6 +568,7 @@ fun writeFailureText(result: ApiResult<*>, update: Boolean, kind: JobKind = JobK
         else -> "Core refused this. $JOBS_FULL_TEXT"
     }
     result is ApiResult.HttpError && result.status == 400 -> INVALID_TEXT
+    result is ApiResult.HttpError && result.status == 422 && !update -> KIND_NOT_KNOWN
     result is ApiResult.HttpError && result.status == 503 ->
         "Not saved: Core could not check this just now (its database or your holdings could not be read). Try again in a minute."
     result is ApiResult.Unreachable -> "No answer from your Home Node. It is unknown whether the change arrived; reloaded to check."

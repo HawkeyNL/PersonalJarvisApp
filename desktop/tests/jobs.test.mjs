@@ -344,7 +344,7 @@ test("an older Core and refusals get fixed wording", () => {
   assert.equal(failureOf(apiError(404), true), "no-api");
   assert.equal(failureOf(apiError(404)), "not-found");
   assert.match(failureText("no-api"), new RegExp(NEEDS_CORE.replace(/\./g, "\\.")));
-  assert.equal(NEEDS_CORE, "Needs Jarvis Core v0.0.80 or later.");
+  assert.equal(NEEDS_CORE, "Needs Jarvis Core v0.0.87 or later.");
   assert.equal(runNowFailureText(apiError(429)), RUN_NOW_REFUSED);
   assert.match(runNowFailureText(apiError(409)), /scheduler is off/);
   // A 409 on a change is always a revision conflict; on a create it means no room.
@@ -352,6 +352,12 @@ test("an older Core and refusals get fixed wording", () => {
   assert.match(writeFailureText(apiError(409), false, "dependency_review"), /dependency review already exists/);
   assert.equal(writeFailureText(apiError(409), false, "prompt"), `Core refused this. ${FULL_TEXT}`);
   assert.equal(writeFailureText(apiError(400), false, "prompt"), INVALID_TEXT);
+  // A Core before v0.0.87 refuses a kind it does not know with 422; on a change it stays generic.
+  assert.equal(
+    writeFailureText(apiError(422), false, "reminder"),
+    "Not saved: your Core does not know this kind of job yet. Update Core on your Home Node.",
+  );
+  assert.match(writeFailureText(apiError(422), true), /^Not saved\. Core returned an answer/);
   assert.match(writeFailureText(apiError(503), true), /holdings could not be read/);
   assert.match(writeFailureText({ name: "NetworkError" }, true), /reloaded to check/);
   assert.equal(readJobAnswer({ deleted: true }), null, "an unreadable answer is not a confirmation");

@@ -415,7 +415,7 @@ enum Jobs {
     /// times at all rather than wrong ones (fail closed); `timeZone` is never shown then.
     static let zoneAvailable = zone != nil
     static let timeZone = zone ?? .gmt
-    static let zoneUnavailable = "This device cannot read the Europe/Amsterdam time zone, so job times cannot be shown."
+    static let zoneUnavailable = "This device cannot read the Europe/Amsterdam time zone, so jobs cannot be shown."
     static let weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     /// The runs read per job: the newest 20.
     static let runsShown = 20
@@ -436,7 +436,7 @@ enum Jobs {
         "Core paused this job after 3 failed runs in a row. Check the latest run, change the job if needed, then enable it again."
     static let runNowStarted = "Started. Refresh to see the run when it ends."
     static let privacyHint =
-        "The instruction leaves your Home Node in a web search: leave out personal or financial details and symbols you hold."
+        "It leaves your Home Node as a web search, so leave out personal or financial details and symbols you hold."
 
     static func jobPath(_ job: UUID) -> String { "/v1/jobs/\(job.uuidString.lowercased())" }
     static func runsPath(_ job: UUID) -> String { "\(jobPath(job))/runs?limit=\(runsShown)" }
@@ -464,7 +464,7 @@ enum Jobs {
     }
 
     static func valid(_ list: JobList) -> Bool {
-        (list.status == "ok" || list.status == "not_configured") && list.jobs.count + list.unsupported <= 50
+        (list.status == "ok" || list.status == "not_configured") && list.jobs.count + list.unsupported <= 100
     }
 
     static func valid(_ run: JobRun) -> Bool {
@@ -658,21 +658,20 @@ enum Jobs {
     /// Why the editor cannot be saved yet, in Core's bounds; nil when Core should take it.
     static func issue(_ kind: JobKind, _ draft: JobDraft) -> String? {
         let line = { (text: String, max: Int) in Roadmaps.validText(text.trimmingCharacters(in: .whitespacesAndNewlines), max: max) }
-        if kind == .prompt || kind == .reminder, !line(draft.title, 60) { return "The title must be 1 to 60 characters on one line." }
-        if kind == .prompt, !line(draft.instruction, 500) { return "The instruction must be 1 to 500 characters on one line." }
+        if kind == .prompt || kind == .reminder, !line(draft.title, 60) { return "Give it a title of 1 to 60 characters on one line." }
+        if kind == .prompt, !line(draft.instruction, 500) { return "Say what to research in 1 to 500 characters on one line." }
         if kind == .reminder, !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !line(draft.text, 500) {
-            return "The text must be at most 500 characters on one line."
+            return "The text can be at most 500 characters on one line."
         }
-        if kind == .diskCheck, !(50...99).contains(draft.threshold) { return "The threshold must be 50 to 99%." }
+        if kind == .diskCheck, !(50...99).contains(draft.threshold) { return "Pick a threshold from 50 to 99 percent." }
         if kind != .dependencyReview {
-            if !draft.cadence.everyRange.contains(draft.every) {
-                return "Repeat every 1 to 365 days, 104 weeks or 24 months."
-            }
-            if let most = draft.maxRuns, !(1...100).contains(most) { return "Stop after 1 to 100 runs." }
-            if draft.cadence == .once, draft.startDate == nil { return "Pick the day this job runs." }
-            if let start = draft.startDate, start > today(adding: maxStartDays) { return "The start date can be at most two years ahead." }
+            let every = draft.cadence.everyRange
+            if !every.contains(draft.every) { return "Repeat every 1 to \(every.upperBound) \(draft.cadence.unit)." }
+            if let most = draft.maxRuns, !(1...100).contains(most) { return "Stop after 1 to 100 runs, or leave it empty." }
+            if draft.cadence == .once, draft.startDate == nil { return "Pick the day it runs." }
+            if let start = draft.startDate, start > today(adding: maxStartDays) { return "Pick a date at most two years ahead." }
             if draft.cadence == .once, draft.enabled, let start = draft.startDate, start < today() {
-                return "A one-time job must be in the future."
+                return "Pick a day from today on."
             }
         }
         return nil
@@ -742,7 +741,7 @@ enum Jobs {
         switch status(error) {
         case 401: return "Your session is not valid. Sign in again from Settings."
         case 404: return notFound
-        case 405, 501: return "Needs Jarvis Core v0.0.80 or later. Update Core on your Home Node."
+        case 405, 501: return "Needs Jarvis Core v0.0.87 or later. Update Core on your Home Node."
         case 503: return "Core could not read the jobs just now. Try again in a minute."
         default: return "Core returned an answer this app does not understand, or an error. Try again later."
         }
@@ -763,6 +762,10 @@ enum Jobs {
         return "Not started. \(failureText(error))"
     }
 
+    /// A create Core refused as unreadable (422): a Core before v0.0.87 knows only the
+    /// dependency review and refuses a body with a kind it does not know.
+    static let kindNotKnown = "Not saved: your Core does not know this kind of job yet. Update Core on your Home Node."
+
     static let invalidText =
         "Core refused this as invalid: for example a one-time job that is not in the future, an archived roadmap, or a research title or instruction that may hold personal or financial details. Check the fields and try again."
 
@@ -775,6 +778,7 @@ enum Jobs {
             return kind == .dependencyReview ? "Core refused this: a dependency review already exists." : "Core refused this. \(full)"
         }
         if status(error) == 400 { return invalidText }
+        if !update, status(error) == 422 { return kindNotKnown }
         if status(error) == 503 {
             return "Not saved: Core could not check this just now (its database or your holdings could not be read). Try again in a minute."
         }

@@ -59,8 +59,10 @@ final class JobsTests: XCTestCase {
         XCTAssertEqual(value.jobs.count, 1, "unknown fields are ignored")
         XCTAssertEqual(value.jobs[0].roadmapId, "r1")
         XCTAssertEqual(value.unsupported, fields.count + 1)
-        let many = Array(repeating: job(), count: 51).joined(separator: ",")
-        XCTAssertNil(list(#"{"status":"ok","jobs":[\#(many)]}"#), "at most 50 entries")
+        let most = Array(repeating: job(), count: 100).joined(separator: ",")
+        XCTAssertEqual(list(#"{"status":"ok","jobs":[\#(most)]}"#)?.jobs.count, 100)
+        let many = Array(repeating: job(), count: 101).joined(separator: ",")
+        XCTAssertNil(list(#"{"status":"ok","jobs":[\#(many)]}"#), "at most 100 entries, as desktop")
     }
 
     func testNewKindsReadWithCoresOwnFields() throws {
@@ -139,6 +141,11 @@ final class JobsTests: XCTestCase {
         XCTAssertTrue(report.truncated)
         // Without facts (a failed or missed run) the report still reads.
         XCTAssertTrue(try JSONDecoder().decode(JobRunReport.self, from: Data(runJSON(["facts": NSNull()]).utf8)).facts.isEmpty)
+        // As desktop: a source this app does not know keeps the report, without a label; a status it does not know fails it.
+        let unknownSource = try JSONDecoder().decode(JobRunReport.self, from: Data(runJSON(["summary_source": "oracle"]).utf8))
+        XCTAssertNil(unknownSource.run.summary_source)
+        XCTAssertEqual(unknownSource.run.summary, "<b>Two</b> fixes")
+        XCTAssertThrowsError(try JSONDecoder().decode(JobRunReport.self, from: Data(runJSON(["status": "paused"]).utf8)))
     }
 
     func testErrorCodesGetFixedWording() {
@@ -296,7 +303,7 @@ final class JobsTests: XCTestCase {
 
     func testTheEditorExplainsCoresBoundsEarly() {
         var draft = JobDraft()
-        XCTAssertEqual(Jobs.issue(.prompt, draft), "The title must be 1 to 60 characters on one line.")
+        XCTAssertEqual(Jobs.issue(.prompt, draft), "Give it a title of 1 to 60 characters on one line.")
         draft.title = String(repeating: "a", count: 61)
         XCTAssertNotNil(Jobs.issue(.reminder, draft))
         draft.title = "Two\nlines"
@@ -306,24 +313,28 @@ final class JobsTests: XCTestCase {
         draft.title = "Call the bank"
         XCTAssertNil(Jobs.issue(.reminder, draft), "a reminder's text is optional")
         draft.text = String(repeating: "a", count: 501)
-        XCTAssertEqual(Jobs.issue(.reminder, draft), "The text must be at most 500 characters on one line.")
-        XCTAssertEqual(Jobs.issue(.prompt, draft), "The instruction must be 1 to 500 characters on one line.")
+        XCTAssertEqual(Jobs.issue(.reminder, draft), "The text can be at most 500 characters on one line.")
+        XCTAssertEqual(Jobs.issue(.prompt, draft), "Say what to research in 1 to 500 characters on one line.")
         draft.instruction = "Dutch energy price outlook"
         XCTAssertNil(Jobs.issue(.prompt, draft))
         draft.cadence = .once
-        XCTAssertEqual(Jobs.issue(.prompt, draft), "Pick the day this job runs.")
+        XCTAssertEqual(Jobs.issue(.prompt, draft), "Pick the day it runs.")
         draft.startDate = Jobs.today(adding: -1)
-        XCTAssertEqual(Jobs.issue(.prompt, draft), "A one-time job must be in the future.")
+        XCTAssertEqual(Jobs.issue(.prompt, draft), "Pick a day from today on.")
         draft.enabled = false
         XCTAssertNil(Jobs.issue(.prompt, draft), "a paused one-time job may be in the past")
         draft.startDate = Jobs.today(adding: Jobs.maxStartDays + 1)
-        XCTAssertEqual(Jobs.issue(.prompt, draft), "The start date can be at most two years ahead.")
+        XCTAssertEqual(Jobs.issue(.prompt, draft), "Pick a date at most two years ahead.")
         draft.cadence = .weekly; draft.startDate = nil; draft.every = 105
-        XCTAssertNotNil(Jobs.issue(.diskCheck, draft))
-        draft.every = 104; draft.maxRuns = 101
-        XCTAssertEqual(Jobs.issue(.diskCheck, draft), "Stop after 1 to 100 runs.")
+        XCTAssertEqual(Jobs.issue(.diskCheck, draft), "Repeat every 1 to 104 weeks.")
+        draft.cadence = .daily; draft.every = 366
+        XCTAssertEqual(Jobs.issue(.diskCheck, draft), "Repeat every 1 to 365 days.")
+        draft.cadence = .monthly; draft.every = 25
+        XCTAssertEqual(Jobs.issue(.diskCheck, draft), "Repeat every 1 to 24 months.")
+        draft.cadence = .weekly; draft.every = 104; draft.maxRuns = 101
+        XCTAssertEqual(Jobs.issue(.diskCheck, draft), "Stop after 1 to 100 runs, or leave it empty.")
         draft.maxRuns = 100; draft.threshold = 49
-        XCTAssertEqual(Jobs.issue(.diskCheck, draft), "The threshold must be 50 to 99%.")
+        XCTAssertEqual(Jobs.issue(.diskCheck, draft), "Pick a threshold from 50 to 99 percent.")
         XCTAssertNil(Jobs.issue(.dependencyReview, JobDraft()))
     }
 
@@ -342,7 +353,12 @@ final class JobsTests: XCTestCase {
         XCTAssertTrue(Jobs.writeFailureText(JarvisAPIError.rejected(status: 503, message: nil), update: true).hasPrefix("Not saved: Core could not check"))
         XCTAssertTrue(Jobs.writeFailureText(JarvisAPIError.timedOut, update: true).contains("unknown whether the change arrived"))
         XCTAssertEqual(Jobs.writeFailureText(JarvisAPIError.rejected(status: 405, message: nil), update: true),
-                       "Not saved. Needs Jarvis Core v0.0.80 or later. Update Core on your Home Node.")
+                       "Not saved. Needs Jarvis Core v0.0.87 or later. Update Core on your Home Node.")
+        // A Core before v0.0.87 refuses a kind it does not know with 422; on a change it stays generic.
+        XCTAssertEqual(Jobs.writeFailureText(JarvisAPIError.rejected(status: 422, message: "raw"), update: false, kind: .reminder),
+                       "Not saved: your Core does not know this kind of job yet. Update Core on your Home Node.")
+        XCTAssertTrue(Jobs.writeFailureText(JarvisAPIError.rejected(status: 422, message: nil), update: true)
+            .hasPrefix("Not saved. Core returned an answer"))
         // A 2xx answer this app could not read: Core may have made the change.
         for error in [JarvisAPIError.invalidResponse, .responseTooLarge] {
             XCTAssertEqual(Jobs.writeFailureText(error, update: true), Jobs.notConfirmed)
@@ -401,6 +417,9 @@ final class JobsTests: XCTestCase {
         XCTAssertEqual(Jobs.errorText("not_configured", kind: .prompt), "Not searched: Research is off, or no subscription worker can run it.")
         XCTAssertEqual(JobKind.reminder.detail, "Posts your text to the job's conversation and sends you a push with the title.")
         XCTAssertTrue(Jobs.zoneAvailable)
+        XCTAssertEqual(Jobs.zoneUnavailable, "This device cannot read the Europe/Amsterdam time zone, so jobs cannot be shown.")
+        XCTAssertEqual(Jobs.privacyHint,
+                       "It leaves your Home Node as a web search, so leave out personal or financial details and symbols you hold.")
     }
 }
 
