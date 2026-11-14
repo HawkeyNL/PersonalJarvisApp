@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -136,7 +135,12 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel, pickPhot
                     icon = JvIcon.CHAT,
                 )
             }
-            items(state.messages) { message -> Message(message, { actions.photo(it) }, state.removedPhotos) { viewing = it } }
+            // Jobs an answer proposed show right under it, while its conversation is open.
+            val proposals = state.jobProposals.filter { it.conversationId == state.conversationId }
+            state.messages.forEach { message ->
+                item { Message(message, { actions.photo(it) }, state.removedPhotos) { viewing = it } }
+                proposals.filter { it.messageId == message.id }.forEach { card -> item { JobProposalCard(card, state.locked, actions) } }
+            }
             state.researchOffer?.takeIf { !state.busy && it.conversationId == state.conversationId && state.chips.isEmpty() }?.question?.let { question ->
                 item {
                     // Only this click sends a web search; the shown question is all that leaves.

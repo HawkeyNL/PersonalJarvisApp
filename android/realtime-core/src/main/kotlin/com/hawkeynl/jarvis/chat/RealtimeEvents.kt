@@ -2,6 +2,7 @@ package com.hawkeynl.jarvis.chat
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -19,6 +20,9 @@ import kotlinx.serialization.json.jsonObject
     val updated_at: String? = null, val run: RealtimeRun? = null, val text: String? = null,
     val message: RealtimeMessage? = null, val reason: String? = null,
     val research_offer: ResearchOffer? = null, val web_search: Boolean? = null,
+    /** `assistant.completed`: up to 3 jobs the answer proposed, kept raw here so any shape
+     *  decodes; the app reads them with its own job checks (network/JobProposals.kt). */
+    val job_proposals: JsonElement? = null,
 )
 @Serializable data class RealtimeEvent(val protocol: Int, val epoch: String, val sequence: Long, val event_id: String, val type: String, val payload: RealtimePayload)
 

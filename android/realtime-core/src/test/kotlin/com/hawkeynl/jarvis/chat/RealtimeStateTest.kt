@@ -18,6 +18,21 @@ class RealtimeStateTest {
         assertEquals("weer?", offered.research_offer?.question)
     }
 
+    @Test fun jobProposalsAreOptionalAndAnyShapeDecodes() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val run = """{"run_id":"r","request_id":"q","conversation_id":"c"}"""
+        assertNull(json.decodeFromString<RealtimePayload>("""{"run":$run}""").job_proposals)
+        // A malformed list never fails the event; the app skips what it cannot read.
+        for (shape in listOf("[]", "\"x\"", "{}", "[1,null]", """[{"id":"x","body":{"kind":"prompt"}}]""")) {
+            val frame = """{"protocol":1,"epoch":"e","sequence":1,"event_id":"i","type":"assistant.completed",
+                "payload":{"run":$run,"research_offer":{"question":"q"},"job_proposals":$shape}}"""
+            val event = decodeRealtimeEvent(json, frame)
+            assertEquals(shape, "r", event.payload.run?.run_id)
+            assertEquals(shape, "q", event.payload.research_offer?.question)
+            assertNotNull(shape, event.payload.job_proposals)
+        }
+    }
+
     @Test fun messagePhotosAreOptionalIds() {
         val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         val message = """"id":"m","conversation_id":"c","role":"user","content":"","created_at":"t""""

@@ -104,7 +104,8 @@ import kotlinx.serialization.json.put
  *  only; a job's conversation opens in chat. */
 @Composable
 fun JobsScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
-    var jobId by rememberSaveable { mutableStateOf<String?>(null) }
+    // A chat card's "View job" opens on that job.
+    var jobId by rememberSaveable { mutableStateOf(actions.takeJobToOpen()) }
     var runId by rememberSaveable { mutableStateOf<String?>(null) }
     BackHandler(enabled = jobId != null || runId != null) { if (runId != null) runId = null else jobId = null }
     val job = jobId
@@ -560,7 +561,7 @@ private fun PriorityRow(priority: Priority, fact: Fact?) {
  *  dependency review daily or weekly only), a time in Europe/Amsterdam and, on create,
  *  enabled. Checked against Core's bounds before it goes out. */
 @Composable
-private fun JobForm(
+internal fun JobForm(
     actions: JarvisViewModel, initial: JobDraft, creating: Boolean, busy: Boolean, submit: String, onCancel: (() -> Unit)?, onSave: (JobDraft) -> Unit,
 ) {
     var draft by remember { mutableStateOf(initial) }
