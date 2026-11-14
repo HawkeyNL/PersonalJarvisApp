@@ -756,7 +756,7 @@ struct IbkrStatus: Decodable, Equatable {
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             code = c.lenientCode(.code); severity = c.lenientCode(.severity)
-            summary = c.lenient(.summary).flatMap { (text: String) in text.count <= IbkrStatus.maxText ? text : nil }
+            summary = (c.lenient(.summary) as String?).flatMap { $0.count <= IbkrStatus.maxText ? $0 : nil }
             // Dropped, never cut: a shortened or multi-line command could paste as another command.
             commands = Array(((try? c.decode([Lenient<String>].self, forKey: .commands)) ?? []).compactMap(\.value)
                 .filter { $0.count <= IbkrStatus.maxText && !$0.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) } }
