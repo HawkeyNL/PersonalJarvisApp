@@ -56,6 +56,18 @@ export function relativeTime(iso: string, now: number): string {
   return `${Math.floor(diff / DAY)}d ago`;
 }
 
+/** "in 4m", "in 2h", "in 3d"; "now" for a time within a minute or past;
+ *  "" for an unparseable time. */
+export function untilTime(iso: string, now: number): string {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return "";
+  const diff = at - now;
+  if (diff < MINUTE) return "now";
+  if (diff < HOUR) return `in ${Math.floor(diff / MINUTE)}m`;
+  if (diff < DAY) return `in ${Math.floor(diff / HOUR)}h`;
+  return `in ${Math.floor(diff / DAY)}d`;
+}
+
 /** "14d 2h", "3h 12m", "5m" from seconds of uptime. */
 export function formatUptime(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));

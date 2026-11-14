@@ -4,8 +4,9 @@
 import { ref, watch, type Ref } from "vue";
 import { getJsonAuth } from "./api";
 import { currentAuthStatus } from "./auth";
+import { loadOptional } from "./coreStatus";
 import {
-  BAR_RANGES, HISTORY_RANGES, dataState, failureState, parseConid,
+  BAR_RANGES, HISTORY_RANGES, dataState, failureState, parseConid, loadIbkrStatusWith,
   type BarRange, type Freshness, type HistoryRange, type TradingState,
 } from "./trading";
 
@@ -19,6 +20,8 @@ export const tradingApi = {
     if (parseConid(conid) === null || !BAR_RANGES.includes(range)) throw new Error("invalid instrument request");
     return getJsonAuth<unknown>(`/v1/trading/instruments/${conid}/bars?range=${range}`);
   },
+  /** IBKR sync status through its guard; 404/405 (older Core) is "unsupported". */
+  ibkrStatus: () => loadIbkrStatusWith(loadOptional),
 };
 
 // ---- dev-only data switch (DevDataToggle) -------------------------------
