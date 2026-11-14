@@ -368,7 +368,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
 
     /** Opens Jobs from a chat card: on the job's page when [id] is set. */
     fun openJob(id: String?) {
-        jobToOpen = id?.takeIf(com.hawkeynl.jarvis.network::isJobId)
+        jobToOpen = id?.takeIf { com.hawkeynl.jarvis.network.isJobId(it) }
         navigate(Screen.JOBS)
     }
 
