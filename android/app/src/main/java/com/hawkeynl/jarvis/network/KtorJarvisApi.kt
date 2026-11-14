@@ -432,7 +432,7 @@ class KtorJarvisApi(
     }
 
     override suspend fun updateJob(endpoint: HomeNodeEndpoint, token: String, id: String, revision: Long, patch: JsonObject): ApiResult<Job?> {
-        if (!isJobId(id) || revision < 0) return ApiResult.InvalidResponse("Invalid job id")
+        if (!isJobId(id) || revision < 0) return ApiResult.InvalidResponse(INVALID_JOB_ID)
         return jobCall(::readJob) {
             client.preparePatch(endpoint.url("/v1/jobs/$id")) {
                 bearerAuth(token); parameter("expected_revision", revision)
@@ -442,19 +442,19 @@ class KtorJarvisApi(
     }
 
     override suspend fun deleteJob(endpoint: HomeNodeEndpoint, token: String, id: String, revision: Long): ApiResult<Unit> {
-        if (!isJobId(id) || revision < 0) return ApiResult.InvalidResponse("Invalid job id")
+        if (!isJobId(id) || revision < 0) return ApiResult.InvalidResponse(INVALID_JOB_ID)
         // Only the status matters; the body is read within the bound and dropped.
         return jobCall({ }) { client.prepareDelete(endpoint.url("/v1/jobs/$id")) { bearerAuth(token); parameter("expected_revision", revision) } }
     }
 
     override suspend fun runJob(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> {
-        if (!isJobId(id)) return ApiResult.InvalidResponse("Invalid job id")
+        if (!isJobId(id)) return ApiResult.InvalidResponse(INVALID_JOB_ID)
         // Only the status matters; the body is read within the bound and dropped.
         return jobCall({ }) { client.preparePost(endpoint.url("/v1/jobs/$id/run")) { bearerAuth(token); setBody(TextContent("{}", ContentType.Application.Json)) } }
     }
 
     override suspend fun jobRuns(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<List<JobRun>> {
-        if (!isJobId(id)) return ApiResult.InvalidResponse("Invalid job id")
+        if (!isJobId(id)) return ApiResult.InvalidResponse(INVALID_JOB_ID)
         return jobCall({ requireNotNull(readRuns(it)) }) {
             client.prepareGet(endpoint.url("/v1/jobs/$id/runs")) { bearerAuth(token); parameter("limit", 20) }
         }

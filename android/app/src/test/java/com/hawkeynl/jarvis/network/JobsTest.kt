@@ -130,12 +130,18 @@ class JobsTest {
 
     @Test fun `error codes get fixed owner-facing wording`() {
         assertTrue(jobErrorText("token_needs_dependabot_alerts_read").contains("\"Dependabot alerts: Read-only\""))
-        assertTrue(jobErrorText("not_configured").contains("GitHub token or the repository list"))
+        assertTrue(jobErrorText("not_configured", JobKind.DEPENDENCY_REVIEW).contains("GitHub token or the repository list"))
+        // Reminders and disk checks (and an unknown kind) use desktop's generic wording, never GitHub's.
+        for (kind in listOf(JobKind.REMINDER, JobKind.DISK_CHECK, null)) {
+            assertEquals("Not set up on Core: something this job needs is turned off on your Home Node.", jobErrorText("not_configured", kind))
+        }
         assertEquals("Core reported an error this app does not know yet.", jobErrorText("something_new"))
         assertEquals("Core reported an error this app does not know yet.", jobErrorText("toString"))
         // The same code reads per kind.
-        assertTrue(jobErrorText("not_configured", JobKind.PROMPT).contains("Research is off"))
-        assertTrue(jobErrorText("timed_out", JobKind.PROMPT).contains("5 minutes"))
+        assertEquals("Not searched: Research is off, or no subscription worker can run it.", jobErrorText("not_configured", JobKind.PROMPT))
+        assertEquals("The web search took longer than 5 minutes and was stopped.", jobErrorText("timed_out", JobKind.PROMPT))
+        assertEquals("No Home Node disk could be read.", jobErrorText("disk_unavailable", JobKind.DISK_CHECK))
+        assertEquals("Something went wrong in Core during the run.", jobErrorText("internal", JobKind.PROMPT))
         assertTrue(jobErrorText("timed_out").contains("15 minutes"))
         for (code in listOf("private_instruction", "holdings_unavailable", "research_unavailable", "conversation_unavailable", "disk_unavailable", "internal")) {
             assertFalse(code, jobErrorText(code, JobKind.PROMPT).contains("does not know"))
@@ -158,21 +164,37 @@ class JobsTest {
         assertEquals("Every 6 months on the 1st at 09:00, from 1 Jan 2027", scheduleText(p, today))
         assertEquals("Every 6 months on the 1st at 09:00", scheduleText(p, LocalDate.of(2027, 2, 1)))
         assertEquals("Once on 1 Dec at 09:00", scheduleText(p.copy(cadence = Cadence.ONCE, every = 1, startDate = "2026-12-01"), today))
+        assertEquals("Once at 09:00", scheduleText(p.copy(cadence = Cadence.ONCE, every = 1, startDate = null), today))
         assertEquals("Every 2 weeks on Friday at 08:00", scheduleText(p.copy(cadence = Cadence.WEEKLY, weekday = 5, every = 2, startDate = null, atMinute = 480), today))
         assertEquals("Every Sunday at 21:30", scheduleText(p.copy(cadence = Cadence.WEEKLY, weekday = 7, every = 1, startDate = null, atMinute = 1290), today))
         assertEquals("Daily at 00:00", scheduleText(p.copy(cadence = Cadence.DAILY, every = 1, startDate = null, atMinute = 0), today))
         assertEquals("Every 3 days at 00:00", scheduleText(p.copy(cadence = Cadence.DAILY, every = 3, startDate = null, atMinute = 0), today))
         assertEquals("Monthly on the 31st at 09:00", scheduleText(p.copy(monthDay = 31, every = 1, startDate = null), today))
         assertEquals("2 of 2 runs done", runsText(p.copy(runCount = 2)))
+        assertEquals("1 of 1 runs done", runsText(p.copy(runCount = 3, maxRuns = 1)))
         assertNull(runsText(p.copy(maxRuns = null)))
         val jarvis = p.copy(byJarvis = true, expiresAt = "2026-12-13T10:00:00Z")
-        assertEquals("Set up by Jarvis · expires 13 Dec", originText(jarvis, today))
-        assertNull(originText(p, today))
-        assertEquals("Paused after 3 failed runs", stateText(p.copy(enabled = false, pausedAfterFailures = true, failureCount = 3)))
+        assertEquals("Set up by Jarvis · expires 13 Dec", originText(jarvis))
+        assertEquals("no year, as desktop", "Set up by Jarvis · expires 5 Jan", originText(jarvis.copy(expiresAt = "2027-01-05T10:00:00Z")))
+        assertNull(originText(p))
+        assertEquals("Paused after 3 failed runs", stateText(p.copy(enabled = false, pausedAfterFailures = true, failureCount = 5)))
         assertEquals("Paused", stateText(p.copy(enabled = false)))
+        // Core disables a job that is done: a one-time job after its slot, or one at its run limit.
+        assertEquals("Finished", stateText(p.copy(enabled = false, cadence = Cadence.ONCE, lastSlotAt = "2026-12-01T08:00:00Z")))
+        assertEquals("Finished", stateText(p.copy(enabled = false, runCount = 2)))
+        assertEquals("Finished", nextRunText(p.copy(enabled = false, runCount = 2)))
+        assertEquals("Paused", nextRunText(p.copy(enabled = false)))
+        assertEquals("Not scheduled", nextRunText(p.copy(nextRunAt = null)))
+        assertEquals("Core paused this job after 3 failed runs in a row. Check the latest run, change the job if needed, then enable it again.", PAUSED_AFTER_FAILURES_NOTE)
+        assertEquals("Its runs are deleted too.", deleteNote(p))
+        assertEquals("Its runs are deleted too. Its conversation stays in chat.", deleteNote(p.copy(conversationId = j1)))
         assertEquals(listOf("1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "23rd", "31st"), listOf(1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 31).map(::ordinal))
         val review = readJobList(json("""{"status":"ok","jobs":[$job]}"""))!!.jobs.single()
         assertEquals("1 of 10 jobs", jobCountText(listOf(p, jarvis, review)))
+        assertEquals("1 of 10 jobs, not counting any this app cannot show", jobCountText(listOf(p), unsupported = 2))
+        assertEquals("1 job this app cannot show yet. Update the app to see it.", unsupportedText(1))
+        assertEquals("2 jobs this app cannot show yet. Update the app to see them.", unsupportedText(2))
+        assertEquals("Searches the web for your instruction and posts the answer to the job's conversation.", JobKind.PROMPT.detail)
         assertEquals("Energy prices", jobTitle(p))
         assertEquals("Dependency review", jobTitle(review))
     }
@@ -215,6 +237,10 @@ class JobsTest {
         assertEquals(json("""{"kind":"prompt","cadence":"monthly","month_day":1,"every":6,"start_date":"2027-01-01","max_runs":2,"at_minute":540,
             "enabled":true,"params":{"title":"Energy prices","instruction":"Dutch energy price outlook","notify":false}}"""), energy)
         for (body in listOf(research, reminder, disk, energy)) assertTrue(body.keys.toString(), clientFields.containsAll(body.keys))
+        // Typed text goes trimmed; a blank reminder text is left out.
+        assertEquals(json("""{"title":"AI news","instruction":"Summarize"}"""), JsonObject(newJob(newDraft(JobKind.PROMPT).copy(title = " AI news ", instruction = " Summarize "), today)!!
+            .getValue("params").jsonObject.filterKeys { it != "notify" }))
+        assertEquals(json("""{"title":"Call"}"""), newJob(newDraft(JobKind.REMINDER).copy(title = "Call ", text = "  "), today)!!.getValue("params"))
         assertNull(newJob(newDraft(JobKind.PROMPT), today))
     }
 
@@ -274,12 +300,14 @@ class JobsTest {
         assertTrue(runNowFailureText(ApiResult.HttpError(409, null)).contains("scheduler is off"))
         // A 409 on a change is always a revision conflict; only a create can mean "exists".
         assertEquals(CHANGED_ELSEWHERE, writeFailureText(ApiResult.HttpError(409, null), update = true))
-        assertTrue(writeFailureText(ApiResult.HttpError(409, null), update = false).contains("already exists"))
+        assertEquals("Core refused this: a dependency review already exists.", writeFailureText(ApiResult.HttpError(409, null), update = false))
         // On a create of the other kinds a 409 means no room for another job.
-        assertEquals(JOBS_FULL, writeFailureText(ApiResult.HttpError(409, null), update = false, JobKind.REMINDER))
+        assertEquals("Core refused this. You have 10 jobs, the most Core keeps. Delete one to add another.",
+            writeFailureText(ApiResult.HttpError(409, null), update = false, JobKind.REMINDER))
         assertEquals(CHANGED_ELSEWHERE, writeFailureText(ApiResult.HttpError(409, null), update = true, JobKind.REMINDER))
-        assertTrue(writeFailureText(ApiResult.HttpError(400, null), update = false, JobKind.PROMPT).contains("personal or financial"))
-        assertTrue(writeFailureText(ApiResult.HttpError(422, null), update = false, JobKind.PROMPT).contains("Update Core"))
+        for (kind in JobKind.entries) assertEquals(INVALID_TEXT, writeFailureText(ApiResult.HttpError(400, null), update = false, kind))
+        assertEquals("Not saved. ${jobFailureText(JobFailure.FAILED)}", writeFailureText(ApiResult.HttpError(422, null), update = false, JobKind.PROMPT))
+        assertTrue(writeFailureText(ApiResult.HttpError(503, null), update = true).startsWith("Not saved: Core could not check this just now"))
         assertTrue(jobDeleted(ApiResult.Success(Unit)))
         assertTrue("already gone counts as deleted", jobDeleted(ApiResult.HttpError(404, null)))
         assertFalse(jobDeleted(ApiResult.HttpError(409, null)))
@@ -289,6 +317,21 @@ class JobsTest {
         assertEquals(NOT_CONFIRMED, writeFailureText(ApiResult.InvalidResponse("x"), update = true))
         assertEquals(NOT_CONFIRMED, writeFailureText(ApiResult.InvalidResponse("x"), update = false))
         assertEquals(NOT_CONFIRMED, runNowFailureText(ApiResult.InvalidResponse("x")))
+        // A call refused before it was sent is not "not confirmed": nothing reached Core.
+        val refused = ApiResult.InvalidResponse(INVALID_JOB_ID)
+        assertEquals(NOT_SENT, writeFailureText(refused, update = true))
+        assertEquals(NOT_SENT, deleteFailureText(refused))
+        assertEquals(NOT_SENT, runNowFailureText(refused))
+    }
+
+    @Test fun `a 2xx whose job does not read is not confirmed, never saved`() {
+        val p = readJob(json(prompt))!!
+        assertEquals("Saved.", writeNotice(ApiResult.Success(p), update = true, JobKind.PROMPT, "Saved."))
+        assertEquals("Paused.", writeNotice(ApiResult.Success(p), update = true, JobKind.PROMPT, "Paused."))
+        assertEquals(NOT_CONFIRMED, writeNotice(ApiResult.Success(null), update = true, JobKind.PROMPT, "Saved."))
+        assertEquals(CHANGED_ELSEWHERE, writeNotice(ApiResult.HttpError(409, null), update = true, JobKind.PROMPT, "Saved."))
+        // A wrong-shaped job answer reads as null, so it lands in the branch above.
+        assertNull(readJob(json("""{"id":"$j1","ok":true}""")))
     }
 
     @Test fun `only a Core UUID can go into a jobs URL`() {

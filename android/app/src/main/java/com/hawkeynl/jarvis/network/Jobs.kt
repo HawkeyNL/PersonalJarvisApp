@@ -28,9 +28,9 @@ enum class JobKind(val wire: String, val label: String, val detail: String) {
         "dependency_review", "Dependency review",
         "Reads the open Dependabot alerts and pull requests of your repositories and puts them in order.",
     ),
-    PROMPT("prompt", "Research", "Searches the web for your instruction on a schedule and posts the answer in the job's own conversation."),
-    REMINDER("reminder", "Reminder", "Posts your text in the job's own conversation at the time you set and sends a push with the title."),
-    DISK_CHECK("disk_check", "Disk check", "Posts a note when a Home Node disk is at or above the threshold you set."),
+    PROMPT("prompt", "Research", "Searches the web for your instruction and posts the answer to the job's conversation."),
+    REMINDER("reminder", "Reminder", "Posts your text to the job's conversation and sends you a push with the title."),
+    DISK_CHECK("disk_check", "Disk check", "Tells you when a Home Node disk is fuller than the threshold. It changes nothing on the host."),
 }
 
 /** The kinds made from "New job"; a dependency review keeps its own set-up card. */
@@ -274,9 +274,9 @@ fun parseDate(text: String): LocalDate? = runCatching { LocalDate.parse(text) }.
 /** "1 Dec", with the year when it is not this year. */
 private fun dayText(date: LocalDate, today: LocalDate): String = (if (date.year == today.year) DAY_MONTH else DAY_MONTH_YEAR).format(date)
 
-/** A moment from Core as a day in the schedule's zone ("13 Dec"). */
-fun zonedDay(iso: String, today: LocalDate = jobsToday()): String =
-    runCatching { dayText(OffsetDateTime.parse(iso).atZoneSameInstant(ZONE).toLocalDate(), today) }.getOrDefault("an unknown day")
+/** A moment from Core as a day in the schedule's zone ("13 Dec"), without a year (desktop). */
+fun zonedDay(iso: String): String =
+    runCatching { DAY_MONTH.format(OffsetDateTime.parse(iso).atZoneSameInstant(ZONE)) }.getOrDefault("an unknown day")
 
 /** The schedule in words: "Every 2 weeks on Friday at 08:00", "Once on 1 Dec at 09:00".
  *  Times are in [JOBS_TIME_ZONE]. */
@@ -285,7 +285,7 @@ fun scheduleText(job: Job, today: LocalDate = jobsToday()): String {
     val n = job.every
     val start = job.startDate?.let(::parseDate)
     val text = when (job.cadence) {
-        Cadence.ONCE -> "Once on ${start?.let { dayText(it, today) } ?: "a day not set"} $at"
+        Cadence.ONCE -> start?.let { "Once on ${dayText(it, today)} $at" } ?: "Once $at"
         Cadence.DAILY -> if (n == 1) "Daily $at" else "Every $n days $at"
         Cadence.WEEKLY -> WEEKDAYS[((job.weekday ?: 1) - 1).coerceIn(0, 6)].let { day -> if (n == 1) "Every $day $at" else "Every $n weeks on $day $at" }
         Cadence.MONTHLY -> "the ${ordinal(job.monthDay ?: 1)}".let { day -> if (n == 1) "Monthly on $day $at" else "Every $n months on $day $at" }
@@ -294,21 +294,42 @@ fun scheduleText(job: Job, today: LocalDate = jobsToday()): String {
 }
 
 /** "2 of 2 runs done" for a job that stops after a number of runs. */
-fun runsText(job: Job): String? = job.maxRuns?.let { "${job.runCount} of $it runs done" }
+fun runsText(job: Job): String? = job.maxRuns?.let { "${job.runCount.coerceAtMost(it)} of $it runs done" }
 
 /** "Set up by Jarvis · expires 13 Dec" for a job Jarvis made for itself. */
-fun originText(job: Job, today: LocalDate = jobsToday()): String? = if (!job.byJarvis) null
-    else "Set up by Jarvis" + job.expiresAt?.let { " · expires ${zonedDay(it, today)}" }.orEmpty()
+fun originText(job: Job): String? = if (!job.byJarvis) null
+    else "Set up by Jarvis" + job.expiresAt?.let { " · expires ${zonedDay(it)}" }.orEmpty()
+
+const val PAUSED_AFTER_FAILURES = "Paused after 3 failed runs"
+const val PAUSED_AFTER_FAILURES_NOTE =
+    "Core paused this job after 3 failed runs in a row. Check the latest run, change the job if needed, then enable it again."
+
+/** A one-time job after its slot, or a job that reached its run limit: Core disabled it
+ *  because it is done, not paused. */
+fun isFinished(job: Job): Boolean =
+    !job.enabled && ((job.cadence == Cadence.ONCE && job.lastSlotAt != null) || (job.maxRuns != null && job.runCount >= job.maxRuns))
 
 fun stateText(job: Job): String = when {
     job.enabled -> "Enabled"
-    job.pausedAfterFailures -> "Paused after ${job.failureCount} failed runs"
+    job.pausedAfterFailures -> PAUSED_AFTER_FAILURES
+    isFinished(job) -> "Finished"
     else -> "Paused"
 }
 
+/** When it runs next, for the list. */
+fun nextRunText(job: Job): String = if (!job.enabled) stateText(job) else job.nextRunAt?.let(::zonedText) ?: "Not scheduled"
+
 /** The owner's jobs that count towards [MAX_OWNER_JOBS]. */
 fun ownerJobCount(jobs: List<Job>): Int = jobs.count { !it.byJarvis && it.kind != JobKind.DEPENDENCY_REVIEW }
-fun jobCountText(jobs: List<Job>): String = "${ownerJobCount(jobs)} of $MAX_OWNER_JOBS jobs"
+/** [unsupported]: jobs this build cannot show; Core may count them too. */
+fun jobCountText(jobs: List<Job>, unsupported: Int = 0): String =
+    "${ownerJobCount(jobs)} of $MAX_OWNER_JOBS jobs" + if (unsupported > 0) ", not counting any this app cannot show" else ""
+const val JOBS_FULL_TEXT = "You have $MAX_OWNER_JOBS jobs, the most Core keeps. Delete one to add another."
+fun unsupportedText(n: Int): String =
+    "${if (n == 1) "1 job" else "$n jobs"} this app cannot show yet. Update the app to see ${if (n == 1) "it" else "them"}."
+
+fun deleteNote(job: Job): String =
+    if (job.conversationId != null) "Its runs are deleted too. Its conversation stays in chat." else "Its runs are deleted too."
 
 /** A job's name on a list: its title, or its kind. */
 fun jobTitle(job: Job): String = job.params.title ?: job.kind.label
@@ -354,9 +375,9 @@ fun hasRecurrence(kind: JobKind): Boolean = kind != JobKind.DEPENDENCY_REVIEW
 /** What Core would refuse, in the owner's words (Core's bounds); null when the draft is fine. */
 fun draftError(d: JobDraft, today: LocalDate = jobsToday()): String? {
     if ((d.kind == JobKind.PROMPT || d.kind == JobKind.REMINDER) && !validText(d.title, 60)) return "Give it a title of 1 to 60 characters on one line."
-    if (d.kind == JobKind.PROMPT && !validText(d.instruction, 500)) return "Write what to research in 1 to 500 characters on one line."
-    if (d.kind == JobKind.REMINDER && d.text.isNotEmpty() && !validText(d.text, 500)) return "The text can be 1 to 500 characters on one line, or empty."
-    if (d.kind == JobKind.DISK_CHECK && d.threshold.trim().toIntOrNull() !in 50..99) return "Pick a threshold of 50 to 99%."
+    if (d.kind == JobKind.PROMPT && !validText(d.instruction, 500)) return "Say what to research in 1 to 500 characters on one line."
+    if (d.kind == JobKind.REMINDER && d.text.isNotBlank() && !validText(d.text, 500)) return "The text can be at most 500 characters on one line."
+    if (d.kind == JobKind.DISK_CHECK && d.threshold.trim().toIntOrNull() !in 50..99) return "Pick a threshold from 50 to 99 percent."
     if (d.cadence !in cadencesOf(d.kind)) return "A dependency review runs daily or weekly."
     if (timeToMinute(d.time) == null) return "Pick a time of day."
     if (!hasRecurrence(d.kind)) return null
@@ -364,10 +385,10 @@ fun draftError(d: JobDraft, today: LocalDate = jobsToday()): String? {
     if (d.cadence != Cadence.ONCE && d.every.trim().toIntOrNull() !in 1..most) return "Repeat every 1 to $most ${everyUnit(d.cadence)}."
     val start = d.startDate.trim()
     if (start.isEmpty()) {
-        if (d.cadence == Cadence.ONCE) return "Pick the day it runs (YYYY-MM-DD)."
+        if (d.cadence == Cadence.ONCE) return "Pick the day it runs."
     } else {
         val date = parseDate(start) ?: return "Write the date as YYYY-MM-DD."
-        if (date.year < 2000 || date > today.plusDays(732)) return "The date can be at most two years ahead."
+        if (date.year < 2000 || date > today.plusDays(732)) return "Pick a date at most two years ahead."
         if (d.cadence == Cadence.ONCE && d.enabled && date < today) return "Pick a day from today on."
     }
     if (d.cadence != Cadence.ONCE && d.maxRuns.isNotBlank() && d.maxRuns.trim().toIntOrNull() !in 1..100) return "Stop after 1 to 100 runs, or leave it empty."
@@ -377,8 +398,8 @@ fun draftError(d: JobDraft, today: LocalDate = jobsToday()): String? {
 private fun JobDraft.paramsJson(): JsonObject = buildJsonObject {
     when (kind) {
         JobKind.DEPENDENCY_REVIEW -> roadmapId?.let { put("roadmap_id", it) }
-        JobKind.PROMPT -> { put("title", title); put("instruction", instruction); put("notify", notify) }
-        JobKind.REMINDER -> { put("title", title); if (text.isNotEmpty()) put("text", text) }
+        JobKind.PROMPT -> { put("title", title.trim()); put("instruction", instruction.trim()); put("notify", notify) }
+        JobKind.REMINDER -> { put("title", title.trim()); text.trim().takeIf { it.isNotEmpty() }?.let { put("text", it) } }
         JobKind.DISK_CHECK -> put("threshold_percent", threshold.trim().toInt())
     }
 }
@@ -433,10 +454,17 @@ fun jobPatch(job: Job, draft: JobDraft, today: LocalDate = jobsToday()): JsonObj
 // ---- fixed wording ---------------------------------------------------------
 
 private val ERROR_TEXT = mapOf(
-    "not_configured" to "Not set up on Core: the GitHub token or the repository list (JARVIS_GITHUB_REPOS) is missing on your Home Node.",
+    "not_configured" to "Not set up on Core: something this job needs is turned off on your Home Node.",
     "timed_out" to "The run took longer than 15 minutes and was stopped.",
     "interrupted" to "Core stopped during the run, so it did not finish.",
     "invalid_result" to "Core refused to store the result of this run.",
+    "internal" to "Something went wrong in Core during the run.",
+    "private_instruction" to
+        "Not searched: the title or instruction may hold personal or financial details or a symbol you hold. Change the job to leave them out.",
+    "holdings_unavailable" to "Not searched: Core could not read your holdings to check the instruction for private details.",
+    "research_unavailable" to "The web search did not run or was stopped.",
+    "conversation_unavailable" to "The answer could not be stored in the job's conversation.",
+    "disk_unavailable" to "No Home Node disk could be read.",
     "token_needs_dependabot_alerts_read" to
         "GitHub refused the Dependabot alerts. Give the GitHub token the \"Dependabot alerts: Read-only\" permission for the repository, and turn on Dependabot alerts in its settings.",
     "github_access_refused" to "GitHub refused the list of pull requests. The repository's alerts were kept.",
@@ -449,22 +477,23 @@ private val ERROR_TEXT = mapOf(
     "roadmap_changed" to "The roadmap changed while the run read it. The next run proposes again.",
     "roadmap_limit" to "The roadmap holds its maximum of items or pending proposals, so no proposal was made.",
     "roadmap_proposal_failed" to "The roadmap proposal could not be made.",
-    "private_instruction" to "The title or instruction may hold personal or financial details or a symbol you hold, so it was not searched. Edit the job to leave them out.",
-    "holdings_unavailable" to "Core could not read your holdings to check the instruction, so it did not search.",
-    "research_unavailable" to "The web search did not run or was stopped. The next run tries again.",
-    "conversation_unavailable" to "The result could not be stored in the job's conversation.",
-    "disk_unavailable" to "Core could not read any Home Node disk.",
-    "internal" to "Core hit an internal error during the run.",
 )
 
-/** The owner-facing text for an error code of a run of [kind] (null: a dependency review or
- *  unknown); never the code's own words. */
-fun jobErrorText(code: String, kind: JobKind? = null): String = when {
-    kind == JobKind.PROMPT && code == "not_configured" -> "Not set up on Core: Research is off or no subscription worker is set up."
-    kind == JobKind.PROMPT && code == "timed_out" -> "The search took longer than 5 minutes and was stopped."
-    (kind == JobKind.REMINDER || kind == JobKind.DISK_CHECK) && code == "not_configured" -> "Not set up on Core: this job has no owner to report to."
-    else -> ERROR_TEXT[code] ?: "Core reported an error this app does not know yet."
-}
+/** Where a code means something else for one kind of job. */
+private val KIND_ERROR_TEXT = mapOf(
+    JobKind.DEPENDENCY_REVIEW to mapOf(
+        "not_configured" to "Not set up on Core: the GitHub token or the repository list (JARVIS_GITHUB_REPOS) is missing on your Home Node.",
+    ),
+    JobKind.PROMPT to mapOf(
+        "not_configured" to "Not searched: Research is off, or no subscription worker can run it.",
+        "timed_out" to "The web search took longer than 5 minutes and was stopped.",
+    ),
+)
+
+/** The owner-facing text for an error code of a run of [kind] (null: unknown); never the
+ *  code's own words. */
+fun jobErrorText(code: String, kind: JobKind? = null): String =
+    KIND_ERROR_TEXT[kind]?.get(code) ?: ERROR_TEXT[code] ?: "Core reported an error this app does not know yet."
 
 fun summarySourceLabel(source: String): String = when (source) {
     "claude" -> "Written by Claude"
@@ -477,6 +506,12 @@ const val JOBS_NOT_CONFIGURED =
     "Core's scheduler is off: it could not read the Europe/Amsterdam time zone on your Home Node. Jobs can be changed, but none runs."
 
 enum class JobFailure { NO_API, UNREACHABLE, SIGNIN, NOT_FOUND, UNAVAILABLE, FAILED }
+
+/** The InvalidResponse message of a call refused before it was sent (a job id that is not a
+ *  UUID): nothing reached Core, so it is not "not confirmed". */
+const val INVALID_JOB_ID = "Invalid job id"
+const val NOT_SENT = "Not sent: this app refused the job's id. Reload and try again."
+private fun notSent(result: ApiResult<*>) = result is ApiResult.InvalidResponse && result.message == INVALID_JOB_ID
 
 /** [list]: the failure is on GET /v1/jobs, where 404 means an older Core. */
 fun jobFailureOf(result: ApiResult<*>, list: Boolean = false): JobFailure = when (result) {
@@ -508,6 +543,7 @@ fun runNowFailureText(result: ApiResult<*>): String = when {
     result is ApiResult.HttpError && result.status == 429 -> RUN_NOW_REFUSED
     result is ApiResult.HttpError && result.status == 409 -> "Not started: Core's scheduler is off, so no job runs."
     result is ApiResult.Unreachable -> "No answer from your Home Node. It is unknown whether the run was queued; reloaded to check."
+    notSent(result) -> NOT_SENT
     // A 2xx whose answer is oversized or unreadable: the run may have been queued.
     result is ApiResult.InvalidResponse -> NOT_CONFIRMED
     else -> "Not started. ${jobFailureText(jobFailureOf(result))}"
@@ -515,27 +551,33 @@ fun runNowFailureText(result: ApiResult<*>): String = when {
 
 const val CHANGED_ELSEWHERE = "Changed elsewhere, reloaded."
 
-const val JOBS_FULL = "Core refused this: you have $MAX_OWNER_JOBS jobs, the most it keeps. Delete one first."
+const val INVALID_TEXT =
+    "Core refused this as invalid: for example a one-time job that is not in the future, an archived roadmap, or a research title or instruction that may hold personal or financial details. Check the fields and try again."
 
-/** The notice after a failed write of a job of [kind]. A 409 on a change is a revision
- *  conflict; on a create, a second dependency review or no room for another job. */
+/** The notice after a failed write. A 409 on a change is a revision conflict; on a create,
+ *  no room: a second dependency review, or the owner's 10 jobs. */
 fun writeFailureText(result: ApiResult<*>, update: Boolean, kind: JobKind = JobKind.DEPENDENCY_REVIEW): String = when {
     result is ApiResult.HttpError && result.status == 409 -> when {
         update -> CHANGED_ELSEWHERE
-        kind == JobKind.DEPENDENCY_REVIEW -> "Core refused this: a job of this kind already exists."
-        else -> JOBS_FULL
+        kind == JobKind.DEPENDENCY_REVIEW -> "Core refused this: a dependency review already exists."
+        else -> "Core refused this. $JOBS_FULL_TEXT"
     }
-    result is ApiResult.HttpError && result.status == 400 -> if (kind == JobKind.PROMPT) {
-        "Core refused this as invalid, for example a title or instruction that may hold personal or financial details. Check the fields and try again."
-    } else {
-        "Core refused this as invalid, for example a roadmap that is archived or a day in the past. Check the fields and try again."
-    }
-    // Core refuses a body it cannot parse: a kind or field an older Core does not know.
-    result is ApiResult.HttpError && result.status == 422 -> "Not saved: your Core does not know this kind of job yet. Update Core on your Home Node."
+    result is ApiResult.HttpError && result.status == 400 -> INVALID_TEXT
+    result is ApiResult.HttpError && result.status == 503 ->
+        "Not saved: Core could not check this just now (its database or your holdings could not be read). Try again in a minute."
     result is ApiResult.Unreachable -> "No answer from your Home Node. It is unknown whether the change arrived; reloaded to check."
+    notSent(result) -> NOT_SENT
     // A 2xx whose answer is oversized or unreadable: the change may have landed.
     result is ApiResult.InvalidResponse -> NOT_CONFIRMED
     else -> "Not saved. ${jobFailureText(jobFailureOf(result))}"
+}
+
+/** The notice after a create or change: [done] when Core's answer reads; NOT_CONFIRMED for a
+ *  2xx whose job does not read (it may have landed; the page reloads). */
+fun writeNotice(result: ApiResult<Job?>, update: Boolean, kind: JobKind, done: String): String = when {
+    result !is ApiResult.Success -> writeFailureText(result, update, kind)
+    result.value == null -> NOT_CONFIRMED
+    else -> done
 }
 
 /** Whether a delete went through: done, or the job was already gone. */
@@ -545,6 +587,7 @@ fun jobDeleted(result: ApiResult<*>): Boolean = result is ApiResult.Success || (
 fun deleteFailureText(result: ApiResult<*>): String = when {
     result is ApiResult.HttpError && result.status == 409 -> CHANGED_ELSEWHERE
     result is ApiResult.Unreachable -> "No answer from your Home Node. It is unknown whether the job was deleted; reloaded to check."
+    notSent(result) -> NOT_SENT
     result is ApiResult.InvalidResponse -> NOT_CONFIRMED
     else -> "Not deleted. ${jobFailureText(jobFailureOf(result))}"
 }

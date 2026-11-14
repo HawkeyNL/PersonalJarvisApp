@@ -40,6 +40,7 @@ import com.hawkeynl.jarvis.chat.Source
 import com.hawkeynl.jarvis.network.ApiResult
 import com.hawkeynl.jarvis.network.Cadence
 import com.hawkeynl.jarvis.network.Fact
+import com.hawkeynl.jarvis.network.JOBS_FULL_TEXT
 import com.hawkeynl.jarvis.network.JOBS_NOT_CONFIGURED
 import com.hawkeynl.jarvis.network.JOBS_TIME_ZONE
 import com.hawkeynl.jarvis.network.Job
@@ -49,7 +50,9 @@ import com.hawkeynl.jarvis.network.JobKind
 import com.hawkeynl.jarvis.network.JobList
 import com.hawkeynl.jarvis.network.JobRun
 import com.hawkeynl.jarvis.network.MAX_OWNER_JOBS
+import com.hawkeynl.jarvis.network.NOT_CONFIRMED
 import com.hawkeynl.jarvis.network.OWNER_KINDS
+import com.hawkeynl.jarvis.network.PAUSED_AFTER_FAILURES_NOTE
 import com.hawkeynl.jarvis.network.Priority
 import com.hawkeynl.jarvis.network.Roadmap
 import com.hawkeynl.jarvis.network.RunDetail
@@ -57,6 +60,7 @@ import com.hawkeynl.jarvis.network.RunStatus
 import com.hawkeynl.jarvis.network.WEEKDAYS
 import com.hawkeynl.jarvis.network.cadencesOf
 import com.hawkeynl.jarvis.network.deleteFailureText
+import com.hawkeynl.jarvis.network.deleteNote
 import com.hawkeynl.jarvis.network.draftError
 import com.hawkeynl.jarvis.network.everyUnit
 import com.hawkeynl.jarvis.network.hasRecurrence
@@ -69,6 +73,7 @@ import com.hawkeynl.jarvis.network.jobPatch
 import com.hawkeynl.jarvis.network.jobTitle
 import com.hawkeynl.jarvis.network.newDraft
 import com.hawkeynl.jarvis.network.newJob
+import com.hawkeynl.jarvis.network.nextRunText
 import com.hawkeynl.jarvis.network.ordinal
 import com.hawkeynl.jarvis.network.originText
 import com.hawkeynl.jarvis.network.ownerJobCount
@@ -80,7 +85,9 @@ import com.hawkeynl.jarvis.network.summarySourceLabel
 import com.hawkeynl.jarvis.network.toDraft
 import com.hawkeynl.jarvis.network.triggerLabel
 import com.hawkeynl.jarvis.network.typedTime
+import com.hawkeynl.jarvis.network.unsupportedText
 import com.hawkeynl.jarvis.network.writeFailureText
+import com.hawkeynl.jarvis.network.writeNotice
 import com.hawkeynl.jarvis.network.zonedText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
@@ -162,11 +169,13 @@ private fun JobListPage(actions: JarvisViewModel, back: () -> Unit, open: (Strin
         latest.launch {
             try {
                 val result = actions.jobs { e, t -> createJob(e, t, body) } ?: return@launch
-                if (result is ApiResult.Success) {
+                val created = (result as? ApiResult.Success)?.value
+                if (created != null) {
                     creating = null
-                    result.value?.let { open(it.id) } ?: load()
+                    open(created.id)
                 } else {
-                    error = writeFailureText(result, update = false, draft.kind)
+                    // A 2xx whose job does not read may have landed: the reload shows it.
+                    error = if (result is ApiResult.Success) NOT_CONFIRMED else writeFailureText(result, update = false, draft.kind)
                     load()
                 }
             } finally {
@@ -191,7 +200,7 @@ private fun JobListPage(actions: JarvisViewModel, back: () -> Unit, open: (Strin
                 if (error.isNotEmpty()) ErrorText(error)
                 val full = ownerJobCount(shown.list.jobs) >= MAX_OWNER_JOBS
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    MutedText(jobCountText(shown.list.jobs) + if (full) ". Delete one to make room." else "", Modifier.weight(1f))
+                    MutedText(jobCountText(shown.list.jobs, shown.list.unsupported) + if (full) ". $JOBS_FULL_TEXT" else "", Modifier.weight(1f))
                     if (creating !in OWNER_KINDS) GhostButton("New job", { creating = JobKind.PROMPT; error = "" }, enabled = !full)
                 }
                 if (creating in OWNER_KINDS) {
@@ -202,9 +211,7 @@ private fun JobListPage(actions: JarvisViewModel, back: () -> Unit, open: (Strin
                     }
                 }
                 shown.rows.forEach { row -> JobCard(row) { open(row.job.id) } }
-                repeat(shown.list.unsupported) {
-                    ListSection(null) { Text("Unsupported job — update the app", Modifier.padding(JvSpace.lg), style = MaterialTheme.typography.bodyMedium) }
-                }
+                if (shown.list.unsupported > 0) Warning(unsupportedText(shown.list.unsupported))
                 val review = JobKind.DEPENDENCY_REVIEW
                 if (shown.rows.none { it.job.kind == review }) {
                     ListSection(review.label) {
@@ -247,7 +254,7 @@ private fun JobCard(row: JobRow, open: () -> Unit) {
             FactRow("Runs", it)
         }
         ListDivider()
-        FactRow("Next run", if (!job.enabled) "Paused" else job.nextRunAt?.let(::zonedText) ?: "Not scheduled")
+        FactRow("Next run", nextRunText(job))
         ListDivider()
         val last = row.last
         when {
@@ -293,7 +300,7 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
     }
     LaunchedEffect(Unit) { latest.launch { load() } }
 
-    fun write(current: Job, patch: JsonObject) {
+    fun write(current: Job, patch: JsonObject, done: String) {
         busy = true
         notice = ""
         latest.launch {
@@ -301,7 +308,7 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
                 val result = actions.jobs { e, t -> updateJob(e, t, current.id, current.revision, patch) } ?: return@launch
                 (result as? ApiResult.Success)?.value?.let { job = it }
                 load()
-                notice = if (result is ApiResult.Success) "Saved." else writeFailureText(result, update = true, current.kind)
+                notice = writeNotice(result, update = true, current.kind, done)
             } finally {
                 busy = false
             }
@@ -313,13 +320,13 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
         if (busy) return
         val patch = jobPatch(current, draft)
         if (patch == null) { notice = "Nothing changed."; return }
-        write(current, patch)
+        write(current, patch, "Saved.")
     }
 
     fun setEnabled(enabled: Boolean) {
         val current = job ?: return
         if (busy) return
-        write(current, buildJsonObject { put("enabled", enabled) })
+        write(current, buildJsonObject { put("enabled", enabled) }, if (enabled) "Enabled." else "Paused.")
     }
 
     fun runNow() {
@@ -379,6 +386,7 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
                         originText(shown)?.let { StatusBadge(it) }
                         val next = if (shown.enabled && shown.nextRunAt != null) "Next run ${zonedText(shown.nextRunAt)}" else null
                         MutedText(listOfNotNull("${scheduleText(shown)} ($JOBS_TIME_ZONE)", runsText(shown), next).joinToString(". ") + ".")
+                        if (shown.pausedAfterFailures) ErrorText(PAUSED_AFTER_FAILURES_NOTE, live = false)
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm), verticalAlignment = Alignment.CenterVertically) {
@@ -386,7 +394,7 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
                     GhostButton(if (shown.enabled) "Pause" else "Enable", { setEnabled(!shown.enabled) }, enabled = !busy)
                 }
                 shown.conversationId?.let { conversation ->
-                    GhostButton("Open conversation", { actions.openConversation(conversation) }, Modifier.fillMaxWidth())
+                    GhostButton("Open in chat", { actions.openConversation(conversation) }, Modifier.fillMaxWidth())
                 }
                 ListSection("Edit") {
                     Column(Modifier.padding(JvSpace.lg)) {
@@ -425,7 +433,7 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
         AlertDialog(
             onDismissRequest = { if (!busy) deleting = false },
             title = { Text("Delete this job?") },
-            text = { Text("Its runs are deleted with it. Its conversation stays.") },
+            text = { Text(job?.let(::deleteNote).orEmpty()) },
             dismissButton = { TextButton(onClick = { deleting = false }, enabled = !busy) { Text("Cancel") } },
             confirmButton = { TextButton(onClick = ::delete, enabled = !busy) { Text("Delete", color = JvTheme.colors.dangerText) } },
         )
@@ -481,7 +489,7 @@ private fun RunReport(detail: RunDetail, openJob: () -> Unit, openConversation: 
         ListSection("Repositories that could not be read") {
             detail.errors.forEachIndexed { i, e ->
                 if (i > 0) ListDivider()
-                Text("${e.repo}: ${jobErrorText(e.errorCode)}", Modifier.padding(JvSpace.lg), style = MaterialTheme.typography.bodyMedium)
+                Text("${e.repo}: ${jobErrorText(e.errorCode, run.kind)}", Modifier.padding(JvSpace.lg), style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
@@ -579,7 +587,7 @@ private fun JobForm(
                 // One line for Core: a typed line break reads as a space.
                 Field("What to research", draft.instruction, { edit(draft.copy(instruction = it.replace('\n', ' '))) }, "Up to 500 characters.", multiline = true)
                 MutedText("The title and instruction leave your Home Node in a web search: leave out personal or financial details and symbols you hold.")
-                SwitchRow("Send a push when a run ends", draft.notify) { edit(draft.copy(notify = it)) }
+                SwitchRow("Send me a push when a run ends", draft.notify) { edit(draft.copy(notify = it)) }
             }
             JobKind.REMINDER -> {
                 Field("Title", draft.title, { edit(draft.copy(title = it)) }, "Up to 60 characters. Sent as the push.")
