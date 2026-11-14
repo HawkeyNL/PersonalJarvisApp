@@ -133,20 +133,33 @@ suspend fun addJob(body: JsonObject, kind: JobKind, create: suspend (JsonObject)
     }
 }
 
-/** [cards] with card [id] set to adding, before anything is sent; null when the tap is
- *  refused: behind the lock or signed out ([allowed] false), or the card is not open (gone,
- *  or a second tap while the first runs). */
-fun startAdd(cards: List<ProposalCard>, id: String, allowed: Boolean): List<ProposalCard>? {
-    if (!allowed || cards.none { it.id == id && it.state == ProposalState.OPEN }) return null
-    return cards.map { if (it.id == id) it.copy(state = ProposalState.ADDING, error = "") else it }
+/** One Add under way (desktop addProposalCard): the cards with it adding, what goes out (the
+ *  card's own body exactly as Core sent it, or the [edited] draft's), the kind that words a
+ *  409, and the sign-in and conversation it was sent from. */
+data class AddStart(
+    val id: String, val cards: List<ProposalCard>, val body: JsonObject, val kind: JobKind, val edited: JobDraft?,
+    val identity: Int, val conversationId: String?,
+)
+
+/** The Add of card [id], with the card set to adding before anything is sent; null when the
+ *  tap is refused: behind the lock or signed out ([allowed] false), the card is not open
+ *  (gone, or a second tap while the first runs), or [edited] fails the job checks. */
+fun startAdd(
+    cards: List<ProposalCard>, id: String, allowed: Boolean, edited: JobDraft?, identity: Int, conversationId: String?,
+    today: LocalDate = jobsToday(),
+): AddStart? {
+    val card = cards.firstOrNull { it.id == id && it.state == ProposalState.OPEN }?.takeIf { allowed } ?: return null
+    val body = if (edited == null) card.body else newJob(edited, today) ?: return null
+    val adding = cards.map { if (it.id == id) it.copy(state = ProposalState.ADDING, error = "") else it }
+    return AddStart(id, adding, body, edited?.kind ?: card.draft.kind, edited, identity, conversationId)
 }
 
-/** [cards] with an Add's [result] on card [id]; unchanged when the owner left the sign-in or
- *  conversation it was sent from ([same] false), or dismissed the card. Once an [edited] job
- *  may exist, the card shows it. */
-fun finishAdd(cards: List<ProposalCard>, id: String, result: AddResult, same: Boolean, edited: JobDraft? = null): List<ProposalCard> =
-    if (!same) cards else cards.map {
-        if (it.id != id) it
+/** [cards] with the Add's [result]; unchanged when the owner has left the sign-in or
+ *  conversation it was sent from (now [identity] and [conversationId]), or dismissed the
+ *  card. Once an edited job may exist, the card shows it. */
+fun finishAdd(cards: List<ProposalCard>, start: AddStart, result: AddResult, identity: Int, conversationId: String?): List<ProposalCard> =
+    if (identity != start.identity || conversationId != start.conversationId) cards else cards.map {
+        if (it.id != start.id) it
         else it.copy(state = result.state, jobId = result.jobId, error = result.error,
-            draft = if (edited != null && result.state != ProposalState.OPEN) edited else it.draft)
+            draft = if (start.edited != null && result.state != ProposalState.OPEN) start.edited else it.draft)
     }

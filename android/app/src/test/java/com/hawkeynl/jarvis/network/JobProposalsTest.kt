@@ -143,19 +143,41 @@ class JobProposalsTest {
 
     @Test fun `Add is refused behind the lock and on a second tap, and a late result is dropped`() {
         val cards = newCards(mutableSetOf(), read(item(1, disk), item(2, prompt)), "c", "m")
-        assertNull(startAdd(cards, id(1), allowed = false))
-        assertNull(startAdd(cards, id(3), allowed = true))
-        val adding = startAdd(cards, id(1), allowed = true)!!
-        assertEquals(listOf(ProposalState.ADDING, ProposalState.OPEN), adding.map { it.state })
-        assertNull(startAdd(adding, id(1), allowed = true))
+        fun start(list: List<ProposalCard>, id: String, allowed: Boolean = true, edited: JobDraft? = null) =
+            startAdd(list, id, allowed, edited, identity = 1, conversationId = "c", today = today)
+        assertNull(start(cards, id(1), allowed = false))
+        assertNull(start(cards, id(3)))
+        val add = start(cards, id(1))!!
+        assertEquals(listOf(ProposalState.ADDING, ProposalState.OPEN), add.cards.map { it.state })
+        assertNull(start(add.cards, id(1)))
+        val adding = add.cards
         val done = AddResult(ProposalState.ADDED, id(7), "")
-        assertSame(adding, finishAdd(adding, id(1), done, same = false))
-        assertEquals(listOf(ProposalState.ADDED, ProposalState.OPEN), finishAdd(adding, id(1), done, same = true).map { it.state })
-        // An edited job that may exist shows on the card; after a refusal the proposal stays.
-        val edited = cards[0].draft.copy(threshold = "95")
-        assertEquals("95", finishAdd(adding, id(1), done, same = true, edited = edited)[0].draft.threshold)
-        assertEquals("90", finishAdd(adding, id(1), AddResult(ProposalState.OPEN, null, "x"), same = true, edited = edited)[0].draft.threshold)
+        // Another sign-in or conversation since: dropped.
+        assertSame(adding, finishAdd(adding, add, done, identity = 2, conversationId = "c"))
+        assertSame(adding, finishAdd(adding, add, done, identity = 1, conversationId = "other"))
+        assertEquals(listOf(ProposalState.ADDED, ProposalState.OPEN), finishAdd(adding, add, done, 1, "c").map { it.state })
         // Dismissed while it ran: nothing comes back.
-        assertEquals(listOf(id(2)), finishAdd(adding.drop(1), id(1), done, same = true).map { it.id })
+        assertEquals(listOf(id(2)), finishAdd(adding.drop(1), add, done, 1, "c").map { it.id })
+    }
+
+    @Test fun `an unedited Add sends the card's body, an edited one the edited body and kind`() = runBlocking<Unit> {
+        val cards = newCards(mutableSetOf(), read(item(1, prompt)), "c", "m")
+        val plain = startAdd(cards, id(1), true, null, 1, "c", today)!!
+        assertSame(cards[0].body, plain.body)
+        assertEquals(JobKind.PROMPT, plain.kind)
+        val edited = cards[0].draft.copy(kind = JobKind.REMINDER, title = "Call the bank", text = "Ask about the card")
+        val edit = startAdd(cards, id(1), true, edited, 1, "c", today)!!
+        assertEquals(newJob(edited, today), edit.body)
+        assertEquals(JobKind.REMINDER, edit.kind)
+        // An edit that fails the checks sends nothing and leaves the card open.
+        assertNull(startAdd(cards, id(1), true, edited.copy(title = ""), 1, "c", today))
+        val sent = mutableListOf<JsonObject>()
+        val full = addJob(edit.body, edit.kind) { sent += it; ApiResult.HttpError(409, null) }
+        assertEquals(listOf(edit.body), sent)
+        assertEquals(writeFailureText(ApiResult.HttpError(409, null), update = false, kind = JobKind.REMINDER), full.error)
+        // An edited job that may exist shows on the card; after a refusal the proposal stays.
+        val done = AddResult(ProposalState.ADDED, id(7), "")
+        assertEquals("Call the bank", finishAdd(edit.cards, edit, done, 1, "c")[0].draft.title)
+        assertEquals("AI news", finishAdd(edit.cards, edit, full, 1, "c")[0].draft.title)
     }
 }

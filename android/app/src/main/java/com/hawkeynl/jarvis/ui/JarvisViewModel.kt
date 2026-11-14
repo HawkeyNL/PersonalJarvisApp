@@ -154,6 +154,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     private fun newIdentity() {
         identity++
         seenProposals.clear()
+        jobToOpen = null
         _state.update { it.copy(jobProposals = emptyList()) }
     }
     // Each job proposal shows once per sign-in, also after a replayed event. Main thread only.
@@ -348,19 +349,12 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
      *  owner has left is dropped. */
     fun addProposal(id: String, edited: com.hawkeynl.jarvis.network.JobDraft? = null) {
         val state = _state.value
-        val edit = edited?.let { com.hawkeynl.jarvis.network.newJob(it) ?: return }
-        val started = com.hawkeynl.jarvis.network.startAdd(state.jobProposals, id, !state.locked && state.authenticated) ?: return
-        val card = started.first { it.id == id }
-        val asked = identity
-        val conversation = state.conversationId
-        _state.update { it.copy(jobProposals = started) }
+        val start = com.hawkeynl.jarvis.network.startAdd(
+            state.jobProposals, id, !state.locked && state.authenticated, edited, identity, state.conversationId) ?: return
+        _state.update { it.copy(jobProposals = start.cards) }
         viewModelScope.launch {
-            val result = com.hawkeynl.jarvis.network.addJob(edit ?: card.body, edited?.kind ?: card.draft.kind) { body ->
-                jobs { e, t -> createJob(e, t, body) }
-            }
-            _state.update {
-                it.copy(jobProposals = com.hawkeynl.jarvis.network.finishAdd(it.jobProposals, id, result, asked == identity && it.conversationId == conversation, edited))
-            }
+            val result = com.hawkeynl.jarvis.network.addJob(start.body, start.kind) { body -> jobs { e, t -> createJob(e, t, body) } }
+            _state.update { it.copy(jobProposals = com.hawkeynl.jarvis.network.finishAdd(it.jobProposals, start, result, identity, it.conversationId)) }
         }
     }
 

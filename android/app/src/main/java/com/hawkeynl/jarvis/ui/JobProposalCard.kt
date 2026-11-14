@@ -13,10 +13,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,16 +38,13 @@ import com.hawkeynl.jarvis.network.proposalTitle
 
 /** One job a chat answer proposed, under that answer (desktop JobProposalCard.vue). Nothing
  *  is made until Add (the proposal as is) or Add in the editor (the edited job). Core's text
- *  shows as plain text only. The lock replaces the whole shell, so it also closes the editor. */
+ *  shows as plain text only. [editing]: its editor is open (see [JobProposalEditor]). */
 @Composable
-internal fun JobProposalCard(card: ProposalCard, locked: Boolean, actions: JarvisViewModel) {
+internal fun JobProposalCard(card: ProposalCard, locked: Boolean, editing: Boolean, onEdit: () -> Unit, actions: JarvisViewModel) {
     val c = JvTheme.colors
     val draft = card.draft
     val title = proposalTitle(draft)
     val busy = card.state == ProposalState.ADDING
-    var editing by remember(card.id) { mutableStateOf(false) }
-    // A resolved card closes its editor.
-    LaunchedEffect(card.state) { if (card.state == ProposalState.ADDED || card.state == ProposalState.UNCONFIRMED) editing = false }
     Column(
         Modifier.clip(JvShapes.md).background(c.bgSunken).padding(horizontal = JvSpace.md, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(JvSpace.xs),
@@ -73,23 +66,33 @@ internal fun JobProposalCard(card: ProposalCard, locked: Boolean, actions: Jarvi
                 ProposalState.UNCONFIRMED -> GhostButton(PROPOSAL_CHECK_JOBS, { actions.openJob(null) })
                 else -> {
                     GhostButton("Add", { actions.addProposal(card.id) }, enabled = !locked && !busy)
-                    GhostButton("Edit", { editing = true }, enabled = !locked && !busy)
+                    GhostButton("Edit", onEdit, enabled = !locked && !busy)
                 }
             }
             GhostButton("Dismiss", { actions.dismissProposal(card.id) }, enabled = !busy)
         }
     }
-    if (editing && !locked) {
-        Dialog(onDismissRequest = { editing = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            Column(
-                Modifier.fillMaxSize().background(c.bgPage).imePadding().verticalScroll(rememberScrollState()).padding(JvSpace.lg)
-                    .semantics { paneTitle = PROPOSAL_EDITOR_TITLE },
-                verticalArrangement = Arrangement.spacedBy(JvSpace.md),
-            ) {
-                Text(PROPOSAL_EDITOR_TITLE, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-                JobForm(actions, draft, creating = true, busy, "Add", onCancel = { editing = false }, onSave = { actions.addProposal(card.id, it) })
-                if (card.error.isNotEmpty()) ErrorText(card.error)
-            }
+}
+
+/** The editor of a proposed job: the jobs create form, prefilled, for the card's kind only.
+ *  Kept by the chat, outside the message list, so scrolling or a reload keeps the edits. It
+ *  closes once the job may exist; the lock replaces the whole shell, so it closes it too. */
+@Composable
+internal fun JobProposalEditor(card: ProposalCard, actions: JarvisViewModel, close: () -> Unit) {
+    val c = JvTheme.colors
+    LaunchedEffect(card.state) { if (card.state == ProposalState.ADDED || card.state == ProposalState.UNCONFIRMED) close() }
+    Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(
+            Modifier.fillMaxSize().background(c.bgPage).imePadding().verticalScroll(rememberScrollState()).padding(JvSpace.lg)
+                .semantics { paneTitle = PROPOSAL_EDITOR_TITLE },
+            verticalArrangement = Arrangement.spacedBy(JvSpace.md),
+        ) {
+            Text(PROPOSAL_EDITOR_TITLE, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+            JobForm(
+                actions, card.draft, creating = true, card.state == ProposalState.ADDING, "Add", onCancel = close,
+                onSave = { actions.addProposal(card.id, it) }, kinds = listOf(card.draft.kind),
+            )
+            if (card.error.isNotEmpty()) ErrorText(card.error)
         }
     }
 }
