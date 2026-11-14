@@ -128,7 +128,8 @@ enum JobProposals {
     /// All of the schedule Add sends: its run limit, and for research without a push, that.
     static func schedule(_ proposal: JobProposal) -> String {
         let draft = proposal.draft
-        let runs = draft.maxRuns.map { ", \($0) \($0 == 1 ? "run" : "runs")" } ?? ""
+        // A one-time job has no run limit; an edited draft may still hold a hidden one.
+        let runs = draft.cadence == .once ? "" : draft.maxRuns.map { ", \($0) \($0 == 1 ? "run" : "runs")" } ?? ""
         let push = proposal.body.kind == .prompt && !draft.notify ? noPush : ""
         return Jobs.scheduleText(draft) + runs + push
     }
