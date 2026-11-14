@@ -358,7 +358,9 @@ export function originText(job: Job): string | null {
 /** The owner's jobs that count towards Core's 10 (not the dependency review,
  *  not Jarvis's own). */
 export const ownerJobCount = (jobs: Job[]) => jobs.filter((j) => j.origin === "owner" && j.kind !== "dependency_review").length;
-export const countText = (n: number) => `${n} of ${LIMITS.ownerJobs} jobs`;
+/** `unsupported`: jobs this build cannot show; Core may count them too. */
+export const countText = (n: number, unsupported = 0) =>
+  `${n} of ${LIMITS.ownerJobs} jobs${unsupported ? ", not counting any this app cannot show" : ""}`;
 export const FULL_TEXT = `You have ${LIMITS.ownerJobs} jobs, the most Core keeps. Delete one to add another.`;
 export const unsupportedText = (n: number) =>
   `${n === 1 ? "1 job" : `${n} jobs`} this app cannot show yet. Update the app to see ${n === 1 ? "it" : "them"}.`;
@@ -626,4 +628,14 @@ export function writeFailureText(error: unknown, update: boolean, kind?: Kind): 
   }
   if (e?.name === "NetworkError") return "No answer from your Home Node. It is unknown whether the change arrived; reloaded to check.";
   return `Not saved. ${failureText(failureOf(error))}`;
+}
+
+/** The notice after a failed delete; null when the job is already gone (404),
+ *  which counts as deleted. */
+export function deleteFailureText(error: unknown): string | null {
+  const e = error as { name?: string; status?: number } | null;
+  if (e?.name === "ApiError" && e.status === 404) return null;
+  if (e?.name === "ApiError" && e.status === 409) return CHANGED_ELSEWHERE;
+  if (e?.name === "NetworkError") return "No answer from your Home Node. It is unknown whether the job was deleted; reloaded to check.";
+  return `Not deleted. ${failureText(failureOf(error))}`;
 }

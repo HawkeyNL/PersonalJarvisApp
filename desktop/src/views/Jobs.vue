@@ -114,7 +114,7 @@ async function create(draft: Draft): Promise<void> {
       </section>
 
       <p class="t-sm t-2 jb-meta">
-        <span>{{ countText(owned) }}</span>
+        <span>{{ countText(owned, state.unsupported) }}</span>
         <span v-if="full" id="jb-full">{{ FULL_TEXT }}</span>
         <span v-else>{{ TIMES_IN_ZONE }}</span>
       </p>

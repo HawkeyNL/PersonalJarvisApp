@@ -6,7 +6,7 @@ import PageShell from "../components/PageShell.vue";
 import JobForm from "../components/jobs/JobForm.vue";
 import {
   KIND_DETAIL, KIND_LABEL, NOT_CONFIGURED_TEXT, NOT_CONFIRMED, RUN_STATUS_LABEL, RUN_STATUS_TONE, TIMES_IN_ZONE, TRIGGER_LABEL,
-  deleteNote, errorText, failureOf, failureText, jobPatch, jobTitle, originText, readJobAnswer, readJobList, readRuns,
+  deleteFailureText, deleteNote, errorText, failureOf, failureText, jobPatch, jobTitle, originText, readJobAnswer, readJobList, readRuns,
   runNowFailureText, runsText, scheduleText, stateBadge, toDraft, todayInZone, writeFailureText, zonedText,
   type Draft, type Failure, type Job, type JobPatch, type Run,
 } from "../jobs";
@@ -128,9 +128,11 @@ async function remove(): Promise<void> {
     await jobApi.remove(j.id, j.revision);
     await router.push("/jobs");
   } catch (error) {
+    const text = deleteFailureText(error);
+    if (text === null) { await router.push("/jobs"); return; } // already gone
     confirming.value = false;
     await load();
-    notice.value = writeFailureText(error, true);
+    notice.value = text;
   } finally {
     busy.value = false;
   }

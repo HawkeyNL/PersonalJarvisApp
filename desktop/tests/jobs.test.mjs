@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  CHANGED_ELSEWHERE, FULL_TEXT, INVALID_TEXT, NEEDS_CORE, PAUSED_AFTER_FAILURES, RUN_NOW_REFUSED, countText, dateText, deleteNote,
+  CHANGED_ELSEWHERE, FULL_TEXT, INVALID_TEXT, NEEDS_CORE, PAUSED_AFTER_FAILURES, RUN_NOW_REFUSED, countText, dateText, deleteFailureText, deleteNote,
   draftIssue, errorText, failureOf, failureText, isFinished, jobPatch, jobTitle, latestStart, minuteToTime, newDraft, newJob, nextRunText,
   ordinal, originText, ownerJobCount, readJobAnswer, readJobList, readRunDetail, readRuns, runFinished, runNowFailureText, runsText,
   scheduleText, stateBadge, timeToMinute, toDraft, todayInZone, unsupportedText, writeFailureText, zonedText,
@@ -235,6 +235,7 @@ test("job state: paused after failures, finished, Jarvis's own, counts", () => {
   const review = readJobList({ status: "ok", jobs: [job] }).jobs[0];
   assert.equal(ownerJobCount([review, p, r, jarvis]), 2, "neither the review nor Jarvis's own count");
   assert.equal(countText(2), "2 of 10 jobs");
+  assert.equal(countText(2, 1), "2 of 10 jobs, not counting any this app cannot show");
   assert.equal(deleteNote({ ...p, conversation_id: J3 }), "Its runs are deleted too. Its conversation stays in chat.");
   assert.equal(deleteNote(p), "Its runs are deleted too.");
 });
@@ -354,4 +355,8 @@ test("an older Core and refusals get fixed wording", () => {
   assert.match(writeFailureText(apiError(503), true), /holdings could not be read/);
   assert.match(writeFailureText({ name: "NetworkError" }, true), /reloaded to check/);
   assert.equal(readJobAnswer({ deleted: true }), null, "an unreadable answer is not a confirmation");
+  assert.equal(deleteFailureText(apiError(404)), null, "already gone counts as deleted");
+  assert.equal(deleteFailureText(apiError(409)), CHANGED_ELSEWHERE);
+  assert.match(deleteFailureText({ name: "NetworkError" }), /unknown whether the job was deleted/);
+  assert.equal(deleteFailureText(apiError(503)), `Not deleted. ${failureText("unavailable")}`);
 });
