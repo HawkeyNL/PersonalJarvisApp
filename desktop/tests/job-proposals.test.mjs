@@ -109,8 +109,7 @@ test("an unreadable 2xx or no answer is not confirmed; a refusal lets the owner 
   assert.deepEqual(await addJob(prompt, async () => { throw Object.assign(new Error("x"), { name: "NetworkError" }); }), unconfirmed);
   // The answer broke after Core may have made the job, or a gateway gave up.
   assert.deepEqual(await addJob(prompt, async () => { throw new Error("Home Node response is invalid"); }), unconfirmed);
-  for (const status of [500, 502, 504]) assert.deepEqual(await addJob(prompt, async () => { throw apiError(status); }), unconfirmed);
-  assert.equal((await addJob(prompt, async () => { throw apiError(503); })).state, "open");
+  for (const status of [500, 502, 503, 504]) assert.deepEqual(await addJob(prompt, async () => { throw apiError(status); }), unconfirmed);
   assert.equal(ADD_NOT_CONFIRMED, "Not confirmed: it may have been added.");
   const full = await addJob(prompt, async () => { throw apiError(409); });
   assert.deepEqual(full, { state: "open", jobId: null, error: `Core refused this. ${FULL_TEXT}` });

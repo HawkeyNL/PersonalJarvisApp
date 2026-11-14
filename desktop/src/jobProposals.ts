@@ -114,10 +114,11 @@ export function proposalDetail(d: Draft): string | null {
 
 export type AddResult = Pick<ProposalCard, "state" | "jobId" | "error">;
 
-/** Sends `body` exactly as given. Only an HTTP refusal (4xx, or Core's 503
- *  "not saved") lets the owner try again; anything else (a 2xx this build
- *  cannot read, no answer, a broken answer, a gateway 5xx) is not confirmed
- *  and Add stays off, since the job may exist. */
+/** Sends `body` exactly as given. Only an HTTP refusal (4xx) lets the owner
+ *  try again; anything else (a 2xx this build cannot read, no answer, a
+ *  broken answer, any 5xx — Core's 503 also covers a write that timed out
+ *  after it may have landed) is not confirmed and Add stays off, since the
+ *  job may exist. */
 export async function addJob(body: NewJob, create: (body: NewJob) => Promise<unknown>): Promise<AddResult> {
   const unconfirmed: AddResult = { state: "unconfirmed", jobId: null, error: ADD_NOT_CONFIRMED };
   try {
@@ -125,7 +126,7 @@ export async function addJob(body: NewJob, create: (body: NewJob) => Promise<unk
     return job ? { state: "added", jobId: job.id, error: "" } : unconfirmed;
   } catch (e) {
     const err = e as { name?: string; status?: number } | null;
-    if (err?.name !== "ApiError" || ((err.status ?? 500) >= 500 && err.status !== 503)) return unconfirmed;
+    if (err?.name !== "ApiError" || (err.status ?? 500) >= 500) return unconfirmed;
     return { state: "open", jobId: null, error: err?.name === "ApiError" && err.status === 400 ? ADD_INVALID : writeFailureText(e, false) };
   }
 }
