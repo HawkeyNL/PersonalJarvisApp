@@ -181,6 +181,129 @@ final class HubModelTests: XCTestCase {
         XCTAssertFalse(ibkrNotSynced.localizedCaseInsensitiveContains("gateway"))
     }
 
+    private let ibkrOk = """
+    {"checked_at":"2026-11-01T12:00:00Z","overall":"ok",
+     "sync":{"enabled":true,"state":"ok","last_success_at":"2026-11-01T11:55:00Z","last_attempt_at":"2026-11-01T11:55:00Z",
+             "next_attempt_at":null,"consecutive_failures":0,"last_error":null},
+     "broker":{"service":"active","enabled_at_boot":true,"credentials":"present","reachable":true,"started_at":null},
+     "token":{"state":"valid","usable":true,"refreshed_at":"2026-11-01T09:00:00Z","expires_at":"2026-11-02T09:00:00Z",
+              "last_refresh_attempt_at":null,"last_refresh_error":null},
+     "ibkr":{"last_ok_at":null,"last_error":null,"rate_limited_until":null,"brokerage_session":"open"},
+     "problems":[]}
+    """
+
+    func testIbkrStatusRowsWhenEverythingWorks() throws {
+        let now = try XCTUnwrap(parseCoreDate("2026-11-01T12:00:00Z"))
+        let status = try decode(IbkrStatus.self, ibkrOk)
+        XCTAssertTrue(ibkrOverall(status) == (.ok, "Connected"))
+        XCTAssertEqual(ibkrRows(status, now: now), [
+            IbkrRow(label: "Broker", value: "Running, reachable"),
+            IbkrRow(label: "Portfolio sync", value: "On · Syncing"),
+            IbkrRow(label: "Session token", value: "Valid · refreshed 3h ago · expires in 21h · usable"),
+            IbkrRow(label: "Last successful sync", value: "5m ago"),
+            IbkrRow(label: "Brokerage session", value: "Open"),
+        ])
+    }
+
+    func testIbkrStatusIsLenientAboutMalformedNullAndUnknownFields() throws {
+        let now = try XCTUnwrap(parseCoreDate("2026-11-01T12:00:00Z"))
+        let long = String(repeating: "x", count: 500)
+        let problems = (0..<12).map { #"{"code":"c\#($0)","severity":"warn","summary":"s","commands":[]}"# }.joined(separator: ",")
+        let status = try decode(IbkrStatus.self, """
+        {"overall":"purple","sync":{"enabled":"yes","state":7,"last_success_at":null,"last_error":{"code":"new_code","at":"2026-11-01T11:00:00Z"}},
+         "broker":5,"token":null,"ibkr":{"rate_limited_until":"2026-11-01T12:03:00Z","brokerage_session":"elsewhere"},
+         "problems":[{"code":"x","severity":"fatal","summary":"\(long)","commands":["ok",3,null,"\(long)"]},"junk",\(problems)]}
+        """)
+        XCTAssertTrue(ibkrOverall(status) == (.idle, "Unknown"))
+        XCTAssertNil(status.broker)
+        XCTAssertNil(status.sync?.enabled)
+        XCTAssertEqual(status.problems.count, IbkrStatus.maxProblems)
+        XCTAssertEqual(status.problems[0].summary?.count, 300)
+        XCTAssertEqual(status.problems[0].commands.map(\.count), [2, 300])
+        XCTAssertTrue(ibkrSeverity(status.problems[0].severity) == (.idle, "Unknown"))
+        let rows = ibkrRows(status, now: now)
+        XCTAssertEqual(rows.map(\.label), ["Broker", "Portfolio sync", "Session token", "Last successful sync",
+                                           "Last error", "Brokerage session", "Rate limited until"])
+        XCTAssertEqual(rows[0].value, "Unknown")
+        XCTAssertEqual(rows[1].value, "Unknown")
+        XCTAssertEqual(rows[2].value, "Unknown")
+        XCTAssertEqual(rows[3].value, "Never")
+        XCTAssertEqual(rows[4], IbkrRow(label: "Last error", value: "new_code · 1h ago", mono: true))
+        XCTAssertEqual(rows[5].value, "Unknown")
+        XCTAssertTrue(rows[6].value.hasSuffix(" · in 3m"))
+        // Everything missing still decodes; a body that is no object does not.
+        let empty = try decode(IbkrStatus.self, "{}")
+        XCTAssertEqual(empty.problems, [])
+        XCTAssertEqual(ibkrRows(empty, now: now).count, 5)
+        XCTAssertThrowsError(try decode(IbkrStatus.self, "[]"))
+    }
+
+    func testIbkrStatusLabelsPerState() throws {
+        func broker(_ json: String) throws -> String { ibkrBrokerLabel(try decode(IbkrStatus.Broker.self, json)) }
+        XCTAssertEqual(try broker(#"{"service":"active","reachable":false,"credentials":"present"}"#), "Running, not reachable")
+        XCTAssertEqual(try broker(#"{"service":"active","reachable":null}"#), "Running")
+        XCTAssertEqual(try broker(#"{"service":"inactive"}"#), "Stopped")
+        XCTAssertEqual(try broker(#"{"service":"failed"}"#), "Failed")
+        XCTAssertEqual(try broker(#"{"service":"not_found"}"#), "Not installed")
+        XCTAssertEqual(try broker(#"{"service":"activating"}"#), "Unknown")
+        XCTAssertEqual(try broker(#"{"service":"active","reachable":true,"credentials":"missing"}"#), "Credentials missing")
+
+        func sync(_ state: String, enabled: Bool = true) throws -> String {
+            ibkrSyncLabel(try decode(IbkrStatus.Sync.self, #"{"enabled":\#(enabled),"state":"\#(state)"}"#))
+        }
+        XCTAssertEqual(try sync("off", enabled: false), "Off")
+        XCTAssertEqual(try sync("refused"), "Refused")
+        XCTAssertEqual(try sync("starting"), "On · Starting")
+        XCTAssertEqual(try sync("failing"), "On · Failing")
+        XCTAssertEqual(try sync("waiting_for_broker"), "On · Waiting for the broker")
+        XCTAssertEqual(try sync("later", enabled: false), "Off")
+
+        let now = try XCTUnwrap(parseCoreDate("2026-11-01T12:00:00Z"))
+        func token(_ state: String) throws -> String {
+            ibkrTokenLabel(try decode(IbkrStatus.Token.self, #"{"state":"\#(state)","usable":false,"refreshed_at":null,"expires_at":"2026-11-01T11:00:00Z"}"#), now: now)
+        }
+        XCTAssertEqual(try token("none"), "Not created yet · not usable")
+        XCTAssertEqual(try token("refresh_due"), "Refreshing soon · not usable")
+        XCTAssertEqual(try token("expired"), "Expired · not usable")
+        XCTAssertEqual(try token("rejected"), "Rejected · not usable")
+        XCTAssertEqual(ibkrBrokerageLabel("closed"), "Closed")
+        XCTAssertEqual(ibkrBrokerageLabel("competing"), "In use elsewhere")
+
+        var status = try decode(IbkrStatus.self, ibkrOk.replacingOccurrences(of: #""last_error":null},"#,
+                                                                              with: #""last_error":{"code":"broker_timeout","at":"2026-11-01T11:58:00Z"}},"#))
+        XCTAssertEqual(ibkrRows(status, now: now)[4], IbkrRow(label: "Last error", value: "Broker timed out · 2m ago"))
+        let problem = #"{"code":"token_expired","severity":"info","summary":"S","commands":[]}"#
+        status = try decode(IbkrStatus.self, ibkrOk.replacingOccurrences(of: #""overall":"ok""#, with: #""overall":"info""#))
+        XCTAssertTrue(ibkrOverall(status) == (.ok, "Connected"))
+        status = try decode(IbkrStatus.self, ibkrOk.replacingOccurrences(of: #""overall":"ok""#, with: #""overall":"info""#)
+            .replacingOccurrences(of: #""problems":[]"#, with: #""problems":[\#(problem)]"#))
+        XCTAssertTrue(ibkrOverall(status) == (.idle, "Needs attention"))
+        for (overall, expected) in [("warn", (Tone.warn, "Needs attention")), ("error", (Tone.error, "Not working")), ("off", (Tone.idle, "Off"))] {
+            status = try decode(IbkrStatus.self, ibkrOk.replacingOccurrences(of: #""overall":"ok""#, with: #""overall":"\#(overall)""#))
+            XCTAssertTrue(ibkrOverall(status) == expected, overall)
+        }
+        XCTAssertTrue(ibkrSeverity("error") == (.error, "Error"))
+        XCTAssertTrue(ibkrSeverity("warn") == (.warn, "Warning"))
+        XCTAssertTrue(ibkrSeverity("info") == (.idle, "Info"))
+    }
+
+    func testUntilTimeIsTheFutureSideOfRelativeTime() {
+        XCTAssertEqual(untilTime(now.addingTimeInterval(-5), now: now), "now")
+        XCTAssertEqual(untilTime(now.addingTimeInterval(30), now: now), "in under a minute")
+        XCTAssertEqual(untilTime(now.addingTimeInterval(4 * 60), now: now), "in 4m")
+        XCTAssertEqual(untilTime(now.addingTimeInterval(3 * 3600), now: now), "in 3h")
+        XCTAssertEqual(untilTime(now.addingTimeInterval(2 * 86_400), now: now), "in 2d")
+    }
+
+    func testIbkrFallsBackToThePortfolioOnAnOlderCore() throws {
+        let now = try XCTUnwrap(parseCoreDate("2026-11-01T12:00:00Z"))
+        let portfolio = try decode(IbkrPortfolio.self, #"{"as_of":"2026-11-01T11:55:00Z","positions":[]}"#)
+        XCTAssertTrue(ibkrHeader(.unsupported, fallback: .ok(portfolio), now: now) == (.ok, "Connected"))
+        XCTAssertTrue(ibkrHeader(.unsupported, fallback: .error(.unavailable), now: now) == (.warn, "Not connected"))
+        XCTAssertTrue(ibkrHeader(.error(.network), fallback: .unsupported, now: now) == (.warn, "Unavailable"))
+        XCTAssertTrue(ibkrHeader(.ok(try decode(IbkrStatus.self, ibkrOk)), fallback: .unsupported, now: now) == (.ok, "Connected"))
+    }
+
     func testRegistryStillDecodesWithoutNewerFields() throws {
         let registry = try decode(HomeNodeRegistry.self, """
         {"host":{"os":"linux","arch":"x86_64","cpu":"Ryzen","cpu_cores":16,"mem_total_gb":32,"gpu":"Radeon"},

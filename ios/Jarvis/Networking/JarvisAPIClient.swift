@@ -355,6 +355,12 @@ actor JarvisAPIClient {
         try await delete("/v1/holdings/\(id)", token: token, expectedBinding: expectedBinding)
     }
 
+    /// IBKR sync status (desktop trading.ts): a small body, read with a small limit.
+    func ibkrStatus(token: String, expectedBinding: UUID) async throws -> IbkrStatus {
+        try await request(path: "/v1/trading/ibkr/status", method: "GET", token: token,
+                          expectedBinding: expectedBinding, limit: 64 * 1024, response: IbkrStatus.self)
+    }
+
     // Memecoin paper trader (desktop memecoinApi.ts): tightening only, no resume or enable.
     // Core's answer is read; only an exact confirmation counts.
     func pauseMemecoin(token: String, expectedBinding: UUID) async throws -> MemeAnswer {

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // The pushed pages (canvas D-Home, D-Runs, D-Memory, D-Devices, D-Approvals in
 // the I-* mobile patterns). Each one shows what Core really reports; features
@@ -388,7 +389,10 @@ struct IntegrationsPage: View {
     let navigate: (HubRoute) -> Void
     @State private var registry: Availability<HomeNodeRegistry> = .loading
     @State private var policy: Availability<ModelPolicySnapshot> = .loading
+    @State private var ibkrStatus: Availability<IbkrStatus> = .loading
+    /// Only read on an older Core without the status route.
     @State private var ibkr: Availability<IbkrPortfolio> = .loading
+    @State private var ibkrReads = 0
     @State private var loadedAt = Date()
     @State private var selected = "brains"
     @State private var sub = "overview"
@@ -404,7 +408,7 @@ struct IntegrationsPage: View {
                      detail: "The brains Core found on your Home Node. Ready means it is set up, not that it is in use.", tone: b.0, status: b.1),
             NodeItem(id: "models", label: "Models", title: "Models", icon: "square.stack.3d.up",
                      detail: "Allowing a model lets Jarvis choose it; it never selects a model for a running request.", tone: m.0, status: m.1),
-            ibkrItem(ibkr, now: loadedAt),
+            ibkrItem(ibkrHeader(ibkrStatus, fallback: ibkr, now: loadedAt)),
         ]
     }
 
@@ -462,7 +466,7 @@ struct IntegrationsPage: View {
                         }
                     }
                 default:
-                    IbkrPanel(source: ibkr, loadedAt: loadedAt, retry: load)
+                    IbkrPanel(status: ibkrStatus, fallback: ibkr, loadedAt: loadedAt, reload: loadIbkr)
                 }
             }
             LaterList(items: Self.later)
@@ -475,12 +479,27 @@ struct IntegrationsPage: View {
     private func load() async {
         async let registry = model.coreRead("/v1/system/registry", as: HomeNodeRegistry.self)
         async let policy = model.coreRead("/v1/system/models", as: ModelPolicySnapshot.self)
-        async let ibkr = model.coreRead("/v1/trading/portfolio", as: IbkrPortfolio.self)
-        let results = (await registry, await policy, await ibkr)
+        await loadIbkr()
+        let results = (await registry, await policy)
         guard !Task.isCancelled else { return }
         self.registry = results.0
         self.policy = results.1
-        self.ibkr = results.2
+        loadedAt = Date()
+    }
+
+    /// The IBKR status; the portfolio only when this Core has no status route.
+    /// A read that a newer one overtook is dropped.
+    private func loadIbkr() async {
+        ibkrReads += 1
+        let read = ibkrReads
+        let status = await model.ibkrStatus()
+        var portfolio: Availability<IbkrPortfolio> = .unsupported
+        if case .unsupported = status {
+            portfolio = await model.coreRead("/v1/trading/portfolio", as: IbkrPortfolio.self)
+        }
+        guard !Task.isCancelled, read == ibkrReads else { return }
+        ibkrStatus = status
+        ibkr = portfolio
         loadedAt = Date()
     }
 }
@@ -522,27 +541,115 @@ func catalogRows(_ models: [HomeNodeRegistry.CatalogModel]) -> [ActivityRow] {
     }
 }
 
-func ibkrItem(_ source: Availability<IbkrPortfolio>, now: Date) -> NodeItem {
-    let state = ibkrState(source, now: now)
-    return NodeItem(id: "ibkr", label: "IBKR", title: "Interactive Brokers", icon: "chart.line.uptrend.xyaxis",
-                    detail: "Core's read-only link to Interactive Brokers. Jarvis only reads; it never places orders.",
-                    tone: state.0, status: state.1)
+func ibkrItem(_ state: (Tone, String)) -> NodeItem {
+    NodeItem(id: "ibkr", label: "IBKR", title: "Interactive Brokers", icon: "chart.line.uptrend.xyaxis",
+             detail: "Core's read-only link to Interactive Brokers. Jarvis only reads; it never places orders.",
+             tone: state.0, status: state.1)
 }
 
-/// IBKR link state from Core's read-only portfolio read (Integrations and Trading).
+/// IBKR link state from Core's status route: what works and what to fix. The
+/// commands are shown to copy, never run, linked or opened. An older Core
+/// without the route gets the portfolio-based state as before.
 struct IbkrPanel: View {
-    let source: Availability<IbkrPortfolio>
+    let status: Availability<IbkrStatus>
+    let fallback: Availability<IbkrPortfolio>
     let loadedAt: Date
-    var retry: (() async -> Void)? = nil
+    /// Re-reads the status only.
+    let reload: () async -> Void
+    @State private var refreshing = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        let item = ibkrItem(source, now: loadedAt)
-        NodePanel(item: item)
-        if case .error(.unavailable) = source {
-            UnavailableState(title: "Interactive Brokers", kind: .error, detail: ibkrNotSynced, symbol: "chart.line.uptrend.xyaxis",
-                             action: retry.map { UnavailableState.Action(label: "Try again", run: $0) })
+        let item = ibkrItem(ibkrHeader(status, fallback: fallback, now: loadedAt))
+        if case .unsupported = status {
+            portfolioState(item)
         } else {
-            Loaded(source: source, title: "Interactive Brokers", symbol: "chart.line.uptrend.xyaxis", rows: 1, retry: retry) { portfolio in
+            NodePanel(item: item) {
+                PanelButton(title: refreshing ? "Refreshing…" : "Refresh", symbol: "arrow.clockwise") {
+                    Task {
+                        refreshing = true
+                        await reload()
+                        refreshing = false
+                    }
+                }
+                .disabled(refreshing)
+            }
+            Loaded(source: status, title: "Interactive Brokers", symbol: "chart.line.uptrend.xyaxis", rows: 4, retry: reload) { value in
+                VStack(spacing: JV.Space.xs) {
+                    ForEach(ibkrRows(value, now: loadedAt), id: \.label) { statusRow($0) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .jvCard(padding: JV.Space.md)
+                if !value.problems.isEmpty {
+                    ListSection(title: "What to fix") {
+                        ForEach(Array(value.problems.enumerated()), id: \.offset) { _, problem in problemCard(problem) }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Label and value side by side, stacked at accessibility text sizes.
+    private func statusRow(_ row: IbkrRow) -> some View {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
+        return layout {
+            Text(row.label)
+                .font(JV.font(13))
+                .foregroundStyle(JV.textSecondary)
+                .frame(width: typeSize.isAccessibilitySize ? nil : 128, alignment: .leading)
+            Text(verbatim: row.value)
+                .font(row.mono ? JV.mono(13, relativeTo: .footnote) : JV.font(13))
+                .foregroundStyle(JV.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func problemCard(_ problem: IbkrStatus.Problem) -> some View {
+        let (tone, severity) = ibkrSeverity(problem.severity)
+        return VStack(alignment: .leading, spacing: JV.Space.xs) {
+            Badge(text: severity, style: tone.badge)
+            Text(verbatim: problem.summary ?? "Unknown")
+                .font(JV.font(14))
+                .foregroundStyle(JV.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(Array(problem.commands.enumerated()), id: \.offset) { _, command in
+                HStack(alignment: .center, spacing: JV.Space.xs) {
+                    Text(verbatim: command)
+                        .font(JV.mono(13, relativeTo: .footnote))
+                        .foregroundStyle(JV.textPrimary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Copy") { copy(command) }
+                        .buttonStyle(JVButtonStyle(kind: .quiet, size: .small))
+                        .accessibilityLabel("Copy command")
+                }
+                .padding(JV.Space.xs)
+                .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jvCard(padding: JV.Space.md)
+    }
+
+    /// Fixed texts from Core, no secrets: a plain copy.
+    private func copy(_ command: String) {
+        UIPasteboard.general.string = command
+        AccessibilityNotification.Announcement("Command copied").post()
+    }
+
+    /// Today's state from the portfolio read, for a Core without the status route.
+    @ViewBuilder private func portfolioState(_ item: NodeItem) -> some View {
+        NodePanel(item: item)
+        if case .error(.unavailable) = fallback {
+            UnavailableState(title: "Interactive Brokers", kind: .error, detail: ibkrNotSynced, symbol: "chart.line.uptrend.xyaxis",
+                             action: UnavailableState.Action(label: "Try again", run: reload))
+        } else {
+            Loaded(source: fallback, title: "Interactive Brokers", symbol: "chart.line.uptrend.xyaxis", rows: 1, retry: reload) { portfolio in
                 let synced = relativeTime(portfolio.asOf, now: loadedAt)
                 TileGrid(tiles: [
                     TileData(label: "Connection", value: item.status),
