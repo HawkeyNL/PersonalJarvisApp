@@ -273,10 +273,12 @@ actor JarvisAPIClient {
 
     // Scheduled jobs (desktop jobsApi.ts). A create or change answers with the job; one
     // that does not read as a job throws `invalidResponse` ("Not confirmed"). The page reloads.
-    func createJob(_ body: NewJob, token: String, expectedBinding: UUID) async throws {
+    @discardableResult
+    func createJob(_ body: NewJob, token: String, expectedBinding: UUID) async throws -> ScheduledJob {
         let job = try await request(path: "/v1/jobs", method: "POST", body: body, token: token,
                                     expectedBinding: expectedBinding, limit: 64 * 1024, response: ScheduledJob.self)
         guard Jobs.valid(job) else { throw JarvisAPIError.invalidResponse }
+        return job
     }
 
     /// Core answers 409 when the job moved past `revision`.

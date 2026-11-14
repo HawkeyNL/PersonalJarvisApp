@@ -542,3 +542,207 @@ private final class JobCoreProtocol: URLProtocol {
     }
     override func stopLoading() { }
 }
+
+/// Mirrors desktop/tests/job-proposals.test.mjs: jobs a chat answer proposed.
+final class JobProposalsTests: XCTestCase {
+    private func id(_ n: Int) -> String { "00000000-0000-4000-8000-00000000000\(n)" }
+    private let prompt: [String: Any] = [
+        "kind": "prompt", "cadence": "weekly", "weekday": 5, "at_minute": 510,
+        "params": ["title": "AI news", "instruction": "Summarize this week's AI news", "notify": false] as [String: Any],
+    ]
+    private var reminder: [String: Any] {
+        ["kind": "reminder", "cadence": "once", "start_date": Jobs.today(adding: 10), "at_minute": 540,
+         "params": ["title": "Call the bank", "text": "Ask about the card"]]
+    }
+    private let disk: [String: Any] = ["kind": "disk_check", "cadence": "daily", "params": ["threshold_percent": 90]]
+
+    private func entry(_ id: String, _ body: Any) -> [String: Any] { ["id": id, "body": body] }
+    private func merged(_ body: [String: Any], _ overrides: [String: Any]) -> [String: Any] { body.merging(overrides) { $1 } }
+
+    /// An `assistant.completed` event; nil leaves `job_proposals` out.
+    private func completed(_ proposals: Any?) throws -> RealtimeEvent {
+        let run = UUID().uuidString
+        var payload: [String: Any] = [
+            "run": ["run_id": run, "request_id": run, "conversation_id": run],
+            "message": ["id": run, "conversation_id": run, "role": "assistant", "content": "Done.", "created_at": "2026-01-01T00:00:00Z"],
+        ]
+        if let proposals { payload["job_proposals"] = proposals }
+        return try JSONDecoder().decode(RealtimeEvent.self, from: JSONSerialization.data(withJSONObject: [
+            "protocol": 1, "epoch": run, "sequence": 1, "event_id": run, "type": "assistant.completed", "payload": payload,
+        ] as [String: Any]))
+    }
+
+    private func read(_ proposals: Any?) throws -> [JobProposal] { JobProposals.read(try completed(proposals).payload) }
+    private func ids(_ proposals: [JobProposal]) -> [String] { proposals.map { $0.id.uuidString.lowercased() } }
+
+    func testNoProposalsAbsentEmptyOrNotAList() throws {
+        XCTAssertEqual(try read(nil), [])
+        XCTAssertEqual(try read(NSNull()), [])
+        XCTAssertEqual(try read([Any]()), [])
+        XCTAssertEqual(try read(entry(id(1), prompt)), [])
+        XCTAssertEqual(try read("jobs"), [])
+    }
+
+    func testCoresBodiesDecodeWithItsDefaultsAndAddSendsExactlyTheBody() throws {
+        let sent = [prompt, reminder, disk]
+        let out = try read([entry(id(1), sent[0]), entry(id(2), sent[1]), entry(id(3), sent[2])])
+        XCTAssertEqual(ids(out), [id(1), id(2), id(3)])
+        XCTAssertEqual(out[0].draft.minute, 510)
+        XCTAssertFalse(out[0].draft.notify)
+        XCTAssertEqual(out[2].draft.minute, 7 * 60)
+        let bare: [String: Any] = ["kind": "disk_check", "params": [String: Any]()]
+        XCTAssertEqual(try read([entry(id(4), bare)]).map(\.draft.threshold), [80])
+        // What Add sends is what Core sent: no field added (`enabled`, defaults) or dropped.
+        for (proposal, body) in zip(out, sent) {
+            let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(proposal.body))
+            XCTAssertEqual(encoded as? NSDictionary, body as NSDictionary)
+        }
+    }
+
+    func testAtMostThreeAreUsed() throws {
+        XCTAssertEqual(ids(try read((1...4).map { entry(id($0), disk) })), [id(1), id(2), id(3)])
+    }
+
+    func testABadIdUnknownKindOrMalformedBodyIsSkippedAndTheMessageStays() throws {
+        let bad: [Any] = [
+            entry("not-a-uuid", disk),
+            ["body": disk] as [String: Any],
+            entry(id(1), merged(disk, ["kind": "dependency_review"])),
+            entry(id(2), merged(disk, ["kind": "shell"])),
+            entry(id(3), merged(disk, ["cadence": "hourly"])),
+            entry(id(4), "disk_check"),
+            entry(id(5), merged(prompt, ["weekday": "friday"])),
+            entry(id(6), merged(prompt, ["at_minute": 1440])),
+            entry(id(7), merged(prompt, ["params": ["title": "", "instruction": "x"]])),
+            entry(id(8), merged(prompt, ["enabled": false])),
+            entry(id(9), merged(prompt, ["params": ["title": "x", "instruction": "y", "roadmap_id": "r"]])),
+            entry(id(1), merged(disk, ["params": ["threshold_percent": 10]])),
+            entry(id(2), merged(reminder, ["start_date": "2020-01-01"])),
+            entry(id(3), merged(disk, ["weekday": 8, "cadence": "weekly"])),
+            // Params of another kind, and fields of another cadence: Core refuses them.
+            entry(id(4), merged(prompt, ["params": ["title": "x", "instruction": "y", "text": "z"]])),
+            entry(id(5), merged(reminder, ["params": ["title": "x", "notify": false]])),
+            entry(id(6), merged(disk, ["params": ["title": "x", "threshold_percent": 90]])),
+            entry(id(7), merged(disk, ["weekday": 1])),
+            entry(id(8), merged(disk, ["month_day": 1, "cadence": "weekly"])),
+            entry(id(9), merged(reminder, ["max_runs": 2])),
+            NSNull(),
+        ]
+        for item in bad {
+            let event = try completed([item])
+            XCTAssertEqual(JobProposals.read(event.payload), [], "\(item)")
+            XCTAssertEqual(event.payload.message?.content, "Done.")
+        }
+        XCTAssertEqual(ids(try read([bad[0], entry(id(9), disk), bad[3]])), [id(9)])
+        // No cadence is weekly, so a weekday fits.
+        let bare: [String: Any] = ["kind": "disk_check", "weekday": 3, "params": [String: Any]()]
+        XCTAssertEqual(ids(try read([entry(id(1), bare)])), [id(1)])
+    }
+
+    func testEachProposalShowsOncePerId() throws {
+        var seen = Set<UUID>()
+        let proposals = try read([entry(id(1), disk), entry(id(1), prompt)])
+        XCTAssertEqual(proposals.count, 1)
+        let conversation = UUID()
+        let cards = JobProposals.adding(proposals, to: [], seen: &seen, conversation: conversation, message: "m")
+        XCTAssertEqual(cards.map(\.state), [.open])
+        XCTAssertEqual(JobProposals.adding(proposals, to: cards, seen: &seen, conversation: conversation, message: "m"), cards)
+        // Dismissed (gone from the list) stays gone when the event comes again.
+        XCTAssertEqual(JobProposals.adding(proposals, to: [], seen: &seen, conversation: conversation, message: "m"), [])
+    }
+
+    func testTheCardShowsAllThatAddSends() throws {
+        let out = try read([entry(id(1), prompt), entry(id(2), reminder), entry(id(3), merged(disk, ["max_runs": 2, "at_minute": 480]))])
+        let (p, r, d) = (out[0], out[1], out[2])
+        XCTAssertEqual(JobProposals.title(p), "AI news")
+        XCTAssertEqual(JobProposals.title(d), "Disk check")
+        XCTAssertEqual(JobProposals.schedule(p), "Every Friday at 08:30 · No push")
+        XCTAssertEqual(JobProposals.schedule(r), "Once on \(Jobs.dayLabel(Jobs.today(adding: 10)) ?? "") at 09:00")
+        XCTAssertEqual(JobProposals.schedule(d), "Daily at 08:00, 2 runs")
+        XCTAssertEqual(JobProposals.detail(p), "Summarize this week's AI news")
+        XCTAssertEqual(JobProposals.detail(r), "Ask about the card")
+        XCTAssertEqual(JobProposals.detail(d), "Threshold 90%")
+        let long = String(repeating: "a", count: 300)
+        let full = try read([entry(id(4), merged(prompt, ["params": ["title": "x", "instruction": long]]))])
+        XCTAssertEqual(full.first.flatMap(JobProposals.detail), long, "never cut")
+    }
+
+    private func job(_ id: UUID) throws -> ScheduledJob {
+        try JSONDecoder().decode(ScheduledJob.self, from: Data(
+            #"{"id":"\#(id.uuidString)","kind":"disk_check","cadence":"daily","at_minute":420,"enabled":true,"revision":0}"#.utf8))
+    }
+
+    func testAddIsGuardedAndOnlyAnswerableResultsResolveTheCard() throws {
+        let proposal = try XCTUnwrap(read([entry(id(1), disk)]).first)
+        let fresh = { [ProposalCard(proposal: proposal, conversationId: UUID(), messageId: "m")] }
+        var cards = fresh()
+        XCTAssertNil(JobProposals.begin(proposal.id, in: &cards, unlocked: false), "locked: nothing sent")
+        XCTAssertEqual(cards[0].state, .open)
+        XCTAssertNotNil(JobProposals.begin(proposal.id, in: &cards, unlocked: true))
+        XCTAssertEqual(cards[0].state, .adding)
+        XCTAssertNil(JobProposals.begin(proposal.id, in: &cards, unlocked: true), "a second tap sends nothing")
+        XCTAssertNil(JobProposals.begin(UUID(), in: &cards, unlocked: true))
+
+        // A result after the owner left the session or conversation is dropped.
+        let added = UUID()
+        JobProposals.finish(proposal.id, in: &cards, result: .success(try job(added)), current: false)
+        XCTAssertEqual(cards[0].state, .adding)
+        JobProposals.finish(proposal.id, in: &cards, result: .success(try job(added)), current: true)
+        XCTAssertEqual(cards[0].state, .added(added))
+        XCTAssertNil(JobProposals.begin(proposal.id, in: &cards, unlocked: true), "added once")
+
+        // Fails closed: an unreadable 2xx, no answer, any 5xx or another error may follow a
+        // write that landed, so Add stays off.
+        let unknown: [JarvisAPIError] = [.invalidResponse, .responseTooLarge, .unreachable, .timedOut, .invalidConfiguration,
+                                         .rejected(status: 500, message: nil), .rejected(status: 502, message: nil),
+                                         .rejected(status: 503, message: nil), .rejected(status: 504, message: nil)]
+        for error in unknown {
+            cards = fresh()
+            _ = JobProposals.begin(proposal.id, in: &cards, unlocked: true)
+            JobProposals.finish(proposal.id, in: &cards, result: .failure(error), current: true)
+            XCTAssertEqual(cards[0].state, .unconfirmed, "\(error)")
+            XCTAssertEqual(cards[0].error, "Not confirmed: it may have been added.")
+            XCTAssertNil(JobProposals.begin(proposal.id, in: &cards, unlocked: true))
+        }
+
+        // A refusal lets the owner try again.
+        let refused: [(JarvisAPIError, String)] = [
+            (.rejected(status: 409, message: nil), "Core refused this. \(Jobs.full)"),
+            (.rejected(status: 400, message: nil), "Core refused this job as invalid, for example a time that has passed. Edit it and try again."),
+            (.rejected(status: 404, message: nil), "Not saved. \(Jobs.notFound)"),
+        ]
+        for (error, text) in refused {
+            cards = fresh()
+            _ = JobProposals.begin(proposal.id, in: &cards, unlocked: true)
+            JobProposals.finish(proposal.id, in: &cards, result: .failure(error), current: true)
+            XCTAssertEqual(cards[0].state, .open)
+            XCTAssertEqual(cards[0].error, text)
+            XCTAssertNotNil(JobProposals.begin(proposal.id, in: &cards, unlocked: true))
+            XCTAssertNil(cards[0].error)
+        }
+        XCTAssertEqual(JobProposals.added, "Added to Jobs")
+    }
+
+    func testAnEditedAddShowsTheEditedJobOnceItMayExist() throws {
+        let proposal = try XCTUnwrap(read([entry(id(1), disk)]).first)
+        var draft = proposal.draft
+        draft.threshold = 70
+        let edited = (body: Jobs.newJob(.diskCheck, draft), draft: draft)
+        let results: [(Result<ScheduledJob, Error>, Bool)] = [
+            (.success(try job(UUID())), true), (.failure(JarvisAPIError.unreachable), true),
+            (.failure(JarvisAPIError.rejected(status: 409, message: nil)), false),
+        ]
+        for (result, shown) in results {
+            var cards = [ProposalCard(proposal: proposal, conversationId: UUID(), messageId: "m")]
+            _ = JobProposals.begin(proposal.id, in: &cards, unlocked: true)
+            JobProposals.finish(proposal.id, in: &cards, result: result, edited: edited, current: true)
+            XCTAssertEqual(JobProposals.detail(cards[0].proposal), shown ? "Threshold 70%" : "Threshold 90%")
+            XCTAssertEqual(cards[0].proposal.body, shown ? edited.body : proposal.body)
+        }
+    }
+
+    func testARunLimitOfOneIsSingular() throws {
+        let one = try XCTUnwrap(read([entry(id(1), merged(disk, ["max_runs": 1, "at_minute": 480]))]).first)
+        XCTAssertEqual(JobProposals.schedule(one), "Daily at 08:00, 1 run")
+    }
+}

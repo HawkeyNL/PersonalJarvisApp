@@ -122,10 +122,11 @@ actor ChatService {
 
     // Scheduled job writes (Jobs pages), bound to the current Home Node. Bearer only, like
     // desktop: they change a schedule, never an identity.
-    func createJob(_ body: NewJob) async throws {
+    @discardableResult
+    func createJob(_ body: NewJob) async throws -> ScheduledJob {
         let binding = await api.binding()
         let token = try await requiredToken()
-        try await api.createJob(body, token: token, expectedBinding: binding)
+        return try await api.createJob(body, token: token, expectedBinding: binding)
     }
 
     func updateJob(_ id: UUID, revision: Int, patch: JobPatch) async throws {

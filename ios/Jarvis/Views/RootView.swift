@@ -186,7 +186,7 @@ struct MainTabs: View {
     @ViewBuilder private func destination(_ route: HubRoute, in item: AppTab) -> some View {
         let navigate: (HubRoute) -> Void = { paths[item, default: []].append($0) }
         switch route {
-        case .chat: ChatView(model: model)
+        case .chat: ChatView(model: model, navigate: navigate)
         case .voice: VoicePage()
         case .settings: SettingsView(model: model, inTabs: true)
         case .models: ModelsView(model: model)

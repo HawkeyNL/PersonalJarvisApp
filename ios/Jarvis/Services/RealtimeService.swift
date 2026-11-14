@@ -20,6 +20,9 @@ struct RealtimePayload: Decodable {
     var web_search: Bool?
     /// Core's advice to search the web after this reply; only the owner's tap sends it.
     var research_offer: RealtimeResearchOffer?
+    /// Jobs the answer proposed; only the owner's Add sends one. Read through
+    /// `JobProposals.read`: a list or entry this app cannot read is skipped, never failing the event.
+    var job_proposals: Lenient<[Lenient<JobProposal>]>?
 }
 struct RealtimeResearchOffer: Decodable { let question: String }
 /// A web search Core advised after the last reply in `conversationId`.

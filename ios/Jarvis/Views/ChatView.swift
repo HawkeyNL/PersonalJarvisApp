@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 /// under a name line, a thinking line while a reply runs, and the composer.
 struct ChatView: View {
     @ObservedObject var model: JarvisAppModel
+    let navigate: (HubRoute) -> Void
     @State private var draft = ""
     @FocusState private var composerFocused: Bool
     @State private var picking = false
@@ -18,6 +19,10 @@ struct ChatView: View {
     @State private var serverNotice = false
     /// Chip errors held while the mic listens (it would type them), said when it stops.
     @State private var heldAnnouncements: [String] = []
+    /// A proposed job open in the editor.
+    @State private var editingProposal: ProposalCard?
+    /// A job added from a proposal, opened from its card.
+    @State private var openJob: UUID?
 
     /// Core's own run after a reply, while its placeholder row is shown.
     private var searchingWeb: Bool {
@@ -90,6 +95,13 @@ struct ChatView: View {
             Text(verbatim: deleteError ?? "")
         }
         .fullScreenCover(item: $viewing) { photo in PhotoViewer(model: model, id: photo.id) }
+        // The editor of a proposed job; saving adds the edited job and resolves its card.
+        .sheet(item: $editingProposal) { card in
+            NewJobSheet(model: model, kinds: [card.proposal.body.kind], title: JobProposals.editorTitle,
+                        initial: card.proposal.draft, submit: JobProposals.add,
+                        write: { await model.addJobProposal(card.id, edited: ($0, $1)) })
+        }
+        .navigationDestination(item: $openJob) { id in JobPage(model: model, id: id, navigate: navigate) }
         .photosPicker(isPresented: $picking, selection: $picked,
                       maxSelectionCount: max(1, ChatPhotos.maxPhotos - model.chips.count), matching: .images)
         .onChange(of: picked) { _, items in
@@ -148,6 +160,13 @@ struct ChatView: View {
                         ForEach(model.messages) { message in
                             MessageView(message: message, removed: model.removedPhotos,
                                         photo: { await model.photo(id: $0) }, open: { viewing = ViewedPhoto(id: $0) }).id(message.id)
+                            ForEach(model.jobProposals.filter { $0.messageId == message.id }) { card in
+                                ProposalCardView(card: card, locked: model.lockState != .unlocked,
+                                                 add: { Task { await model.addJobProposal(card.id) } },
+                                                 edit: { if model.lockState == .unlocked { editingProposal = card } },
+                                                 dismiss: { model.dismissJobProposal(card.id) },
+                                                 viewJob: { openJob = $0 }, checkJobs: { navigate(.jobs) })
+                            }
                         }
                         if let offer = model.researchOffer, offer.conversationId == model.currentConversationId,
                            !model.isSending, model.chips.isEmpty {
@@ -558,6 +577,78 @@ private struct PhotoThumb: View {
         .background(JV.bgSunken)
         .clipShape(RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
         .task(id: id) { if !removed { photo = await load(id) } }
+    }
+}
+
+/// One job a chat answer proposed, under that answer (desktop JobProposalCard.vue). Nothing
+/// is made until Add (the proposal as is) or Add in the editor (the edited job). Core's text
+/// is shown verbatim.
+private struct ProposalCardView: View {
+    let card: ProposalCard
+    let locked: Bool
+    let add: () -> Void
+    let edit: () -> Void
+    let dismiss: () -> Void
+    let viewJob: (UUID) -> Void
+    let checkJobs: () -> Void
+
+    private var busy: Bool { card.state == .adding }
+
+    var body: some View {
+        let proposal = card.proposal
+        VStack(alignment: .leading, spacing: JV.Space.xxs) {
+            HStack(spacing: JV.Space.xs) {
+                Badge(text: proposal.body.kind.label, style: .accent, dot: false)
+                Text(verbatim: JobProposals.title(proposal)).font(JV.font(15, .medium)).foregroundStyle(JV.textPrimary)
+            }
+            caption(JobProposals.schedule(proposal))
+            if let detail = JobProposals.detail(proposal) { caption(detail) }
+            switch card.state {
+            case let .added(job):
+                status("\(JobProposals.added) ·", link: JobProposals.viewJob) { viewJob(job) }
+            case .unconfirmed:
+                status(card.error ?? JobProposals.notConfirmed, link: JobProposals.checkJobs, action: checkJobs)
+            case .open, .adding:
+                if let error = card.error {
+                    Text(verbatim: error).font(JV.font(13)).foregroundStyle(JV.dangerText).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            HStack(spacing: JV.Space.xs) {
+                if card.state == .open || busy {
+                    Button(JobProposals.add, action: add)
+                        .buttonStyle(JVButtonStyle(kind: .secondary, size: .small)).disabled(locked || busy)
+                    Button(JobProposals.edit, action: edit)
+                        .buttonStyle(JVButtonStyle(kind: .quiet, size: .small)).disabled(locked || busy)
+                }
+                Button(JobProposals.dismiss, action: dismiss)
+                    .buttonStyle(JVButtonStyle(kind: .quiet, size: .small)).disabled(busy)
+            }
+            .padding(.top, JV.Space.xxs)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, JV.Space.md)
+        .padding(.vertical, JV.Space.sm)
+        .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text(verbatim: "Proposed job: \(JobProposals.title(proposal))"))
+        .onChange(of: card.state) { _, state in
+            // Added, not confirmed or refused: said once it is known.
+            guard state != .adding, let text = card.error ?? (state == .open ? nil : JobProposals.added) else { return }
+            AccessibilityNotification.Announcement(text).post()
+        }
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(verbatim: text).font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func status(_ text: String, link: String, action: @escaping () -> Void) -> some View {
+        HStack(spacing: JV.Space.xs) {
+            Text(verbatim: text).font(JV.font(13)).foregroundStyle(JV.textPrimary).fixedSize(horizontal: false, vertical: true)
+            Button(link, action: action).font(JV.font(13, .medium)).foregroundStyle(JV.accentText).buttonStyle(.plain)
+                .frame(minHeight: 44)
+        }
     }
 }
 
