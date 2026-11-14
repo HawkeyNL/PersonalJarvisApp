@@ -505,9 +505,11 @@ final class JobWriteModelTests: XCTestCase {
                 XCTAssertEqual(Jobs.writeFailureText(error, update: false, kind: .reminder), Jobs.notConfirmed, body)
             }
         }
-        // The job itself confirms the write.
+        // The job itself confirms the write, and is what the page then shows.
         JobCoreProtocol.reset(status: 200, body: jobBody(id))
-        try await signedIn().updateJob(id, revision: 1, patch: JobPatch(enabled: false))
+        let saved = try await signedIn().updateJob(id, revision: 1, patch: JobPatch(enabled: false))
+        XCTAssertEqual(saved.id, id)
+        XCTAssertEqual(saved.revision, 2)
         JobCoreProtocol.reset(status: 201, body: jobBody(UUID()))
         try await signedIn().createJob(Jobs.newJob(.reminder, JobDraft()))
     }

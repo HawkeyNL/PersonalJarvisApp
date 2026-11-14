@@ -150,7 +150,7 @@ private fun JobListPage(actions: JarvisViewModel, back: () -> Unit, open: (Strin
             if (overview == null) failure = jobFailureOf(list, list = true)
             return
         }
-        // ponytail: one runs read per job for its newest run, in parallel; Core keeps at most 14 jobs.
+        // ponytail: one runs read per job for its newest run, in parallel; Core keeps at most 100 jobs.
         val runs = coroutineScope { list.value.jobs.map { job -> async { actions.jobs { e, t -> jobRuns(e, t, job.id) } } }.awaitAll() }
         if (runs.any { it == null }) return
         val rows = list.value.jobs.zip(runs) { job, r -> JobRow(job, (r as? ApiResult.Success)?.value?.firstOrNull(), r is ApiResult.Success) }

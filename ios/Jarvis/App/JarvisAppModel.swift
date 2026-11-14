@@ -243,7 +243,8 @@ final class JarvisAppModel: ObservableObject {
     @discardableResult
     func createJob(_ body: NewJob) async throws -> ScheduledJob { try await ownerWrite { try await self.chat.createJob(body) } }
 
-    func updateJob(_ id: UUID, revision: Int, patch: JobPatch) async throws {
+    @discardableResult
+    func updateJob(_ id: UUID, revision: Int, patch: JobPatch) async throws -> ScheduledJob {
         try await ownerWrite { try await self.chat.updateJob(id, revision: revision, patch: patch) }
     }
 
