@@ -107,6 +107,8 @@ data class JarvisUiState(
     val busy: Boolean = false,
     /** Core's web search advice after the last reply in [WebSearchOffer.conversationId]. */
     val researchOffer: WebSearchOffer? = null,
+    /** Jobs answers in the open conversation proposed; only Add or a saved edit makes one. */
+    val jobProposals: List<com.hawkeynl.jarvis.network.ProposalCard> = emptyList(),
     /** A run Core started itself right after a reply (its automatic web search);
      *  only meaningful while its `run:` placeholder row is shown. */
     val webSearchRun: String? = null,
@@ -149,6 +151,16 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     // erase and sign-in, never by the background lock. A late answer from another sign-in
     // must not restore, delete or sign out anything in this one. Main thread only.
     private var identity = 0
+    private fun newIdentity() {
+        identity++
+        seenProposals.clear()
+        jobToOpen = null
+        _state.update { it.copy(jobProposals = emptyList()) }
+    }
+    // Each job proposal shows once per sign-in, also after a replayed event. Main thread only.
+    private val seenProposals = mutableSetOf<String>()
+    /** A job a chat card opens on the Jobs screen; taken once by [takeJobToOpen]. */
+    private var jobToOpen: String? = null
     /** One picked photo is shrunk at a time (each decode can take tens of MB). */
     private val preparing = kotlinx.coroutines.sync.Mutex()
     /** Photos picked while the app was locked (the picker stops this activity, which locks
@@ -203,7 +215,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             val parsed = HomeNodeEndpoint.parse(_state.value.endpointDraft)
             if (parsed is EndpointValidation.Valid && parsed.endpoint != _state.value.endpoint) {
                 container.realtime.stop(); speech.stop(); cancelDictation(); pending.clear(); container.sessions.reset()
-                identity++
+                newIdentity()
                 _state.update {
                     it.copy(authenticated = false, messages = emptyList(), conversations = emptyList(), conversationId = null, passwordResetRequest = null,
                         chips = emptyList(), chipNotice = null)
@@ -296,7 +308,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         val endpoint = _state.value.endpoint ?: return
         cancelDictation()
         viewModelScope.launch {
-            _state.update { it.copy(busy = true, error = null, researchOffer = null) }
+            _state.update { it.copy(busy = true, error = null, researchOffer = null, jobProposals = emptyList()) }
             when (val result = container.conversations.load(endpoint, id)) {
                 is ApiResult.Success -> _state.update {
                     it.copy(
@@ -325,11 +337,36 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 messages = emptyList(),
                 error = null,
                 researchOffer = null,
+                jobProposals = emptyList(),
                 photoMeta = emptyMap(),
                 removedPhotos = emptySet(),
             )
         }
     }
+
+    /** Creates a proposed job: its body as Core sent it, or [edited] (the editor's draft).
+     *  Never behind the lock or twice at once; a result for a sign-in or conversation the
+     *  owner has left is dropped. */
+    fun addProposal(id: String, edited: com.hawkeynl.jarvis.network.JobDraft? = null) {
+        val state = _state.value
+        val start = com.hawkeynl.jarvis.network.startAdd(
+            state.jobProposals, id, !state.locked && state.authenticated, edited, identity, state.conversationId) ?: return
+        _state.update { it.copy(jobProposals = start.cards) }
+        viewModelScope.launch {
+            val result = com.hawkeynl.jarvis.network.addJob(start.body, start.kind) { body -> jobs { e, t -> createJob(e, t, body) } }
+            _state.update { it.copy(jobProposals = com.hawkeynl.jarvis.network.finishAdd(it.jobProposals, start, result, identity, it.conversationId)) }
+        }
+    }
+
+    fun dismissProposal(id: String) = _state.update { it.copy(jobProposals = it.jobProposals.filterNot { card -> card.id == id }) }
+
+    /** Opens Jobs from a chat card: on the job's page when [id] is set. */
+    fun openJob(id: String?) {
+        jobToOpen = id?.takeIf { com.hawkeynl.jarvis.network.isJobId(it) }
+        navigate(Screen.JOBS)
+    }
+
+    fun takeJobToOpen(): String? = jobToOpen.also { jobToOpen = null }
 
     /** Only the owner's click on a Core offer passes [research]. */
     fun searchWeb() {
@@ -658,7 +695,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     fun logout() {
         container.sessions.modelAuthorization.invalidate()
         clearPhotos()
-        identity++
+        newIdentity()
         pending.clear()
         container.realtime.stop(); speech.stop(); cancelDictation()
         val endpoint = _state.value.endpoint ?: return
@@ -686,7 +723,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         if (failure != null) return@async PairingApproval.displayName(failure.message ?: "The password was not changed.", 160)
         container.sessions.modelAuthorization.invalidate()
         clearPhotos()
-        identity++
+        newIdentity()
         pending.clear()
         container.realtime.stop(); speech.stop(); cancelDictation()
         _state.update {
@@ -745,7 +782,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         _state.update { it.copy(localEraseOffer = null) }
         container.sessions.modelAuthorization.invalidate()
         clearPhotos()
-        identity++
+        newIdentity()
         pending.clear()
         container.realtime.stop(); speech.stop(); cancelDictation()
         // A new owner of this phone hears the voice and photo notices again.
@@ -839,7 +876,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             }
             is EnrollmentOutcome.Authenticated -> {
                 cancelDictation()
-                identity++
+                newIdentity()
                 _state.update {
                     it.copy(
                         busy = false,
@@ -1003,7 +1040,11 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
             "assistant.completed" -> {
                 val run = p.run ?: return; val message = p.message ?: return
                 pending.remove(run.request_id)
+                // Each proposal shows once, under this answer, only while its conversation is open.
+                val fresh = if (_state.value.conversationId != message.conversation_id) emptyList() else com.hawkeynl.jarvis.network.newCards(
+                    seenProposals, com.hawkeynl.jarvis.network.readProposals(p.job_proposals), message.conversation_id, message.id)
                 _state.update { state -> if (state.conversationId != message.conversation_id) state else state.copy(busy = false,
+                    jobProposals = state.jobProposals + fresh,
                     researchOffer = p.research_offer?.question?.trim()?.takeIf { it.isNotEmpty() }?.let { WebSearchOffer(message.conversation_id, it) },
                     messages = upsertRealtime(state.messages, ConversationMessage(message.role, message.content, message.model, message.created_at, message.id, message.attachments), "run:${run.run_id}")) }
             }

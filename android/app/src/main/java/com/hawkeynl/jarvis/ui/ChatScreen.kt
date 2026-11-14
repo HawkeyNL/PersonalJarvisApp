@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -83,6 +82,8 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel, pickPhot
     var draft by remember(state.conversationId) { mutableStateOf("") }
     // The full-screen view shows the open conversation's photos only.
     var viewing by remember(state.conversationId) { mutableStateOf<String?>(null) }
+    // The open proposal editor, kept here so the message list can change under it.
+    var editingProposal by remember(state.conversationId) { mutableStateOf<String?>(null) }
     var confirmDelete by remember(state.conversationId) { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     var deleteError by remember(state.conversationId) { mutableStateOf<String?>(null) }
@@ -136,7 +137,20 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel, pickPhot
                     icon = JvIcon.CHAT,
                 )
             }
-            items(state.messages) { message -> Message(message, { actions.photo(it) }, state.removedPhotos) { viewing = it } }
+            // Jobs an answer proposed show right under it, while its conversation is open. Keys
+            // stay unique: a message without an id, or with one seen before, is keyed by place
+            // (and shows no cards; cards are unique by id).
+            val proposals = state.jobProposals.filter { it.conversationId == state.conversationId }
+            val keyed = HashSet<String>()
+            state.messages.forEachIndexed { index, message ->
+                val id = message.id?.takeIf { keyed.add(it) }
+                item(key = id?.let { "m:$it" } ?: "i:$index") { Message(message, { actions.photo(it) }, state.removedPhotos) { viewing = it } }
+                if (id != null) proposals.filter { it.messageId == id }.forEach { card ->
+                    item(key = "jp:${card.id}") {
+                        JobProposalCard(card, state.locked, editingProposal == card.id, { editingProposal = card.id }, actions)
+                    }
+                }
+            }
             state.researchOffer?.takeIf { !state.busy && it.conversationId == state.conversationId && state.chips.isEmpty() }?.question?.let { question ->
                 item {
                     // Only this click sends a web search; the shown question is all that leaves.
@@ -195,6 +209,9 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel, pickPhot
             }
         }
     }
+    editingProposal?.let { id -> state.jobProposals.firstOrNull { it.id == id && it.conversationId == state.conversationId } }
+        ?.takeIf { !state.locked }
+        ?.let { card -> JobProposalEditor(card, actions) { editingProposal = null } }
     viewing?.let { id -> PhotoViewer(id, state.photoMeta[id], id in state.removedPhotos, actions) { viewing = null } }
     if (confirmDelete) AlertDialog(
         onDismissRequest = { if (!deleting) confirmDelete = false },

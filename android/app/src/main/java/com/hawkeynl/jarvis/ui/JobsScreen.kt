@@ -102,7 +102,8 @@ import kotlinx.serialization.json.put
  *  only; a job's conversation opens in chat. */
 @Composable
 fun JobsScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
-    var jobId by rememberSaveable { mutableStateOf<String?>(null) }
+    // A chat card's "View job" opens on that job.
+    var jobId by rememberSaveable { mutableStateOf(actions.takeJobToOpen()) }
     var runId by rememberSaveable { mutableStateOf<String?>(null) }
     BackHandler(enabled = jobId != null || runId != null) { if (runId != null) runId = null else jobId = null }
     val job = jobId
@@ -559,13 +560,15 @@ private fun PriorityRow(priority: Priority, fact: Fact?) {
     }
 }
 
-/** The job editor (desktop JobForm.vue): on create the kind, then the kind's fields, the
+/** The job editor (desktop JobForm.vue): on create the kind (one of [kinds], when there is a
+ *  choice), then the kind's fields, the
  *  recurrence (once, daily, weekly or monthly; every N, start date, stop after N runs; a
  *  dependency review daily or weekly only), a time in Europe/Amsterdam and, on create,
  *  enabled. Checked against Core's bounds before it goes out. */
 @Composable
-private fun JobForm(
+internal fun JobForm(
     actions: JarvisViewModel, initial: JobDraft, creating: Boolean, busy: Boolean, submit: String, onCancel: (() -> Unit)?, onSave: (JobDraft) -> Unit,
+    kinds: List<JobKind> = OWNER_KINDS,
 ) {
     var draft by remember { mutableStateOf(initial) }
     var error by remember { mutableStateOf("") }
@@ -581,8 +584,8 @@ private fun JobForm(
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
-        if (creating && draft.kind in OWNER_KINDS) {
-            Picker("Kind", OWNER_KINDS.map { it to it.label }, draft.kind, { edit(draft.copy(kind = it)) })
+        if (creating && draft.kind in OWNER_KINDS && kinds.size > 1) {
+            Picker("Kind", kinds.map { it to it.label }, draft.kind, { edit(draft.copy(kind = it)) })
             MutedText(draft.kind.detail)
         }
         when (draft.kind) {
