@@ -359,7 +359,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 jobs { e, t -> createJob(e, t, body) }
             }
             _state.update {
-                it.copy(jobProposals = com.hawkeynl.jarvis.network.finishAdd(it.jobProposals, id, result, asked == identity && it.conversationId == conversation))
+                it.copy(jobProposals = com.hawkeynl.jarvis.network.finishAdd(it.jobProposals, id, result, asked == identity && it.conversationId == conversation, edited))
             }
         }
     }

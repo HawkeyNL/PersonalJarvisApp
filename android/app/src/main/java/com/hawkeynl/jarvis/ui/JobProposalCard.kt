@@ -76,7 +76,7 @@ internal fun JobProposalCard(card: ProposalCard, locked: Boolean, actions: Jarvi
                     GhostButton("Edit", { editing = true }, enabled = !locked && !busy)
                 }
             }
-            GhostButton("Dismiss", { actions.dismissProposal(card.id) })
+            GhostButton("Dismiss", { actions.dismissProposal(card.id) }, enabled = !busy)
         }
     }
     if (editing && !locked) {

@@ -39,15 +39,24 @@ data class ProposalCard(
 // What a chat marker can carry (no `enabled`, no roadmap): the card shows all of it, so what
 // is added is what was shown.
 private val BODY_KEYS = setOf("kind", "cadence", "weekday", "month_day", "every", "start_date", "max_runs", "at_minute", "params")
-private val PARAM_KEYS = setOf("title", "instruction", "text", "notify", "threshold_percent")
+// The params each kind takes, and the fields only some cadences take (Core refuses the rest,
+// so a card never shows a job Core would not make).
+private val PARAM_KEYS = mapOf(
+    JobKind.PROMPT to setOf("title", "instruction", "notify"), JobKind.REMINDER to setOf("title", "text"),
+    JobKind.DISK_CHECK to setOf("threshold_percent"),
+)
 
 /** The editor's draft for a body, with Core's defaults for what it leaves out; null when a
  *  field has the wrong type or the job breaks a rule. */
 private fun proposalDraft(body: JsonObject, today: LocalDate): JobDraft? = guarded {
     val p = body["params"].takeUnless { it == null || it == JsonNull }?.obj() ?: JsonObject(emptyMap())
-    require(BODY_KEYS.containsAll(body.keys) && PARAM_KEYS.containsAll(p.keys))
+    require(BODY_KEYS.containsAll(body.keys))
     val kind = body.optStr("kind").let { k -> OWNER_KINDS.firstOrNull { it.wire == k } } ?: throw IllegalArgumentException()
+    require(PARAM_KEYS.getValue(kind).containsAll(p.keys))
     val cadence = body.optStr("cadence")?.let { c -> Cadence.entries.firstOrNull { it.wire == c } ?: throw IllegalArgumentException() } ?: Cadence.WEEKLY
+    fun has(key: String) = body[key].let { it != null && it != JsonNull }
+    require((!has("weekday") || cadence == Cadence.WEEKLY) && (!has("month_day") || cadence == Cadence.MONTHLY))
+    require(!has("max_runs") || cadence != Cadence.ONCE)
     val weekday = (body.optInt("weekday") ?: 1).also { require(it in 1..7) }
     val monthDay = (body.optInt("month_day") ?: 1).also { require(it in 1..31) }
     val at = (body.optInt("at_minute") ?: 420).also { require(it <= 1439) }
@@ -85,13 +94,13 @@ fun newCards(seen: MutableSet<String>, proposals: List<JobProposal>, conversatio
 
 fun proposalTitle(d: JobDraft): String = d.title.ifEmpty { d.kind.label }
 
-/** The schedule in words, as on the Jobs page, with ", N runs" for a run limit and
- *  " · No push" for research without one. */
+/** The schedule in words, as on the Jobs page, then the run limit and " · No push" when
+ *  the body has them: "Daily at 08:00, 2 runs · No push". */
 fun proposalSchedule(d: JobDraft, today: LocalDate = jobsToday()): String = scheduleText(
     Job("", d.kind, d.cadence, d.weekday, d.monthDay, d.every.toIntOrNull() ?: 1, d.startDate.ifEmpty { null }, null,
         timeToMinute(d.time) ?: 0, true, 0, JobParams(), null, null),
     today,
-) + d.maxRuns.ifEmpty { null }?.let { ", $it runs" }.orEmpty() + if (d.kind == JobKind.PROMPT && !d.notify) " · $PROPOSAL_NO_PUSH" else ""
+) + d.maxRuns.ifEmpty { null }?.let { ", $it run" + if (it == "1") "" else "s" }.orEmpty() + if (d.kind == JobKind.PROMPT && !d.notify) " · $PROPOSAL_NO_PUSH" else ""
 
 /** The whole instruction or text (one line of at most 500 characters), or the threshold;
  *  null when none. */
@@ -105,16 +114,18 @@ fun proposalDetail(d: JobDraft): String? = when (d.kind) {
 
 data class AddResult(val state: ProposalState, val jobId: String?, val error: String)
 
-/** Sends [body] exactly as given. A 2xx this build cannot read, no answer, or an answer the
- *  lock dropped ([create] gave null) is not confirmed: the job may exist, so Add stays off.
- *  A refusal lets the owner try again. [kind] picks the wording of a 409. */
+/** Sends [body] exactly as given. Only an HTTP refusal (4xx, or Core's 503 "not saved") lets
+ *  the owner try again; anything else (a 2xx this build cannot read, no answer, a broken
+ *  answer, a gateway 5xx, an answer the lock dropped: [create] gave null) is not confirmed
+ *  and Add stays off, since the job may exist. [kind] picks the wording of a 409. */
 suspend fun addJob(body: JsonObject, kind: JobKind, create: suspend (JsonObject) -> ApiResult<Job?>?): AddResult {
-    val result = create(body)
+    val unconfirmed = AddResult(ProposalState.UNCONFIRMED, null, PROPOSAL_NOT_CONFIRMED)
+    val result = create(body) ?: return unconfirmed
     val job = (result as? ApiResult.Success)?.value
+    val refused = result == ApiResult.Unauthorized || (result is ApiResult.HttpError && (result.status in 400..499 || result.status == 503))
     return when {
         job != null -> AddResult(ProposalState.ADDED, job.id, "")
-        result == null || result is ApiResult.Success || result is ApiResult.InvalidResponse || result is ApiResult.Unreachable ->
-            AddResult(ProposalState.UNCONFIRMED, null, PROPOSAL_NOT_CONFIRMED)
+        !refused -> unconfirmed
         result is ApiResult.HttpError && result.status == 400 -> AddResult(ProposalState.OPEN, null, PROPOSAL_INVALID)
         else -> AddResult(ProposalState.OPEN, null, writeFailureText(result, update = false, kind))
     }
@@ -129,6 +140,11 @@ fun startAdd(cards: List<ProposalCard>, id: String, allowed: Boolean): List<Prop
 }
 
 /** [cards] with an Add's [result] on card [id]; unchanged when the owner left the sign-in or
- *  conversation it was sent from ([same] false), or dismissed the card. */
-fun finishAdd(cards: List<ProposalCard>, id: String, result: AddResult, same: Boolean): List<ProposalCard> =
-    if (!same) cards else cards.map { if (it.id == id) it.copy(state = result.state, jobId = result.jobId, error = result.error) else it }
+ *  conversation it was sent from ([same] false), or dismissed the card. Once an [edited] job
+ *  may exist, the card shows it. */
+fun finishAdd(cards: List<ProposalCard>, id: String, result: AddResult, same: Boolean, edited: JobDraft? = null): List<ProposalCard> =
+    if (!same) cards else cards.map {
+        if (it.id != id) it
+        else it.copy(state = result.state, jobId = result.jobId, error = result.error,
+            draft = if (edited != null && result.state != ProposalState.OPEN) edited else it.draft)
+    }

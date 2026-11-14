@@ -64,6 +64,13 @@ class JobProposalsTest {
             item(1, withField(disk, "params", """{"threshold_percent":10}""")),
             item(2, withField(reminder, "start_date", "\"2026-01-01\"")),
             item(3, withField(prompt, "every", "-1")),
+            // Params of another kind, or fields the cadence does not take: Core refuses them.
+            item(4, withField(disk, "params", """{"threshold_percent":90,"title":"x"}""")),
+            item(5, withField(reminder, "params", """{"title":"Call the bank","notify":false}""")),
+            item(6, withField(prompt, "params", """{"title":"AI news","instruction":"x","text":"y"}""")),
+            item(7, withField(disk, "weekday", "1")),
+            item(8, withField(prompt, "month_day", "1")),
+            item(9, withField(reminder, "max_runs", "2")),
             "null",
         )
         for (one in bad) assertEquals(one, emptyList<JobProposal>(), read(one))
@@ -89,6 +96,9 @@ class JobProposalsTest {
         assertEquals("Every Friday at 08:30 · No push", proposalSchedule(p.draft, today))
         assertEquals("Once on 1 Dec at 09:00", proposalSchedule(r.draft, today))
         assertEquals("Daily at 08:00, 2 runs", proposalSchedule(read(item(4, withField(withField(disk, "at_minute", "480"), "max_runs", "2"))).single().draft, today))
+        assertEquals("Daily at 08:00, 1 run", proposalSchedule(read(item(4, withField(withField(disk, "at_minute", "480"), "max_runs", "1"))).single().draft, today))
+        // No cadence is weekly, so a weekday is fine.
+        assertEquals("Every Tuesday at 07:00", proposalSchedule(read(item(5, """{"kind":"disk_check","weekday":2}""")).single().draft, today))
         assertEquals("Summarize this week's AI news", proposalDetail(p.draft))
         assertEquals("Ask about the card", proposalDetail(r.draft))
         assertEquals("Threshold 90%", proposalDetail(d.draft))
@@ -108,12 +118,13 @@ class JobProposalsTest {
         assertEquals("Added to Jobs", PROPOSAL_ADDED)
     }
 
-    @Test fun `an unreadable 2xx, no answer or a dropped answer is not confirmed`() = runBlocking<Unit> {
+    @Test fun `anything but a refusal is not confirmed`() = runBlocking<Unit> {
         val unconfirmed = AddResult(ProposalState.UNCONFIRMED, null, PROPOSAL_NOT_CONFIRMED)
         assertEquals(unconfirmed, addJob(prompt, JobKind.PROMPT) { ApiResult.Success(null) })
         assertEquals(unconfirmed, addJob(prompt, JobKind.PROMPT) { ApiResult.InvalidResponse("Home Node sent an invalid answer") })
         assertEquals(unconfirmed, addJob(prompt, JobKind.PROMPT) { ApiResult.Unreachable(UnreachableReason.TIMEOUT) })
         assertEquals(unconfirmed, addJob(prompt, JobKind.PROMPT) { null })
+        for (status in listOf(500, 502, 504, 599, 302)) assertEquals("$status", unconfirmed, addJob(prompt, JobKind.PROMPT) { ApiResult.HttpError(status, null) })
         assertEquals("Not confirmed: it may have been added.", PROPOSAL_NOT_CONFIRMED)
     }
 
@@ -123,6 +134,9 @@ class JobProposalsTest {
         val down = addJob(disk, JobKind.DISK_CHECK) { ApiResult.HttpError(503, null) }
         assertEquals(ProposalState.OPEN, down.state)
         assertTrue(down.error.startsWith("Not saved"))
+        for (refusal in listOf(ApiResult.HttpError(404, null), ApiResult.HttpError(429, null), ApiResult.Unauthorized)) {
+            assertEquals("$refusal", ProposalState.OPEN, addJob(prompt, JobKind.PROMPT) { refusal }.state)
+        }
     }
 
     @Test fun `Add is refused behind the lock and on a second tap, and a late result is dropped`() {
@@ -135,6 +149,10 @@ class JobProposalsTest {
         val done = AddResult(ProposalState.ADDED, id(7), "")
         assertSame(adding, finishAdd(adding, id(1), done, same = false))
         assertEquals(listOf(ProposalState.ADDED, ProposalState.OPEN), finishAdd(adding, id(1), done, same = true).map { it.state })
+        // An edited job that may exist shows on the card; after a refusal the proposal stays.
+        val edited = cards[0].draft.copy(threshold = "95")
+        assertEquals("95", finishAdd(adding, id(1), done, same = true, edited = edited)[0].draft.threshold)
+        assertEquals("90", finishAdd(adding, id(1), AddResult(ProposalState.OPEN, null, "x"), same = true, edited = edited)[0].draft.threshold)
         // Dismissed while it ran: nothing comes back.
         assertEquals(listOf(id(2)), finishAdd(adding.drop(1), id(1), done, same = true).map { it.id })
     }
