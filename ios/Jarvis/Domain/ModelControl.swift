@@ -272,14 +272,15 @@ struct LenientRouting: Decodable {
     init(from decoder: Decoder) throws { document = try? RoutingDocument(from: decoder) }
 }
 
-private struct AnyKey: CodingKey {
+struct AnyKey: CodingKey {
     let stringValue: String
     var intValue: Int? { nil }
     init?(stringValue: String) { self.stringValue = stringValue }
     init?(intValue: Int) { nil }
 }
 
-private func requireKnownKeys(_ decoder: Decoder, _ allowed: Set<String>) throws {
+/// Fails decoding on a field outside `allowed`.
+func requireKnownKeys(_ decoder: Decoder, _ allowed: Set<String>) throws {
     let keys = try decoder.container(keyedBy: AnyKey.self).allKeys.map(\.stringValue)
     guard Set(keys).isSubset(of: allowed) else {
         throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unknown field"))

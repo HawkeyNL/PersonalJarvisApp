@@ -25,6 +25,10 @@ final class JarvisAppModel: ObservableObject {
     @Published private(set) var webSearchRun: UUID?
     /// A web search Core advised after the last reply; only the owner's tap sends it.
     @Published private(set) var researchOffer: ResearchOffer?
+    /// Jobs answers in this conversation proposed; only Add or a saved edit makes one.
+    @Published private(set) var jobProposals: [ProposalCard] = []
+    /// Each proposal shows once per session, also after a replayed event.
+    private var seenProposals: Set<UUID> = []
     /// Photos in the composer, in order (ChatPhotos).
     @Published private(set) var chips: [PhotoChip] = []
     /// Why a photo was not added (the limit); cleared by the next attach.
@@ -81,6 +85,7 @@ final class JarvisAppModel: ObservableObject {
         messages = []; conversations = []; isSending = false; realtimeAvailable = false
         photos.removeAll()
         photoMeta = [:]; removedPhotos = []; researchOffer = nil
+        jobProposals = []; seenProposals = []
         if clearIdentity {
             dropChips()
             pendingRequests.clear(); currentConversationId = nil; currentConversationTitle = "New conversation"
@@ -235,7 +240,8 @@ final class JarvisAppModel: ObservableObject {
 
     // Scheduled jobs, roadmaps and manual holdings: each write only while unlocked; a late 401
     // signs out only the session it was sent for.
-    func createJob(_ body: NewJob) async throws { try await ownerWrite { try await self.chat.createJob(body) } }
+    @discardableResult
+    func createJob(_ body: NewJob) async throws -> ScheduledJob { try await ownerWrite { try await self.chat.createJob(body) } }
 
     func updateJob(_ id: UUID, revision: Int, patch: JobPatch) async throws {
         try await ownerWrite { try await self.chat.updateJob(id, revision: revision, patch: patch) }
@@ -839,7 +845,7 @@ final class JarvisAppModel: ObservableObject {
         let generation = presentation.id
         voiceInput.stop(discard: true)
         currentConversationId = id
-        researchOffer = nil
+        researchOffer = nil; jobProposals = []
         do {
             let conversation = try await chat.conversation(id: id)
             guard currentConversationId == id, presentation.accepts(generation) else { return }
@@ -864,7 +870,7 @@ final class JarvisAppModel: ObservableObject {
         currentConversationTitle = "New conversation"
         messages = []
         isSending = false
-        researchOffer = nil; photoMeta = [:]; removedPhotos = []
+        researchOffer = nil; jobProposals = []; photoMeta = [:]; removedPhotos = []
     }
 
     /// Delete the open conversation for good, its photos included (kept ones too), then
@@ -884,6 +890,25 @@ final class JarvisAppModel: ObservableObject {
         guard realtimeAvailable, let offer = researchOffer, offer.conversationId == currentConversationId else { return }
         await send(offer.question, research: true)
     }
+
+    /// Creates a job an answer proposed: Core's body as sent, or the editor's. Never while
+    /// locked or twice at once; a result for a session or conversation the owner has left
+    /// is dropped. The notice for the editor; nil once the card is resolved or gone.
+    @discardableResult
+    func addJobProposal(_ id: UUID, edited: NewJob? = nil) async -> String? {
+        guard let card = JobProposals.begin(id, in: &jobProposals, unlocked: isAuthenticated && lockState == .unlocked) else { return nil }
+        let generation = presentation.id
+        let conversation = currentConversationId
+        let body = edited ?? card.proposal.body
+        let result: Result<ScheduledJob, Error>
+        do { result = .success(try await createJob(body)) } catch { result = .failure(error) }
+        let current = presentation.accepts(generation) && currentConversationId == conversation
+        JobProposals.finish(id, in: &jobProposals, result: result, kind: body.kind, current: current)
+        guard current, let now = jobProposals.first(where: { $0.id == id }), now.state == .open else { return nil }
+        return now.error
+    }
+
+    func dismissJobProposal(_ id: UUID) { jobProposals.removeAll { $0.id == id } }
 
     /// Sends a message with the composer's photos (a photo alone is a message too).
     /// `research` only ever comes from the owner's tap on a Core offer. Returns true when
@@ -1064,6 +1089,8 @@ final class JarvisAppModel: ObservableObject {
                 if currentConversationId == message.conversation_id {
                     upsertRealtime(message, optimistic: "run:\(run.run_id)"); isSending = false
                     researchOffer = ResearchOffer.from(payload)
+                    jobProposals = JobProposals.adding(JobProposals.read(payload), to: jobProposals, seen: &seenProposals,
+                                                       conversation: message.conversation_id, message: message.conversationMessage.id)
                 }
             }
         case "assistant.failed":

@@ -352,7 +352,7 @@ struct JobDraft: Equatable {
 }
 
 /// The kind's fields only; empty clears the roadmap of a dependency review.
-struct JobParamsBody: Encodable, Equatable {
+struct JobParamsBody: Codable, Equatable {
     var roadmap_id: String?
     var title: String?
     var instruction: String?
@@ -362,10 +362,11 @@ struct JobParamsBody: Encodable, Equatable {
 }
 
 /// Only fields the owner sets: Core refuses a body that names one of its own (origin,
-/// run_count, conversation_id, …).
-struct NewJob: Encodable, Equatable {
+/// run_count, conversation_id, …). Decodable for a chat proposal's body (JobProposal),
+/// which may leave out what Core defaults; absent fields are not sent.
+struct NewJob: Codable, Equatable {
     let kind: JobKind
-    let cadence: JobCadence
+    let cadence: JobCadence?
     /// Weekly only; Core refuses a weekday on another cadence.
     let weekday: Int?
     /// Monthly only.
@@ -374,8 +375,8 @@ struct NewJob: Encodable, Equatable {
     let every: Int?
     let start_date: String?
     let max_runs: Int?
-    let at_minute: Int
-    let enabled: Bool
+    let at_minute: Int?
+    let enabled: Bool?
     let params: JobParamsBody
 }
 

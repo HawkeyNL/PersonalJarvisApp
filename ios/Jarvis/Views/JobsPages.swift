@@ -79,7 +79,7 @@ struct JobsPage: View {
         }
         .navigationDestination(item: $open) { id in JobPage(model: model, id: id, navigate: navigate) }
         .sheet(isPresented: $creating) {
-            NewJobSheet(model: model, kinds: newKinds) { await load() }
+            NewJobSheet(model: model, kinds: newKinds, created: { await load() })
         }
         .refreshable { await load() }
         .task { await load() }
@@ -150,20 +150,31 @@ struct JobsPage: View {
     }
 }
 
-/// A new job: its kind, then the kind's fields and schedule.
-private struct NewJobSheet: View {
+/// A new job: its kind, then the kind's fields and schedule. Chat opens it on a proposed
+/// job (prefilled, with its own `write`).
+struct NewJobSheet: View {
     @ObservedObject var model: JarvisAppModel
     let kinds: [JobKind]
+    let title: String
+    let initial: JobDraft
+    let submit: String
     let created: () async -> Void
+    /// Sends the job instead of a plain create: the notice to show, or nil when the sheet closes.
+    let write: ((NewJob) async -> String?)?
     @Environment(\.dismiss) private var dismiss
     @State private var kind: JobKind
     @State private var busy = false
     @State private var error: String?
 
-    init(model: JarvisAppModel, kinds: [JobKind], created: @escaping () async -> Void) {
+    init(model: JarvisAppModel, kinds: [JobKind], title: String = "New job", initial: JobDraft = JobDraft(), submit: String = "Set up",
+         created: @escaping () async -> Void = {}, write: ((NewJob) async -> String?)? = nil) {
         self.model = model
         self.kinds = kinds
+        self.title = title
+        self.initial = initial
+        self.submit = submit
         self.created = created
+        self.write = write
         _kind = State(initialValue: kinds.first ?? .prompt)
     }
 
@@ -182,7 +193,7 @@ private struct NewJobSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                     if let error { JobNotice(text: error, style: .danger) }
                     // A new kind starts from a fresh editor.
-                    JobForm(model: model, kind: kind, initial: JobDraft(), busy: busy, submit: "Set up", creating: true,
+                    JobForm(model: model, kind: kind, initial: initial, busy: busy, submit: submit, creating: true,
                             cancel: { dismiss() }) { draft in Task { await create(draft) } }
                         .id(kind)
                 }
@@ -190,7 +201,7 @@ private struct NewJobSheet: View {
                 .foregroundStyle(JV.textPrimary)
                 .padding(JV.Space.md)
             }
-            .navigationTitle("New job")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
         }
         .interactiveDismissDisabled(busy)
@@ -204,11 +215,16 @@ private struct NewJobSheet: View {
         guard !busy else { return }
         busy = true
         error = nil
-        do {
-            try await model.createJob(Jobs.newJob(kind, draft))
-            dismiss()
-        } catch {
-            self.error = Jobs.writeFailureText(error, update: false, kind: kind)
+        if let write {
+            error = await write(Jobs.newJob(kind, draft))
+            if error == nil { dismiss() }
+        } else {
+            do {
+                try await model.createJob(Jobs.newJob(kind, draft))
+                dismiss()
+            } catch {
+                self.error = Jobs.writeFailureText(error, update: false, kind: kind)
+            }
         }
         await created()
         busy = false

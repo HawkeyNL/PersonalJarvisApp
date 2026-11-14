@@ -28,6 +28,7 @@
         A000000000000000000000C3 /* TradingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000000000000000000C3 /* TradingTests.swift */; };
         A000000000000000000000D1 /* Memecoin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000000000000000000D1 /* Memecoin.swift */; };
         A000000000000000000000D2 /* MemecoinPages.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000000000000000000D2 /* MemecoinPages.swift */; };
+        A000000000000000000000E1 /* JobProposals.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000000000000000000E1 /* JobProposals.swift */; };
         A000000000000000000000D3 /* MemecoinTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000000000000000000D3 /* MemecoinTests.swift */; };
         A00000000000000000000060 /* IBMPlexSans-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000060 /* IBMPlexSans-Regular.ttf */; };
         A00000000000000000000061 /* IBMPlexSans-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000061 /* IBMPlexSans-Medium.ttf */; };
@@ -98,6 +99,7 @@
         B000000000000000000000C3 /* TradingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingTests.swift; sourceTree = "<group>"; };
         B000000000000000000000D1 /* Memecoin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/Memecoin.swift; sourceTree = "<group>"; };
         B000000000000000000000D2 /* MemecoinPages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/MemecoinPages.swift; sourceTree = "<group>"; };
+        B000000000000000000000E1 /* JobProposals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/JobProposals.swift; sourceTree = "<group>"; };
         B000000000000000000000D3 /* MemecoinTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemecoinTests.swift; sourceTree = "<group>"; };
         B00000000000000000000060 /* IBMPlexSans-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/IBMPlexSans-Regular.ttf; sourceTree = "<group>"; };
         B00000000000000000000061 /* IBMPlexSans-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/IBMPlexSans-Medium.ttf; sourceTree = "<group>"; };
@@ -191,6 +193,7 @@
                 B000000000000000000000C2 /* TradingPages.swift */,
                 B000000000000000000000D1 /* Memecoin.swift */,
                 B000000000000000000000D2 /* MemecoinPages.swift */,
+                B000000000000000000000E1 /* JobProposals.swift */,
                 B00000000000000000000070 /* PushRegistration.swift */,
                 B00000000000000000000071 /* Jarvis.entitlements */,
                 B00000000000000000000060 /* IBMPlexSans-Regular.ttf */,
@@ -339,6 +342,7 @@
                 A000000000000000000000C2 /* TradingPages.swift in Sources */,
                 A000000000000000000000D1 /* Memecoin.swift in Sources */,
                 A000000000000000000000D2 /* MemecoinPages.swift in Sources */,
+                A000000000000000000000E1 /* JobProposals.swift in Sources */,
                 A00000000000000000000070 /* PushRegistration.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
