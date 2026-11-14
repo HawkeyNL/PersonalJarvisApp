@@ -88,7 +88,10 @@ struct JobsPage: View {
     @ViewBuilder private func content(_ value: JobList) -> some View {
         if !value.configured { JobNotice(text: Jobs.notConfigured, style: .negative) }
         if value.unsupported > 0 { JobNotice(text: Jobs.unsupportedText(value.unsupported), style: .negative) }
-        ActivityList(rows: value.jobs.map(row), emptyText: "No jobs yet.") { open = UUID(uuidString: $0.id) }
+        ActivityList(rows: value.jobs.map(row),
+                     emptyText: "No jobs yet. Use New job to have Core research, remind you or check the disks on a schedule.") {
+            open = UUID(uuidString: $0.id)
+        }
         VStack(alignment: .leading, spacing: JV.Space.xs) {
             Text(verbatim: Jobs.countText(value.ownerJobs, unsupported: value.unsupported))
                 .font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
@@ -126,6 +129,8 @@ struct JobsPage: View {
     }
 
     private func load() async {
+        // Nothing is shown without the zone, so nothing is read.
+        guard Jobs.zoneAvailable else { return }
         loads += 1
         let mine = loads
         let result = await model.coreRead("/v1/jobs", as: JobList.self).checked(Jobs.valid)
@@ -279,7 +284,8 @@ struct JobPage: View {
         VStack(alignment: .leading, spacing: JV.Space.sm) {
             TitleBadgeRow(title: job.kind.label, badge: Badge(text: Jobs.stateLabel(job),
                                                               style: job.enabled ? .positive : job.pausedAfterFailures ? .danger : .neutral))
-            let lines = [Jobs.scheduleText(job), Jobs.runsDoneText(job), Jobs.stateText(job), Jobs.originText(job)]
+            let origin = Jobs.originText(job).map { "\($0). Jarvis made this job for itself; it goes away when it expires." }
+            let lines = [Jobs.scheduleText(job), Jobs.runsDoneText(job), Jobs.stateText(job), origin]
             Text(verbatim: lines.compactMap { $0 }.joined(separator: "\n"))
                 .font(JV.font(13)).foregroundStyle(JV.textSecondary).fixedSize(horizontal: false, vertical: true)
             if job.pausedAfterFailures {
@@ -403,7 +409,8 @@ struct JobPage: View {
         let (jobs, history) = (await list.checked(Jobs.valid), await runs.checked(Jobs.valid))
         guard !Task.isCancelled, mine == loads else { return }
         if let value = jobs.value { configured = value.configured }
-        job = jobs.map { list in list.jobs.first { $0.id == id } }
+        // As on desktop: a failed reload keeps the job already shown.
+        if jobs.value != nil || found == nil { job = jobs.map { list in list.jobs.first { $0.id == id } } }
         self.runs = history.map(\.runs)
     }
 }
@@ -420,6 +427,8 @@ struct JobRunPage: View {
     let kind: JobKind?
     let navigate: (HubRoute) -> Void
     @State private var report: Availability<JobRunReport> = .loading
+    /// A read already in flight must not overwrite a newer answer.
+    @State private var loads = 0
 
     var body: some View {
         PageScaffold(title: "Run report", subtitle: report.value?.run.status.label ?? "") {
@@ -537,8 +546,12 @@ struct JobRunPage: View {
     }
 
     private func load() async {
+        loads += 1
+        let mine = loads
         let result = await model.coreRead(Jobs.runPath(id), as: JobRunReport.self).checked { Jobs.valid($0.run) }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, mine == loads else { return }
+        // As on desktop: a failed refresh keeps the report already shown.
+        guard result.value != nil || report.value == nil else { return }
         report = result
     }
 }
@@ -644,14 +657,18 @@ struct JobForm: View {
         switch kind {
         case .prompt:
             TextField("Title", text: $draft.title).textFieldStyle(.roundedBorder)
+            caption("Shown in the push and the job's conversation.")
             TextField("What to research", text: $draft.instruction, axis: .vertical).lineLimit(2...6).textFieldStyle(.roundedBorder)
             caption(Jobs.privacyHint)
             Toggle("Send me a push when a run ends", isOn: $draft.notify)
         case .reminder:
             TextField("Title", text: $draft.title).textFieldStyle(.roundedBorder)
+            caption("The push shows the title only.")
             TextField("Text (optional)", text: $draft.text, axis: .vertical).lineLimit(2...6).textFieldStyle(.roundedBorder)
+            caption("Posted to the job's conversation. Without it, the title is posted.")
         case .diskCheck:
             Stepper(value: $draft.threshold, in: 50...99) { Text(verbatim: "Tell me at \(draft.threshold)% full") }
+            caption("You hear about a disk at or above this. 50 to 99.")
         case .dependencyReview:
             roadmapPicker
         }
@@ -665,7 +682,7 @@ struct JobForm: View {
             .labelsHidden()
         }
         if draft.cadence == .once {
-            DatePicker("Day", selection: start, in: startRange, displayedComponents: .date)
+            DatePicker("On", selection: start, in: startRange, displayedComponents: .date)
                 .environment(\.timeZone, Jobs.timeZone)
         } else if kind != .dependencyReview {
             Stepper(value: $draft.every, in: draft.cadence.everyRange) {
@@ -687,7 +704,7 @@ struct JobForm: View {
                 }
                 .labelsHidden()
             }
-            if draft.monthDay > 28 { caption("A shorter month runs on its last day.") }
+            if draft.monthDay > 28 { caption("Shorter months run on their last day.") }
         }
         LabeledContent("Time") {
             DatePicker("Time", selection: time, displayedComponents: .hourAndMinute)
@@ -698,7 +715,7 @@ struct JobForm: View {
         if draft.cadence != .once && kind != .dependencyReview {
             Toggle("Start on a later day", isOn: laterStart)
             if draft.startDate != nil {
-                DatePicker("Start", selection: start, in: startRange, displayedComponents: .date)
+                DatePicker("Starting", selection: start, in: startRange, displayedComponents: .date)
                     .environment(\.timeZone, Jobs.timeZone)
             }
             Toggle("Stop after a number of runs", isOn: runLimit)

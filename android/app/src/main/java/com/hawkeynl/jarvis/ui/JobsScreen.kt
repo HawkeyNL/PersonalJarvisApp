@@ -50,7 +50,6 @@ import com.hawkeynl.jarvis.network.JobKind
 import com.hawkeynl.jarvis.network.JobList
 import com.hawkeynl.jarvis.network.JobRun
 import com.hawkeynl.jarvis.network.MAX_OWNER_JOBS
-import com.hawkeynl.jarvis.network.NOT_CONFIRMED
 import com.hawkeynl.jarvis.network.OWNER_KINDS
 import com.hawkeynl.jarvis.network.PAUSED_AFTER_FAILURES_NOTE
 import com.hawkeynl.jarvis.network.Priority
@@ -86,7 +85,6 @@ import com.hawkeynl.jarvis.network.toDraft
 import com.hawkeynl.jarvis.network.triggerLabel
 import com.hawkeynl.jarvis.network.typedTime
 import com.hawkeynl.jarvis.network.unsupportedText
-import com.hawkeynl.jarvis.network.writeFailureText
 import com.hawkeynl.jarvis.network.writeNotice
 import com.hawkeynl.jarvis.network.zonedText
 import kotlinx.coroutines.CoroutineScope
@@ -174,8 +172,9 @@ private fun JobListPage(actions: JarvisViewModel, back: () -> Unit, open: (Strin
                     creating = null
                     open(created.id)
                 } else {
-                    // A 2xx whose job does not read may have landed: the reload shows it.
-                    error = if (result is ApiResult.Success) NOT_CONFIRMED else writeFailureText(result, update = false, draft.kind)
+                    // A 2xx whose job does not read may have landed: the reload shows it. No "done"
+                    // text: a confirmed create opens the job instead.
+                    error = writeNotice(result, update = false, draft.kind, done = "")
                     load()
                 }
             } finally {
@@ -208,6 +207,11 @@ private fun JobListPage(actions: JarvisViewModel, back: () -> Unit, open: (Strin
                         Column(Modifier.padding(JvSpace.lg)) {
                             JobForm(actions, newDraft(JobKind.PROMPT), creating = true, busy, "Create", onCancel = { creating = null; error = "" }, onSave = ::create)
                         }
+                    }
+                }
+                if (shown.rows.isEmpty() && creating !in OWNER_KINDS) {
+                    ListSection(null) {
+                        EmptyState("No jobs yet. Use New job to have Core research, remind you or check the disks on a schedule.", compact = true)
                     }
                 }
                 shown.rows.forEach { row -> JobCard(row) { open(row.job.id) } }
@@ -383,7 +387,7 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
                 ListSection(null) {
                     Column(Modifier.padding(JvSpace.lg), verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
                         StatusBadge(stateText(shown), tone = stateTone(shown))
-                        originText(shown)?.let { StatusBadge(it) }
+                        originText(shown)?.let { MutedText("$it. Jarvis made this job for itself; it goes away when it expires.") }
                         val next = if (shown.enabled && shown.nextRunAt != null) "Next run ${zonedText(shown.nextRunAt)}" else null
                         MutedText(listOfNotNull("${scheduleText(shown)} ($JOBS_TIME_ZONE)", runsText(shown), next).joinToString(". ") + ".")
                         if (shown.pausedAfterFailures) ErrorText(PAUSED_AFTER_FAILURES_NOTE, live = false)
@@ -583,18 +587,23 @@ private fun JobForm(
         }
         when (draft.kind) {
             JobKind.PROMPT -> {
-                Field("Title", draft.title, { edit(draft.copy(title = it)) }, "Up to 60 characters. It can show in a push.")
+                Field("Title", draft.title, { edit(draft.copy(title = it)) }, "Shown in the push and the job's conversation.")
                 // One line for Core: a typed line break reads as a space.
-                Field("What to research", draft.instruction, { edit(draft.copy(instruction = it.replace('\n', ' '))) }, "Up to 500 characters.", multiline = true)
-                MutedText("The title and instruction leave your Home Node in a web search: leave out personal or financial details and symbols you hold.")
+                Field(
+                    "What to research", draft.instruction, { edit(draft.copy(instruction = it.replace('\n', ' '))) },
+                    "It leaves your Home Node as a web search, so leave out personal or financial details and symbols you hold.", multiline = true,
+                )
                 SwitchRow("Send me a push when a run ends", draft.notify) { edit(draft.copy(notify = it)) }
             }
             JobKind.REMINDER -> {
-                Field("Title", draft.title, { edit(draft.copy(title = it)) }, "Up to 60 characters. Sent as the push.")
-                Field("Text (optional)", draft.text, { edit(draft.copy(text = it.replace('\n', ' '))) }, "Up to 500 characters, posted in the job's conversation.", multiline = true)
+                Field("Title", draft.title, { edit(draft.copy(title = it)) }, "The push shows the title only.")
+                Field(
+                    "Text (optional)", draft.text, { edit(draft.copy(text = it.replace('\n', ' '))) },
+                    "Posted to the job's conversation. Without it, the title is posted.", multiline = true,
+                )
             }
             JobKind.DISK_CHECK ->
-                Field("Threshold", draft.threshold, { edit(draft.copy(threshold = it)) }, "50 to 99%. A note when a disk is at or above it.", number = true, suffix = "%")
+                Field("Threshold", draft.threshold, { edit(draft.copy(threshold = it)) }, "You hear about a disk at or above this. 50 to 99.", number = true, suffix = "%")
             JobKind.DEPENDENCY_REVIEW -> {
                 val list = choices
                 val chosen = draft.roadmapId
@@ -625,11 +634,11 @@ private fun JobForm(
         if (draft.cadence == Cadence.WEEKLY) Picker("Day", WEEKDAYS.mapIndexed { i, day -> i + 1 to day }, draft.weekday, { edit(draft.copy(weekday = it)) })
         if (draft.cadence == Cadence.MONTHLY) {
             Picker("Day of the month", (1..31).map { it to ordinal(it) }, draft.monthDay, { edit(draft.copy(monthDay = it)) })
-            if (draft.monthDay > 28) MutedText("In a shorter month it runs on the last day.")
+            if (draft.monthDay > 28) MutedText("Shorter months run on their last day.")
         }
         if (hasRecurrence(draft.kind)) {
             Field(
-                if (once) "Day" else "Start date (optional)", draft.startDate, { edit(draft.copy(startDate = it)) },
+                if (once) "On" else "Starting (optional)", draft.startDate, { edit(draft.copy(startDate = it)) },
                 if (once) "YYYY-MM-DD, at most two years ahead." else "YYYY-MM-DD. It runs from this day on; empty starts now.",
                 placeholder = "YYYY-MM-DD",
             )

@@ -11,7 +11,7 @@
 import { validHttpsUrl, validText } from "./roadmaps.ts";
 
 export const TIME_ZONE = "Europe/Amsterdam";
-export const NEEDS_CORE = "Needs Jarvis Core v0.0.80 or later.";
+export const NEEDS_CORE = "Needs Jarvis Core v0.0.87 or later.";
 export const TIMES_IN_ZONE = `Times are in ${TIME_ZONE} time.`;
 
 export const KINDS = ["prompt", "reminder", "disk_check", "dependency_review"] as const;
@@ -610,6 +610,9 @@ export function runNowFailureText(error: unknown): string {
 export const CHANGED_ELSEWHERE = "Changed elsewhere, reloaded.";
 /** A write Core answered with 2xx but an answer this build cannot read. */
 export const NOT_CONFIRMED = "Not confirmed; reloaded to check.";
+/** A create Core refused as unreadable (422): a Core before v0.0.87 knows only the
+ *  dependency review and refuses a body with a kind it does not know. */
+export const KIND_NOT_KNOWN = "Not saved: your Core does not know this kind of job yet. Update Core on your Home Node.";
 export const INVALID_TEXT =
   "Core refused this as invalid: for example a one-time job that is not in the future, an archived roadmap, or a research title or instruction that may hold personal or financial details. Check the fields and try again.";
 
@@ -623,6 +626,7 @@ export function writeFailureText(error: unknown, update: boolean, kind?: Kind): 
     return kind === "dependency_review" ? "Core refused this: a dependency review already exists." : `Core refused this. ${FULL_TEXT}`;
   }
   if (e?.name === "ApiError" && e.status === 400) return INVALID_TEXT;
+  if (e?.name === "ApiError" && e.status === 422 && !update) return KIND_NOT_KNOWN;
   if (e?.name === "ApiError" && e.status === 503) {
     return "Not saved: Core could not check this just now (its database or your holdings could not be read). Try again in a minute.";
   }

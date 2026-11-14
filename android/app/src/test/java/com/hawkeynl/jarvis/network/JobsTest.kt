@@ -42,6 +42,9 @@ class JobsTest {
         for (broken in listOf("null", "[]", """{"jobs":[$job]}""", """{"status":"ok"}""", """{"status":"ok","jobs":{}}""")) {
             assertNull(broken.take(80), readJobList(json(broken)))
         }
+        // At most 100 entries, as desktop.
+        assertEquals(100, readJobList(json("""{"status":"ok","jobs":[${List(100) { job }.joinToString(",")}]}"""))!!.jobs.size)
+        assertNull(readJobList(json("""{"status":"ok","jobs":[${List(101) { job }.joinToString(",")}]}""")))
     }
 
     @Test fun `one job this build cannot read never fails the list`() {
@@ -214,6 +217,8 @@ class JobsTest {
             newDraft(JobKind.DEPENDENCY_REVIEW).copy(cadence = Cadence.MONTHLY) to "review cadence",
         )) assertTrue(why, draftError(draft, today) != null)
         assertNull(draftError(ok.copy(cadence = Cadence.ONCE, startDate = "2026-11-13"), today))
+        assertEquals("Pick a day from today on.", draftError(ok.copy(startDate = "1999-12-31"), today))
+        assertEquals("Pick a date at most two years ahead.", draftError(ok.copy(startDate = "2029-01-01"), today))
         assertNull(draftError(ok.copy(cadence = Cadence.ONCE, startDate = "2026-11-12", enabled = false), today))
         assertNull("a run limit is ignored on a one-time job", draftError(ok.copy(cadence = Cadence.ONCE, startDate = "2026-12-01", maxRuns = "x"), today))
         assertNull(draftError(newDraft(JobKind.REMINDER).copy(title = "Call the bank"), today))
@@ -295,7 +300,7 @@ class JobsTest {
         assertEquals(JobFailure.NO_API, jobFailureOf(ApiResult.HttpError(404, null), list = true))
         assertEquals(JobFailure.NOT_FOUND, jobFailureOf(ApiResult.HttpError(404, null)))
         assertTrue(jobFailureText(JobFailure.NO_API).startsWith(JOBS_NEED_CORE))
-        assertEquals("Needs Jarvis Core v0.0.80 or later.", JOBS_NEED_CORE)
+        assertEquals("Needs Jarvis Core v0.0.87 or later.", JOBS_NEED_CORE)
         assertEquals(RUN_NOW_REFUSED, runNowFailureText(ApiResult.HttpError(429, null)))
         assertTrue(runNowFailureText(ApiResult.HttpError(409, null)).contains("scheduler is off"))
         // A 409 on a change is always a revision conflict; only a create can mean "exists".
@@ -306,7 +311,10 @@ class JobsTest {
             writeFailureText(ApiResult.HttpError(409, null), update = false, JobKind.REMINDER))
         assertEquals(CHANGED_ELSEWHERE, writeFailureText(ApiResult.HttpError(409, null), update = true, JobKind.REMINDER))
         for (kind in JobKind.entries) assertEquals(INVALID_TEXT, writeFailureText(ApiResult.HttpError(400, null), update = false, kind))
-        assertEquals("Not saved. ${jobFailureText(JobFailure.FAILED)}", writeFailureText(ApiResult.HttpError(422, null), update = false, JobKind.PROMPT))
+        // A Core before v0.0.87 refuses a kind it does not know with 422; on a change it stays generic.
+        assertEquals("Not saved: your Core does not know this kind of job yet. Update Core on your Home Node.",
+            writeFailureText(ApiResult.HttpError(422, null), update = false, JobKind.PROMPT))
+        assertEquals("Not saved. ${jobFailureText(JobFailure.FAILED)}", writeFailureText(ApiResult.HttpError(422, null), update = true, JobKind.PROMPT))
         assertTrue(writeFailureText(ApiResult.HttpError(503, null), update = true).startsWith("Not saved: Core could not check this just now"))
         assertTrue(jobDeleted(ApiResult.Success(Unit)))
         assertTrue("already gone counts as deleted", jobDeleted(ApiResult.HttpError(404, null)))
@@ -330,6 +338,10 @@ class JobsTest {
         assertEquals("Paused.", writeNotice(ApiResult.Success(p), update = true, JobKind.PROMPT, "Paused."))
         assertEquals(NOT_CONFIRMED, writeNotice(ApiResult.Success(null), update = true, JobKind.PROMPT, "Saved."))
         assertEquals(CHANGED_ELSEWHERE, writeNotice(ApiResult.HttpError(409, null), update = true, JobKind.PROMPT, "Saved."))
+        // The create path: a 2xx without a readable job is not confirmed; refusals keep their wording.
+        assertEquals(NOT_CONFIRMED, writeNotice(ApiResult.Success(null), update = false, JobKind.REMINDER, ""))
+        assertEquals(KIND_NOT_KNOWN, writeNotice(ApiResult.HttpError(422, null), update = false, JobKind.REMINDER, ""))
+        assertEquals("Core refused this. $JOBS_FULL_TEXT", writeNotice(ApiResult.HttpError(409, null), update = false, JobKind.REMINDER, ""))
         // A wrong-shaped job answer reads as null, so it lands in the branch above.
         assertNull(readJob(json("""{"id":"$j1","ok":true}""")))
     }
