@@ -129,10 +129,11 @@ actor ChatService {
         return try await api.createJob(body, token: token, expectedBinding: binding)
     }
 
-    func updateJob(_ id: UUID, revision: Int, patch: JobPatch) async throws {
+    @discardableResult
+    func updateJob(_ id: UUID, revision: Int, patch: JobPatch) async throws -> ScheduledJob {
         let binding = await api.binding()
         let token = try await requiredToken()
-        try await api.updateJob(id: id, revision: revision, patch: patch, token: token, expectedBinding: binding)
+        return try await api.updateJob(id: id, revision: revision, patch: patch, token: token, expectedBinding: binding)
     }
 
     func runJobNow(_ id: UUID) async throws {

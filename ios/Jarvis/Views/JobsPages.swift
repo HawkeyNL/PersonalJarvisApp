@@ -135,7 +135,7 @@ struct JobsPage: View {
         let mine = loads
         let result = await model.coreRead("/v1/jobs", as: JobList.self).checked(Jobs.valid)
         let jobs = result.value?.jobs ?? []
-        // ponytail: one runs read per job, side by side (at most 14 jobs); a newest-run field in Core's list if this gets slow.
+        // ponytail: one runs read per job, side by side (at most 100 jobs); a newest-run field in Core's list if this gets slow.
         let model = self.model
         let newest = await withTaskGroup(of: (UUID, Availability<JobRun?>).self) { group in
             for job in jobs {
@@ -372,7 +372,9 @@ struct JobPage: View {
         busy = true
         notice = nil
         do {
-            try await model.updateJob(job.id, revision: job.revision, patch: patch)
+            // As on desktop: show the saved job, so a failed reload does not leave the old revision.
+            let saved = try await model.updateJob(job.id, revision: job.revision, patch: patch)
+            self.job = .ok(saved)
             await load()
             notice = done
         } catch {

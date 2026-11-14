@@ -281,11 +281,13 @@ actor JarvisAPIClient {
         return job
     }
 
-    /// Core answers 409 when the job moved past `revision`.
-    func updateJob(id: UUID, revision: Int, patch: JobPatch, token: String, expectedBinding: UUID) async throws {
+    /// Core answers 409 when the job moved past `revision`. The answer is the job as saved.
+    @discardableResult
+    func updateJob(id: UUID, revision: Int, patch: JobPatch, token: String, expectedBinding: UUID) async throws -> ScheduledJob {
         let job = try await request(path: "\(Jobs.jobPath(id))?expected_revision=\(revision)", method: "PATCH",
                                     body: patch, token: token, expectedBinding: expectedBinding, limit: 64 * 1024, response: ScheduledJob.self)
         guard Jobs.valid(job), job.id == id else { throw JarvisAPIError.invalidResponse }
+        return job
     }
 
     /// Deletes the job and its runs; its conversation stays. Core answers 409 when the job
