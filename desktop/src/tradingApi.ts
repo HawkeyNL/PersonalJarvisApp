@@ -5,10 +5,9 @@ import { ref, watch, type Ref } from "vue";
 import { getJsonAuth } from "./api";
 import { currentAuthStatus } from "./auth";
 import { loadOptional } from "./coreStatus";
-import type { Availability } from "./hubModel";
 import {
-  BAR_RANGES, HISTORY_RANGES, dataState, failureState, parseConid, readIbkrStatus,
-  type BarRange, type Freshness, type HistoryRange, type IbkrStatus, type TradingState,
+  BAR_RANGES, HISTORY_RANGES, dataState, failureState, parseConid, loadIbkrStatusWith,
+  type BarRange, type Freshness, type HistoryRange, type TradingState,
 } from "./trading";
 
 export const tradingApi = {
@@ -22,12 +21,7 @@ export const tradingApi = {
     return getJsonAuth<unknown>(`/v1/trading/instruments/${conid}/bars?range=${range}`);
   },
   /** IBKR sync status through its guard; 404/405 (older Core) is "unsupported". */
-  ibkrStatus: async (): Promise<Availability<IbkrStatus>> => {
-    const result = await loadOptional<unknown>("/v1/trading/ibkr/status");
-    if (result.state !== "ok") return result;
-    const status = readIbkrStatus(result.value);
-    return status ? { state: "ok", value: status } : { state: "error", reason: "failed" };
-  },
+  ibkrStatus: () => loadIbkrStatusWith(loadOptional),
 };
 
 // ---- dev-only data switch (DevDataToggle) -------------------------------

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import NodePage, { type NodeItem } from "../components/jv/NodePage.vue";
 import JvSegmented, { type SegmentItem } from "../components/jv/JvSegmented.vue";
 import RowList, { type Row } from "../components/RowList.vue";
@@ -52,15 +52,18 @@ const ibkrFallback = computed(() => ibkrStatus.value.state === "unsupported");
 const ibkrFacts = computed(() => (ibkrStatus.value.state === "ok" ? ibkrStatusFacts(ibkrStatus.value.value, statusNow.value) : []));
 const localTime = (iso: string) => new Date(iso).toLocaleString();
 const copied = ref<string | null>(null);
+let copyTimer: ReturnType<typeof setTimeout> | undefined;
 async function copyCommand(key: string, command: string) {
+  clearTimeout(copyTimer);
   try {
     await navigator.clipboard.writeText(command);
     copied.value = key;
-    setTimeout(() => { if (copied.value === key) copied.value = null; }, 2000);
+    copyTimer = setTimeout(() => { copied.value = null; }, 2000);
   } catch {
     copied.value = null; // the command stays selectable
   }
 }
+onBeforeUnmount(() => clearTimeout(copyTimer));
 const { state: ibkr, reload: reloadIbkr } = useTradingRead<Portfolio>({
   live: tradingApi.portfolio,
   fixture: (f, set) => f.portfolioFixture(set),
@@ -193,12 +196,15 @@ const readyOf = (cost: string) => `${countOf(brains.value.filter((b) => b.cost =
     <!-- IBKR: status, and what to fix. Commands are only shown to copy; never run, linked or opened. -->
     <ActivityState v-else-if="selected === 'ibkr' && !ibkrFallback" nested :state="ibkrStatus" what="the IBKR status" @retry="loadIbkrStatus" v-slot="{ data }">
       <div class="np-cols">
-        <dl class="np-facts" aria-label="IBKR status">
-          <div v-for="fact in ibkrFacts" :key="fact.label">
-            <dt>{{ fact.label }}</dt>
-            <dd :title="fact.at ? localTime(fact.at) : undefined"><code v-if="fact.code" class="mono">{{ fact.code }}</code>{{ fact.value }}</dd>
-          </div>
-        </dl>
+        <div class="ib-facts">
+          <dl class="np-facts" aria-label="IBKR status">
+            <div v-for="fact in ibkrFacts" :key="fact.label">
+              <dt>{{ fact.label }}</dt>
+              <dd :title="fact.at ? localTime(fact.at) : undefined"><code v-if="fact.code" class="mono">{{ fact.code }}</code>{{ fact.value }}</dd>
+            </div>
+          </dl>
+          <p v-if="data.ibkr" class="np-note">The brokerage session is only needed for charts.</p>
+        </div>
         <section class="ib-fix" aria-labelledby="ib-fix-title">
           <h3 id="ib-fix-title">What to fix</h3>
           <ul v-if="data.problems.length" class="ib-problems">
@@ -209,11 +215,12 @@ const readyOf = (cost: string) => `${countOf(brains.value.filter((b) => b.cost =
               </div>
               <div v-for="(c, j) in p.commands" :key="j" class="ib-cmd">
                 <code class="mono">{{ c }}</code>
-                <button type="button" class="btn btn-secondary btn-sm" :aria-label="`${copied === `${i}-${j}` ? 'Copied' : 'Copy'}: ${c}`" @click="copyCommand(`${i}-${j}`, c)">{{ copied === `${i}-${j}` ? "Copied" : "Copy" }}</button>
+                <button type="button" class="btn btn-secondary btn-sm" :aria-label="`Copy command: ${c}`" @click="copyCommand(`${i}-${j}`, c)">{{ copied === `${i}-${j}` ? "Copied" : "Copy" }}</button>
               </div>
             </li>
           </ul>
           <p v-else class="np-empty">Nothing to fix.</p>
+          <p v-if="data.problems.some((p) => p.commands.length)" class="np-note">Run these yourself on the Home Node. Jarvis never runs them.</p>
         </section>
       </div>
     </ActivityState>
@@ -231,6 +238,7 @@ const readyOf = (cost: string) => `${countOf(brains.value.filter((b) => b.cost =
 </template>
 
 <style scoped>
+.ib-facts { display: flex; flex-direction: column; gap: 10px; }
 .ib-fix { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .ib-fix h3 { margin: 0; }
 .ib-problems { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }

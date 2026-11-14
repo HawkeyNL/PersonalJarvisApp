@@ -10,7 +10,7 @@
 // numbers: a JS float cannot hold every amount exactly. They become numbers
 // only to draw a chart (chartNumber).
 
-import { relativeTime, untilTime, type Tone } from "./hubModel.ts";
+import { relativeTime, untilTime, type Availability, type Tone } from "./hubModel.ts";
 
 /** Exact decimal as a string: optional "-", digits, optional "." + digits. */
 export type Decimal = string;
@@ -471,23 +471,28 @@ export function readBars(x: unknown): InstrumentBars | null {
 
 // ---- IBKR status (GET /v1/trading/ibkr/status) --------------------------
 // Whether the sync works and, if not, what to fix. Read leniently: every field
-// may be null, an unknown value becomes "unknown", a bad problem is dropped;
-// only a body that is not an object fails the read. Texts are capped.
+// may be null, an unknown value becomes "unknown", a bad problem or command is
+// dropped; only a body that is not an object fails the read.
 
 export const STATUS_LIMITS = { problems: 8, commands: 8, text: 500, code: 64, time: 64 } as const;
 
 export type IbkrOverall = "ok" | "info" | "warn" | "error" | "off" | "unknown";
 export type IbkrSeverity = "info" | "warn" | "error" | "unknown";
-/** `code` is a known code, an unlisted one (shown as itself) or "unknown". */
+/** `code` is a listed code, an unlisted one (shown as itself) or "unknown". */
 export type IbkrError = { code: string; at: string | null };
 export type IbkrProblem = { code: string; severity: IbkrSeverity; summary: string; commands: string[] };
 export type IbkrStatus = {
   overall: IbkrOverall;
-  sync: { enabled: boolean | null; state: string; last_success_at: string | null; last_error: IbkrError | null };
+  sync: {
+    enabled: boolean | null; state: string;
+    /** "" when Core sent a time that cannot be read (shown as "Unknown"). */
+    last_success_at: string | null;
+    last_error: IbkrError | null;
+  };
   broker: { service: string; credentials: string; reachable: boolean | null };
   /** null: the broker did not answer the status request. */
   token: { state: string; usable: boolean | null; refreshed_at: string | null; expires_at: string | null } | null;
-  ibkr: { rate_limited_until: string | null; brokerage_session: string } | null;
+  ibkr: { last_error: IbkrError | null; rate_limited_until: string | null; brokerage_session: string } | null;
   problems: IbkrProblem[];
 };
 
@@ -501,13 +506,15 @@ const BROKERAGE: Record<string, string> = { open: "Open", closed: "Closed", comp
 const SERVICE: Record<string, string> = {
   active: "Running", activating: "Running", inactive: "Stopped", deactivating: "Stopped", failed: "Failed", not_found: "Not installed",
 };
-/** Sync error codes, including a refused configuration. */
+/** Every code Core can send in a last_error: sync, refusal and broker codes. */
 const ERROR_LABEL: Record<string, string> = {
   broker_not_running: "Broker not running", broker_unavailable: "Broker unavailable", broker_busy: "Broker busy",
-  broker_timeout: "Broker timed out", ibkr_auth: "IBKR refused the login", ibkr_rate_limited: "IBKR rate limit",
+  broker_timeout: "Broker timed out", ibkr_auth: "IBKR refused the login", ibkr_rate_limited: "Rate limited by IBKR",
   ibkr_failed: "IBKR request failed", broker_protocol: "Unreadable broker answer", account_unsupported: "Account not supported",
-  data_refused: "Data refused", store_failed: "Could not save", socket_path_invalid: "Broker socket path invalid",
-  broker_account_missing: "Broker account missing", broker_account_unsafe: "Broker account unsafe", unknown: "Unknown",
+  data_refused: "IBKR data refused", store_failed: "Could not store the portfolio",
+  socket_path_invalid: "Broker socket path invalid", broker_account_missing: "Broker account missing", broker_account_unsafe: "Broker account unsafe",
+  auth_rejected: "Rejected by IBKR", not_authenticated: "Not signed in to IBKR", rate_limited: "Rate limited by IBKR",
+  upstream: "IBKR request failed", busy: "Broker busy", invalid_input: "Invalid request", unknown: "Unknown",
 };
 export const SEVERITY_LABEL: Record<IbkrSeverity, string> = { error: "Error", warn: "Warning", info: "Info", unknown: "Unknown" };
 export const SEVERITY_TONE: Record<IbkrSeverity, Tone> = { error: "error", warn: "warn", info: "idle", unknown: "idle" };
@@ -516,19 +523,26 @@ const has = (map: Record<string, string>, key: string) => Object.prototype.hasOw
 const objOrEmpty = (x: unknown): Obj => (isObj(x) ? x : {});
 const bool = (x: unknown) => (typeof x === "boolean" ? x : null);
 const time = (x: unknown) => (isStr(x) && x.length <= STATUS_LIMITS.time && !Number.isNaN(Date.parse(x)) ? x : null);
-const text = (x: unknown) => (isStr(x) ? x.slice(0, STATUS_LIMITS.text) : null);
+/** A code as Core spells them (snake_case), else "unknown". */
+const code = (x: unknown) => (isStr(x) && x.length <= STATUS_LIMITS.code && /^[a-z0-9_]+$/.test(x) ? x : "unknown");
 /** A value from `known`, else "unknown" (also for null). */
 const oneOf = <T extends string>(x: unknown, known: readonly T[]): T | "unknown" =>
   known.find((k) => k === x) ?? "unknown";
-/** A code as Core spells them (snake_case), else "unknown". */
-const code = (x: unknown) => (isStr(x) && x.length <= STATUS_LIMITS.code && /^[a-z0-9_]+$/.test(x) ? x : "unknown");
 const error = (x: unknown): IbkrError | null => (isObj(x) ? { code: code(x.code), at: time(x.at) } : null);
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+/** A command to copy: dropped, never cut, when too long or multi-line (a cut
+ *  or multi-line command could paste as a different one). */
+const command = (x: unknown) => isStr(x) && x.length > 0 && x.length <= STATUS_LIMITS.text && !CONTROL.test(x);
 
 function problem(x: unknown): IbkrProblem | null {
   if (!isObj(x)) return null;
-  const c = code(x.code);
-  const commands = Array.isArray(x.commands) ? x.commands.slice(0, STATUS_LIMITS.commands).map(text).filter((t): t is string => !!t) : [];
-  return { code: c, severity: oneOf(x.severity, ["info", "warn", "error"] as const), summary: text(x.summary) || c, commands };
+  const commands = Array.isArray(x.commands) ? x.commands.slice(0, STATUS_LIMITS.commands).filter(command) : [];
+  return {
+    code: code(x.code),
+    severity: oneOf(x.severity, ["info", "warn", "error"] as const),
+    summary: isStr(x.summary) && x.summary ? x.summary.slice(0, STATUS_LIMITS.text) : "Unknown",
+    commands,
+  };
 }
 
 export function readIbkrStatus(x: unknown): IbkrStatus | null {
@@ -538,11 +552,13 @@ export function readIbkrStatus(x: unknown): IbkrStatus | null {
   const token = isObj(x.token) ? x.token : null;
   const ibkr = isObj(x.ibkr) ? x.ibkr : null;
   const problems = Array.isArray(x.problems) ? x.problems.slice(0, STATUS_LIMITS.problems).map(problem) : [];
+  const lastSuccess = sync.last_success_at;
   return {
     overall: oneOf(x.overall, ["ok", "info", "warn", "error", "off"] as const),
     sync: {
       enabled: bool(sync.enabled), state: oneOf(sync.state, ["off", "refused", ...Object.keys(SYNC_STATE)]),
-      last_success_at: time(sync.last_success_at), last_error: error(sync.last_error),
+      last_success_at: lastSuccess === null || lastSuccess === undefined ? null : time(lastSuccess) ?? "",
+      last_error: error(sync.last_error),
     },
     broker: {
       service: oneOf(broker.service, Object.keys(SERVICE)),
@@ -553,9 +569,22 @@ export function readIbkrStatus(x: unknown): IbkrStatus | null {
       state: oneOf(token.state, Object.keys(TOKEN_STATE)), usable: bool(token.usable),
       refreshed_at: time(token.refreshed_at), expires_at: time(token.expires_at),
     },
-    ibkr: ibkr && { rate_limited_until: time(ibkr.rate_limited_until), brokerage_session: oneOf(ibkr.brokerage_session, Object.keys(BROKERAGE)) },
+    ibkr: ibkr && {
+      last_error: error(ibkr.last_error), rate_limited_until: time(ibkr.rate_limited_until),
+      brokerage_session: oneOf(ibkr.brokerage_session, Object.keys(BROKERAGE)),
+    },
     problems: problems.filter((p): p is IbkrProblem => p !== null),
   };
+}
+
+/** Load the status through `load` (loadOptional in the app): 404/405 stays
+ *  "unsupported" (the pane falls back to the portfolio); a body that is not
+ *  an object is an error. */
+export async function loadIbkrStatusWith(load: (path: string) => Promise<Availability<unknown>>): Promise<Availability<IbkrStatus>> {
+  const result = await load("/v1/trading/ibkr/status");
+  if (result.state !== "ok") return result;
+  const status = readIbkrStatus(result.value);
+  return status ? { state: "ok", value: status } : { state: "error", reason: "failed" };
 }
 
 /** Header tone and label. "info" needs attention only with a problem to show. */
@@ -574,7 +603,25 @@ export function ibkrStatusState(s: IbkrStatus): [Tone, string] {
  *  before `value`. `at`: the time behind a relative value, for a tooltip. */
 export type IbkrFact = { label: string; value: string; code?: string; at?: string };
 
-const ago = (iso: string, now: number) => relativeTime(iso, now) || "at an unknown time";
+const ago = (iso: string, now: number) => relativeTime(iso, now) || "Unknown";
+/** Local short clock time ("14:05") in the device locale and timezone. */
+export const clockTime = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
+/** The more recent error by `at`; one with a time beats one without; a tie
+ *  goes to the sync error. */
+function latestError(sync: IbkrError | null, broker: IbkrError | null): IbkrError | null {
+  if (!sync || !broker) return sync ?? broker;
+  const s = sync.at ? Date.parse(sync.at) : -Infinity;
+  const b = broker.at ? Date.parse(broker.at) : -Infinity;
+  return b > s ? broker : sync;
+}
+
+function syncText({ enabled, state }: IbkrStatus["sync"]): string {
+  if (state === "off") return "Off";
+  if (state === "refused") return "Refused";
+  if (has(SYNC_STATE, state)) return `On · ${SYNC_STATE[state]}`;
+  return enabled === true ? "On · Unknown" : enabled === false ? "Off" : "Unknown";
+}
 
 export function ibkrStatusFacts(s: IbkrStatus, now: number): IbkrFact[] {
   const { sync, broker, token, ibkr } = s;
@@ -582,25 +629,26 @@ export function ibkrStatusFacts(s: IbkrStatus, now: number): IbkrFact[] {
   const reach = service === "Running" && broker.reachable !== null ? (broker.reachable ? ", reachable" : ", not reachable") : "";
   const facts: IbkrFact[] = [
     { label: "Broker", value: broker.credentials === "missing" ? "Credentials missing" : service + reach },
-    {
-      label: "Portfolio sync",
-      value: sync.enabled === false || sync.state === "off" ? "Off" : sync.state === "refused" ? "Refused" : `On · ${SYNC_STATE[sync.state] ?? "Unknown"}`,
-    },
+    { label: "Portfolio sync", value: syncText(sync) },
     { label: "Session token", value: token ? tokenText(token, now) : "Unknown" },
-    sync.last_success_at
-      ? { label: "Last successful sync", value: ago(sync.last_success_at, now), at: sync.last_success_at }
-      : { label: "Last successful sync", value: "Never" },
+    sync.last_success_at === null
+      ? { label: "Last successful sync", value: "Never" }
+      : sync.last_success_at === ""
+        ? { label: "Last successful sync", value: "Unknown" }
+        : { label: "Last successful sync", value: ago(sync.last_success_at, now), at: sync.last_success_at },
   ];
-  const e = sync.last_error;
+  const e = latestError(sync.last_error, ibkr?.last_error ?? null);
   if (e) {
     const when = e.at ? ` · ${ago(e.at, now)}` : "";
+    const at = e.at ?? undefined;
     facts.push(has(ERROR_LABEL, e.code)
-      ? { label: "Last error", value: ERROR_LABEL[e.code] + when, at: e.at ?? undefined }
-      : { label: "Last error", code: e.code, value: when, at: e.at ?? undefined });
+      ? { label: "Last error", value: ERROR_LABEL[e.code] + when, at }
+      : { label: "Last error", code: e.code, value: when, at });
   }
   if (ibkr) facts.push({ label: "Brokerage session", value: BROKERAGE[ibkr.brokerage_session] ?? "Unknown" });
   if (ibkr?.rate_limited_until) {
-    facts.push({ label: "Rate limited until", value: untilTime(ibkr.rate_limited_until, now), at: ibkr.rate_limited_until });
+    const until = ibkr.rate_limited_until;
+    facts.push({ label: "Rate limited until", value: `${clockTime(until)} · ${untilTime(until, now)}`, at: until });
   }
   return facts;
 }

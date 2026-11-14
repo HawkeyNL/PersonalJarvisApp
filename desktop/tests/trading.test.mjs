@@ -5,7 +5,7 @@ import {
   STALE_AFTER_MS, ageText, changePercent, chartNumber, dataState, decimalSign, errorText, failureState, formatDecimal, formatMoney, ibkrLinkState,
   LIMITS, changeRatio, formatPercent, formatPrice, movingAverage, notConnectedText, onTarget, parseConid, readBars, readHistory,
   readPortfolio, signTone, skippedText, sourceLabel,
-  SEVERITY_LABEL, SEVERITY_TONE, STATUS_LIMITS, ibkrStatusFacts, ibkrStatusState, readIbkrStatus,
+  SEVERITY_LABEL, SEVERITY_TONE, STATUS_LIMITS, clockTime, ibkrStatusFacts, ibkrStatusState, loadIbkrStatusWith, readIbkrStatus,
 } from "../src/trading.ts";
 import { availabilityFromError } from "../src/hubModel.ts";
 import { barsFixture, historyFixture, portfolioFixture } from "../src/tradingFixtures.ts";
@@ -308,8 +308,11 @@ test("IBKR status: labels per state", () => {
   assert.equal(sync({ state: "failing" }), "On · Failing");
   assert.equal(sync({ state: "waiting_for_broker" }), "On · Waiting for the broker");
   assert.equal(sync({ state: "new_state" }), "On · Unknown");
+  assert.equal(sync({ enabled: false, state: "new_state" }), "Off");
+  assert.equal(sync({ enabled: null, state: "new_state" }), "Unknown");
   assert.equal(sync({ last_success_at: null }), "On · Syncing");
   assert.equal(with_({ sync: { ...okStatus().sync, last_success_at: null } })["Last successful sync"].value, "Never");
+  assert.equal(with_({ sync: { ...okStatus().sync, last_success_at: "yesterday" } })["Last successful sync"].value, "Unknown");
 
   const token = (t) => with_({ token: { ...okStatus().token, ...t } })["Session token"].value;
   assert.equal(token({ state: "none", usable: false, refreshed_at: null, expires_at: null }), "Not created yet · not usable");
@@ -323,8 +326,29 @@ test("IBKR status: labels per state", () => {
   assert.equal(session("competing"), "In use elsewhere");
   assert.equal(session(42), "Unknown");
   assert.equal(with_({ ibkr: null })["Brokerage session"], undefined);
-  assert.equal(with_({ ibkr: { ...okStatus().ibkr, rate_limited_until: at(12 * 60_000) } })["Rate limited until"].value, "in 12m");
+  const until = at(12 * 60_000);
+  assert.equal(with_({ ibkr: { ...okStatus().ibkr, rate_limited_until: until } })["Rate limited until"].value, `${clockTime(until)} · in 12m`);
+  assert.equal(with_({ ibkr: { ...okStatus().ibkr, rate_limited_until: at(-60_000) } })["Rate limited until"].value, `${clockTime(at(-60_000))} · now`);
+  assert.equal(with_({ ibkr: { ...okStatus().ibkr, rate_limited_until: "soon" } })["Rate limited until"], undefined);
   assert.equal(facts(okStatus())["Rate limited until"], undefined);
+});
+
+test("IBKR status: last error is the more recent of the sync and broker errors", () => {
+  const err = (syncErr, brokerErr) =>
+    facts({ ...okStatus(), sync: { ...okStatus().sync, last_error: syncErr }, ibkr: { ...okStatus().ibkr, last_error: brokerErr } })["Last error"]?.value;
+  assert.equal(err(null, null), undefined);
+  assert.equal(err(null, { code: "auth_rejected", at: at(-H) }), "Rejected by IBKR · 1h ago");
+  assert.equal(err({ code: "ibkr_auth", at: at(-2 * H) }, { code: "auth_rejected", at: at(-H) }), "Rejected by IBKR · 1h ago");
+  assert.equal(err({ code: "ibkr_auth", at: at(-H) }, { code: "auth_rejected", at: at(-2 * H) }), "IBKR refused the login · 1h ago");
+  // A tie goes to the sync error; a time beats none.
+  assert.equal(err({ code: "ibkr_auth", at: at(-H) }, { code: "auth_rejected", at: at(-H) }), "IBKR refused the login · 1h ago");
+  assert.equal(err({ code: "ibkr_auth", at: null }, { code: "busy", at: at(-5 * H) }), "Broker busy · 5h ago");
+  assert.equal(facts({ ...okStatus(), ibkr: null, sync: { ...okStatus().sync, last_error: { code: "store_failed", at: null } } })["Last error"].value, "Could not store the portfolio");
+  const labels = {
+    ibkr_rate_limited: "Rate limited by IBKR", data_refused: "IBKR data refused", not_authenticated: "Not signed in to IBKR",
+    rate_limited: "Rate limited by IBKR", upstream: "IBKR request failed", invalid_input: "Invalid request", broker_account_unsafe: "Broker account unsafe",
+  };
+  for (const [code, label] of Object.entries(labels)) assert.equal(err(null, { code, at: null }), label, code);
 });
 
 test("IBKR status: last error shows a label, or an unlisted code as itself", () => {
@@ -344,7 +368,7 @@ test("IBKR status: lenient reader; only a non-object fails", () => {
   assert.deepEqual(empty.problems, []);
   assert.equal(empty.token, null);
   assert.deepEqual(Object.fromEntries(ibkrStatusFacts(empty, S_NOW).map((f) => [f.label, f.value])), {
-    Broker: "Unknown", "Portfolio sync": "On · Unknown", "Session token": "Unknown", "Last successful sync": "Never",
+    Broker: "Unknown", "Portfolio sync": "Unknown", "Session token": "Unknown", "Last successful sync": "Never",
   });
   // Wrong types become null/unknown instead of failing the pane.
   const odd = readIbkrStatus({ ...okStatus(), sync: "x", broker: { service: 1, credentials: null, reachable: "yes" }, token: { usable: "true", refreshed_at: 5, expires_at: "garbage" } });
@@ -360,16 +384,33 @@ test("IBKR status: problems are capped, bad entries dropped, texts bounded", () 
   assert.deepEqual(s.problems[0], { code: "p_0", severity: "warn", summary: "Problem 0", commands: ["cmd 0"] });
 
   const long = "x".repeat(10_000);
-  const [q] = readIbkrStatus({ problems: [{ code: "Bad Code!", severity: "critical", summary: long, commands: [long, 7, null, ...Array(20).fill("c")] }] }).problems;
+  const ok500 = "y".repeat(STATUS_LIMITS.text);
+  const [q] = readIbkrStatus({ problems: [{ code: "Bad Code!", severity: "critical", summary: long, commands: [long, ok500, 7, null, ...Array(20).fill("c")] }] }).problems;
   assert.equal(q.code, "unknown");
   assert.equal(q.severity, "unknown");
   assert.equal(q.summary.length, STATUS_LIMITS.text);
-  assert.equal(q.commands.length, STATUS_LIMITS.commands - 2);
-  assert.equal(q.commands[0].length, STATUS_LIMITS.text);
-  // No summary: the code stands in.
-  assert.equal(readIbkrStatus({ problems: [{ code: "sync_stale", severity: "warn" }] }).problems[0].summary, "sync_stale");
+  // Too long, multi-line or with a control character: dropped, never cut.
+  assert.deepEqual(q.commands, [ok500, "c", "c", "c", "c"]);
+  const [r] = readIbkrStatus({ problems: [{ code: "x", severity: "warn", summary: "s", commands: ["a\nrm -rf /", "b\r", "c\td", "e\u0000", "f\u009b", "", "sudo jarvis update"] }] }).problems;
+  assert.deepEqual(r.commands, ["sudo jarvis update"]);
+  // No summary: "Unknown".
+  assert.equal(readIbkrStatus({ problems: [{ code: "sync_stale", severity: "warn" }] }).problems[0].summary, "Unknown");
+  assert.equal(readIbkrStatus({ problems: [{ code: "sync_stale", summary: 5 }] }).problems[0].summary, "Unknown");
   assert.equal(SEVERITY_LABEL[q.severity], "Unknown");
   assert.equal(SEVERITY_TONE.error, "error");
+});
+
+test("IBKR status: the load asks the status route; 404/405 stays unsupported, a non-object is an error", async () => {
+  const paths = [];
+  const load = (result) => (path) => { paths.push(path); return Promise.resolve(result); };
+  assert.deepEqual(await loadIbkrStatusWith(load(availabilityFromError({ name: "ApiError", status: 404 }))), { state: "unsupported" });
+  assert.deepEqual(await loadIbkrStatusWith(load(availabilityFromError({ name: "ApiError", status: 405 }))), { state: "unsupported" });
+  assert.deepEqual(await loadIbkrStatusWith(load({ state: "error", reason: "network" })), { state: "error", reason: "network" });
+  assert.deepEqual(await loadIbkrStatusWith(load({ state: "ok", value: "nope" })), { state: "error", reason: "failed" });
+  const ok = await loadIbkrStatusWith(load({ state: "ok", value: okStatus() }));
+  assert.equal(ok.state, "ok");
+  assert.equal(ok.value.overall, "ok");
+  assert.deepEqual([...new Set(paths)], ["/v1/trading/ibkr/status"]);
 });
 
 test("IBKR status: an older Core without the route falls back to the portfolio", () => {
