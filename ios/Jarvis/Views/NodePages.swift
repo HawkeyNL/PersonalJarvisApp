@@ -557,6 +557,8 @@ struct IbkrPanel: View {
     /// Re-reads the status only.
     let reload: () async -> Void
     @State private var refreshing = false
+    /// "problem/command" of the command just copied.
+    @State private var copied: String?
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -575,14 +577,19 @@ struct IbkrPanel: View {
                 .disabled(refreshing)
             }
             Loaded(source: status, title: "Interactive Brokers", symbol: "chart.line.uptrend.xyaxis", rows: 4, retry: reload) { value in
-                VStack(spacing: JV.Space.xs) {
+                VStack(alignment: .leading, spacing: JV.Space.xs) {
                     ForEach(ibkrRows(value, now: loadedAt), id: \.label) { statusRow($0) }
+                    if value.ibkr != nil { note(ibkrBrokerageNote) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .jvCard(padding: JV.Space.md)
-                if !value.problems.isEmpty {
-                    ListSection(title: "What to fix") {
-                        ForEach(Array(value.problems.enumerated()), id: \.offset) { _, problem in problemCard(problem) }
+                ListSection(title: "What to fix") {
+                    if value.problems.isEmpty {
+                        note("Nothing to fix.").padding(.horizontal, JV.Space.xxs)
+                    }
+                    ForEach(Array(value.problems.enumerated()), id: \.offset) { index, problem in problemCard(problem, index: index) }
+                    if value.problems.contains(where: { !$0.commands.isEmpty }) {
+                        note("Run these yourself on the Home Node. Jarvis never runs them.").padding(.horizontal, JV.Space.xxs)
                     }
                 }
             }
@@ -608,7 +615,11 @@ struct IbkrPanel: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func problemCard(_ problem: IbkrStatus.Problem) -> some View {
+    private func note(_ text: String) -> some View {
+        Text(text).font(JV.font(13)).foregroundStyle(JV.textSecondary).fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func problemCard(_ problem: IbkrStatus.Problem, index: Int) -> some View {
         let (tone, severity) = ibkrSeverity(problem.severity)
         return VStack(alignment: .leading, spacing: JV.Space.xs) {
             Badge(text: severity, style: tone.badge)
@@ -616,7 +627,8 @@ struct IbkrPanel: View {
                 .font(JV.font(14))
                 .foregroundStyle(JV.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
-            ForEach(Array(problem.commands.enumerated()), id: \.offset) { _, command in
+            ForEach(Array(problem.commands.enumerated()), id: \.offset) { offset, command in
+                let key = "\(index)/\(offset)"
                 HStack(alignment: .center, spacing: JV.Space.xs) {
                     Text(verbatim: command)
                         .font(JV.mono(13, relativeTo: .footnote))
@@ -624,9 +636,9 @@ struct IbkrPanel: View {
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button("Copy") { copy(command) }
+                    Button(copied == key ? "Copied" : "Copy") { copy(command, key: key) }
                         .buttonStyle(JVButtonStyle(kind: .quiet, size: .small))
-                        .accessibilityLabel("Copy command")
+                        .accessibilityLabel(Text(verbatim: "Copy command: \(command)"))
                 }
                 .padding(JV.Space.xs)
                 .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
@@ -636,10 +648,16 @@ struct IbkrPanel: View {
         .jvCard(padding: JV.Space.md)
     }
 
-    /// Fixed texts from Core, no secrets: a plain copy.
-    private func copy(_ command: String) {
+    /// Fixed texts from Core, no secrets: a plain-text copy. The button says
+    /// "Copied" for 2 s.
+    private func copy(_ command: String, key: String) {
         UIPasteboard.general.string = command
-        AccessibilityNotification.Announcement("Command copied").post()
+        copied = key
+        AccessibilityNotification.Announcement("Copied").post()
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            if copied == key { copied = nil }
+        }
     }
 
     /// Today's state from the portfolio read, for a Core without the status route.

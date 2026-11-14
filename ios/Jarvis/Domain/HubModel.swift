@@ -99,11 +99,10 @@ func relativeTime(_ date: Date, now: Date) -> String {
     return "\(Int(seconds / 86_400))d ago"
 }
 
-/// The future side of `relativeTime`: "in 4m", "in 2h", "in 3d"; "now" once it has passed.
+/// The future side of `relativeTime`: "in 4m", "in 2h", "in 3d"; "now" within a minute or once it has passed.
 func untilTime(_ date: Date, now: Date) -> String {
     let seconds = date.timeIntervalSince(now)
-    if seconds <= 0 { return "now" }
-    if seconds < 60 { return "in under a minute" }
+    if seconds < 60 { return "now" }
     if seconds < 3600 { return "in \(Int(seconds / 60))m" }
     if seconds < 86_400 { return "in \(Int(seconds / 3600))h" }
     return "in \(Int(seconds / 86_400))d"
@@ -360,7 +359,8 @@ struct IbkrRow: Equatable {
     var mono = false
 }
 
-/// The IBKR status rows. Last error and Rate limited until only appear when set.
+/// The IBKR status rows. Last error and Rate limited until only appear when set,
+/// Brokerage session only when the broker answered.
 func ibkrRows(_ status: IbkrStatus, now: Date) -> [IbkrRow] {
     let lastSuccess = status.sync?.lastSuccessAt.map { relativeTime($0, now: now) }
     var rows = [
@@ -369,31 +369,47 @@ func ibkrRows(_ status: IbkrStatus, now: Date) -> [IbkrRow] {
         IbkrRow(label: "Session token", value: ibkrTokenLabel(status.token, now: now)),
         IbkrRow(label: "Last successful sync", value: lastSuccess.map { $0.isEmpty ? "Unknown" : $0 } ?? "Never"),
     ]
-    if let error = status.sync?.lastError, let code = error.code {
-        let label = ibkrErrorLabels[code]
+    if let error = ibkrLastError(status) {
+        let label = error.code.map { ibkrErrorLabels[$0] ?? $0 } ?? "Unknown"
         let at = error.at.map { relativeTime($0, now: now) } ?? ""
-        rows.append(IbkrRow(label: "Last error", value: [label ?? code, at].filter { !$0.isEmpty }.joined(separator: " · "),
-                            mono: label == nil))
+        rows.append(IbkrRow(label: "Last error", value: [label, at].filter { !$0.isEmpty }.joined(separator: " · "),
+                            mono: error.code.map { ibkrErrorLabels[$0] == nil } ?? false))
     }
-    rows.append(IbkrRow(label: "Brokerage session", value: ibkrBrokerageLabel(status.ibkr?.brokerageSession)))
+    if let ibkr = status.ibkr {
+        rows.append(IbkrRow(label: "Brokerage session", value: ibkrBrokerageLabel(ibkr.brokerageSession)))
+    }
     if let until = status.ibkr?.rateLimitedUntil.flatMap(parseCoreDate) {
-        let time = until.formatted(date: .omitted, time: .shortened)
-        rows.append(IbkrRow(label: "Rate limited until", value: until > now ? "\(time) · \(untilTime(until, now: now))" : time))
+        rows.append(IbkrRow(label: "Rate limited until",
+                            value: "\(until.formatted(date: .omitted, time: .shortened)) · \(untilTime(until, now: now))"))
     }
     return rows
+}
+
+/// Shown under the rows whenever the Brokerage session row is.
+let ibkrBrokerageNote = "The brokerage session is only needed for charts."
+
+/// The more recent of the sync's and the broker's last error; one with a
+/// readable time beats one without, and the sync's wins a tie.
+func ibkrLastError(_ status: IbkrStatus) -> IbkrStatus.Failure? {
+    let sync = status.sync?.lastError, broker = status.ibkr?.lastError
+    guard let broker else { return sync }
+    guard let sync else { return broker }
+    guard let brokerAt = broker.at.flatMap(parseCoreDate) else { return sync }
+    guard let syncAt = sync.at.flatMap(parseCoreDate) else { return broker }
+    return brokerAt > syncAt ? broker : sync
 }
 
 func ibkrBrokerLabel(_ broker: IbkrStatus.Broker?) -> String {
     if broker?.credentials == "missing" { return "Credentials missing" }
     switch broker?.service {
-    case "active":
+    case "active", "activating":
         // Not asked while the sync is off or refused: say only that it runs.
         switch broker?.reachable {
         case true?: return "Running, reachable"
         case false?: return "Running, not reachable"
         case nil: return "Running"
         }
-    case "inactive": return "Stopped"
+    case "inactive", "deactivating": return "Stopped"
     case "failed": return "Failed"
     case "not_found": return "Not installed"
     default: return "Unknown"
@@ -424,10 +440,12 @@ func ibkrTokenLabel(_ token: IbkrStatus.Token?, now: Date) -> String {
     default: "Unknown"
     }
     let refreshed = token.refreshedAt.map { relativeTime($0, now: now) } ?? ""
-    let expires = token.expiresAt.flatMap(parseCoreDate).flatMap { $0 > now ? untilTime($0, now: now) : nil }
+    let expires = token.expiresAt.flatMap(parseCoreDate).map {
+        $0 > now ? "expires \(untilTime($0, now: now))" : "expired \(relativeTime($0, now: now))"
+    }
     return [state,
             refreshed.isEmpty ? nil : "refreshed \(refreshed)",
-            expires.map { "expires \($0)" },
+            expires,
             token.usable.map { $0 ? "usable" : "not usable" }]
         .compactMap { $0 }.joined(separator: " · ")
 }
@@ -441,22 +459,30 @@ func ibkrBrokerageLabel(_ session: String?) -> String {
     }
 }
 
-/// Labels of the sync's error codes; any other code is shown as it is.
+/// Labels of the sync, refusal and broker error codes (the sets do not
+/// overlap); any other code is shown as it is.
 let ibkrErrorLabels: [String: String] = [
     "broker_not_running": "Broker not running",
     "broker_unavailable": "Broker unavailable",
     "broker_busy": "Broker busy",
     "broker_timeout": "Broker timed out",
     "ibkr_auth": "IBKR refused the login",
-    "ibkr_rate_limited": "IBKR rate limit",
+    "ibkr_rate_limited": "Rate limited by IBKR",
     "ibkr_failed": "IBKR request failed",
-    "broker_protocol": "Unreadable broker reply",
+    "broker_protocol": "Unreadable broker answer",
     "account_unsupported": "Account not supported",
     "data_refused": "IBKR data refused",
     "store_failed": "Could not store the portfolio",
-    "socket_path_invalid": "Invalid broker socket path",
+    "socket_path_invalid": "Broker socket path invalid",
     "broker_account_missing": "Broker account missing",
     "broker_account_unsafe": "Broker account unsafe",
+    "auth_rejected": "Rejected by IBKR",
+    "not_authenticated": "Not signed in to IBKR",
+    "rate_limited": "Rate limited by IBKR",
+    "upstream": "IBKR request failed",
+    "busy": "Broker busy",
+    "invalid_input": "Invalid request",
+    "unknown": "Unknown",
 ]
 
 /// Tone and badge text of a problem's severity.

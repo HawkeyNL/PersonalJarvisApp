@@ -681,8 +681,9 @@ struct IbkrPortfolio: Decodable {
 
 /// GET /v1/trading/ibkr/status: whether the IBKR sync works and what to fix.
 /// Every field may be null, missing, of another type or a value this app does
-/// not know; such a field reads as nil and the labels say "Unknown". Only the
-/// fields the Integrations pane shows are read, and texts are capped.
+/// not know; such a field reads as nil and the labels say "Unknown". Codes
+/// must match `^[a-z0-9_]{1,64}$`. Only the fields the Integrations pane shows
+/// are read, and texts are capped.
 struct IbkrStatus: Decodable, Equatable {
     /// `last_error`: a code and when it happened.
     struct Failure: Decodable, Equatable {
@@ -691,7 +692,7 @@ struct IbkrStatus: Decodable, Equatable {
         enum CodingKeys: String, CodingKey { case code, at }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            code = c.lenientText(.code); at = c.lenientText(.at)
+            code = c.lenientCode(.code); at = c.lenientText(.at)
         }
     }
 
@@ -703,7 +704,7 @@ struct IbkrStatus: Decodable, Equatable {
         enum CodingKeys: String, CodingKey { case enabled, state, last_success_at, last_error }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            enabled = c.lenient(.enabled); state = c.lenientText(.state)
+            enabled = c.lenient(.enabled); state = c.lenientCode(.state)
             lastSuccessAt = c.lenientText(.last_success_at); lastError = c.lenient(.last_error)
         }
     }
@@ -716,7 +717,7 @@ struct IbkrStatus: Decodable, Equatable {
         enum CodingKeys: String, CodingKey { case service, credentials, reachable }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            service = c.lenientText(.service); credentials = c.lenientText(.credentials); reachable = c.lenient(.reachable)
+            service = c.lenientCode(.service); credentials = c.lenientCode(.credentials); reachable = c.lenient(.reachable)
         }
     }
 
@@ -728,18 +729,20 @@ struct IbkrStatus: Decodable, Equatable {
         enum CodingKeys: String, CodingKey { case state, usable, refreshed_at, expires_at }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            state = c.lenientText(.state); usable = c.lenient(.usable)
+            state = c.lenientCode(.state); usable = c.lenient(.usable)
             refreshedAt = c.lenientText(.refreshed_at); expiresAt = c.lenientText(.expires_at)
         }
     }
 
     struct Ibkr: Decodable, Equatable {
+        let lastError: Failure?
         let rateLimitedUntil: String?
         let brokerageSession: String?
-        enum CodingKeys: String, CodingKey { case rate_limited_until, brokerage_session }
+        enum CodingKeys: String, CodingKey { case last_error, rate_limited_until, brokerage_session }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            rateLimitedUntil = c.lenientText(.rate_limited_until); brokerageSession = c.lenientText(.brokerage_session)
+            lastError = c.lenient(.last_error)
+            rateLimitedUntil = c.lenientText(.rate_limited_until); brokerageSession = c.lenientCode(.brokerage_session)
         }
     }
 
@@ -752,16 +755,20 @@ struct IbkrStatus: Decodable, Equatable {
         enum CodingKeys: String, CodingKey { case code, severity, summary, commands }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            code = c.lenientText(.code); severity = c.lenientText(.severity)
-            summary = c.lenientText(.summary, max: 300)
-            commands = Array(((try? c.decode([Lenient<String>].self, forKey: .commands)) ?? [])
-                .compactMap { $0.value.map { String($0.prefix(300)) } }.prefix(IbkrStatus.maxCommands))
+            code = c.lenientCode(.code); severity = c.lenientCode(.severity)
+            summary = c.lenient(.summary).flatMap { (text: String) in text.count <= IbkrStatus.maxText ? text : nil }
+            // Dropped, never cut: a shortened or multi-line command could paste as another command.
+            commands = Array(((try? c.decode([Lenient<String>].self, forKey: .commands)) ?? []).compactMap(\.value)
+                .filter { $0.count <= IbkrStatus.maxText && !$0.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) } }
+                .prefix(IbkrStatus.maxCommands))
         }
     }
 
     /// Core sends at most 8 problems; a few commands each.
     static let maxProblems = 8
     static let maxCommands = 8
+    /// Longest summary or command; a longer one reads as missing.
+    static let maxText = 500
 
     let overall: String?
     let sync: Sync?
@@ -774,7 +781,7 @@ struct IbkrStatus: Decodable, Equatable {
     enum CodingKeys: String, CodingKey { case overall, sync, broker, token, ibkr, problems }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        overall = c.lenientText(.overall)
+        overall = c.lenientCode(.overall)
         sync = c.lenient(.sync); broker = c.lenient(.broker); token = c.lenient(.token); ibkr = c.lenient(.ibkr)
         problems = Array(((try? c.decode([Lenient<Problem>].self, forKey: .problems)) ?? []).compactMap(\.value).prefix(Self.maxProblems))
     }
@@ -787,6 +794,15 @@ extension KeyedDecodingContainer {
     /// A string capped at `max` characters, nil like `lenient`.
     func lenientText(_ key: Key, max: Int = 64) -> String? {
         (lenient(key) as String?).map { String($0.prefix(max)) }
+    }
+
+    /// A code matching `^[a-z0-9_]{1,64}$`; anything else is nil.
+    func lenientCode(_ key: Key) -> String? {
+        (lenient(key) as String?).flatMap { code in
+            let scalars = code.unicodeScalars
+            return (1...64).contains(scalars.count)
+                && scalars.allSatisfy { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "_" } ? code : nil
+        }
     }
 }
 
