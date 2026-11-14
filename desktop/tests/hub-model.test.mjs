@@ -14,6 +14,7 @@ import {
   originHost,
   relativeTime,
   runsCard,
+  untilTime,
 } from "../src/hubModel.ts";
 
 const NOW = Date.parse("2026-10-04T12:00:00Z");
@@ -28,6 +29,16 @@ test("relative time", () => {
   assert.equal(relativeTime(ago(3 * DAY + 1), NOW), "3d ago");
   assert.equal(relativeTime("not a date", NOW), "");
   assert.equal(relativeTime(new Date(NOW + 5 * MIN).toISOString(), NOW), "just now");
+});
+
+test("future time", () => {
+  const ahead = (ms) => new Date(NOW + ms).toISOString();
+  assert.equal(untilTime(ahead(10_000), NOW), "now");
+  assert.equal(untilTime(ago(5 * MIN), NOW), "now");
+  assert.equal(untilTime(ahead(4 * MIN), NOW), "in 4m");
+  assert.equal(untilTime(ahead(21 * 60 * MIN + 30 * MIN), NOW), "in 21h");
+  assert.equal(untilTime(ahead(3 * DAY + 1), NOW), "in 3d");
+  assert.equal(untilTime("not a date", NOW), "");
 });
 
 test("uptime formatting", () => {

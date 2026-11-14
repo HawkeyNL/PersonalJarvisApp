@@ -6,10 +6,14 @@ import RowList, { type Row } from "../components/RowList.vue";
 import ActivityState from "../components/activity/ActivityState.vue";
 import NavIcon from "../components/NavIcon.vue";
 import { loadOptional } from "../coreStatus";
-import type { Availability, Tone } from "../hubModel";
+import { TONE_BADGE, type Availability, type Tone } from "../hubModel";
 import TradingStatus from "../components/trading/TradingStatus.vue";
 import { countOf } from "../nodeModels";
-import { asOfText, ibkrLinkState, readPortfolio, type Portfolio } from "../trading";
+import { locked } from "../lock";
+import {
+  SEVERITY_LABEL, SEVERITY_TONE, asOfText, ibkrLinkState, ibkrStatusFacts, ibkrStatusState, readPortfolio,
+  type IbkrStatus, type Portfolio,
+} from "../trading";
 import { tradingApi, useTradingRead } from "../tradingApi";
 
 // Integrations: the brains, model catalog and host tools Core probed, the
@@ -23,7 +27,40 @@ type PolicyModel = { provider: string; model: string; enabled: boolean; route?: 
 
 const registry = ref<Availability<Registry>>({ state: "loading" });
 const policy = ref<Availability<{ models: PolicyModel[] }>>({ state: "loading" });
-// IBKR has no status route: a portfolio from Core means connected.
+// IBKR: Core's status route; an older Core without it (404/405) falls back
+// to the portfolio: a portfolio from Core means connected.
+const ibkrStatus = ref<Availability<IbkrStatus>>({ state: "loading" });
+const statusNow = ref(Date.now());
+let statusSeq = 0;
+async function loadIbkrStatus() {
+  const mine = ++statusSeq;
+  ibkrStatus.value = { state: "loading" };
+  const next = await tradingApi.ibkrStatus();
+  // Only the newest read lands, and none behind the app lock.
+  if (mine !== statusSeq || locked.value) return;
+  ibkrStatus.value = next;
+  statusNow.value = Date.now();
+}
+// Locking drops the status (fail closed); unlocking reads it again.
+watch(locked, (isLocked) => {
+  statusSeq++;
+  if (isLocked) ibkrStatus.value = { state: "loading" };
+  else void loadIbkrStatus();
+});
+onMounted(loadIbkrStatus);
+const ibkrFallback = computed(() => ibkrStatus.value.state === "unsupported");
+const ibkrFacts = computed(() => (ibkrStatus.value.state === "ok" ? ibkrStatusFacts(ibkrStatus.value.value, statusNow.value) : []));
+const localTime = (iso: string) => new Date(iso).toLocaleString();
+const copied = ref<string | null>(null);
+async function copyCommand(key: string, command: string) {
+  try {
+    await navigator.clipboard.writeText(command);
+    copied.value = key;
+    setTimeout(() => { if (copied.value === key) copied.value = null; }, 2000);
+  } catch {
+    copied.value = null; // the command stays selectable
+  }
+}
 const { state: ibkr, reload: reloadIbkr } = useTradingRead<Portfolio>({
   live: tradingApi.portfolio,
   fixture: (f, set) => f.portfolioFixture(set),
@@ -55,7 +92,7 @@ const planned = (id: string, title: string, icon: NodeItem["icon"], description:
 const items = computed<NodeItem[]>(() => {
   const b = status(registry.value, () => [brains.value.some((x) => x.available) ? "ok" : "idle", `${countOf(brains.value, (x) => x.available)} ready`]);
   const m = status(policy.value, () => [allowed.value.length ? "ok" : "idle", `${allowed.value.length} allowed`]);
-  const i = ibkrLinkState(ibkr.value);
+  const i = ibkrFallback.value ? ibkrLinkState(ibkr.value) : status(ibkrStatus.value, ibkrStatusState);
   return [
     {
       id: "brains", title: "AI brains", icon: "spark", tone: b[0], status: b[1],
@@ -107,7 +144,10 @@ const readyOf = (cost: string) => `${countOf(brains.value.filter((b) => b.cost =
   <NodePage v-model="selected" title="Integrations" subtitle="The systems Jarvis can reach" :items="items">
     <template v-if="['brains', 'models', 'ibkr'].includes(selected)" #actions>
       <RouterLink v-if="selected === 'models'" to="/health?node=models" class="btn btn-secondary btn-sm">Manage access<NavIcon name="arrow-right" /></RouterLink>
-      <RouterLink v-else-if="selected === 'ibkr'" to="/trading" class="btn btn-secondary btn-sm">Open trading desk<NavIcon name="arrow-right" /></RouterLink>
+      <template v-else-if="selected === 'ibkr'">
+        <button v-if="!ibkrFallback" type="button" class="btn btn-secondary btn-sm" @click="loadIbkrStatus">Refresh</button>
+        <RouterLink to="/trading" class="btn btn-secondary btn-sm">Open trading desk<NavIcon name="arrow-right" /></RouterLink>
+      </template>
       <button v-else type="button" class="btn btn-secondary btn-sm" @click="load">Refresh</button>
     </template>
 
@@ -150,7 +190,33 @@ const readyOf = (cost: string) => `${countOf(brains.value.filter((b) => b.cost =
       </template>
     </template>
 
-    <!-- IBKR -->
+    <!-- IBKR: status, and what to fix. Commands are only shown to copy; never run, linked or opened. -->
+    <ActivityState v-else-if="selected === 'ibkr' && !ibkrFallback" nested :state="ibkrStatus" what="the IBKR status" @retry="loadIbkrStatus" v-slot="{ data }">
+      <div class="np-cols">
+        <dl class="np-facts" aria-label="IBKR status">
+          <div v-for="fact in ibkrFacts" :key="fact.label">
+            <dt>{{ fact.label }}</dt>
+            <dd :title="fact.at ? localTime(fact.at) : undefined"><code v-if="fact.code" class="mono">{{ fact.code }}</code>{{ fact.value }}</dd>
+          </div>
+        </dl>
+        <section class="ib-fix" aria-labelledby="ib-fix-title">
+          <h3 id="ib-fix-title">What to fix</h3>
+          <ul v-if="data.problems.length" class="ib-problems">
+            <li v-for="(p, i) in data.problems" :key="`${i}-${p.code}`">
+              <div class="ib-summary">
+                <span class="badge" :class="TONE_BADGE[SEVERITY_TONE[p.severity]]">{{ SEVERITY_LABEL[p.severity] }}</span>
+                <span>{{ p.summary }}</span>
+              </div>
+              <div v-for="(c, j) in p.commands" :key="j" class="ib-cmd">
+                <code class="mono">{{ c }}</code>
+                <button type="button" class="btn btn-secondary btn-sm" :aria-label="`${copied === `${i}-${j}` ? 'Copied' : 'Copy'}: ${c}`" @click="copyCommand(`${i}-${j}`, c)">{{ copied === `${i}-${j}` ? "Copied" : "Copy" }}</button>
+              </div>
+            </li>
+          </ul>
+          <p v-else class="np-empty">Nothing to fix.</p>
+        </section>
+      </div>
+    </ActivityState>
     <TradingStatus v-else-if="selected === 'ibkr'" :state="ibkr" what="the IBKR link" compact @retry="reloadIbkr" v-slot="{ data }">
       <dl class="np-facts" aria-label="IBKR link">
         <div><dt>Connection</dt><dd>{{ ibkrLinkState(ibkr)[1] }}</dd></div>
@@ -163,3 +229,14 @@ const readyOf = (cost: string) => `${countOf(brains.value.filter((b) => b.cost =
     <p v-else class="np-empty"><strong>Not yet available</strong>Nothing to show until Core reports it.</p>
   </NodePage>
 </template>
+
+<style scoped>
+.ib-fix { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.ib-fix h3 { margin: 0; }
+.ib-problems { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.ib-problems li { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: var(--r-md); box-shadow: var(--shadow-border); }
+.ib-summary { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.ib-cmd { display: flex; align-items: center; gap: 8px; }
+.ib-cmd code { flex: 1; min-width: 0; padding: 6px 8px; border-radius: 6px; background: var(--bg-sunken); font-size: 12px; overflow-wrap: anywhere; user-select: text; }
+.np-facts dd code { margin-right: 4px; font-size: 13px; }
+</style>

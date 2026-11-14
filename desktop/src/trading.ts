@@ -10,7 +10,7 @@
 // numbers: a JS float cannot hold every amount exactly. They become numbers
 // only to draw a chart (chartNumber).
 
-import type { Tone } from "./hubModel";
+import { relativeTime, untilTime, type Tone } from "./hubModel.ts";
 
 /** Exact decimal as a string: optional "-", digits, optional "." + digits. */
 export type Decimal = string;
@@ -467,4 +467,149 @@ export function readBars(x: unknown): InstrumentBars | null {
     .filter((b): b is Bar => isObj(b) && isStr(b.t) && [b.o, b.h, b.l, b.c].every((v) => chartNumber(v) !== null))
     .map((b) => (b.v === undefined || chartNumber(b.v) !== null ? b : { ...b, v: undefined }));
   return { ...(x as unknown as InstrumentBars), bars };
+}
+
+// ---- IBKR status (GET /v1/trading/ibkr/status) --------------------------
+// Whether the sync works and, if not, what to fix. Read leniently: every field
+// may be null, an unknown value becomes "unknown", a bad problem is dropped;
+// only a body that is not an object fails the read. Texts are capped.
+
+export const STATUS_LIMITS = { problems: 8, commands: 8, text: 500, code: 64, time: 64 } as const;
+
+export type IbkrOverall = "ok" | "info" | "warn" | "error" | "off" | "unknown";
+export type IbkrSeverity = "info" | "warn" | "error" | "unknown";
+/** `code` is a known code, an unlisted one (shown as itself) or "unknown". */
+export type IbkrError = { code: string; at: string | null };
+export type IbkrProblem = { code: string; severity: IbkrSeverity; summary: string; commands: string[] };
+export type IbkrStatus = {
+  overall: IbkrOverall;
+  sync: { enabled: boolean | null; state: string; last_success_at: string | null; last_error: IbkrError | null };
+  broker: { service: string; credentials: string; reachable: boolean | null };
+  /** null: the broker did not answer the status request. */
+  token: { state: string; usable: boolean | null; refreshed_at: string | null; expires_at: string | null } | null;
+  ibkr: { rate_limited_until: string | null; brokerage_session: string } | null;
+  problems: IbkrProblem[];
+};
+
+const SYNC_STATE: Record<string, string> = {
+  ok: "Syncing", starting: "Starting", failing: "Failing", waiting_for_broker: "Waiting for the broker",
+};
+const TOKEN_STATE: Record<string, string> = {
+  none: "Not created yet", valid: "Valid", refresh_due: "Refreshing soon", expired: "Expired", rejected: "Rejected",
+};
+const BROKERAGE: Record<string, string> = { open: "Open", closed: "Closed", competing: "In use elsewhere" };
+const SERVICE: Record<string, string> = {
+  active: "Running", activating: "Running", inactive: "Stopped", deactivating: "Stopped", failed: "Failed", not_found: "Not installed",
+};
+/** Sync error codes, including a refused configuration. */
+const ERROR_LABEL: Record<string, string> = {
+  broker_not_running: "Broker not running", broker_unavailable: "Broker unavailable", broker_busy: "Broker busy",
+  broker_timeout: "Broker timed out", ibkr_auth: "IBKR refused the login", ibkr_rate_limited: "IBKR rate limit",
+  ibkr_failed: "IBKR request failed", broker_protocol: "Unreadable broker answer", account_unsupported: "Account not supported",
+  data_refused: "Data refused", store_failed: "Could not save", socket_path_invalid: "Broker socket path invalid",
+  broker_account_missing: "Broker account missing", broker_account_unsafe: "Broker account unsafe", unknown: "Unknown",
+};
+export const SEVERITY_LABEL: Record<IbkrSeverity, string> = { error: "Error", warn: "Warning", info: "Info", unknown: "Unknown" };
+export const SEVERITY_TONE: Record<IbkrSeverity, Tone> = { error: "error", warn: "warn", info: "idle", unknown: "idle" };
+
+const has = (map: Record<string, string>, key: string) => Object.prototype.hasOwnProperty.call(map, key);
+const objOrEmpty = (x: unknown): Obj => (isObj(x) ? x : {});
+const bool = (x: unknown) => (typeof x === "boolean" ? x : null);
+const time = (x: unknown) => (isStr(x) && x.length <= STATUS_LIMITS.time && !Number.isNaN(Date.parse(x)) ? x : null);
+const text = (x: unknown) => (isStr(x) ? x.slice(0, STATUS_LIMITS.text) : null);
+/** A value from `known`, else "unknown" (also for null). */
+const oneOf = <T extends string>(x: unknown, known: readonly T[]): T | "unknown" =>
+  known.find((k) => k === x) ?? "unknown";
+/** A code as Core spells them (snake_case), else "unknown". */
+const code = (x: unknown) => (isStr(x) && x.length <= STATUS_LIMITS.code && /^[a-z0-9_]+$/.test(x) ? x : "unknown");
+const error = (x: unknown): IbkrError | null => (isObj(x) ? { code: code(x.code), at: time(x.at) } : null);
+
+function problem(x: unknown): IbkrProblem | null {
+  if (!isObj(x)) return null;
+  const c = code(x.code);
+  const commands = Array.isArray(x.commands) ? x.commands.slice(0, STATUS_LIMITS.commands).map(text).filter((t): t is string => !!t) : [];
+  return { code: c, severity: oneOf(x.severity, ["info", "warn", "error"] as const), summary: text(x.summary) || c, commands };
+}
+
+export function readIbkrStatus(x: unknown): IbkrStatus | null {
+  if (!isObj(x)) return null;
+  const sync = objOrEmpty(x.sync);
+  const broker = objOrEmpty(x.broker);
+  const token = isObj(x.token) ? x.token : null;
+  const ibkr = isObj(x.ibkr) ? x.ibkr : null;
+  const problems = Array.isArray(x.problems) ? x.problems.slice(0, STATUS_LIMITS.problems).map(problem) : [];
+  return {
+    overall: oneOf(x.overall, ["ok", "info", "warn", "error", "off"] as const),
+    sync: {
+      enabled: bool(sync.enabled), state: oneOf(sync.state, ["off", "refused", ...Object.keys(SYNC_STATE)]),
+      last_success_at: time(sync.last_success_at), last_error: error(sync.last_error),
+    },
+    broker: {
+      service: oneOf(broker.service, Object.keys(SERVICE)),
+      credentials: oneOf(broker.credentials, ["present", "missing"]),
+      reachable: bool(broker.reachable),
+    },
+    token: token && {
+      state: oneOf(token.state, Object.keys(TOKEN_STATE)), usable: bool(token.usable),
+      refreshed_at: time(token.refreshed_at), expires_at: time(token.expires_at),
+    },
+    ibkr: ibkr && { rate_limited_until: time(ibkr.rate_limited_until), brokerage_session: oneOf(ibkr.brokerage_session, Object.keys(BROKERAGE)) },
+    problems: problems.filter((p): p is IbkrProblem => p !== null),
+  };
+}
+
+/** Header tone and label. "info" needs attention only with a problem to show. */
+export function ibkrStatusState(s: IbkrStatus): [Tone, string] {
+  switch (s.overall) {
+    case "ok": return ["ok", "Connected"];
+    case "info": return s.problems.length ? ["idle", "Needs attention"] : ["ok", "Connected"];
+    case "warn": return ["warn", "Needs attention"];
+    case "error": return ["error", "Not working"];
+    case "off": return ["idle", "Off"];
+    case "unknown": return ["idle", "Unknown"];
+  }
+}
+
+/** One fact of the pane. `code`: an unlisted error code, shown in monospace
+ *  before `value`. `at`: the time behind a relative value, for a tooltip. */
+export type IbkrFact = { label: string; value: string; code?: string; at?: string };
+
+const ago = (iso: string, now: number) => relativeTime(iso, now) || "at an unknown time";
+
+export function ibkrStatusFacts(s: IbkrStatus, now: number): IbkrFact[] {
+  const { sync, broker, token, ibkr } = s;
+  const service = SERVICE[broker.service] ?? "Unknown";
+  const reach = service === "Running" && broker.reachable !== null ? (broker.reachable ? ", reachable" : ", not reachable") : "";
+  const facts: IbkrFact[] = [
+    { label: "Broker", value: broker.credentials === "missing" ? "Credentials missing" : service + reach },
+    {
+      label: "Portfolio sync",
+      value: sync.enabled === false || sync.state === "off" ? "Off" : sync.state === "refused" ? "Refused" : `On · ${SYNC_STATE[sync.state] ?? "Unknown"}`,
+    },
+    { label: "Session token", value: token ? tokenText(token, now) : "Unknown" },
+    sync.last_success_at
+      ? { label: "Last successful sync", value: ago(sync.last_success_at, now), at: sync.last_success_at }
+      : { label: "Last successful sync", value: "Never" },
+  ];
+  const e = sync.last_error;
+  if (e) {
+    const when = e.at ? ` · ${ago(e.at, now)}` : "";
+    facts.push(has(ERROR_LABEL, e.code)
+      ? { label: "Last error", value: ERROR_LABEL[e.code] + when, at: e.at ?? undefined }
+      : { label: "Last error", code: e.code, value: when, at: e.at ?? undefined });
+  }
+  if (ibkr) facts.push({ label: "Brokerage session", value: BROKERAGE[ibkr.brokerage_session] ?? "Unknown" });
+  if (ibkr?.rate_limited_until) {
+    facts.push({ label: "Rate limited until", value: untilTime(ibkr.rate_limited_until, now), at: ibkr.rate_limited_until });
+  }
+  return facts;
+}
+
+/** "Valid · refreshed 3h ago · expires in 21h · usable". */
+function tokenText(t: NonNullable<IbkrStatus["token"]>, now: number): string {
+  const parts = [TOKEN_STATE[t.state] ?? "Unknown"];
+  if (t.refreshed_at) parts.push(`refreshed ${ago(t.refreshed_at, now)}`);
+  if (t.expires_at) parts.push(Date.parse(t.expires_at) > now ? `expires ${untilTime(t.expires_at, now)}` : `expired ${ago(t.expires_at, now)}`);
+  if (t.usable !== null) parts.push(t.usable ? "usable" : "not usable");
+  return parts.join(" · ");
 }
