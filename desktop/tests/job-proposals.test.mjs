@@ -82,6 +82,8 @@ test("the card's wording", () => {
   const limited = (body) => readProposals([{ id: id(5), body }], today)[0].draft;
   assert.equal(proposalSchedule(limited({ ...disk, at_minute: 480, max_runs: 2 }), today), "Daily at 08:00, 2 runs");
   assert.equal(proposalSchedule(limited({ ...disk, max_runs: 1 }), today), "Daily at 07:00, 1 run");
+  const editedOnce = { ...limited({ ...disk, max_runs: 3 }), cadence: "once", start_date: "2026-12-01" };
+  assert.equal(proposalSchedule(editedOnce, today), "Once on 1 Dec at 07:00");
   assert.equal(proposalSchedule(limited({ ...prompt, max_runs: 3 }), today), "Every Friday at 08:30, 3 runs · No push");
   assert.equal(proposalSchedule(limited({ ...prompt, params: { ...prompt.params, notify: true } }), today), "Every Friday at 08:30");
   assert.deepEqual(readProposals([{ id: id(5), body: { ...disk, params: { notify: false } } }], today), []);

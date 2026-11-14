@@ -744,5 +744,10 @@ final class JobProposalsTests: XCTestCase {
     func testARunLimitOfOneIsSingular() throws {
         let one = try XCTUnwrap(read([entry(id(1), merged(disk, ["max_runs": 1, "at_minute": 480]))]).first)
         XCTAssertEqual(JobProposals.schedule(one), "Daily at 08:00, 1 run")
+        var draft = one.draft
+        draft.cadence = .once
+        draft.startDate = "2026-12-01"
+        let once = JobProposal(id: one.id, body: one.body, draft: draft)
+        XCTAssertFalse(JobProposals.schedule(once).contains("run"))
     }
 }

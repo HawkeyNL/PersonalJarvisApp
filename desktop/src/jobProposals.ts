@@ -98,7 +98,8 @@ export function proposalSchedule(d: Draft, today: string): string {
     cadence: d.cadence, weekday: d.weekday, month_day: d.month_day, every: Number(d.every),
     start_date: d.start_date || null, at_minute: timeToMinute(d.time) ?? 0,
   }, today);
-  const runs = typeof d.max_runs === "number" ? `, ${d.max_runs} run${d.max_runs === 1 ? "" : "s"}` : "";
+  // A one-time job has no run limit; an edited draft may still hold a hidden one.
+  const runs = typeof d.max_runs === "number" && d.cadence !== "once" ? `, ${d.max_runs} run${d.max_runs === 1 ? "" : "s"}` : "";
   return `${when}${runs}${d.kind === "prompt" && !d.notify ? " · No push" : ""}`;
 }
 
