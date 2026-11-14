@@ -186,10 +186,17 @@ final class JarvisAppModel: ObservableObject {
     /// becomes `.unsupported`; a 401 signs out like every other session read;
     /// results from before a lock, logout or origin change are dropped.
     func coreRead<Response: Decodable>(_ path: String, as type: Response.Type = Response.self) async -> Availability<Response> {
+        await ownerRead { try await self.auth.ownerGet(path) as Response }
+    }
+
+    /// GET /v1/trading/ibkr/status, through the same gate as `coreRead`.
+    func ibkrStatus() async -> Availability<IbkrStatus> { await ownerRead { try await self.auth.ibkrStatus() } }
+
+    private func ownerRead<Response>(_ call: () async throws -> Response) async -> Availability<Response> {
         guard isAuthenticated, lockState == .unlocked else { return .error(.signin) }
         let generation = presentation.id
         do {
-            let value: Response = try await auth.ownerGet(path)
+            let value = try await call()
             guard presentation.accepts(generation), lockState == .unlocked else { return .error(.signin) }
             return .ok(value)
         } catch {

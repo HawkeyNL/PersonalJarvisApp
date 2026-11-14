@@ -149,6 +149,12 @@ actor AuthService {
         return try await api.get("/v1/system/models", token: token, expectedBinding: binding)
     }
 
+    func ibkrStatus() async throws -> IbkrStatus {
+        let binding = await api.binding()
+        guard let token = try await credentials.session()?.token else { throw JarvisAPIError.unauthorized }
+        return try await api.ibkrStatus(token: token, expectedBinding: binding)
+    }
+
     /// Authenticated GET for read-only owner routes, bound to the current origin.
     func ownerGet<Response: Decodable>(_ path: String) async throws -> Response {
         let binding = await api.binding()
