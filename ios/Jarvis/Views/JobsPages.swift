@@ -160,14 +160,14 @@ struct NewJobSheet: View {
     let submit: String
     let created: () async -> Void
     /// Sends the job instead of a plain create: the notice to show, or nil when the sheet closes.
-    let write: ((NewJob) async -> String?)?
+    let write: ((NewJob, JobDraft) async -> String?)?
     @Environment(\.dismiss) private var dismiss
     @State private var kind: JobKind
     @State private var busy = false
     @State private var error: String?
 
     init(model: JarvisAppModel, kinds: [JobKind], title: String = "New job", initial: JobDraft = JobDraft(), submit: String = "Set up",
-         created: @escaping () async -> Void = {}, write: ((NewJob) async -> String?)? = nil) {
+         created: @escaping () async -> Void = {}, write: ((NewJob, JobDraft) async -> String?)? = nil) {
         self.model = model
         self.kinds = kinds
         self.title = title
@@ -216,7 +216,7 @@ struct NewJobSheet: View {
         busy = true
         error = nil
         if let write {
-            error = await write(Jobs.newJob(kind, draft))
+            error = await write(Jobs.newJob(kind, draft), draft)
             if error == nil { dismiss() }
         } else {
             do {

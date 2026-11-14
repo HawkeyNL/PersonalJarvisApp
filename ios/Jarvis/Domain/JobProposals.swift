@@ -12,6 +12,12 @@ struct JobProposal: Decodable, Equatable {
     let body: NewJob
     let draft: JobDraft
 
+    init(id: UUID, body: NewJob, draft: JobDraft) {
+        self.id = id
+        self.body = body
+        self.draft = draft
+    }
+
     private enum Keys: String, CodingKey { case id, body }
     private enum BodyKeys: String, CodingKey { case params }
     // What a chat marker can carry (no `enabled`, no roadmap): the card shows all of it,
@@ -37,7 +43,8 @@ struct JobProposal: Decodable, Equatable {
 struct ProposalCard: Identifiable, Equatable {
     enum State: Equatable { case open, adding, added(UUID), unconfirmed }
 
-    let proposal: JobProposal
+    /// After an edited Add that may have landed, the edited job.
+    var proposal: JobProposal
     let conversationId: UUID
     /// The answer's canonical message id.
     let messageId: String
@@ -74,9 +81,19 @@ enum JobProposals {
     }
 
     /// The editor's draft for a body, with Core's defaults for what it leaves out; nil when
-    /// the kind cannot be proposed or the job breaks a rule the editor checks.
+    /// the kind cannot be proposed, a param or schedule field does not belong to its kind or
+    /// cadence (Core refuses those), or the job breaks a rule the editor checks.
     static func draft(_ body: NewJob) -> JobDraft? {
-        guard [.prompt, .reminder, .diskCheck].contains(body.kind) else { return nil }
+        let p = body.params
+        let paramsFit = switch body.kind {
+        case .prompt: p.text == nil && p.threshold_percent == nil
+        case .reminder: p.instruction == nil && p.notify == nil && p.threshold_percent == nil
+        case .diskCheck: p.title == nil && p.instruction == nil && p.text == nil && p.notify == nil
+        case .dependencyReview: false
+        }
+        let cadence = body.cadence ?? .weekly
+        guard paramsFit, p.roadmap_id == nil, body.weekday == nil || cadence == .weekly, body.month_day == nil || cadence == .monthly,
+              body.max_runs == nil || cadence != .once else { return nil }
         var draft = JobDraft()
         draft.cadence = body.cadence ?? .weekly
         draft.weekday = body.weekday ?? 1
@@ -137,20 +154,27 @@ enum JobProposals {
     }
 
     /// Ends an Add. A result for a session or conversation the owner has left (`current`
-    /// false) is dropped, and so is one for a dismissed card.
-    static func finish(_ id: UUID, in cards: inout [ProposalCard], result: Result<ScheduledJob, Error>, kind: JobKind, current: Bool) {
+    /// false) is dropped, and so is one for a dismissed card. Once an edited job may exist,
+    /// the card shows it.
+    static func finish(_ id: UUID, in cards: inout [ProposalCard], result: Result<ScheduledJob, Error>,
+                       edited: (body: NewJob, draft: JobDraft)? = nil, current: Bool) {
         guard current, let index = cards.firstIndex(where: { $0.id == id }) else { return }
-        (cards[index].state, cards[index].error) = outcome(result, kind: kind)
+        let card = cards[index]
+        let (state, error) = outcome(result, kind: edited?.body.kind ?? card.proposal.body.kind)
+        cards[index].state = state
+        cards[index].error = error
+        if let edited, state != .open { cards[index].proposal = JobProposal(id: card.id, body: edited.body, draft: edited.draft) }
     }
 
-    /// A 2xx this app cannot read, or no answer, is not confirmed (Add stays off: the job
-    /// may exist); a refusal lets the owner try again.
+    /// Fails closed: only an HTTP refusal (4xx) lets the owner try again. Anything else (a
+    /// 2xx this app cannot read, no answer, any 5xx: Core's 503 also covers a write that timed
+    /// out after it may have landed) is not confirmed, and Add stays off: the job may exist.
     static func outcome(_ result: Result<ScheduledJob, Error>, kind: JobKind) -> (ProposalCard.State, String?) {
         switch result {
         case let .success(job): return (.added(job.id), nil)
-        case let .failure(error) where Jobs.isUnreadable(error) || Jobs.isNetwork(error): return (.unconfirmed, notConfirmed)
-        case let .failure(error) where Jobs.status(error) == 400: return (.open, invalid)
-        case let .failure(error): return (.open, Jobs.writeFailureText(error, update: false, kind: kind))
+        case let .failure(error):
+            guard let status = Jobs.status(error), (400..<500).contains(status) else { return (.unconfirmed, notConfirmed) }
+            return (.open, status == 400 ? invalid : Jobs.writeFailureText(error, update: false, kind: kind))
         }
     }
 }

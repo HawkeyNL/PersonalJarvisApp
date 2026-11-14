@@ -99,7 +99,7 @@ struct ChatView: View {
         .sheet(item: $editingProposal) { card in
             NewJobSheet(model: model, kinds: [card.proposal.body.kind], title: JobProposals.editorTitle,
                         initial: card.proposal.draft, submit: JobProposals.add,
-                        write: { await model.addJobProposal(card.id, edited: $0) })
+                        write: { await model.addJobProposal(card.id, edited: ($0, $1)) })
         }
         .navigationDestination(item: $openJob) { id in JobPage(model: model, id: id, navigate: navigate) }
         .photosPicker(isPresented: $picking, selection: $picked,
@@ -605,7 +605,7 @@ private struct ProposalCardView: View {
             if let detail = JobProposals.detail(proposal) { caption(detail) }
             switch card.state {
             case let .added(job):
-                status(JobProposals.added, link: JobProposals.viewJob) { viewJob(job) }
+                status("\(JobProposals.added) ·", link: JobProposals.viewJob) { viewJob(job) }
             case .unconfirmed:
                 status(card.error ?? JobProposals.notConfirmed, link: JobProposals.checkJobs, action: checkJobs)
             case .open, .adding:

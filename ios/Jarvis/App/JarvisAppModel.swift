@@ -895,15 +895,16 @@ final class JarvisAppModel: ObservableObject {
     /// locked or twice at once; a result for a session or conversation the owner has left
     /// is dropped. The notice for the editor; nil once the card is resolved or gone.
     @discardableResult
-    func addJobProposal(_ id: UUID, edited: NewJob? = nil) async -> String? {
+    func addJobProposal(_ id: UUID, edited: (body: NewJob, draft: JobDraft)? = nil) async -> String? {
         guard let card = JobProposals.begin(id, in: &jobProposals, unlocked: isAuthenticated && lockState == .unlocked) else { return nil }
         let generation = presentation.id
         let conversation = currentConversationId
-        let body = edited ?? card.proposal.body
+        // Without an edit, the body goes exactly as Core sent it (checked by JobProposal).
+        let body = edited?.body ?? card.proposal.body
         let result: Result<ScheduledJob, Error>
         do { result = .success(try await createJob(body)) } catch { result = .failure(error) }
         let current = presentation.accepts(generation) && currentConversationId == conversation
-        JobProposals.finish(id, in: &jobProposals, result: result, kind: body.kind, current: current)
+        JobProposals.finish(id, in: &jobProposals, result: result, edited: edited, current: current)
         guard current, let now = jobProposals.first(where: { $0.id == id }), now.state == .open else { return nil }
         return now.error
     }
