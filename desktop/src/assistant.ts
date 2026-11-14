@@ -14,7 +14,7 @@ import { startRealtime, type RealtimeEvent, type CanonicalMessage } from "./real
 import { mergeCanonical, appendVisualDelta, dropFailedRun, runRequest } from "./realtimeProjection";
 import { PendingRuns } from "./pendingRuns";
 import { offerFrom, type ResearchOffer } from "./researchOffer";
-import { addJob, readProposals, withProposals, type ProposalCard } from "./jobProposals";
+import { addProposalCard, readProposals, withProposals, type ProposalCard } from "./jobProposals";
 import { todayInZone, type NewJob } from "./jobs";
 import { jobApi } from "./jobsApi";
 import { isWebModel, startsWebSearch } from "./webAnswer";
@@ -252,21 +252,15 @@ export function startNewConversation(): void {
   jobProposals.value = [];
 }
 
-/** Creates the proposed job: `body` is the proposal's own, or an edited one.
- *  Never behind the lock or twice at once; a result for a session or
- *  conversation the owner has left is dropped. */
-export async function addProposal(id: string, body?: NewJob): Promise<void> {
-  const card=jobProposals.value.find(c=>c.id===id);
-  if(!card || locked.value || card.state!=="open") return;
+/** Creates the proposed job: `body` is the proposal's own, or an edited one. */
+export function addProposal(id: string, body?: NewJob): Promise<void> {
   const epoch=chatSession.capture();
   const conversation=currentId.value;
-  card.state="adding";
-  card.error="";
-  // Without an edit, the body goes exactly as Core sent it (checked by readProposals).
-  const result=await addJob(body ?? card.body as NewJob,jobApi.create);
-  if(!chatSession.current(epoch) || currentId.value!==conversation) return;
-  const now=jobProposals.value.find(c=>c.id===id);
-  if(now) Object.assign(now,result);
+  return addProposalCard(jobProposals.value.find(c=>c.id===id),body,{
+    locked:()=>locked.value,
+    current:()=>chatSession.current(epoch) && currentId.value===conversation,
+    create:jobApi.create,
+  });
 }
 
 export function dismissProposal(id: string): void {

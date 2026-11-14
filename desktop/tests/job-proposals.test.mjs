@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readProposals, withProposals, addJob, proposalDetail, proposalSchedule, proposalTitle, ADDED } from "../src/jobProposals.ts";
-import { NOT_CONFIRMED, FULL_TEXT } from "../src/jobs.ts";
+import {
+  readProposals, withProposals, addJob, addProposalCard, proposalDetail, proposalSchedule, proposalTitle, ADDED, ADD_NOT_CONFIRMED, ADD_INVALID,
+} from "../src/jobProposals.ts";
+import { FULL_TEXT } from "../src/jobs.ts";
 
 const today = "2026-11-14";
 const id = (n) => `00000000-0000-4000-8000-00000000000${n}`;
@@ -69,13 +71,20 @@ test("the card's wording", () => {
   const [p, r, d] = readProposals([{ id: id(1), body: prompt }, { id: id(2), body: reminder }, { id: id(3), body: disk }], today);
   assert.equal(proposalTitle(p.draft), "AI news");
   assert.equal(proposalTitle(d.draft), "Disk check");
-  assert.equal(proposalSchedule(p.draft, today), "Every Friday at 08:30");
+  assert.equal(proposalSchedule(p.draft, today), "Every Friday at 08:30 · No push");
   assert.equal(proposalSchedule(r.draft, today), "Once on 1 Dec at 09:00");
+  assert.equal(proposalSchedule(d.draft, today), "Daily at 07:00");
+  const limited = (body) => readProposals([{ id: id(5), body }], today)[0].draft;
+  assert.equal(proposalSchedule(limited({ ...disk, at_minute: 480, max_runs: 2 }), today), "Daily at 08:00, 2 runs");
+  assert.equal(proposalSchedule(limited({ ...disk, max_runs: 1 }), today), "Daily at 07:00, 1 run");
+  assert.equal(proposalSchedule(limited({ ...prompt, max_runs: 3 }), today), "Every Friday at 08:30, 3 runs · No push");
+  assert.equal(proposalSchedule(limited({ ...prompt, params: { ...prompt.params, notify: true } }), today), "Every Friday at 08:30");
+  assert.equal(proposalSchedule(limited({ ...disk, params: { notify: false } }), today), "Daily at 07:00");
   assert.equal(proposalDetail(p.draft), "Summarize this week's AI news");
   assert.equal(proposalDetail(r.draft), "Ask about the card");
   assert.equal(proposalDetail(d.draft), "Threshold 90%");
   const long = readProposals([{ id: id(4), body: { ...prompt, params: { title: "x", instruction: "a".repeat(300) } } }], today)[0];
-  assert.equal(proposalDetail(long.draft).length, 140);
+  assert.equal(proposalDetail(long.draft), "a".repeat(300));
 });
 
 const job = { id: id(7), kind: "prompt", cadence: "weekly", weekday: 5, at_minute: 510, enabled: true, revision: 0, params: {} };
@@ -89,11 +98,55 @@ test("Add sends exactly the body and links the new job", async () => {
   assert.equal(ADDED, "Added to Jobs");
 });
 
-test("an unreadable 2xx is not confirmed; a 409 or other failure lets the owner try again", async () => {
-  assert.deepEqual(await addJob(prompt, async () => ({ ok: true })), { state: "unconfirmed", jobId: null, error: NOT_CONFIRMED });
+test("an unreadable 2xx or no answer is not confirmed; a refusal lets the owner try again", async () => {
+  const unconfirmed = { state: "unconfirmed", jobId: null, error: ADD_NOT_CONFIRMED };
+  assert.deepEqual(await addJob(prompt, async () => ({ ok: true })), unconfirmed);
+  assert.deepEqual(await addJob(prompt, async () => { throw Object.assign(new Error("x"), { name: "NetworkError" }); }), unconfirmed);
+  assert.equal(ADD_NOT_CONFIRMED, "Not confirmed: it may have been added.");
   const full = await addJob(prompt, async () => { throw apiError(409); });
   assert.deepEqual(full, { state: "open", jobId: null, error: `Core refused this. ${FULL_TEXT}` });
-  const invalid = await addJob(prompt, async () => { throw apiError(400); });
-  assert.equal(invalid.state, "open");
-  assert.match(invalid.error, /^Core refused this as invalid/);
+  assert.deepEqual(await addJob(prompt, async () => { throw apiError(400); }), { state: "open", jobId: null, error: ADD_INVALID });
+  assert.equal(ADD_INVALID, "Core refused this job as invalid, for example a time that has passed. Edit it and try again.");
+});
+
+const card = () => ({ ...readProposals([{ id: id(1), body: prompt }], today)[0], conversationId: "c", messageId: "m", state: "open", jobId: null, error: "x" });
+const guards = (over = {}) => ({ locked: () => false, current: () => true, create: async () => job, ...over });
+
+test("Add guards: a double click sends once; the card is adding before the request", async () => {
+  const c = card();
+  let calls = 0;
+  let release;
+  const g = guards({ create: () => { calls++; return new Promise((r) => { release = () => r(job); }); } });
+  const first = addProposalCard(c, undefined, g);
+  assert.equal(c.state, "adding");
+  assert.equal(c.error, "");
+  await addProposalCard(c, undefined, g);
+  release();
+  await first;
+  assert.equal(calls, 1);
+  assert.deepEqual([c.state, c.jobId], ["added", id(7)]);
+});
+
+test("Add guards: the lock, a missing or finished card send nothing; an edit sends the edited body", async () => {
+  let calls = 0;
+  const create = async () => { calls++; return job; };
+  const locked = card();
+  await addProposalCard(locked, undefined, guards({ locked: () => true, create }));
+  assert.equal(locked.state, "open");
+  await addProposalCard(undefined, undefined, guards({ create }));
+  await addProposalCard({ ...card(), state: "unconfirmed" }, undefined, guards({ create }));
+  assert.equal(calls, 0);
+  const sent = [];
+  const edited = { ...prompt, params: { ...prompt.params, title: "Edited" } };
+  await addProposalCard(card(), edited, guards({ create: async (b) => { sent.push(b); return job; } }));
+  assert.deepEqual(sent, [edited]);
+});
+
+test("Add guards: a result after leaving the session or conversation is dropped; no answer is unconfirmed", async () => {
+  const left = card();
+  await addProposalCard(left, undefined, guards({ current: () => false }));
+  assert.deepEqual([left.state, left.jobId], ["adding", null]);
+  const lost = card();
+  await addProposalCard(lost, undefined, guards({ create: async () => { throw Object.assign(new Error("x"), { name: "NetworkError" }); } }));
+  assert.deepEqual([lost.state, lost.error], ["unconfirmed", ADD_NOT_CONFIRMED]);
 });

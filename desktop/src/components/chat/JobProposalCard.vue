@@ -22,8 +22,6 @@ async function edit(): Promise<void> {
   await nextTick();
   dialog.value?.showModal();
 }
-// The editor sits in the top layer, above the app lock: the lock closes it.
-watch(locked, (on) => { if (on) dialog.value?.close(); });
 watch(() => props.card.state, (state) => { if (state === "added" || state === "unconfirmed") dialog.value?.close(); });
 
 function save(draft: Draft): void {
@@ -44,16 +42,16 @@ function save(draft: Draft): void {
       {{ ADDED }} · <RouterLink :to="`/jobs/${card.jobId}`">View job</RouterLink>
     </p>
     <p v-else-if="card.state === 'unconfirmed'" class="t-sm" role="status">
-      {{ card.error }} <RouterLink to="/jobs">Open Jobs</RouterLink>
+      {{ card.error }} <RouterLink to="/jobs">Check Jobs</RouterLink>
     </p>
-    <template v-else>
-      <p v-if="card.error && !editing" class="err t-xs" role="alert">{{ card.error }}</p>
-      <div class="actions">
+    <p v-else-if="card.error && !editing" class="err t-xs" role="alert">{{ card.error }}</p>
+    <div class="actions">
+      <template v-if="card.state === 'open' || busy">
         <button type="button" class="btn btn-secondary btn-sm" :disabled="locked || busy" :aria-busy="busy" @click="addProposal(card.id)">Add</button>
         <button type="button" class="btn btn-ghost btn-sm" :disabled="locked || busy" @click="edit">Edit</button>
-        <button type="button" class="btn btn-ghost btn-sm" :disabled="busy" @click="dismissProposal(card.id)">Dismiss</button>
-      </div>
-    </template>
+      </template>
+      <button type="button" class="btn btn-ghost btn-sm" :disabled="busy" @click="dismissProposal(card.id)">Dismiss</button>
+    </div>
 
     <dialog v-if="editing" ref="dialog" class="dialog editor" :aria-labelledby="`jp-${card.id}`" @close="editing = false">
       <h2 :id="`jp-${card.id}`">Proposed job</h2>

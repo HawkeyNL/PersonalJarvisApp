@@ -4,12 +4,15 @@
 // body as is) or saves an edited one. Cards live in memory only, for the
 // conversation on screen. Pure: tests load this file directly.
 import {
-  KIND_LABEL, LIMITS, NEW_KINDS, NOT_CONFIRMED, CADENCES, draftIssue, minuteToTime, newDraft, readJobAnswer, scheduleText,
+  KIND_LABEL, LIMITS, NEW_KINDS, CADENCES, draftIssue, minuteToTime, newDraft, readJobAnswer, scheduleText,
   timeToMinute, writeFailureText, type Draft, type NewJob,
 } from "./jobs.ts";
 
 export const MAX_PROPOSALS = 3;
 export const ADDED = "Added to Jobs";
+/** Chat only, followed by a "Check Jobs" link (the Jobs page has its own). */
+export const ADD_NOT_CONFIRMED = "Not confirmed: it may have been added.";
+export const ADD_INVALID = "Core refused this job as invalid, for example a time that has passed. Edit it and try again.";
 
 export type Proposal = { id: string; body: Record<string, unknown>; draft: Draft };
 export type CardState = "open" | "adding" | "added" | "unconfirmed";
@@ -78,19 +81,24 @@ export function withProposals(
 
 // ---- wording -----------------------------------------------------------------
 
-const cut = (s: string, max = 140) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
-
 export const proposalTitle = (d: Draft) => d.title || KIND_LABEL[d.kind];
 
-export const proposalSchedule = (d: Draft, today: string) => scheduleText({
-  cadence: d.cadence, weekday: d.weekday, month_day: d.month_day, every: Number(d.every),
-  start_date: d.start_date || null, at_minute: timeToMinute(d.time) ?? 0,
-}, today);
+/** The schedule, then the run limit and " · No push" when the body has them:
+ *  "Daily at 08:00, 2 runs · No push". */
+export function proposalSchedule(d: Draft, today: string): string {
+  const when = scheduleText({
+    cadence: d.cadence, weekday: d.weekday, month_day: d.month_day, every: Number(d.every),
+    start_date: d.start_date || null, at_minute: timeToMinute(d.time) ?? 0,
+  }, today);
+  const runs = typeof d.max_runs === "number" ? `, ${d.max_runs} run${d.max_runs === 1 ? "" : "s"}` : "";
+  return `${when}${runs}${d.kind === "prompt" && !d.notify ? " · No push" : ""}`;
+}
 
-/** The instruction, text or threshold, as one short plain line; null when none. */
+/** The full instruction or text (Core caps both at 500 characters), or the
+ *  threshold; null when none. */
 export function proposalDetail(d: Draft): string | null {
-  if (d.kind === "prompt") return cut(d.instruction);
-  if (d.kind === "reminder") return d.text ? cut(d.text) : null;
+  if (d.kind === "prompt") return d.instruction;
+  if (d.kind === "reminder") return d.text || null;
   return `Threshold ${d.threshold}%`;
 }
 
@@ -98,14 +106,36 @@ export function proposalDetail(d: Draft): string | null {
 
 export type AddResult = Pick<ProposalCard, "state" | "jobId" | "error">;
 
-/** Sends `body` exactly as given. A 2xx this build cannot read is not
- *  confirmed (Add stays off: the job may exist); a failure lets the owner
- *  try again. */
+/** Sends `body` exactly as given. A 2xx this build cannot read, or no answer
+ *  at all, is not confirmed (Add stays off: the job may exist); a refusal
+ *  lets the owner try again. */
 export async function addJob(body: NewJob, create: (body: NewJob) => Promise<unknown>): Promise<AddResult> {
+  const unconfirmed: AddResult = { state: "unconfirmed", jobId: null, error: ADD_NOT_CONFIRMED };
   try {
     const job = readJobAnswer(await create(body));
-    return job ? { state: "added", jobId: job.id, error: "" } : { state: "unconfirmed", jobId: null, error: NOT_CONFIRMED };
+    return job ? { state: "added", jobId: job.id, error: "" } : unconfirmed;
   } catch (e) {
-    return { state: "open", jobId: null, error: writeFailureText(e, false) };
+    const err = e as { name?: string; status?: number } | null;
+    if (err?.name === "NetworkError") return unconfirmed;
+    return { state: "open", jobId: null, error: err?.name === "ApiError" && err.status === 400 ? ADD_INVALID : writeFailureText(e, false) };
   }
+}
+
+export type AddGuards = {
+  locked: () => boolean;
+  /** False once the owner left the session or conversation the add began in. */
+  current: () => boolean;
+  create: (body: NewJob) => Promise<unknown>;
+};
+
+/** Adds `card`'s job (its own body, or an edited one): only from "open" and
+ *  never behind the lock. The card turns "adding" before the request, so a
+ *  second click does nothing; a result that is no longer current is dropped. */
+export async function addProposalCard(card: ProposalCard | undefined, body: NewJob | undefined, g: AddGuards): Promise<void> {
+  if (!card || g.locked() || card.state !== "open") return;
+  card.state = "adding";
+  card.error = "";
+  // Without an edit, the body goes exactly as Core sent it (checked by readProposals).
+  const result = await addJob(body ?? (card.body as NewJob), g.create);
+  if (g.current()) Object.assign(card, result);
 }
