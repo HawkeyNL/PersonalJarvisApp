@@ -43,8 +43,10 @@ class JobsApiTest {
     @Test fun `ids other than a UUID never reach the network`() = runTest {
         for (bad in listOf("", "../auth/login", "$id/../x", "$id?x=1", "%2e%2e")) {
             val (jobs, engine) = api()
-            assertTrue(bad, jobs.updateJob(endpoint, "t", bad, 1, JsonObject(emptyMap())) is ApiResult.InvalidResponse)
-            assertTrue(bad, jobs.runJob(endpoint, "t", bad) is ApiResult.InvalidResponse)
+            // Its own message: the page says "not sent", not "not confirmed".
+            assertEquals(bad, ApiResult.InvalidResponse(INVALID_JOB_ID), jobs.updateJob(endpoint, "t", bad, 1, JsonObject(emptyMap())))
+            assertEquals(bad, ApiResult.InvalidResponse(INVALID_JOB_ID), jobs.runJob(endpoint, "t", bad))
+            assertEquals(bad, ApiResult.InvalidResponse(INVALID_JOB_ID), jobs.deleteJob(endpoint, "t", bad, 1))
             assertTrue(bad, jobs.jobRuns(endpoint, "t", bad) is ApiResult.InvalidResponse)
             assertTrue(bad, jobs.jobRun(endpoint, "t", bad) is ApiResult.InvalidResponse)
             assertTrue(bad, engine.requestHistory.isEmpty())
@@ -53,7 +55,7 @@ class JobsApiTest {
 
     @Test fun `a change names its revision and the runs read asks for 20`() = runTest {
         val (jobs, engine) = api(body = "{}")
-        // An answer that is not a job still counts as saved; the page reloads.
+        // An answer that is not a job reads as null; the page says "not confirmed" and reloads.
         assertEquals(ApiResult.Success(null), jobs.updateJob(endpoint, "t", id, 3, JsonObject(emptyMap())))
         val patch = engine.requestHistory.single()
         assertEquals(HttpMethod.Patch, patch.method)
@@ -65,6 +67,25 @@ class JobsApiTest {
         val read = runsEngine.requestHistory.single()
         assertEquals("/v1/jobs/$id/runs", read.url.encodedPath)
         assertEquals("20", read.url.parameters["limit"])
+    }
+
+    @Test fun `a delete names its revision and a 409 stays a conflict`() = runTest {
+        val (jobs, engine) = api(body = """{"deleted":true}""")
+        assertEquals(ApiResult.Success(Unit), jobs.deleteJob(endpoint, "t", id, 4))
+        val request = engine.requestHistory.single()
+        assertEquals(HttpMethod.Delete, request.method)
+        assertEquals("/v1/jobs/$id", request.url.encodedPath)
+        assertEquals("4", request.url.parameters["expected_revision"])
+        assertEquals("Bearer t", request.headers[HttpHeaders.Authorization])
+        assertEquals(ApiResult.HttpError(409, null), api(HttpStatusCode.Conflict).first.deleteJob(endpoint, "t", id, 4))
+        assertTrue(api(body = "{}" + " ".repeat(1024 * 1024)).first.deleteJob(endpoint, "t", id, 4) is ApiResult.InvalidResponse)
+    }
+
+    @Test fun `a wrong-shaped 2xx on a create or change reads as no job`() = runTest {
+        for (body in listOf("""{"id":"$id","kind":"prompt"}""", """{"saved":true}""", "[]", "")) {
+            assertEquals(body, ApiResult.Success(null), api(HttpStatusCode.Created, body).first.createJob(endpoint, "t", JsonObject(emptyMap())))
+            assertEquals(body, ApiResult.Success(null), api(body = body).first.updateJob(endpoint, "t", id, 3, JsonObject(emptyMap())))
+        }
     }
 
     @Test fun `an oversized write answer fails closed instead of counting as saved`() = runTest {

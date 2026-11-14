@@ -116,6 +116,9 @@ interface JarvisApi {
     /** A change built on [revision]; HttpError(409) when the job moved on. */
     suspend fun updateJob(endpoint: HomeNodeEndpoint, token: String, id: String, revision: Long, patch: kotlinx.serialization.json.JsonObject): ApiResult<Job?> =
         ApiResult.InvalidResponse("Not supported")
+    /** Deletes a job and its runs, built on [revision]; HttpError(409) when the job moved on. */
+    suspend fun deleteJob(endpoint: HomeNodeEndpoint, token: String, id: String, revision: Long): ApiResult<Unit> =
+        ApiResult.InvalidResponse("Not supported")
     /** Queues a run (202); HttpError(429) within an hour of the last owner run. */
     suspend fun runJob(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> = ApiResult.InvalidResponse("Not supported")
     /** The 20 newest runs of a job. */

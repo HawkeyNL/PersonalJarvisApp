@@ -1,8 +1,8 @@
 package com.hawkeynl.jarvis.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,12 +11,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -28,50 +28,80 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.hawkeynl.jarvis.chat.Source
 import com.hawkeynl.jarvis.network.ApiResult
+import com.hawkeynl.jarvis.network.Cadence
 import com.hawkeynl.jarvis.network.Fact
+import com.hawkeynl.jarvis.network.JOBS_FULL_TEXT
 import com.hawkeynl.jarvis.network.JOBS_NOT_CONFIGURED
 import com.hawkeynl.jarvis.network.JOBS_TIME_ZONE
 import com.hawkeynl.jarvis.network.Job
 import com.hawkeynl.jarvis.network.JobDraft
 import com.hawkeynl.jarvis.network.JobFailure
 import com.hawkeynl.jarvis.network.JobKind
+import com.hawkeynl.jarvis.network.JobList
 import com.hawkeynl.jarvis.network.JobRun
+import com.hawkeynl.jarvis.network.MAX_OWNER_JOBS
+import com.hawkeynl.jarvis.network.NOT_CONFIRMED
+import com.hawkeynl.jarvis.network.OWNER_KINDS
+import com.hawkeynl.jarvis.network.PAUSED_AFTER_FAILURES_NOTE
 import com.hawkeynl.jarvis.network.Priority
 import com.hawkeynl.jarvis.network.Roadmap
 import com.hawkeynl.jarvis.network.RunDetail
 import com.hawkeynl.jarvis.network.RunStatus
 import com.hawkeynl.jarvis.network.WEEKDAYS
-import com.hawkeynl.jarvis.network.cadenceText
+import com.hawkeynl.jarvis.network.cadencesOf
+import com.hawkeynl.jarvis.network.deleteFailureText
+import com.hawkeynl.jarvis.network.deleteNote
+import com.hawkeynl.jarvis.network.draftError
+import com.hawkeynl.jarvis.network.everyUnit
+import com.hawkeynl.jarvis.network.hasRecurrence
+import com.hawkeynl.jarvis.network.jobCountText
+import com.hawkeynl.jarvis.network.jobDeleted
 import com.hawkeynl.jarvis.network.jobErrorText
 import com.hawkeynl.jarvis.network.jobFailureOf
 import com.hawkeynl.jarvis.network.jobFailureText
 import com.hawkeynl.jarvis.network.jobPatch
+import com.hawkeynl.jarvis.network.jobTitle
 import com.hawkeynl.jarvis.network.newDraft
 import com.hawkeynl.jarvis.network.newJob
+import com.hawkeynl.jarvis.network.nextRunText
+import com.hawkeynl.jarvis.network.ordinal
+import com.hawkeynl.jarvis.network.originText
+import com.hawkeynl.jarvis.network.ownerJobCount
 import com.hawkeynl.jarvis.network.runNowFailureText
+import com.hawkeynl.jarvis.network.runsText
+import com.hawkeynl.jarvis.network.scheduleText
+import com.hawkeynl.jarvis.network.stateText
 import com.hawkeynl.jarvis.network.summarySourceLabel
-import com.hawkeynl.jarvis.network.typedTime
 import com.hawkeynl.jarvis.network.toDraft
 import com.hawkeynl.jarvis.network.triggerLabel
+import com.hawkeynl.jarvis.network.typedTime
+import com.hawkeynl.jarvis.network.unsupportedText
 import com.hawkeynl.jarvis.network.writeFailureText
+import com.hawkeynl.jarvis.network.writeNotice
 import com.hawkeynl.jarvis.network.zonedText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /** Jobs (desktop Jobs.vue, Job.vue, JobRun.vue): the owner's scheduled jobs, one job with its
- *  schedule editor, Run now and newest runs, and one run's report. A job and a run open inside
- *  this screen; Back returns to where they were opened from. Content comes from Core only. */
+ *  editor, Run now, pause, delete and newest runs, and one run's report. A job and a run open
+ *  inside this screen; Back returns to where they were opened from. Content comes from Core
+ *  only; a job's conversation opens in chat. */
 @Composable
 fun JobsScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
     var jobId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -103,12 +133,13 @@ internal fun rememberLatest(): Latest {
 }
 
 private data class JobRow(val job: Job, val last: JobRun?, val lastLoaded: Boolean)
-private data class JobsOverview(val configured: Boolean, val rows: List<JobRow>)
+private data class JobsOverview(val list: JobList, val rows: List<JobRow>)
 
 @Composable
 private fun JobListPage(actions: JarvisViewModel, back: () -> Unit, open: (String) -> Unit) {
     var overview by remember { mutableStateOf<JobsOverview?>(null) }
     var failure by remember { mutableStateOf<JobFailure?>(null) }
+    // The kind whose create form is open: one of OWNER_KINDS (New job) or a dependency review.
     var creating by remember { mutableStateOf<JobKind?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
@@ -121,29 +152,30 @@ private fun JobListPage(actions: JarvisViewModel, back: () -> Unit, open: (Strin
             if (overview == null) failure = jobFailureOf(list, list = true)
             return
         }
-        // ponytail: one runs read per job (at most one job per kind, one kind today).
-        val rows = list.value.jobs.map { job ->
-            val runs = actions.jobs { e, t -> jobRuns(e, t, job.id) } ?: return
-            JobRow(job, (runs as? ApiResult.Success)?.value?.firstOrNull(), runs is ApiResult.Success)
-        }
-        overview = JobsOverview(list.value.configured, rows)
+        // ponytail: one runs read per job for its newest run, in parallel; Core keeps at most 14 jobs.
+        val runs = coroutineScope { list.value.jobs.map { job -> async { actions.jobs { e, t -> jobRuns(e, t, job.id) } } }.awaitAll() }
+        if (runs.any { it == null }) return
+        val rows = list.value.jobs.zip(runs) { job, r -> JobRow(job, (r as? ApiResult.Success)?.value?.firstOrNull(), r is ApiResult.Success) }
+        overview = JobsOverview(list.value, rows)
         failure = null
     }
     LaunchedEffect(Unit) { latest.launch { load() } }
 
-    fun create(kind: JobKind, draft: JobDraft) {
-        val body = newJob(kind, draft) ?: return
+    fun create(draft: JobDraft) {
+        val body = newJob(draft) ?: return
         if (busy) return
         busy = true
         error = ""
         latest.launch {
             try {
                 val result = actions.jobs { e, t -> createJob(e, t, body) } ?: return@launch
-                if (result is ApiResult.Success) {
+                val created = (result as? ApiResult.Success)?.value
+                if (created != null) {
                     creating = null
-                    result.value?.let { open(it.id) } ?: load()
+                    open(created.id)
                 } else {
-                    error = writeFailureText(result, update = false)
+                    // A 2xx whose job does not read may have landed: the reload shows it.
+                    error = if (result is ApiResult.Success) NOT_CONFIRMED else writeFailureText(result, update = false, draft.kind)
                     load()
                 }
             } finally {
@@ -163,18 +195,32 @@ private fun JobListPage(actions: JarvisViewModel, back: () -> Unit, open: (Strin
                 Unavailable("Jobs", JvIcon.CLOCK, kind = UnavailableKind.ERROR, detail = jobFailureText(failed), onRetry = { latest.launch { load() } })
             shown == null -> Skeleton("Loading jobs…")
             else -> {
-                if (!shown.configured) Warning(JOBS_NOT_CONFIGURED)
-                // Outside the set-up card: after a 409 the reload shows the job, and the card goes.
+                if (!shown.list.configured) Warning(JOBS_NOT_CONFIGURED)
+                // Outside the create form: after a 409 the reload shows why, and the form stays.
                 if (error.isNotEmpty()) ErrorText(error)
+                val full = ownerJobCount(shown.list.jobs) >= MAX_OWNER_JOBS
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    MutedText(jobCountText(shown.list.jobs, shown.list.unsupported) + if (full) ". $JOBS_FULL_TEXT" else "", Modifier.weight(1f))
+                    if (creating !in OWNER_KINDS) GhostButton("New job", { creating = JobKind.PROMPT; error = "" }, enabled = !full)
+                }
+                if (creating in OWNER_KINDS) {
+                    ListSection("New job") {
+                        Column(Modifier.padding(JvSpace.lg)) {
+                            JobForm(actions, newDraft(JobKind.PROMPT), creating = true, busy, "Create", onCancel = { creating = null; error = "" }, onSave = ::create)
+                        }
+                    }
+                }
                 shown.rows.forEach { row -> JobCard(row) { open(row.job.id) } }
-                JobKind.entries.filter { kind -> shown.rows.none { it.job.kind == kind } }.forEach { kind ->
-                    ListSection(kind.label) {
+                if (shown.list.unsupported > 0) Warning(unsupportedText(shown.list.unsupported))
+                val review = JobKind.DEPENDENCY_REVIEW
+                if (shown.rows.none { it.job.kind == review }) {
+                    ListSection(review.label) {
                         Column(Modifier.padding(JvSpace.lg), verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
-                            MutedText(kind.detail)
-                            if (creating == kind) {
-                                JobForm(actions, kind, newDraft(), busy, "Set up", onCancel = { creating = null; error = "" }) { create(kind, it) }
+                            MutedText(review.detail)
+                            if (creating == review) {
+                                JobForm(actions, newDraft(review), creating = true, busy, "Set up", onCancel = { creating = null; error = "" }, onSave = ::create)
                             } else {
-                                ActionButton("Set up", { creating = kind; error = "" })
+                                ActionButton("Set up", { creating = review; error = "" })
                             }
                         }
                     }
@@ -184,16 +230,31 @@ private fun JobListPage(actions: JarvisViewModel, back: () -> Unit, open: (Strin
     }
 }
 
-/** A job on the list: its name opens it; schedule, next run and newest run below. */
+private fun stateTone(job: Job): Tone = when {
+    job.enabled -> Tone.OK
+    job.pausedAfterFailures -> Tone.WARN
+    else -> Tone.IDLE
+}
+
+/** A job on the list: its name opens it; who set it up, schedule, next run and newest run below. */
 @Composable
 private fun JobCard(row: JobRow, open: () -> Unit) {
     val job = row.job
     ListSection(null) {
-        NavRow(JvIcon.CLOCK, job.kind.label, if (job.enabled) "Enabled" else "Paused", open, if (job.enabled) Tone.OK else Tone.IDLE)
+        val detail = listOfNotNull(job.kind.label.takeIf { job.params.title != null }, stateText(job)).joinToString(" · ")
+        NavRow(JvIcon.CLOCK, jobTitle(job), detail, open, stateTone(job))
+        originText(job)?.let {
+            ListDivider()
+            StatusBadge(it, Modifier.padding(horizontal = JvSpace.lg, vertical = JvSpace.md))
+        }
         ListDivider()
-        FactRow("Schedule", cadenceText(job))
+        FactRow("Schedule", scheduleText(job))
+        runsText(job)?.let {
+            ListDivider()
+            FactRow("Runs", it)
+        }
         ListDivider()
-        FactRow("Next run", if (!job.enabled) "Paused" else job.nextRunAt?.let(::zonedText) ?: "Not scheduled")
+        FactRow("Next run", nextRunText(job))
         ListDivider()
         val last = row.last
         when {
@@ -212,10 +273,11 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
     var runs by remember { mutableStateOf<List<JobRun>?>(null) }
     var notice by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
     val latest = rememberLatest()
 
     suspend fun load() {
-        // Core has no single-job read; the list holds at most one job per kind.
+        // Core has no single-job read; the list is small.
         val (list, runList) = coroutineScope {
             val list = async { actions.jobs { e, t -> jobs(e, t) } }
             val runList = async { actions.jobs { e, t -> jobRuns(e, t, id) } }
@@ -238,11 +300,7 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
     }
     LaunchedEffect(Unit) { latest.launch { load() } }
 
-    fun save(draft: JobDraft) {
-        val current = job ?: return
-        if (busy) return
-        val patch = jobPatch(current, draft)
-        if (patch == null) { notice = "Nothing changed."; return }
+    fun write(current: Job, patch: JsonObject, done: String) {
         busy = true
         notice = ""
         latest.launch {
@@ -250,11 +308,25 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
                 val result = actions.jobs { e, t -> updateJob(e, t, current.id, current.revision, patch) } ?: return@launch
                 (result as? ApiResult.Success)?.value?.let { job = it }
                 load()
-                notice = if (result is ApiResult.Success) "Saved." else writeFailureText(result, update = true)
+                notice = writeNotice(result, update = true, current.kind, done)
             } finally {
                 busy = false
             }
         }
+    }
+
+    fun save(draft: JobDraft) {
+        val current = job ?: return
+        if (busy) return
+        val patch = jobPatch(current, draft)
+        if (patch == null) { notice = "Nothing changed."; return }
+        write(current, patch, "Saved.")
+    }
+
+    fun setEnabled(enabled: Boolean) {
+        val current = job ?: return
+        if (busy) return
+        write(current, buildJsonObject { put("enabled", enabled) }, if (enabled) "Enabled." else "Paused.")
     }
 
     fun runNow() {
@@ -273,9 +345,30 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
         }
     }
 
+    fun delete() {
+        val current = job ?: return
+        if (busy) return
+        busy = true
+        notice = ""
+        latest.launch {
+            try {
+                val result = actions.jobs { e, t -> deleteJob(e, t, current.id, current.revision) } ?: return@launch
+                deleting = false
+                if (jobDeleted(result)) {
+                    back()
+                } else {
+                    notice = deleteFailureText(result)
+                    load()
+                }
+            } finally {
+                busy = false
+            }
+        }
+    }
+
     val shown = job
     PushedPage(
-        shown?.kind?.label ?: "Job", shown?.kind?.detail, back,
+        shown?.let(::jobTitle) ?: "Job", shown?.let { if (it.params.title != null) it.kind.label else it.kind.detail }, back,
         trailing = { GhostButton("Refresh", { latest.launch { load() } }, enabled = !busy) },
     ) {
         // Announced once when it appears or changes, like desktop focusing it.
@@ -287,13 +380,26 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
                 Unavailable("This job", JvIcon.ALERT, kind = UnavailableKind.ERROR, detail = jobFailureText(failed), onRetry = { latest.launch { load() } })
             shown == null -> Skeleton("Loading the job…")
             else -> {
-                ActionButton("Run now", ::runNow, enabled = !busy && configured)
-                ListSection("Schedule") {
-                    Column(Modifier.padding(JvSpace.lg), verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
-                        StatusBadge(if (shown.enabled) "Enabled" else "Paused", tone = if (shown.enabled) Tone.OK else Tone.IDLE)
-                        MutedText(cadenceText(shown) + "." + if (shown.enabled && shown.nextRunAt != null) " Next run ${zonedText(shown.nextRunAt)}." else "")
+                ListSection(null) {
+                    Column(Modifier.padding(JvSpace.lg), verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+                        StatusBadge(stateText(shown), tone = stateTone(shown))
+                        originText(shown)?.let { StatusBadge(it) }
+                        val next = if (shown.enabled && shown.nextRunAt != null) "Next run ${zonedText(shown.nextRunAt)}" else null
+                        MutedText(listOfNotNull("${scheduleText(shown)} ($JOBS_TIME_ZONE)", runsText(shown), next).joinToString(". ") + ".")
+                        if (shown.pausedAfterFailures) ErrorText(PAUSED_AFTER_FAILURES_NOTE, live = false)
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm), verticalAlignment = Alignment.CenterVertically) {
+                    ActionButton("Run now", ::runNow, Modifier.weight(1f), enabled = !busy && configured)
+                    GhostButton(if (shown.enabled) "Pause" else "Enable", { setEnabled(!shown.enabled) }, enabled = !busy)
+                }
+                shown.conversationId?.let { conversation ->
+                    GhostButton("Open in chat", { actions.openConversation(conversation) }, Modifier.fillMaxWidth())
+                }
+                ListSection("Edit") {
+                    Column(Modifier.padding(JvSpace.lg)) {
                         // Reset per revision: a change elsewhere resets the editor to Core's state.
-                        key(shown.revision) { JobForm(actions, shown.kind, toDraft(shown), busy, "Save", onCancel = null, onSave = ::save) }
+                        key(shown.revision) { JobForm(actions, toDraft(shown), creating = false, busy, "Save", onCancel = null, onSave = ::save) }
                     }
                 }
                 val list = runs
@@ -306,7 +412,7 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
                     ActivityList(
                         "Runs",
                         list.map { run ->
-                            val detail = run.errorCode?.let(::jobErrorText) ?: if (run.priorities.isNotEmpty()) "${run.priorities.size} priorities" else ""
+                            val detail = run.errorCode?.let { jobErrorText(it, shown.kind) } ?: if (run.priorities.isNotEmpty()) "${run.priorities.size} priorities" else ""
                             ActivityItem(
                                 run.id, JvIcon.CLOCK, zonedText(run.startedAt), listOf(triggerLabel(run.byOwner), detail).filter { it.isNotEmpty() }.joinToString(" · "),
                                 tone = runTone(run.status), toneLabel = run.status.label,
@@ -318,8 +424,19 @@ private fun JobPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
                     )
                     if (list.isNotEmpty()) MutedText("The 20 newest runs. Core keeps runs for 180 days.", Modifier.padding(horizontal = JvSpace.xs))
                 }
+                GhostButton("Delete job", { deleting = true }, Modifier.fillMaxWidth(), enabled = !busy, danger = true)
             }
         }
+    }
+
+    if (deleting) {
+        AlertDialog(
+            onDismissRequest = { if (!busy) deleting = false },
+            title = { Text("Delete this job?") },
+            text = { Text(job?.let(::deleteNote).orEmpty()) },
+            dismissButton = { TextButton(onClick = { deleting = false }, enabled = !busy) { Text("Cancel") } },
+            confirmButton = { TextButton(onClick = ::delete, enabled = !busy) { Text("Delete", color = JvTheme.colors.dangerText) } },
+        )
     }
 }
 
@@ -347,15 +464,15 @@ private fun RunPage(id: String, actions: JarvisViewModel, back: () -> Unit, open
             failed != null ->
                 Unavailable("This run", JvIcon.ALERT, kind = UnavailableKind.ERROR, detail = jobFailureText(failed), onRetry = { latest.launch { load() } })
             shown == null -> Skeleton("Loading the run…")
-            else -> RunReport(shown) { openJob(shown.run.jobId) }
+            else -> RunReport(shown, { openJob(shown.run.jobId) }, actions::openConversation)
         }
     }
 }
 
-/** The run's status, error, summary and ranked priorities. Core's summary and reasons are
- *  display text and shown as plain text only. */
+/** The run's status, error, summary, sources and ranked priorities. Core's summary and
+ *  reasons are display text and shown as plain text only. */
 @Composable
-private fun RunReport(detail: RunDetail, openJob: () -> Unit) {
+private fun RunReport(detail: RunDetail, openJob: () -> Unit, openConversation: (String) -> Unit) {
     val run = detail.run
     ListSection(null) {
         FactRow("Status", run.status.label, runTone(run.status))
@@ -367,12 +484,12 @@ private fun RunReport(detail: RunDetail, openJob: () -> Unit) {
         FactRow("Ended", run.finishedAt?.let(::zonedText) ?: if (run.status == RunStatus.RUNNING) "Still running" else "—")
     }
     if (run.status == RunStatus.MISSED) Text("Core was down at this slot for more than a day, so it did not run.", style = MaterialTheme.typography.bodyMedium)
-    run.errorCode?.let { ErrorText(jobErrorText(it), live = false) }
+    run.errorCode?.let { ErrorText(jobErrorText(it, run.kind), live = false) }
     if (detail.errors.isNotEmpty()) {
         ListSection("Repositories that could not be read") {
             detail.errors.forEachIndexed { i, e ->
                 if (i > 0) ListDivider()
-                Text("${e.repo}: ${jobErrorText(e.errorCode)}", Modifier.padding(JvSpace.lg), style = MaterialTheme.typography.bodyMedium)
+                Text("${e.repo}: ${jobErrorText(e.errorCode, run.kind)}", Modifier.padding(JvSpace.lg), style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
@@ -384,6 +501,7 @@ private fun RunReport(detail: RunDetail, openJob: () -> Unit) {
             }
         }
     }
+    if (detail.sources.isNotEmpty()) Sources(detail.sources)
     if (run.priorities.isNotEmpty()) {
         val facts = remember(detail) { detail.facts.associateBy { it.ref } }
         ListSection("Priorities") {
@@ -392,11 +510,34 @@ private fun RunReport(detail: RunDetail, openJob: () -> Unit) {
                 PriorityRow(p, facts[p.ref])
             }
         }
-    } else if (run.status == RunStatus.OK || run.status == RunStatus.PARTIAL) {
+    } else if (run.kind == JobKind.DEPENDENCY_REVIEW && (run.status == RunStatus.OK || run.status == RunStatus.PARTIAL)) {
         ListSection(null) { EmptyState("No open alerts in the repositories Core could read.", compact = true) }
     }
     if (detail.truncated) MutedText("Some entries were left out: a full page from GitHub, an alert Core could not read, or the size limit.")
-    GhostButton("Open job", openJob)
+    Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+        GhostButton("Open job", openJob)
+        detail.conversationId?.let { conversation -> GhostButton("Open in chat", { openConversation(conversation) }) }
+    }
+}
+
+/** A research run's sources: validated https links (Jobs.kt), opened in the browser on tap.
+ *  Without a browser openUri throws and the tap does nothing. */
+@Composable
+private fun Sources(urls: List<String>) {
+    val uris = LocalUriHandler.current
+    ListSection("Sources") {
+        urls.forEachIndexed { i, url ->
+            if (i > 0) ListDivider()
+            val source = Source(url)
+            Text(
+                source.host + source.shortPath,
+                Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                    .clickable(role = Role.Button, onClickLabel = "Open source") { runCatching { uris.openUri(url) } }
+                    .padding(JvSpace.lg),
+                color = JvTheme.colors.accentText, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
 }
 
 @Composable
@@ -414,20 +555,21 @@ private fun PriorityRow(priority: Priority, fact: Fact?) {
     }
 }
 
-/** The schedule editor (desktop JobForm.vue): daily or weekly, the weekday, a time in
- *  Europe/Amsterdam, enabled, and for a dependency review the roadmap its runs propose
- *  upgrades to. */
+/** The job editor (desktop JobForm.vue): on create the kind, then the kind's fields, the
+ *  recurrence (once, daily, weekly or monthly; every N, start date, stop after N runs; a
+ *  dependency review daily or weekly only), a time in Europe/Amsterdam and, on create,
+ *  enabled. Checked against Core's bounds before it goes out. */
 @Composable
 private fun JobForm(
-    actions: JarvisViewModel, kind: JobKind, initial: JobDraft, busy: Boolean, submit: String, onCancel: (() -> Unit)?, onSave: (JobDraft) -> Unit,
+    actions: JarvisViewModel, initial: JobDraft, creating: Boolean, busy: Boolean, submit: String, onCancel: (() -> Unit)?, onSave: (JobDraft) -> Unit,
 ) {
     var draft by remember { mutableStateOf(initial) }
-    var timeError by remember { mutableStateOf("") }
-    var dayMenu by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    fun edit(next: JobDraft) { draft = next; error = "" }
     // null while loading or when the roadmaps could not be read.
     var choices by remember { mutableStateOf<List<Roadmap>?>(null) }
     var choicesFailed by remember { mutableStateOf(false) }
-    if (kind == JobKind.DEPENDENCY_REVIEW) {
+    if (initial.kind == JobKind.DEPENDENCY_REVIEW) {
         LaunchedEffect(Unit) {
             val result = actions.jobs { e, t -> roadmaps(e, t) } ?: return@LaunchedEffect
             choices = (result as? ApiResult.Success)?.value?.filter { it.archivedAt == null }
@@ -435,77 +577,111 @@ private fun JobForm(
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
-        SectionLabel("Repeats")
-        Segmented(listOf("weekly" to "Weekly", "daily" to "Daily"), if (draft.daily) "daily" else "weekly", { draft = draft.copy(daily = it == "daily") })
-        if (!draft.daily) {
-            Box {
-                GhostButton("Day: ${WEEKDAYS[draft.weekday - 1]}", { dayMenu = true })
-                DropdownMenu(expanded = dayMenu, onDismissRequest = { dayMenu = false }) {
-                    WEEKDAYS.forEachIndexed { i, day ->
-                        val chosen = draft.weekday == i + 1
-                        DropdownMenuItem(
-                            text = { Text(day) },
-                            onClick = { draft = draft.copy(weekday = i + 1); dayMenu = false },
-                            modifier = Modifier.semantics { selected = chosen },
-                            trailingIcon = { if (chosen) JvIconView(JvIcon.CHECK, size = 18.dp) },
-                        )
+        if (creating && draft.kind in OWNER_KINDS) {
+            Picker("Kind", OWNER_KINDS.map { it to it.label }, draft.kind, { edit(draft.copy(kind = it)) })
+            MutedText(draft.kind.detail)
+        }
+        when (draft.kind) {
+            JobKind.PROMPT -> {
+                Field("Title", draft.title, { edit(draft.copy(title = it)) }, "Up to 60 characters. It can show in a push.")
+                // One line for Core: a typed line break reads as a space.
+                Field("What to research", draft.instruction, { edit(draft.copy(instruction = it.replace('\n', ' '))) }, "Up to 500 characters.", multiline = true)
+                MutedText("The title and instruction leave your Home Node in a web search: leave out personal or financial details and symbols you hold.")
+                SwitchRow("Send me a push when a run ends", draft.notify) { edit(draft.copy(notify = it)) }
+            }
+            JobKind.REMINDER -> {
+                Field("Title", draft.title, { edit(draft.copy(title = it)) }, "Up to 60 characters. Sent as the push.")
+                Field("Text (optional)", draft.text, { edit(draft.copy(text = it.replace('\n', ' '))) }, "Up to 500 characters, posted in the job's conversation.", multiline = true)
+            }
+            JobKind.DISK_CHECK ->
+                Field("Threshold", draft.threshold, { edit(draft.copy(threshold = it)) }, "50 to 99%. A note when a disk is at or above it.", number = true, suffix = "%")
+            JobKind.DEPENDENCY_REVIEW -> {
+                val list = choices
+                val chosen = draft.roadmapId
+                val options = buildList<Pair<String?, String>> {
+                    add(null to "No roadmap")
+                    if (chosen != null && list?.none { it.id == chosen } != false) {
+                        add(chosen to if (list == null) "The roadmap set now" else "A roadmap that is gone or archived")
                     }
+                    list?.forEach { add(it.id to it.title) }
                 }
+                Picker(
+                    "Propose upgrades to a roadmap (optional)", options, chosen, { edit(draft.copy(roadmapId = it)) },
+                    enabled = list != null || chosen != null,
+                )
+                if (choicesFailed) ErrorText("Roadmaps could not be loaded.", live = false)
+                MutedText("Each run then proposes one item per fixable alert. You accept or reject the proposal on the roadmap.")
             }
         }
-        OutlinedTextField(
-            value = draft.time,
-            onValueChange = { draft = draft.copy(time = it); timeError = "" },
-            modifier = Modifier.fillMaxWidth().semantics { if (timeError.isNotEmpty()) this.error(timeError) },
-            label = { Text("Time") },
-            placeholder = { Text("HH:MM") },
-            supportingText = { Text(timeError.ifEmpty { "$JOBS_TIME_ZONE time" }) },
-            isError = timeError.isNotEmpty(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            singleLine = true,
-            shape = JvShapes.md,
+        SectionLabel("Repeats")
+        Segmented(
+            cadencesOf(draft.kind).map { it.wire to it.label }, draft.cadence.wire,
+            { wire -> edit(draft.copy(cadence = Cadence.entries.first { it.wire == wire })) },
         )
-        if (kind == JobKind.DEPENDENCY_REVIEW) {
-            val list = choices
-            val chosen = draft.roadmapId
-            val options = buildList<Pair<String?, String>> {
-                add(null to "No roadmap")
-                if (chosen != null && list?.none { it.id == chosen } != false) {
-                    add(chosen to if (list == null) "The roadmap set now" else "A roadmap that is gone or archived")
-                }
-                list?.forEach { add(it.id to it.title) }
+        val once = draft.cadence == Cadence.ONCE
+        if (hasRecurrence(draft.kind) && !once) {
+            Field("Every", draft.every, { edit(draft.copy(every = it)) }, null, number = true, suffix = everyUnit(draft.cadence))
+        }
+        if (draft.cadence == Cadence.WEEKLY) Picker("Day", WEEKDAYS.mapIndexed { i, day -> i + 1 to day }, draft.weekday, { edit(draft.copy(weekday = it)) })
+        if (draft.cadence == Cadence.MONTHLY) {
+            Picker("Day of the month", (1..31).map { it to ordinal(it) }, draft.monthDay, { edit(draft.copy(monthDay = it)) })
+            if (draft.monthDay > 28) MutedText("In a shorter month it runs on the last day.")
+        }
+        if (hasRecurrence(draft.kind)) {
+            Field(
+                if (once) "Day" else "Start date (optional)", draft.startDate, { edit(draft.copy(startDate = it)) },
+                if (once) "YYYY-MM-DD, at most two years ahead." else "YYYY-MM-DD. It runs from this day on; empty starts now.",
+                placeholder = "YYYY-MM-DD",
+            )
+            if (!once) {
+                Field("Stop after (optional)", draft.maxRuns, { edit(draft.copy(maxRuns = it)) }, "1 to 100 runs; empty keeps it going.", number = true, suffix = "runs")
             }
-            Picker(
-                "Propose upgrades to a roadmap (optional)", options, chosen, { draft = draft.copy(roadmapId = it) },
-                enabled = list != null || chosen != null,
-            )
-            if (choicesFailed) ErrorText("Roadmaps could not be loaded.", live = false)
-            MutedText("Each run then proposes one item per fixable alert. You accept or reject the proposal on the roadmap.")
         }
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                .toggleable(value = draft.enabled, role = Role.Switch) { draft = draft.copy(enabled = it) },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                if (draft.enabled) "Enabled: runs on this schedule" else "Paused: runs only when you run it",
-                Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
-            )
-            Switch(checked = draft.enabled, onCheckedChange = null)
+        Field("Time", draft.time, { edit(draft.copy(time = it)) }, "$JOBS_TIME_ZONE time", placeholder = "HH:MM", number = true)
+        if (creating) {
+            SwitchRow(if (draft.enabled) "Enabled: runs on this schedule" else "Paused: runs only when you run it", draft.enabled) { edit(draft.copy(enabled = it)) }
         }
+        if (error.isNotEmpty()) ErrorText(error)
         Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm), verticalAlignment = Alignment.CenterVertically) {
             onCancel?.let { GhostButton("Cancel", it, enabled = !busy) }
             ActionButton(submit, {
-                val time = typedTime(draft.time)
-                if (time == null) {
-                    timeError = "Pick a time of day."
-                } else {
-                    timeError = ""
-                    draft = draft.copy(time = time)
-                    onSave(draft)
-                }
+                val next = typedTime(draft.time)?.let { draft.copy(time = it) } ?: draft
+                draft = next
+                error = draftError(next).orEmpty()
+                if (error.isEmpty()) onSave(next)
             }, Modifier.weight(1f), enabled = !busy)
         }
+    }
+}
+
+@Composable
+private fun Field(
+    label: String, value: String, onChange: (String) -> Unit, supporting: String?, placeholder: String? = null,
+    number: Boolean = false, suffix: String? = null, multiline: Boolean = false,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text(label) },
+        placeholder = placeholder?.let { text -> @Composable { Text(text) } },
+        suffix = suffix?.let { text -> @Composable { Text(text) } },
+        supportingText = supporting?.let { text -> @Composable { Text(text) } },
+        keyboardOptions = KeyboardOptions(keyboardType = if (number) KeyboardType.Number else KeyboardType.Text),
+        singleLine = !multiline,
+        maxLines = if (multiline) 5 else 1,
+        shape = JvShapes.md,
+    )
+}
+
+@Composable
+private fun SwitchRow(text: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(value = checked, role = Role.Switch, onValueChange = onChange),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 
