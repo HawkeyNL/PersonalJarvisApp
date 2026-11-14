@@ -372,6 +372,9 @@ class KtorJarvisApi(
         }
     }
 
+    override suspend fun ibkrStatus(endpoint: HomeNodeEndpoint, token: String) =
+        jobCall({ requireNotNull(readIbkrStatus(it)) }, IbkrStatusLimits.BYTES) { client.prepareGet(endpoint.url("/v1/trading/ibkr/status")) { bearerAuth(token) } }
+
     override suspend fun holdings(endpoint: HomeNodeEndpoint, token: String) =
         jobCall({ requireNotNull(readHoldings(it)) }) { client.prepareGet(endpoint.url("/v1/holdings")) { bearerAuth(token) } }
 

@@ -6,7 +6,10 @@ import com.hawkeynl.jarvis.network.Availability
 import com.hawkeynl.jarvis.network.CodingSession
 import com.hawkeynl.jarvis.network.ConnectionState
 import com.hawkeynl.jarvis.network.DiskStatus
+import com.hawkeynl.jarvis.network.IbkrError
 import com.hawkeynl.jarvis.network.IbkrPortfolio
+import com.hawkeynl.jarvis.network.IbkrStatus
+import com.hawkeynl.jarvis.network.IbkrToken
 import com.hawkeynl.jarvis.network.LinkedDevice
 import com.hawkeynl.jarvis.network.LiveHost
 import com.hawkeynl.jarvis.network.LoadFailure
@@ -15,6 +18,9 @@ import com.hawkeynl.jarvis.network.ServiceStatus
 import com.hawkeynl.jarvis.network.valueOrNull
 import java.time.Instant
 import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Locale
 
 // Pure presentation helpers for the tab roots and node pages (no Android or Compose
@@ -84,6 +90,18 @@ fun relativeTime(iso: String?, now: Long): String {
         diff < HOUR -> "${diff / MINUTE}m ago"
         diff < DAY -> "${diff / HOUR}h ago"
         else -> "${diff / DAY}d ago"
+    }
+}
+
+/** "in 4m", "in 3h", "in 2d"; "now" within a minute or when past; "" for an unparseable time. */
+fun untilTime(iso: String?, now: Long): String {
+    val at = parseInstant(iso) ?: return ""
+    val diff = at - now
+    return when {
+        diff < MINUTE -> "now"
+        diff < HOUR -> "in ${diff / MINUTE}m"
+        diff < DAY -> "in ${diff / HOUR}h"
+        else -> "in ${diff / DAY}d"
     }
 }
 
@@ -234,6 +252,127 @@ fun ibkrState(source: Availability<IbkrPortfolio>, now: Long): Pair<Tone, String
 
 const val IBKR_NOT_SYNCED = "Core has no IBKR data yet: the IBKR connection is not set up, the first sync has not finished, " +
     "or Core cannot reach IBKR right now. Check the IBKR broker on your Home Node, then refresh."
+
+// GET /v1/trading/ibkr/status. Unknown values read as "Unknown", never as a failure.
+
+/** The pane's header, from `overall`. */
+fun ibkrOverall(status: IbkrStatus): Pair<Tone, String> = when (status.overall) {
+    "ok" -> Tone.OK to "Connected"
+    "info" -> if (status.problems.isEmpty()) Tone.OK to "Connected" else Tone.IDLE to "Needs attention"
+    "warn" -> Tone.WARN to "Needs attention"
+    "error" -> Tone.ERROR to "Not working"
+    "off" -> Tone.IDLE to "Off"
+    else -> Tone.IDLE to "Unknown"
+}
+
+/** The broker unit and whether Core reached it; missing credentials come first. */
+fun ibkrBroker(status: IbkrStatus): Pair<Tone, String> {
+    // A stopped broker only matters while the sync is on.
+    val stopped = if (status.syncEnabled == true) Tone.WARN else Tone.IDLE
+    return when {
+        status.credentials == "missing" -> Tone.ERROR to "Credentials missing"
+        status.service == "active" || status.service == "activating" -> when (status.reachable) {
+            true -> Tone.OK to "Running, reachable"
+            false -> Tone.ERROR to "Running, not reachable"
+            null -> Tone.OK to "Running"
+        }
+        status.service == "inactive" || status.service == "deactivating" -> stopped to "Stopped"
+        status.service == "failed" -> Tone.ERROR to "Failed"
+        status.service == "not_found" -> stopped to "Not installed"
+        else -> Tone.IDLE to "Unknown"
+    }
+}
+
+/** "On · Syncing", "Off", "Refused", …; an unknown state keeps On or Off. */
+fun ibkrSync(status: IbkrStatus): Pair<Tone, String> = when (status.syncState) {
+    "off" -> Tone.IDLE to "Off"
+    "refused" -> Tone.ERROR to "Refused"
+    "ok" -> Tone.OK to "On · Syncing"
+    "starting" -> Tone.IDLE to "On · Starting"
+    "failing" -> Tone.WARN to "On · Failing"
+    "waiting_for_broker" -> Tone.WARN to "On · Waiting for the broker"
+    else -> Tone.IDLE to when (status.syncEnabled) {
+        true -> "On · Unknown"
+        false -> "Off"
+        null -> "Unknown"
+    }
+}
+
+private val TOKEN_STATES = mapOf(
+    "valid" to "Valid", "refresh_due" to "Refreshing soon", "expired" to "Expired", "rejected" to "Rejected", "none" to "Not created yet",
+)
+
+/** "Valid · refreshed 3h ago · expires in 21h · usable"; parts Core did not send are left out. */
+fun ibkrToken(token: IbkrToken?, now: Long): String {
+    if (token == null) return "Unknown"
+    val refreshed = relativeTime(token.refreshedAt, now).takeIf { it.isNotEmpty() }?.let { "refreshed $it" }
+    val expires = parseInstant(token.expiresAt)?.let {
+        if (it > now) "expires ${untilTime(token.expiresAt, now)}" else "expired ${relativeTime(token.expiresAt, now)}"
+    }
+    val usable = token.usable?.let { if (it) "usable" else "not usable" }
+    return listOfNotNull(TOKEN_STATES[token.state] ?: "Unknown", refreshed, expires, usable).joinToString(" · ")
+}
+
+/** Relative time of the last good sync, or "Never". */
+fun ibkrLastSync(status: IbkrStatus, now: Long): String =
+    if (status.lastSuccessAt == null) "Never" else relativeTime(status.lastSuccessAt, now).ifEmpty { "Unknown" }
+
+/** The most recent error of the sync and the broker (a parseable time beats none; a tie
+ *  keeps the sync's); null when there is none. */
+fun ibkrLastError(status: IbkrStatus): IbkrError? =
+    listOfNotNull(status.syncError, status.ibkr?.lastError).maxByOrNull { parseInstant(it.at) ?: Long.MIN_VALUE }
+
+private val IBKR_ERRORS = mapOf(
+    // The sync's codes.
+    "broker_not_running" to "Broker not running",
+    "broker_unavailable" to "Broker unavailable",
+    "broker_busy" to "Broker busy",
+    "broker_timeout" to "Broker timed out",
+    "ibkr_auth" to "IBKR refused the login",
+    "ibkr_rate_limited" to "Rate limited by IBKR",
+    "ibkr_failed" to "IBKR request failed",
+    "broker_protocol" to "Unreadable broker answer",
+    "account_unsupported" to "Account not supported",
+    "data_refused" to "IBKR data refused",
+    "store_failed" to "Could not store the portfolio",
+    "socket_path_invalid" to "Broker socket path invalid",
+    "broker_account_missing" to "Broker account missing",
+    "broker_account_unsafe" to "Broker account unsafe",
+    // The broker's codes.
+    "auth_rejected" to "Rejected by IBKR",
+    "not_authenticated" to "Not signed in to IBKR",
+    "rate_limited" to "Rate limited by IBKR",
+    "upstream" to "IBKR request failed",
+    "busy" to "Broker busy",
+    "invalid_input" to "Invalid request",
+    "unknown" to "Unknown",
+)
+
+/** Label of an error code; null for a code this app does not know (shown as the code). */
+fun ibkrErrorLabel(code: String?): String? = if (code == null) "Unknown" else IBKR_ERRORS[code]
+
+fun ibkrBrokerage(session: String?): String = when (session) {
+    "open" -> "Open"
+    "closed" -> "Closed"
+    "competing" -> "In use elsewhere"
+    else -> "Unknown"
+}
+
+/** "14:05 · in 3m" ("14:05 · now" when due) in the device's time zone and locale; null when
+ *  not rate limited or the time is unreadable. */
+fun ibkrRateLimit(status: IbkrStatus, now: Long, zone: ZoneId = ZoneId.systemDefault(), locale: Locale = Locale.getDefault()): String? {
+    val iso = status.ibkr?.rateLimitedUntil ?: return null
+    val at = parseInstant(iso) ?: return null
+    val clock = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale).withZone(zone).format(Instant.ofEpochMilli(at))
+    return "$clock · ${untilTime(iso, now)}"
+}
+
+fun problemSeverity(severity: String?): Pair<Tone, String> = when (severity) {
+    "error" -> Tone.ERROR to "Error"
+    "warn" -> Tone.WARN to "Warning"
+    "info" -> Tone.IDLE to "Info"
+    else -> Tone.IDLE to "Unknown"
+}
 
 /** "3 of 9" style count of items with a truthy flag. */
 fun <T> countOf(list: List<T>, flag: (T) -> Boolean): String = "${list.count(flag)} of ${list.size}"

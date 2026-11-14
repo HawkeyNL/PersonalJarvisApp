@@ -11,6 +11,7 @@ import com.hawkeynl.jarvis.network.CodingSessionsResponse
 import com.hawkeynl.jarvis.network.DevicesResponse
 import com.hawkeynl.jarvis.network.HomeNodeEndpoint
 import com.hawkeynl.jarvis.network.IbkrPortfolio
+import com.hawkeynl.jarvis.network.IbkrStatus
 import com.hawkeynl.jarvis.network.ModelPolicyList
 import com.hawkeynl.jarvis.network.PairingRequestList
 import com.hawkeynl.jarvis.network.PendingResponse
@@ -43,6 +44,8 @@ data class CoreData(
     val registry: Availability<Registry> = Availability.Loading,
     val models: Availability<ModelPolicyList> = Availability.Loading,
     val ibkr: Availability<IbkrPortfolio> = Availability.Loading,
+    /** Unsupported on an older Core: the IBKR pane then infers the link from [ibkr]. */
+    val ibkrStatus: Availability<IbkrStatus> = Availability.Loading,
     val usage: Availability<SystemUsage> = Availability.Loading,
     val services: Availability<ServicesResponse> = Availability.Loading,
     val systemAudit: Availability<SystemAuditResponse> = Availability.Loading,
@@ -86,6 +89,13 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
     private val registry = source("/v1/system/registry", Registry.serializer()) { copy(registry = it) }
     private val models = source("/v1/system/models", ModelPolicyList.serializer()) { copy(models = it) }
     private val ibkr = source("/v1/trading/portfolio", IbkrPortfolio.serializer()) { copy(ibkr = it) }
+    // The page and the pane can read the status at once; only the latest read lands.
+    private var ibkrStatusRead = 0L
+    private val ibkrStatus: suspend (HomeNodeEndpoint) -> Unit = { endpoint ->
+        val read = ++ibkrStatusRead
+        val result = container.core.ibkrStatus(endpoint)
+        if (read == ibkrStatusRead) _state.update { it.copy(ibkrStatus = result) }
+    }
     private val usage = source("/v1/system/usage", SystemUsage.serializer()) { copy(usage = it) }
     private val services = source("/v1/system/services", ServicesResponse.serializer()) { copy(services = it) }
     private val systemAudit = source("/v1/system/audit", SystemAuditResponse.serializer()) { copy(systemAudit = it) }
@@ -96,7 +106,9 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
     fun refreshSettings() = refresh("settings", registry, devices, services)
     fun refreshAgents() = refresh("agents", agents)
     fun refreshTasks() = refresh("tasks", sessions, pending, agentAudit)
-    fun refreshIntegrations() = refresh("integrations", registry, models, ibkr)
+    fun refreshIntegrations() = refresh("integrations", registry, models, ibkr, ibkrStatus)
+    /** The IBKR pane's own refresh: only the status route (Core caches it 5 s). */
+    fun refreshIbkrStatus() = refresh("ibkr-status", ibkrStatus)
     fun refreshHealth() = refresh("health", registry, usage, services, systemAudit)
     fun refreshContext() = refresh("context", devices)
 

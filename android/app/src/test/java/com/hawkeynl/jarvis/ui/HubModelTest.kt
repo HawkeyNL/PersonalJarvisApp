@@ -6,7 +6,12 @@ import com.hawkeynl.jarvis.network.Availability
 import com.hawkeynl.jarvis.network.CodingSession
 import com.hawkeynl.jarvis.network.ConnectionState
 import com.hawkeynl.jarvis.network.DiskStatus
+import com.hawkeynl.jarvis.network.IbkrError
+import com.hawkeynl.jarvis.network.IbkrLink
 import com.hawkeynl.jarvis.network.IbkrPortfolio
+import com.hawkeynl.jarvis.network.IbkrProblem
+import com.hawkeynl.jarvis.network.IbkrStatus
+import com.hawkeynl.jarvis.network.IbkrToken
 import com.hawkeynl.jarvis.network.LinkedDevice
 import com.hawkeynl.jarvis.network.LiveHost
 import com.hawkeynl.jarvis.network.LoadFailure
@@ -15,6 +20,8 @@ import com.hawkeynl.jarvis.network.ServiceStatus
 import com.hawkeynl.jarvis.network.SoftwareItem
 import com.hawkeynl.jarvis.network.UnreachableReason
 import java.time.Instant
+import java.time.ZoneId
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -110,6 +117,108 @@ class HubModelTest {
         assertEquals(Tone.IDLE to "Requires newer Core", ibkrState(Availability.Unsupported, now))
         assertEquals(Tone.IDLE to "Loading…", ibkrState(Availability.Loading, now))
         assertFalse(IBKR_NOT_SYNCED.contains("gateway", ignoreCase = true))
+    }
+
+    @Test
+    fun `future time helper`() {
+        assertEquals("now", untilTime("2026-10-04T12:00:30Z", now))
+        assertEquals("in 4m", untilTime("2026-10-04T12:04:00Z", now))
+        assertEquals("in 3h", untilTime("2026-10-04T15:00:00+00:00", now))
+        assertEquals("in 2d", untilTime("2026-10-06T12:00:00Z", now))
+        assertEquals("now", untilTime("2026-10-04T11:00:00Z", now))
+        assertEquals("", untilTime("tomorrow", now))
+        assertEquals("", untilTime(null, now))
+    }
+
+    private val status = IbkrStatus(
+        overall = "ok", syncEnabled = true, syncState = "ok", lastSuccessAt = "2026-10-04T11:58:00Z", syncError = null,
+        service = "active", credentials = "present", reachable = true, token = null, ibkr = null, problems = emptyList(),
+    )
+    private val problem = IbkrProblem("token_expired", "info", "The IBKR session token expired.", emptyList())
+
+    @Test
+    fun `IBKR status header follows overall`() {
+        assertEquals(Tone.OK to "Connected", ibkrOverall(status))
+        assertEquals(Tone.OK to "Connected", ibkrOverall(status.copy(overall = "info")))
+        assertEquals(Tone.IDLE to "Needs attention", ibkrOverall(status.copy(overall = "info", problems = listOf(problem))))
+        assertEquals(Tone.WARN to "Needs attention", ibkrOverall(status.copy(overall = "warn")))
+        assertEquals(Tone.ERROR to "Not working", ibkrOverall(status.copy(overall = "error")))
+        assertEquals(Tone.IDLE to "Off", ibkrOverall(status.copy(overall = "off")))
+        assertEquals(Tone.IDLE to "Unknown", ibkrOverall(status.copy(overall = "later")))
+        assertEquals(Tone.IDLE to "Unknown", ibkrOverall(status.copy(overall = null)))
+    }
+
+    @Test
+    fun `IBKR broker and sync rows`() {
+        assertEquals(Tone.OK to "Running, reachable", ibkrBroker(status))
+        assertEquals(Tone.ERROR to "Running, not reachable", ibkrBroker(status.copy(reachable = false)))
+        assertEquals(Tone.OK to "Running", ibkrBroker(status.copy(reachable = null)))
+        assertEquals(Tone.WARN to "Stopped", ibkrBroker(status.copy(service = "inactive")))
+        assertEquals(Tone.IDLE to "Stopped", ibkrBroker(status.copy(service = "inactive", syncEnabled = false)))
+        assertEquals(Tone.ERROR to "Failed", ibkrBroker(status.copy(service = "failed")))
+        assertEquals(Tone.WARN to "Not installed", ibkrBroker(status.copy(service = "not_found")))
+        assertEquals(Tone.IDLE to "Unknown", ibkrBroker(status.copy(service = null)))
+        assertEquals(Tone.ERROR to "Credentials missing", ibkrBroker(status.copy(service = "failed", credentials = "missing")))
+
+        assertEquals(Tone.OK to "On · Syncing", ibkrSync(status))
+        assertEquals(Tone.IDLE to "On · Starting", ibkrSync(status.copy(syncState = "starting")))
+        assertEquals(Tone.WARN to "On · Failing", ibkrSync(status.copy(syncState = "failing")))
+        assertEquals(Tone.WARN to "On · Waiting for the broker", ibkrSync(status.copy(syncState = "waiting_for_broker")))
+        assertEquals(Tone.IDLE to "Off", ibkrSync(status.copy(syncState = "off", syncEnabled = false)))
+        assertEquals(Tone.ERROR to "Refused", ibkrSync(status.copy(syncState = "refused")))
+        assertEquals(Tone.IDLE to "On · Unknown", ibkrSync(status.copy(syncState = "later")))
+        assertEquals(Tone.IDLE to "Unknown", ibkrSync(status.copy(syncState = null, syncEnabled = null)))
+    }
+
+    @Test
+    fun `IBKR token, sync time, error, session and rate limit`() {
+        val token = IbkrToken("valid", true, "2026-10-04T09:00:00Z", "2026-10-05T09:00:00Z")
+        assertEquals("Valid · refreshed 3h ago · expires in 21h · usable", ibkrToken(token, now))
+        assertEquals("Refreshing soon", ibkrToken(IbkrToken("refresh_due", null, null, null), now))
+        assertEquals("Expired · expired 1h ago · not usable", ibkrToken(IbkrToken("expired", false, null, "2026-10-04T11:00:00Z"), now))
+        assertEquals("Rejected", ibkrToken(IbkrToken("rejected", null, null, null), now))
+        assertEquals("Not created yet", ibkrToken(IbkrToken("none", null, null, null), now))
+        assertEquals("Unknown", ibkrToken(IbkrToken("later", null, null, null), now))
+        assertEquals("Unknown", ibkrToken(null, now))
+
+        assertEquals("2m ago", ibkrLastSync(status, now))
+        assertEquals("Never", ibkrLastSync(status.copy(lastSuccessAt = null), now))
+
+        assertNull(ibkrLastError(status))
+        val sync = IbkrError("broker_timeout", "2026-10-04T10:00:00Z")
+        val broker = IbkrError("rate_limited", "2026-10-04T11:00:00Z")
+        assertEquals(broker, ibkrLastError(status.copy(syncError = sync, ibkr = IbkrLink(broker, null, "open"))))
+        assertEquals(sync, ibkrLastError(status.copy(syncError = sync)))
+        // A parseable time beats none; a tie keeps the sync's error.
+        assertEquals(broker, ibkrLastError(status.copy(syncError = IbkrError("broker_busy", null), ibkr = IbkrLink(broker, null, "open"))))
+        assertEquals(sync, ibkrLastError(status.copy(syncError = sync, ibkr = IbkrLink(sync.copy(code = "busy"), null, "open"))))
+        assertEquals("IBKR refused the login", ibkrErrorLabel("ibkr_auth"))
+        assertEquals("Unreadable broker answer", ibkrErrorLabel("broker_protocol"))
+        assertEquals("IBKR data refused", ibkrErrorLabel("data_refused"))
+        assertEquals("IBKR request failed", ibkrErrorLabel("upstream"))
+        assertEquals("Broker timed out", ibkrErrorLabel("broker_timeout"))
+        assertEquals("Rejected by IBKR", ibkrErrorLabel("auth_rejected"))
+        assertEquals("Unknown", ibkrErrorLabel("unknown"))
+        assertEquals("Unknown", ibkrErrorLabel(null))
+        assertNull(ibkrErrorLabel("future_code"))
+
+        assertEquals("Open", ibkrBrokerage("open"))
+        assertEquals("Closed", ibkrBrokerage("closed"))
+        assertEquals("In use elsewhere", ibkrBrokerage("competing"))
+        assertEquals("Unknown", ibkrBrokerage(null))
+
+        val utc = ZoneId.of("UTC")
+        assertNull(ibkrRateLimit(status, now, utc, Locale.UK))
+        assertNull(ibkrRateLimit(status.copy(ibkr = IbkrLink(null, null, "open")), now, utc, Locale.UK))
+        assertEquals("12:05 · in 5m", ibkrRateLimit(status.copy(ibkr = IbkrLink(null, "2026-10-04T12:05:00Z", "open")), now, utc, Locale.UK))
+        assertEquals("14:05 · in 5m", ibkrRateLimit(status.copy(ibkr = IbkrLink(null, "2026-10-04T12:05:00Z", "open")), now, ZoneId.of("Europe/Amsterdam"), Locale.UK))
+        assertEquals("11:59 · now", ibkrRateLimit(status.copy(ibkr = IbkrLink(null, "2026-10-04T11:59:00Z", "open")), now, utc, Locale.UK))
+        assertNull(ibkrRateLimit(status.copy(ibkr = IbkrLink(null, "soon", "open")), now, utc, Locale.UK))
+
+        assertEquals(Tone.ERROR to "Error", problemSeverity("error"))
+        assertEquals(Tone.WARN to "Warning", problemSeverity("warn"))
+        assertEquals(Tone.IDLE to "Info", problemSeverity("info"))
+        assertEquals(Tone.IDLE to "Unknown", problemSeverity("later"))
     }
 
     @Test

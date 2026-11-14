@@ -2,7 +2,11 @@ package com.hawkeynl.jarvis.network
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 
 // Read-only owner endpoints shown on the hub and node pages. Every field the
 // app does not strictly need has a default, so an older or newer Core shape
@@ -167,6 +171,85 @@ data class ModelPolicyList(val models: List<PolicyModel> = emptyList())
 /** The part of GET /v1/trading/portfolio the Integrations page shows. */
 @Serializable
 data class IbkrPortfolio(val as_of: String = "", val positions: List<JsonElement> = emptyList())
+
+/** One error of the sync or the broker: a code from Core's fixed list and when. */
+data class IbkrError(val code: String?, val at: String?)
+
+/** Something to fix: [commands] are for the owner to copy, never run, linked or opened. */
+data class IbkrProblem(val code: String?, val severity: String?, val summary: String?, val commands: List<String>)
+
+data class IbkrToken(val state: String?, val usable: Boolean?, val refreshedAt: String?, val expiresAt: String?)
+
+data class IbkrLink(val lastError: IbkrError?, val rateLimitedUntil: String?, val brokerageSession: String?)
+
+/** The part of GET /v1/trading/ibkr/status the Integrations page shows. Every field may be
+ *  null: a missing, mistyped or oversized value reads as unknown, never as a failed pane. */
+data class IbkrStatus(
+    val overall: String?,
+    val syncEnabled: Boolean?,
+    val syncState: String?,
+    val lastSuccessAt: String?,
+    val syncError: IbkrError?,
+    val service: String?,
+    val credentials: String?,
+    val reachable: Boolean?,
+    val token: IbkrToken?,
+    val ibkr: IbkrLink?,
+    val problems: List<IbkrProblem>,
+)
+
+object IbkrStatusLimits {
+    /** Core sends at most 8 problems. */
+    const val PROBLEMS = 8
+    const val COMMANDS = 8
+    const val TEXT = 500
+    /** Core's answer is a few KiB; anything larger is refused. */
+    const val BYTES = 64 * 1024
+}
+
+private val IBKR_CODE = Regex("^[a-z0-9_]{1,64}$")
+private val CONTROL = Regex("\\p{Cntrl}")
+
+private fun JsonObject.ibkrObj(key: String) = this[key] as? JsonObject
+private fun JsonObject.ibkrBool(key: String) = (this[key] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
+
+/** A short single-line string, else null. */
+private fun JsonObject.ibkrStr(key: String, max: Int = 64): String? =
+    (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() && it.length <= max && !CONTROL.containsMatchIn(it) }
+
+private fun JsonObject.ibkrCode(key: String) = ibkrStr(key)?.takeIf { IBKR_CODE.matches(it) }
+
+private fun JsonObject.ibkrError(key: String) = ibkrObj(key)?.let { IbkrError(it.ibkrCode("code"), it.ibkrStr("at")) }
+
+/** The status route's answer; null only when it is not a JSON object. */
+fun readIbkrStatus(json: JsonElement): IbkrStatus? {
+    val o = json as? JsonObject ?: return null
+    val sync = o.ibkrObj("sync")
+    val broker = o.ibkrObj("broker")
+    val problems = (o["problems"] as? JsonArray).orEmpty().take(IbkrStatusLimits.PROBLEMS).filterIsInstance<JsonObject>().map { p ->
+        IbkrProblem(
+            p.ibkrCode("code"), p.ibkrCode("severity"), p.ibkrStr("summary", IbkrStatusLimits.TEXT),
+            (p["commands"] as? JsonArray).orEmpty().take(IbkrStatusLimits.COMMANDS).mapNotNull { c ->
+                // A command with a line break could paste as two; it is dropped, not shown.
+                (c as? JsonPrimitive)?.takeIf { it.isString }?.content
+                    ?.takeIf { it.isNotBlank() && it.length <= IbkrStatusLimits.TEXT && !CONTROL.containsMatchIn(it) }
+            },
+        )
+    }
+    return IbkrStatus(
+        overall = o.ibkrCode("overall"),
+        syncEnabled = sync?.ibkrBool("enabled"),
+        syncState = sync?.ibkrCode("state"),
+        lastSuccessAt = sync?.ibkrStr("last_success_at"),
+        syncError = sync?.ibkrError("last_error"),
+        service = broker?.ibkrCode("service"),
+        credentials = broker?.ibkrCode("credentials"),
+        reachable = broker?.ibkrBool("reachable"),
+        token = o.ibkrObj("token")?.let { IbkrToken(it.ibkrCode("state"), it.ibkrBool("usable"), it.ibkrStr("refreshed_at"), it.ibkrStr("expires_at")) },
+        ibkr = o.ibkrObj("ibkr")?.let { IbkrLink(it.ibkrError("last_error"), it.ibkrStr("rate_limited_until"), it.ibkrCode("brokerage_session")) },
+        problems = problems,
+    )
+}
 
 @Serializable
 data class BackendUsage(val backend: String = "", val spent_eur: Double = 0.0, val total_tokens: Long = 0)
