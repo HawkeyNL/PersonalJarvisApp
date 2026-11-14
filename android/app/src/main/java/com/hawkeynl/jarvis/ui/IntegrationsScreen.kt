@@ -34,6 +34,7 @@ import com.hawkeynl.jarvis.network.IbkrError
 import com.hawkeynl.jarvis.network.IbkrProblem
 import com.hawkeynl.jarvis.network.LoadFailure
 import com.hawkeynl.jarvis.network.valueOrNull
+import kotlinx.coroutines.delay
 
 private val INTEGRATION_DETAILS = mapOf(
     "brains" to "The brains Core found on your Home Node. Ready means it is set up, not that it is in use.",
@@ -147,9 +148,8 @@ private fun IbkrPane(data: CoreData, onRefresh: () -> Unit, onRefreshStatus: () 
     Loaded(data.ibkrStatus, "IBKR", JvIcon.TREND, "Checking the IBKR link…", onRetry = onRefreshStatus) { s ->
         val now = data.loadedAt
         val (tone, label) = ibkrOverall(s)
-        ListSection("IBKR link") {
-            FactRow("Status", label, tone)
-            ListDivider()
+        StatusBadge(label, Modifier.padding(horizontal = JvSpace.xs), tone = tone)
+        ListSection(null) {
             val (brokerTone, broker) = ibkrBroker(s)
             FactRow("Broker", broker, brokerTone)
             ListDivider()
@@ -173,13 +173,16 @@ private fun IbkrPane(data: CoreData, onRefresh: () -> Unit, onRefreshStatus: () 
             }
         }
         if (s.ibkr != null) MutedText("The brokerage session is only needed for charts.", Modifier.padding(horizontal = JvSpace.xs))
-        if (s.problems.isNotEmpty()) {
-            ListSection("What to fix") {
-                s.problems.forEachIndexed { i, problem ->
-                    if (i > 0) ListDivider()
-                    ProblemRow(problem)
-                }
+        ListSection("What to fix") {
+            if (s.problems.isEmpty()) {
+                Text("Nothing to fix.", Modifier.padding(horizontal = JvSpace.lg, vertical = JvSpace.md), style = MaterialTheme.typography.bodyMedium)
             }
+            s.problems.forEachIndexed { i, problem ->
+                if (i > 0) ListDivider()
+                ProblemRow(problem)
+            }
+        }
+        if (s.problems.any { it.commands.isNotEmpty() }) {
             MutedText("Run these yourself on the Home Node. Jarvis never runs them.", Modifier.padding(horizontal = JvSpace.xs))
         }
         GhostButton("Refresh", onRefreshStatus)
@@ -225,6 +228,12 @@ private fun ProblemRow(problem: IbkrProblem) {
 private fun CommandRow(command: String) {
     val context = LocalContext.current
     var copied by remember(command) { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(2_000)
+            copied = false
+        }
+    }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
         SelectionContainer(Modifier.weight(1f)) {
             Text(command, fontFamily = PlexMono, style = MaterialTheme.typography.bodySmall)
@@ -232,8 +241,12 @@ private fun CommandRow(command: String) {
         GhostButton(
             if (copied) "Copied" else "Copy",
             {
-                context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Command", command))
-                copied = true
+                // A failed copy stays "Copy"; the command stays selectable.
+                copied = runCatching {
+                    val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return@runCatching false
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Command", command))
+                    true
+                }.getOrDefault(false)
             },
             Modifier.semantics { contentDescription = "Copy command: $command" },
         )

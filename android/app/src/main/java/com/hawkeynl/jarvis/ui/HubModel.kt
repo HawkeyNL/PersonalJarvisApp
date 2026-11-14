@@ -93,13 +93,12 @@ fun relativeTime(iso: String?, now: Long): String {
     }
 }
 
-/** "in under a minute", "in 4m", "in 3h", "in 2d"; "" for an unparseable time. A past
- *  time reads as "in under a minute". */
+/** "in 4m", "in 3h", "in 2d"; "now" within a minute or when past; "" for an unparseable time. */
 fun untilTime(iso: String?, now: Long): String {
     val at = parseInstant(iso) ?: return ""
-    val diff = maxOf(0L, at - now)
+    val diff = at - now
     return when {
-        diff < MINUTE -> "in under a minute"
+        diff < MINUTE -> "now"
         diff < HOUR -> "in ${diff / MINUTE}m"
         diff < DAY -> "in ${diff / HOUR}h"
         else -> "in ${diff / DAY}d"
@@ -318,7 +317,8 @@ fun ibkrToken(token: IbkrToken?, now: Long): String {
 fun ibkrLastSync(status: IbkrStatus, now: Long): String =
     if (status.lastSuccessAt == null) "Never" else relativeTime(status.lastSuccessAt, now).ifEmpty { "Unknown" }
 
-/** The most recent error of the sync and the broker; null when there is none. */
+/** The most recent error of the sync and the broker (a parseable time beats none; a tie
+ *  keeps the sync's); null when there is none. */
 fun ibkrLastError(status: IbkrStatus): IbkrError? =
     listOfNotNull(status.syncError, status.ibkr?.lastError).maxByOrNull { parseInstant(it.at) ?: Long.MIN_VALUE }
 
@@ -328,12 +328,12 @@ private val IBKR_ERRORS = mapOf(
     "broker_unavailable" to "Broker unavailable",
     "broker_busy" to "Broker busy",
     "broker_timeout" to "Broker timed out",
-    "ibkr_auth" to "IBKR sign-in failed",
+    "ibkr_auth" to "IBKR refused the login",
     "ibkr_rate_limited" to "Rate limited by IBKR",
     "ibkr_failed" to "IBKR request failed",
-    "broker_protocol" to "Broker answer not readable",
+    "broker_protocol" to "Unreadable broker answer",
     "account_unsupported" to "Account not supported",
-    "data_refused" to "Data refused",
+    "data_refused" to "IBKR data refused",
     "store_failed" to "Could not store the portfolio",
     "socket_path_invalid" to "Broker socket path invalid",
     "broker_account_missing" to "Broker account missing",
@@ -342,7 +342,7 @@ private val IBKR_ERRORS = mapOf(
     "auth_rejected" to "Rejected by IBKR",
     "not_authenticated" to "Not signed in to IBKR",
     "rate_limited" to "Rate limited by IBKR",
-    "upstream" to "IBKR error",
+    "upstream" to "IBKR request failed",
     "busy" to "Broker busy",
     "invalid_input" to "Invalid request",
     "unknown" to "Unknown",
@@ -358,10 +358,11 @@ fun ibkrBrokerage(session: String?): String = when (session) {
     else -> "Unknown"
 }
 
-/** "14:05 · in 3m" in the device's time zone and locale; null when not rate limited. */
+/** "14:05 · in 3m" ("14:05 · now" when due) in the device's time zone and locale; null when
+ *  not rate limited or the time is unreadable. */
 fun ibkrRateLimit(status: IbkrStatus, now: Long, zone: ZoneId = ZoneId.systemDefault(), locale: Locale = Locale.getDefault()): String? {
     val iso = status.ibkr?.rateLimitedUntil ?: return null
-    val at = parseInstant(iso) ?: return "Unknown"
+    val at = parseInstant(iso) ?: return null
     val clock = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale).withZone(zone).format(Instant.ofEpochMilli(at))
     return "$clock · ${untilTime(iso, now)}"
 }

@@ -121,11 +121,11 @@ class HubModelTest {
 
     @Test
     fun `future time helper`() {
-        assertEquals("in under a minute", untilTime("2026-10-04T12:00:30Z", now))
+        assertEquals("now", untilTime("2026-10-04T12:00:30Z", now))
         assertEquals("in 4m", untilTime("2026-10-04T12:04:00Z", now))
         assertEquals("in 3h", untilTime("2026-10-04T15:00:00+00:00", now))
         assertEquals("in 2d", untilTime("2026-10-06T12:00:00Z", now))
-        assertEquals("in under a minute", untilTime("2026-10-04T11:00:00Z", now))
+        assertEquals("now", untilTime("2026-10-04T11:00:00Z", now))
         assertEquals("", untilTime("tomorrow", now))
         assertEquals("", untilTime(null, now))
     }
@@ -189,6 +189,13 @@ class HubModelTest {
         val broker = IbkrError("rate_limited", "2026-10-04T11:00:00Z")
         assertEquals(broker, ibkrLastError(status.copy(syncError = sync, ibkr = IbkrLink(broker, null, "open"))))
         assertEquals(sync, ibkrLastError(status.copy(syncError = sync)))
+        // A parseable time beats none; a tie keeps the sync's error.
+        assertEquals(broker, ibkrLastError(status.copy(syncError = IbkrError("broker_busy", null), ibkr = IbkrLink(broker, null, "open"))))
+        assertEquals(sync, ibkrLastError(status.copy(syncError = sync, ibkr = IbkrLink(sync.copy(code = "busy"), null, "open"))))
+        assertEquals("IBKR refused the login", ibkrErrorLabel("ibkr_auth"))
+        assertEquals("Unreadable broker answer", ibkrErrorLabel("broker_protocol"))
+        assertEquals("IBKR data refused", ibkrErrorLabel("data_refused"))
+        assertEquals("IBKR request failed", ibkrErrorLabel("upstream"))
         assertEquals("Broker timed out", ibkrErrorLabel("broker_timeout"))
         assertEquals("Rejected by IBKR", ibkrErrorLabel("auth_rejected"))
         assertEquals("Unknown", ibkrErrorLabel("unknown"))
@@ -205,7 +212,8 @@ class HubModelTest {
         assertNull(ibkrRateLimit(status.copy(ibkr = IbkrLink(null, null, "open")), now, utc, Locale.UK))
         assertEquals("12:05 · in 5m", ibkrRateLimit(status.copy(ibkr = IbkrLink(null, "2026-10-04T12:05:00Z", "open")), now, utc, Locale.UK))
         assertEquals("14:05 · in 5m", ibkrRateLimit(status.copy(ibkr = IbkrLink(null, "2026-10-04T12:05:00Z", "open")), now, ZoneId.of("Europe/Amsterdam"), Locale.UK))
-        assertEquals("Unknown", ibkrRateLimit(status.copy(ibkr = IbkrLink(null, "soon", "open")), now, utc, Locale.UK))
+        assertEquals("11:59 · now", ibkrRateLimit(status.copy(ibkr = IbkrLink(null, "2026-10-04T11:59:00Z", "open")), now, utc, Locale.UK))
+        assertNull(ibkrRateLimit(status.copy(ibkr = IbkrLink(null, "soon", "open")), now, utc, Locale.UK))
 
         assertEquals(Tone.ERROR to "Error", problemSeverity("error"))
         assertEquals(Tone.WARN to "Warning", problemSeverity("warn"))

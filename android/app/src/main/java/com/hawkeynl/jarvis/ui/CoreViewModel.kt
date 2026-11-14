@@ -89,9 +89,12 @@ class CoreViewModel(private val container: AppContainer) : ViewModel() {
     private val registry = source("/v1/system/registry", Registry.serializer()) { copy(registry = it) }
     private val models = source("/v1/system/models", ModelPolicyList.serializer()) { copy(models = it) }
     private val ibkr = source("/v1/trading/portfolio", IbkrPortfolio.serializer()) { copy(ibkr = it) }
+    // The page and the pane can read the status at once; only the latest read lands.
+    private var ibkrStatusRead = 0L
     private val ibkrStatus: suspend (HomeNodeEndpoint) -> Unit = { endpoint ->
+        val read = ++ibkrStatusRead
         val result = container.core.ibkrStatus(endpoint)
-        _state.update { it.copy(ibkrStatus = result) }
+        if (read == ibkrStatusRead) _state.update { it.copy(ibkrStatus = result) }
     }
     private val usage = source("/v1/system/usage", SystemUsage.serializer()) { copy(usage = it) }
     private val services = source("/v1/system/services", ServicesResponse.serializer()) { copy(services = it) }
