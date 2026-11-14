@@ -140,6 +140,12 @@ actor ChatService {
         try await api.runJobNow(id: id, token: token, expectedBinding: binding)
     }
 
+    func deleteJob(_ id: UUID, revision: Int) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.deleteJob(id: id, revision: revision, token: token, expectedBinding: binding)
+    }
+
     // Roadmap writes (Roadmaps pages), bound to the current Home Node like the job writes.
     func createRoadmap(_ body: NewRoadmap) async throws -> CreatedRoadmap {
         let binding = await api.binding()

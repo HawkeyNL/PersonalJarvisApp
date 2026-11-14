@@ -206,7 +206,7 @@ enum WebAnswer {
     /// One https URL with an ASCII host and no user info, bare or titled, like Core's Sources
     /// filter. A non-ASCII (IDN) host is refused, as on Android, so a look-alike host never
     /// shows on a card.
-    private static func httpsSource(_ line: Substring) -> Source? {
+    static func httpsSource(_ line: Substring) -> Source? {
         let candidate = line.trimmingCharacters(in: .whitespaces).drop(while: { $0 == "-" || $0 == "*" }).drop(while: \.isWhitespace)
         let titled = titledLink(candidate)
         let text = titled?.url ?? candidate

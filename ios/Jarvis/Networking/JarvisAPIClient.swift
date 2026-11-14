@@ -243,8 +243,8 @@ actor JarvisAPIClient {
     }
 
     // The only bearer-only DELETEs: this device's own APNs push target, the owner's own chat
-    // data (a conversation, a photo), roadmap items, manual holdings, and archiving a roadmap
-    // (Core deletes nothing). A device is revoked with a signed approval, never with a
+    // data (a conversation, a photo), scheduled jobs, roadmap items, manual holdings, and
+    // archiving a roadmap (Core deletes nothing). A device is revoked with a signed approval, never with a
     // bearer-only DELETE.
     func deletePushTarget(token: String, expectedBinding: UUID) async throws {
         try await delete("/v1/devices/self/push", token: token, expectedBinding: expectedBinding)
@@ -271,21 +271,30 @@ actor JarvisAPIClient {
                           expectedBinding: expectedBinding, limit: 4 * 1024, resourceTimeout: 120, response: PhotoUpload.self)
     }
 
-    // Scheduled jobs (desktop jobsApi.ts). The answers are not needed: the page reloads.
+    // Scheduled jobs (desktop jobsApi.ts). A create or change answers with the job; one
+    // that does not read as a job throws `invalidResponse` ("Not confirmed"). The page reloads.
     func createJob(_ body: NewJob, token: String, expectedBinding: UUID) async throws {
-        _ = try await request(path: "/v1/jobs", method: "POST", body: body, token: token,
-                              expectedBinding: expectedBinding, limit: 64 * 1024, response: EmptyOrJSON.self)
+        let job = try await request(path: "/v1/jobs", method: "POST", body: body, token: token,
+                                    expectedBinding: expectedBinding, limit: 64 * 1024, response: ScheduledJob.self)
+        guard Jobs.valid(job) else { throw JarvisAPIError.invalidResponse }
     }
 
     /// Core answers 409 when the job moved past `revision`.
     func updateJob(id: UUID, revision: Int, patch: JobPatch, token: String, expectedBinding: UUID) async throws {
-        _ = try await request(path: "/v1/jobs/\(id.uuidString.lowercased())?expected_revision=\(revision)", method: "PATCH",
-                              body: patch, token: token, expectedBinding: expectedBinding, limit: 64 * 1024, response: EmptyOrJSON.self)
+        let job = try await request(path: "\(Jobs.jobPath(id))?expected_revision=\(revision)", method: "PATCH",
+                                    body: patch, token: token, expectedBinding: expectedBinding, limit: 64 * 1024, response: ScheduledJob.self)
+        guard Jobs.valid(job), job.id == id else { throw JarvisAPIError.invalidResponse }
+    }
+
+    /// Deletes the job and its runs; its conversation stays. Core answers 409 when the job
+    /// moved past `revision`.
+    func deleteJob(id: UUID, revision: Int, token: String, expectedBinding: UUID) async throws {
+        try await delete("\(Jobs.jobPath(id))?expected_revision=\(revision)", token: token, expectedBinding: expectedBinding)
     }
 
     /// 202 when queued; 429 within an hour of the last owner run.
     func runJobNow(id: UUID, token: String, expectedBinding: UUID) async throws {
-        _ = try await request(path: "/v1/jobs/\(id.uuidString.lowercased())/run", method: "POST", body: [String: String](),
+        _ = try await request(path: "\(Jobs.jobPath(id))/run", method: "POST", body: [String: String](),
                               token: token, expectedBinding: expectedBinding, limit: 64 * 1024, response: EmptyOrJSON.self)
     }
 

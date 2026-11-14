@@ -243,6 +243,10 @@ final class JarvisAppModel: ObservableObject {
 
     func runJobNow(_ id: UUID) async throws { try await ownerWrite { try await self.chat.runJobNow(id) } }
 
+    func deleteJob(_ id: UUID, revision: Int) async throws {
+        try await ownerWrite { try await self.chat.deleteJob(id, revision: revision) }
+    }
+
     /// The new roadmap's id, when Core's answer names it.
     func createRoadmap(_ body: NewRoadmap) async throws -> UUID? { try await ownerWrite { try await self.chat.createRoadmap(body) }.id }
 
