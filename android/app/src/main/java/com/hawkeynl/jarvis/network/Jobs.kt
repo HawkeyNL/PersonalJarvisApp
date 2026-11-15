@@ -22,6 +22,8 @@ import kotlinx.serialization.json.put
 
 const val JOBS_TIME_ZONE = "Europe/Amsterdam"
 const val JOBS_NEED_CORE = "Needs Jarvis Core v0.0.87 or later."
+/** The morning check came with this Core; an older one refuses it with 422 ([KIND_NOT_KNOWN]). */
+const val HEALTH_REVIEW_NEEDS_CORE = "Needs Jarvis Core v0.0.90 or later."
 
 enum class JobKind(val wire: String, val label: String, val detail: String) {
     DEPENDENCY_REVIEW(
@@ -31,10 +33,17 @@ enum class JobKind(val wire: String, val label: String, val detail: String) {
     PROMPT("prompt", "Research", "Searches the web for your instruction and posts the answer to the job's conversation."),
     REMINDER("reminder", "Reminder", "Posts your text to the job's conversation and sends you a push with the title."),
     DISK_CHECK("disk_check", "Disk check", "Tells you when a Home Node disk is fuller than the threshold. It changes nothing on the host."),
+    HEALTH_REVIEW(
+        "health_review", "Morning check",
+        "Every morning Jarvis checks Core's own health and proposes things to fix on a roadmap you pick.",
+    ),
 }
 
 /** The kinds made from "New job"; a dependency review keeps its own set-up card. */
 val OWNER_KINDS = listOf(JobKind.PROMPT, JobKind.REMINDER, JobKind.DISK_CHECK)
+/** One of each at most, each with its own set-up card: daily or weekly, an optional roadmap,
+ *  and not counted towards [MAX_OWNER_JOBS]. */
+val SINGLETON_KINDS = listOf(JobKind.DEPENDENCY_REVIEW, JobKind.HEALTH_REVIEW)
 /** Core's room for the owner's jobs of [OWNER_KINDS]. */
 const val MAX_OWNER_JOBS = 10
 
@@ -42,9 +51,10 @@ enum class Cadence(val wire: String, val label: String) {
     ONCE("once", "Once"), DAILY("daily", "Daily"), WEEKLY("weekly", "Weekly"), MONTHLY("monthly", "Monthly"),
 }
 
-/** A dependency review keeps the schedules it had: daily or weekly, nothing more. */
+/** A dependency review keeps the schedules it had: daily or weekly, nothing more; so does a
+ *  morning check. */
 fun cadencesOf(kind: JobKind): List<Cadence> =
-    if (kind == JobKind.DEPENDENCY_REVIEW) listOf(Cadence.WEEKLY, Cadence.DAILY) else Cadence.entries
+    if (kind in SINGLETON_KINDS) listOf(Cadence.WEEKLY, Cadence.DAILY) else Cadence.entries
 
 val WEEKDAYS = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
@@ -320,7 +330,7 @@ fun stateText(job: Job): String = when {
 fun nextRunText(job: Job): String = if (!job.enabled) stateText(job) else job.nextRunAt?.let(::zonedText) ?: "Not scheduled"
 
 /** The owner's jobs that count towards [MAX_OWNER_JOBS]. */
-fun ownerJobCount(jobs: List<Job>): Int = jobs.count { !it.byJarvis && it.kind != JobKind.DEPENDENCY_REVIEW }
+fun ownerJobCount(jobs: List<Job>): Int = jobs.count { !it.byJarvis && it.kind !in SINGLETON_KINDS }
 /** [unsupported]: jobs this build cannot show; Core may count them too. */
 fun jobCountText(jobs: List<Job>, unsupported: Int = 0): String =
     "${ownerJobCount(jobs)} of $MAX_OWNER_JOBS jobs" + if (unsupported > 0) ", not counting any this app cannot show" else ""
@@ -348,7 +358,8 @@ data class JobDraft(
     val notify: Boolean = true, val threshold: String = "80",
 )
 
-fun newDraft(kind: JobKind) = JobDraft(kind)
+/** A morning check starts daily at 07:00 (Core's default); the others weekly. */
+fun newDraft(kind: JobKind) = JobDraft(kind, cadence = if (kind == JobKind.HEALTH_REVIEW) Cadence.DAILY else Cadence.WEEKLY)
 fun toDraft(job: Job) = JobDraft(
     job.kind, job.cadence, job.weekday ?: 1, job.monthDay ?: 1, "${job.every}", job.startDate.orEmpty(), job.maxRuns?.toString().orEmpty(),
     minuteToTime(job.atMinute), job.enabled, job.params.roadmapId, job.params.title.orEmpty(), job.params.instruction.orEmpty(),
@@ -370,7 +381,7 @@ fun everyUnit(cadence: Cadence): String = when (cadence) {
 }
 
 /** Whether the editor shows the repeat fields (every, start date, stop after). */
-fun hasRecurrence(kind: JobKind): Boolean = kind != JobKind.DEPENDENCY_REVIEW
+fun hasRecurrence(kind: JobKind): Boolean = kind !in SINGLETON_KINDS
 
 /** What Core would refuse, in the owner's words (Core's bounds); null when the draft is fine. */
 fun draftError(d: JobDraft, today: LocalDate = jobsToday()): String? {
@@ -378,7 +389,7 @@ fun draftError(d: JobDraft, today: LocalDate = jobsToday()): String? {
     if (d.kind == JobKind.PROMPT && !validText(d.instruction, 500)) return "Say what to research in 1 to 500 characters on one line."
     if (d.kind == JobKind.REMINDER && d.text.isNotBlank() && !validText(d.text, 500)) return "The text can be at most 500 characters on one line."
     if (d.kind == JobKind.DISK_CHECK && d.threshold.trim().toIntOrNull() !in 50..99) return "Pick a threshold from 50 to 99 percent."
-    if (d.cadence !in cadencesOf(d.kind)) return "A dependency review runs daily or weekly."
+    if (d.cadence !in cadencesOf(d.kind)) return "A ${d.kind.label.lowercase()} runs daily or weekly."
     if (timeToMinute(d.time) == null) return "Pick a time of day."
     if (!hasRecurrence(d.kind)) return null
     val most = mostEvery(d.cadence)
@@ -398,7 +409,7 @@ fun draftError(d: JobDraft, today: LocalDate = jobsToday()): String? {
 
 private fun JobDraft.paramsJson(): JsonObject = buildJsonObject {
     when (kind) {
-        JobKind.DEPENDENCY_REVIEW -> roadmapId?.let { put("roadmap_id", it) }
+        JobKind.DEPENDENCY_REVIEW, JobKind.HEALTH_REVIEW -> roadmapId?.let { put("roadmap_id", it) }
         JobKind.PROMPT -> { put("title", title.trim()); put("instruction", instruction.trim()); put("notify", notify) }
         JobKind.REMINDER -> { put("title", title.trim()); text.trim().takeIf { it.isNotEmpty() }?.let { put("text", it) } }
         JobKind.DISK_CHECK -> put("threshold_percent", threshold.trim().toInt())
@@ -478,6 +489,8 @@ private val ERROR_TEXT = mapOf(
     "roadmap_changed" to "The roadmap changed while the run read it. The next run proposes again.",
     "roadmap_limit" to "The roadmap holds its maximum of items or pending proposals, so no proposal was made.",
     "roadmap_proposal_failed" to "The roadmap proposal could not be made.",
+    "signals_unavailable" to "Core could not read any of its own signals.",
+    "source_unavailable" to "Some signals could not be read; the rest were checked.",
 )
 
 /** Where a code means something else for one kind of job. */
@@ -553,7 +566,7 @@ fun runNowFailureText(result: ApiResult<*>): String = when {
 const val CHANGED_ELSEWHERE = "Changed elsewhere, reloaded."
 
 /** A create Core refused as unreadable (422): a Core before v0.0.87 knows only the dependency
- *  review and refuses a body with a kind it does not know. */
+ *  review (one before v0.0.90 no morning check) and refuses a body with a kind it does not know. */
 const val KIND_NOT_KNOWN = "Not saved: your Core does not know this kind of job yet. Update Core on your Home Node."
 
 const val INVALID_TEXT =
@@ -564,7 +577,7 @@ const val INVALID_TEXT =
 fun writeFailureText(result: ApiResult<*>, update: Boolean, kind: JobKind = JobKind.DEPENDENCY_REVIEW): String = when {
     result is ApiResult.HttpError && result.status == 409 -> when {
         update -> CHANGED_ELSEWHERE
-        kind == JobKind.DEPENDENCY_REVIEW -> "Core refused this: a dependency review already exists."
+        kind in SINGLETON_KINDS -> "Core refused this: a ${kind.label.lowercase()} already exists."
         else -> "Core refused this. $JOBS_FULL_TEXT"
     }
     result is ApiResult.HttpError && result.status == 400 -> INVALID_TEXT

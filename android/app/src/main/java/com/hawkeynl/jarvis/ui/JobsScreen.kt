@@ -40,6 +40,7 @@ import com.hawkeynl.jarvis.chat.Source
 import com.hawkeynl.jarvis.network.ApiResult
 import com.hawkeynl.jarvis.network.Cadence
 import com.hawkeynl.jarvis.network.Fact
+import com.hawkeynl.jarvis.network.HEALTH_REVIEW_NEEDS_CORE
 import com.hawkeynl.jarvis.network.JOBS_FULL_TEXT
 import com.hawkeynl.jarvis.network.JOBS_NOT_CONFIGURED
 import com.hawkeynl.jarvis.network.JOBS_TIME_ZONE
@@ -56,6 +57,7 @@ import com.hawkeynl.jarvis.network.Priority
 import com.hawkeynl.jarvis.network.Roadmap
 import com.hawkeynl.jarvis.network.RunDetail
 import com.hawkeynl.jarvis.network.RunStatus
+import com.hawkeynl.jarvis.network.SINGLETON_KINDS
 import com.hawkeynl.jarvis.network.WEEKDAYS
 import com.hawkeynl.jarvis.network.cadencesOf
 import com.hawkeynl.jarvis.network.deleteFailureText
@@ -217,15 +219,17 @@ private fun JobListPage(actions: JarvisViewModel, back: () -> Unit, open: (Strin
                 }
                 shown.rows.forEach { row -> JobCard(row) { open(row.job.id) } }
                 if (shown.list.unsupported > 0) Warning(unsupportedText(shown.list.unsupported))
-                val review = JobKind.DEPENDENCY_REVIEW
-                if (shown.rows.none { it.job.kind == review }) {
-                    ListSection(review.label) {
+                // A set-up card for each one-of-a-kind job that does not exist yet.
+                SINGLETON_KINDS.filter { kind -> shown.rows.none { it.job.kind == kind } }.forEach { kind ->
+                    val health = kind == JobKind.HEALTH_REVIEW
+                    ListSection(kind.label) {
                         Column(Modifier.padding(JvSpace.lg), verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
-                            MutedText(review.detail)
-                            if (creating == review) {
-                                JobForm(actions, newDraft(review), creating = true, busy, "Set up", onCancel = { creating = null; error = "" }, onSave = ::create)
+                            MutedText(kind.detail)
+                            if (creating == kind) {
+                                JobForm(actions, newDraft(kind), creating = true, busy, "Set up", onCancel = { creating = null; error = "" }, onSave = ::create)
                             } else {
-                                ActionButton("Set up", { creating = review; error = "" })
+                                if (health) MutedText(HEALTH_REVIEW_NEEDS_CORE)
+                                ActionButton(if (health) "Set up the morning check" else "Set up", { creating = kind; error = "" })
                             }
                         }
                     }
@@ -576,7 +580,7 @@ internal fun JobForm(
     // null while loading or when the roadmaps could not be read.
     var choices by remember { mutableStateOf<List<Roadmap>?>(null) }
     var choicesFailed by remember { mutableStateOf(false) }
-    if (initial.kind == JobKind.DEPENDENCY_REVIEW) {
+    if (initial.kind in SINGLETON_KINDS) {
         LaunchedEffect(Unit) {
             val result = actions.jobs { e, t -> roadmaps(e, t) } ?: return@LaunchedEffect
             choices = (result as? ApiResult.Success)?.value?.filter { it.archivedAt == null }
@@ -607,7 +611,8 @@ internal fun JobForm(
             }
             JobKind.DISK_CHECK ->
                 Field("Threshold", draft.threshold, { edit(draft.copy(threshold = it)) }, "You hear about a disk at or above this. 50 to 99.", number = true, suffix = "%")
-            JobKind.DEPENDENCY_REVIEW -> {
+            JobKind.DEPENDENCY_REVIEW, JobKind.HEALTH_REVIEW -> {
+                val health = draft.kind == JobKind.HEALTH_REVIEW
                 val list = choices
                 val chosen = draft.roadmapId
                 val options = buildList<Pair<String?, String>> {
@@ -618,11 +623,15 @@ internal fun JobForm(
                     list?.forEach { add(it.id to it.title) }
                 }
                 Picker(
-                    "Propose upgrades to a roadmap (optional)", options, chosen, { edit(draft.copy(roadmapId = it)) },
+                    if (health) "Put things to fix on a roadmap (optional)" else "Propose upgrades to a roadmap (optional)",
+                    options, chosen, { edit(draft.copy(roadmapId = it)) },
                     enabled = list != null || chosen != null,
                 )
                 if (choicesFailed) ErrorText("Roadmaps could not be loaded.", live = false)
-                MutedText("Each run then proposes one item per fixable alert. You accept or reject the proposal on the roadmap.")
+                MutedText(
+                    if (health) "Each run then proposes the things to fix. You accept or reject the proposal on the roadmap. Without a roadmap, a run only records its summary."
+                    else "Each run then proposes one item per fixable alert. You accept or reject the proposal on the roadmap.",
+                )
             }
         }
         SectionLabel("Repeats")
