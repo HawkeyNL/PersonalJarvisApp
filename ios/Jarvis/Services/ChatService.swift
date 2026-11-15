@@ -204,6 +204,25 @@ actor ChatService {
         try await api.deleteHolding(id: id, token: token, expectedBinding: binding)
     }
 
+    // Read-only crypto wallets (Trading › Crypto), bound like the job writes.
+    func addCryptoWallet(_ body: NewCryptoWallet) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.addCryptoWallet(body, token: token, expectedBinding: binding)
+    }
+
+    func deleteCryptoWallet(_ id: UUID) async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.deleteCryptoWallet(id: id, token: token, expectedBinding: binding)
+    }
+
+    func refreshCrypto() async throws {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        try await api.refreshCrypto(token: token, expectedBinding: binding)
+    }
+
     // Memecoin paper trader (Trading › Memecoin): tightening only, bound like the job writes.
     func pauseMemecoin() async throws -> MemeAnswer {
         let binding = await api.binding()
