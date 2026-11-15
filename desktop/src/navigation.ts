@@ -27,6 +27,7 @@ export const NAV: NavSection[] = [
   { label: "Trading", items: [
     { id: "dashboard", label: "Dashboard", icon: "chart", path: "/trading" },
     { id: "stocks", label: "Stocks", icon: "stocks", path: "/trading/stocks" },
+    { id: "crypto", label: "Crypto", icon: "wallet", path: "/trading/crypto" },
     { id: "memecoin", label: "Memecoin", icon: "coin", path: "/trading/memecoin" },
     { id: "futures", label: "Futures", icon: "futures", path: "/trading/futures", badge: "Later" },
     { id: "positions", label: "Positions", icon: "orders", path: "/trading/positions" },
@@ -50,7 +51,7 @@ export const NAV: NavSection[] = [
 
 export type View =
   | "home" | "agents" | "integrations" | "health" | "memory" | "roadmaps" | "roadmap" | "jobs" | "job" | "jobrun"
-  | "trading" | "desk" | "stocks" | "stock" | "positions" | "memecoin" | "memestrategies" | "memestrategy"
+  | "trading" | "desk" | "stocks" | "stock" | "positions" | "crypto" | "memecoin" | "memestrategies" | "memestrategy"
   | "tasks" | "context" | "settings" | "soon";
 
 /** One screen: its path, the view that renders it and the sidebar entry it highlights. */
@@ -79,6 +80,8 @@ export const PAGES: Page[] = [
   { path: "/trading/stocks", name: "stocks", view: "stocks", nav: "stocks" },
   { path: "/trading/stocks/:conid(\\d+)", name: "stock", view: "stock", nav: "stocks" },
   { path: "/trading/positions", name: "positions", view: "positions", nav: "positions" },
+  // Read-only crypto wallets (/v1/trading/crypto): public addresses only.
+  { path: "/trading/crypto", name: "crypto", view: "crypto", nav: "crypto" },
   // Manual holdings and the IBKR status: one older view, tab driven by the path.
   { path: "/trading/holdings", name: "trading-holdings", view: "trading", nav: "dashboard" },
   { path: "/trading/ibkr", name: "trading-ibkr", view: "trading", nav: "dashboard" },
