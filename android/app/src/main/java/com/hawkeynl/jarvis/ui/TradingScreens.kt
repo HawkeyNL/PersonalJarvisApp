@@ -1,99 +1,153 @@
 package com.hawkeynl.jarvis.ui
 
+import android.content.ClipboardManager
+import android.content.ClipData
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.hawkeynl.jarvis.network.ApiResult
-import com.hawkeynl.jarvis.network.BAR_RANGES
-import com.hawkeynl.jarvis.network.Bar
-import com.hawkeynl.jarvis.network.Freshness
-import com.hawkeynl.jarvis.network.HISTORY_RANGES
-import com.hawkeynl.jarvis.network.HomeNodeEndpoint
-import com.hawkeynl.jarvis.network.Holdings
-import com.hawkeynl.jarvis.network.JarvisApi
-import com.hawkeynl.jarvis.network.LinkTone
-import com.hawkeynl.jarvis.network.Portfolio
-import com.hawkeynl.jarvis.network.Position
-import com.hawkeynl.jarvis.network.TradingState
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.Lifecycle
+import com.hawkeynl.jarvis.network.addWalletFailureText
 import com.hawkeynl.jarvis.network.ageText
+import com.hawkeynl.jarvis.network.ApiResult
 import com.hawkeynl.jarvis.network.asOfText
+import com.hawkeynl.jarvis.network.Bar
+import com.hawkeynl.jarvis.network.BAR_RANGES
 import com.hawkeynl.jarvis.network.changeRatio
 import com.hawkeynl.jarvis.network.chartNumber
 import com.hawkeynl.jarvis.network.chartTime
+import com.hawkeynl.jarvis.network.cooldownText
+import com.hawkeynl.jarvis.network.CRYPTO_ATTRIBUTION
+import com.hawkeynl.jarvis.network.CRYPTO_HINT
+import com.hawkeynl.jarvis.network.CRYPTO_OFF
+import com.hawkeynl.jarvis.network.CRYPTO_OFF_DETAIL
+import com.hawkeynl.jarvis.network.CRYPTO_SUBTITLE
+import com.hawkeynl.jarvis.network.CryptoAsset
+import com.hawkeynl.jarvis.network.CryptoChain
+import com.hawkeynl.jarvis.network.CryptoFailure
+import com.hawkeynl.jarvis.network.cryptoFailureOf
+import com.hawkeynl.jarvis.network.cryptoFailureText
+import com.hawkeynl.jarvis.network.CryptoLimits
+import com.hawkeynl.jarvis.network.CryptoOverview
+import com.hawkeynl.jarvis.network.CryptoRefresh
+import com.hawkeynl.jarvis.network.DASH
 import com.hawkeynl.jarvis.network.dayText
 import com.hawkeynl.jarvis.network.decimalSign
+import com.hawkeynl.jarvis.network.DELETE_CONFIRM
+import com.hawkeynl.jarvis.network.DeskTotal
+import com.hawkeynl.jarvis.network.deskTotal
+import com.hawkeynl.jarvis.network.DraftField
+import com.hawkeynl.jarvis.network.draftIssue
+import com.hawkeynl.jarvis.network.DraftIssue
 import com.hawkeynl.jarvis.network.errorText
+import com.hawkeynl.jarvis.network.EVM_CHAINS
 import com.hawkeynl.jarvis.network.formatDecimal
 import com.hawkeynl.jarvis.network.formatMoney
 import com.hawkeynl.jarvis.network.formatPercent
 import com.hawkeynl.jarvis.network.formatPrice
+import com.hawkeynl.jarvis.network.Freshness
+import com.hawkeynl.jarvis.network.hiddenText
+import com.hawkeynl.jarvis.network.HISTORY_RANGES
 import com.hawkeynl.jarvis.network.HOLDING_AMBIGUOUS
 import com.hawkeynl.jarvis.network.HOLDING_LEADING_ZERO
 import com.hawkeynl.jarvis.network.HOLDING_NUMBER_RULE
 import com.hawkeynl.jarvis.network.holdingIssue
 import com.hawkeynl.jarvis.network.holdingNumber
+import com.hawkeynl.jarvis.network.Holdings
 import com.hawkeynl.jarvis.network.holdingsErrorText
 import com.hawkeynl.jarvis.network.holdingsWriteText
+import com.hawkeynl.jarvis.network.HomeNodeEndpoint
 import com.hawkeynl.jarvis.network.ibkrLinkState
+import com.hawkeynl.jarvis.network.isKeyMaterialRefusal
 import com.hawkeynl.jarvis.network.isStock
+import com.hawkeynl.jarvis.network.JarvisApi
+import com.hawkeynl.jarvis.network.kindsAvailable
+import com.hawkeynl.jarvis.network.LinkTone
 import com.hawkeynl.jarvis.network.movingAverage
+import com.hawkeynl.jarvis.network.NO_CHAINS
+import com.hawkeynl.jarvis.network.NO_PRICE
 import com.hawkeynl.jarvis.network.notConnectedText
 import com.hawkeynl.jarvis.network.offTarget
 import com.hawkeynl.jarvis.network.onTarget
+import com.hawkeynl.jarvis.network.otherTokensText
+import com.hawkeynl.jarvis.network.PARTIAL_TEXT
+import com.hawkeynl.jarvis.network.partLabel
+import com.hawkeynl.jarvis.network.Portfolio
+import com.hawkeynl.jarvis.network.Position
+import com.hawkeynl.jarvis.network.REFRESH_ASKED
+import com.hawkeynl.jarvis.network.removeWalletFailureText
+import com.hawkeynl.jarvis.network.shortAddress
 import com.hawkeynl.jarvis.network.skippedText
 import com.hawkeynl.jarvis.network.sourceLabel
+import com.hawkeynl.jarvis.network.TOTAL_FAILED_TEXT
 import com.hawkeynl.jarvis.network.tradingState
+import com.hawkeynl.jarvis.network.TradingState
+import com.hawkeynl.jarvis.network.Wallet
+import com.hawkeynl.jarvis.network.WALLET_ADDED
+import com.hawkeynl.jarvis.network.WALLET_REMOVED
+import com.hawkeynl.jarvis.network.walletErrorText
+import com.hawkeynl.jarvis.network.WalletKind
+import com.hawkeynl.jarvis.network.walletName
+import com.hawkeynl.jarvis.network.WalletStatus
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // Trading (desktop TradingDesk.vue, TradingStocks.vue, TradingStock.vue, TradingPositions.vue
@@ -228,6 +282,14 @@ fun TradingScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
     val portfolio = rememberPortfolio(actions, noValue)
     var range by rememberSaveable { mutableStateOf("3M") }
     val history = rememberTradingRead<com.hawkeynl.jarvis.network.PortfolioHistory>(actions, range, { it.fresh }, { it.points.size < 2 }) { e, t -> valueHistory(e, t, range) }
+    // The total over IBKR and the crypto wallets (GET /v1/trading/total). A Core before v0.0.90
+    // has no such route: the IBKR net liquidation is the total then.
+    var total by remember { mutableStateOf(DeskTotal(null, false)) }
+    var totalTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(totalTick) {
+        val result = actions.jobs { e, t -> portfolioTotal(e, t) } ?: return@LaunchedEffect
+        total = deskTotal(result)
+    }
     val now = System.currentTimeMillis()
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(JvSpace.lg),
@@ -235,9 +297,22 @@ fun TradingScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TabTitle("Trading", "All pots in one place. Read-only: this app places no orders.", Modifier.weight(1f))
-            GhostButton("Refresh", { portfolio.reload(); history.reload() })
+            GhostButton("Refresh", { portfolio.reload(); history.reload(); totalTick++ })
         }
         (portfolio.state as? TradingState.Ready)?.let { MutedText("${sourceLabel(it.data.fresh)} · as of ${asOfText(it.data.fresh.asOf, now)}") }
+        total.shown?.let { sum ->
+            Column(
+                Modifier.fillMaxWidth().clip(JvShapes.lg).background(JvTheme.colors.bgSurface).padding(JvSpace.md).semantics(mergeDescendants = true) {},
+                verticalArrangement = Arrangement.spacedBy(JvSpace.xxs),
+            ) {
+                Text("Total value", color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.labelMedium)
+                Text(formatMoney(sum.total, sum.baseCurrency), style = MaterialTheme.typography.titleMedium.tabular())
+                sum.parts.forEach {
+                    Text("${partLabel(it.source)} ${formatMoney(it.value, sum.baseCurrency)} · as of ${asOfText(it.asOf, now)}", color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+                if (sum.partial) Text(PARTIAL_TEXT, color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.bodySmall)
+            }
+        }
         TradingStatus(portfolio, "your portfolio") { data, empty ->
             if (empty) {
                 ListSection(null) {
@@ -246,7 +321,10 @@ fun TradingScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
-                        Kpi("Total value", formatMoney(data.netLiquidation, data.baseCurrency), "incl. ${formatMoney(data.cash, data.baseCurrency)} cash")
+                        Kpi(
+                            if (total.total != null) "IBKR value" else "Total value", formatMoney(data.netLiquidation, data.baseCurrency),
+                            "incl. ${formatMoney(data.cash, data.baseCurrency)} cash",
+                        )
                         Kpi("Today", formatMoney(data.dayPnl, data.baseCurrency, sign = true), formatPercent(data.dayChangePct), signColor(data.dayPnl))
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
@@ -256,11 +334,12 @@ fun TradingScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
                         )
                         Kpi("Positions", "${data.positions.size}", "${if (data.positions.size == 1) "1 instrument" else "${data.positions.size} instruments"} at IBKR")
                     }
+                    if (total.failed) MutedText(TOTAL_FAILED_TEXT)
                 }
             }
         }
 
-        ListSection("Total value") {
+        ListSection("IBKR value") {
             Column(Modifier.padding(JvSpace.lg), verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
                 val points = (history.state as? TradingState.Ready)?.data?.points.orEmpty()
                 val ratio = if (points.size > 1) changeRatio(points.first().value, points.last().value) else null
@@ -271,7 +350,7 @@ fun TradingScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
                         MutedText("Not enough history for this period yet.")
                     } else {
                         val series = remember(data) { data.points.map { Bar(it.t, it.value, it.value, it.value, it.value) } }
-                        val label = "Total value over ${if (range == "ALL") "all time" else range}: ${ratio?.let { formatPercent(it) } ?: "no change data"}"
+                        val label = "IBKR value over ${if (range == "ALL") "all time" else range}: ${ratio?.let { formatPercent(it) } ?: "no change data"}"
                         PriceChart(series, data.baseCurrency, label, height = 220)
                     }
                 }
@@ -328,6 +407,7 @@ fun TradingScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
                 if (i > 0) ListDivider()
                 when (screen) {
                     Screen.STOCKS -> NavRow(JvIcon.TREND, "Stocks", "Holdings, allocation, deposit and dividends", { onNavigate(screen) })
+                    Screen.CRYPTO -> NavRow(JvIcon.LAYERS, "Crypto", "Your self-custody wallets, read-only, in EUR", { onNavigate(screen) })
                     Screen.MEMECOIN -> NavRow(JvIcon.SPARK, "Memecoin", "The paper trader, its strategies and Claude's decisions", { onNavigate(screen) })
                     Screen.POSITIONS -> NavRow(JvIcon.LINES, "Positions", "Every open IBKR position", { onNavigate(screen) })
                     Screen.HOLDINGS -> NavRow(JvIcon.BRIEFCASE, "Holdings", "Manual holdings and the IBKR status", { onNavigate(screen) })
@@ -933,3 +1013,309 @@ private fun HoldingField(placeholder: String, label: String, value: String, keyb
     )
 }
 
+
+// ---- Crypto ----------------------------------------------------------------------
+
+private fun walletTone(status: WalletStatus): Tone = when (status) {
+    WalletStatus.OK -> Tone.OK
+    WalletStatus.STALE -> Tone.WARN
+    WalletStatus.ERROR -> Tone.ERROR
+    WalletStatus.PENDING, WalletStatus.UNKNOWN -> Tone.IDLE
+}
+
+/** Read-only crypto wallets (desktop TradingCrypto.vue): public addresses the owner adds, their
+ *  balances and EUR value from Core. Nothing here signs or sends; key material is refused
+ *  before any request (Crypto.kt draftIssue) and never kept. Phones have no realtime reload:
+ *  the page reads again on every return to the app, and a while after a refresh. */
+@Composable
+fun CryptoScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
+    var overview by remember { mutableStateOf<CryptoOverview?>(null) }
+    var failure by remember { mutableStateOf<CryptoFailure?>(null) }
+    var notice by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var confirming by remember { mutableStateOf<Wallet?>(null) }
+    var cooldownUntil by remember { mutableLongStateOf(0L) }
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val latest = rememberLatest()
+    val scope = rememberCoroutineScope()
+
+    // A null answer means locked or signed out: this page is about to go. A failed read is not
+    // shown next to an older one (desktop).
+    suspend fun load() {
+        val result = actions.jobs { e, t -> cryptoOverview(e, t) } ?: return
+        if (result is ApiResult.Success) {
+            overview = result.value
+            failure = null
+        } else {
+            overview = null
+            failure = cryptoFailureOf(result)
+        }
+        now = System.currentTimeMillis()
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { if (!busy) latest.launch { load() } }
+    LaunchedEffect(cooldownUntil) {
+        while (System.currentTimeMillis() < cooldownUntil) {
+            now = System.currentTimeMillis()
+            delay(1_000)
+        }
+        now = System.currentTimeMillis()
+    }
+
+    fun add(kind: WalletKind, address: String, chains: List<CryptoChain>, label: String, clear: () -> Unit, failed: (String) -> Unit) {
+        if (busy) return
+        busy = true
+        notice = ""
+        latest.launch {
+            try {
+                val result = actions.jobs { e, t -> addWallet(e, t, kind, address, chains, label) } ?: return@launch
+                if (result is ApiResult.Success) {
+                    clear()
+                    notice = WALLET_ADDED
+                } else {
+                    failed(addWalletFailureText(result))
+                    if (isKeyMaterialRefusal(result)) clear()
+                }
+            } finally {
+                busy = false
+            }
+            load()
+        }
+    }
+
+    fun remove(wallet: Wallet) {
+        if (busy) return
+        busy = true
+        notice = ""
+        latest.launch {
+            try {
+                val result = actions.jobs { e, t -> deleteWallet(e, t, wallet.id) } ?: return@launch
+                notice = if (result is ApiResult.Success) WALLET_REMOVED else removeWalletFailureText(result) ?: WALLET_REMOVED
+            } finally {
+                busy = false
+                confirming = null
+            }
+            load()
+        }
+    }
+
+    fun refresh() {
+        if (busy || now < cooldownUntil) return
+        notice = ""
+        scope.launch {
+            val result = actions.jobs { e, t -> refreshCrypto(e, t) } ?: return@launch
+            when (val answer = (result as? ApiResult.Success)?.value) {
+                CryptoRefresh.Queued -> {
+                    notice = REFRESH_ASKED
+                    // ponytail: no realtime hint on phones; read again while Core's pass (at most
+                    // 60 s) runs. Listen for trading.crypto.updated once the app has realtime refetch.
+                    for (wait in listOf(10_000L, 50_000L)) {
+                        delay(wait)
+                        latest.launch { load() }
+                    }
+                }
+                is CryptoRefresh.Cooldown -> cooldownUntil = System.currentTimeMillis() + answer.seconds * 1_000
+                null -> notice = "Not refreshed. ${cryptoFailureText(cryptoFailureOf(result))}"
+            }
+        }
+    }
+
+    val shown = overview
+    val cooldown = ((cooldownUntil - now + 999) / 1_000).coerceAtLeast(0)
+    PushedPage(
+        screenTitle(Screen.CRYPTO), CRYPTO_SUBTITLE, { onNavigate(backOf(Screen.CRYPTO)) },
+        trailing = { if (shown != null) GhostButton("Refresh", ::refresh, enabled = cooldown == 0L) },
+    ) {
+        val failed = failure
+        when {
+            failed != null -> ListSection(null) {
+                Column(Modifier.padding(JvSpace.lg), verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
+                    val off = failed == CryptoFailure.OFF
+                    Row(Modifier.semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
+                        IconTile(if (off) JvIcon.LAYERS else JvIcon.ALERT, if (off) null else Tone.ERROR)
+                        Text(if (off) CRYPTO_OFF else "Could not load your wallets", Modifier.padding(start = JvSpace.md), style = MaterialTheme.typography.titleSmall)
+                    }
+                    MutedText(if (off) CRYPTO_OFF_DETAIL else cryptoFailureText(failed))
+                    GhostButton("Try again", { latest.launch { load() } })
+                }
+            }
+            shown == null -> Skeleton("Loading your wallets…")
+            else -> {
+                if (notice.isNotEmpty()) Banner(notice)
+                if (cooldown > 0) MutedText(cooldownText(cooldown))
+                Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+                    Kpi("Crypto value", formatMoney(shown.totalEur, "EUR"), if (shown.wallets.isNotEmpty()) "as of ${asOfText(shown.asOf, now)}" else "No wallets yet")
+                    Kpi("Wallets", "${shown.wallets.size}", "read-only, public addresses")
+                }
+                if (shown.hidden > 0) Banner(hiddenText(shown.hidden), warn = true)
+                AddWalletForm(shown.chainsAvailable, busy, ::add)
+                SectionLabel("Wallets", Modifier.padding(horizontal = JvSpace.xs))
+                if (shown.wallets.isEmpty()) {
+                    ListSection(null) { EmptyState("No wallets yet", body = "Add a public address above to see its balances here.", compact = true) }
+                }
+                shown.wallets.forEach { w -> WalletCard(w, now, busy) { confirming = w } }
+                if (shown.assets.isNotEmpty()) AssetsTable(shown.assets)
+                MutedText(CRYPTO_ATTRIBUTION)
+            }
+        }
+    }
+
+    confirming?.let { w ->
+        AlertDialog(
+            onDismissRequest = { if (!busy) confirming = null },
+            title = { Text(DELETE_CONFIRM) },
+            text = { Text("${walletName(w)} · ${shortAddress(w.address)}") },
+            dismissButton = { TextButton(onClick = { confirming = null }, enabled = !busy) { Text("Cancel") } },
+            confirmButton = { TextButton(onClick = { remove(w) }, enabled = !busy) { Text("Remove", color = JvTheme.colors.dangerText) } },
+        )
+    }
+}
+
+@Composable
+private fun WalletCard(w: Wallet, now: Long, busy: Boolean, remove: () -> Unit) {
+    val context = LocalContext.current
+    var copied by remember(w.id) { mutableStateOf(false) }
+    val name = walletName(w)
+    ListSection(null) {
+        Column(Modifier.padding(JvSpace.lg), verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+                Text(name, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleSmall)
+                StatusBadge(w.status.label, tone = walletTone(w.status))
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(shortAddress(w.address), Modifier.weight(1f), fontFamily = PlexMono, style = MaterialTheme.typography.bodySmall)
+                GhostButton(
+                    if (copied) "Copied" else "Copy",
+                    {
+                        // A failed copy stays "Copy".
+                        copied = runCatching {
+                            val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return@runCatching false
+                            clipboard.setPrimaryClip(ClipData.newPlainText("Address", w.address))
+                            true
+                        }.getOrDefault(false)
+                    },
+                    Modifier.semantics { contentDescription = "Copy the address of $name" },
+                )
+            }
+            Text(formatMoney(w.valueEur, "EUR"), style = MaterialTheme.typography.titleMedium.tabular())
+            if (w.chains.isNotEmpty()) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(JvSpace.xs)) {
+                    w.chains.forEach { StatusBadge(it.label) }
+                }
+            }
+            MutedText(w.lastRefreshAt?.let { "Last refreshed ${relativeTime(it, now).ifEmpty { "at an unknown time" }}" } ?: "Not refreshed yet")
+            w.error?.let { ErrorText(walletErrorText(it), live = false) }
+            if (w.otherTokens > 0) MutedText(otherTokensText(w.otherTokens))
+        }
+        w.balances.forEach { b ->
+            ListDivider()
+            Row(
+                Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.padding(horizontal = JvSpace.lg, vertical = JvSpace.md),
+                horizontalArrangement = Arrangement.spacedBy(JvSpace.md), verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(b.symbol, style = MaterialTheme.typography.titleSmall)
+                    MutedText("${b.chain?.label ?: "Other"} · ${formatDecimal(b.amount)}")
+                }
+                Text(b.valueEur?.let { formatMoney(it, "EUR") } ?: NO_PRICE, style = MaterialTheme.typography.bodyMedium.tabular())
+            }
+        }
+        ListDivider()
+        GhostButton("Remove wallet", remove, Modifier.padding(JvSpace.lg).semantics { contentDescription = "Remove wallet $name" }, enabled = !busy, danger = true)
+    }
+}
+
+/** The assets across all wallets: amount, EUR price, value and weight. */
+@Composable
+private fun AssetsTable(assets: List<CryptoAsset>) {
+    ListSection("By asset") {
+        assets.forEachIndexed { i, a ->
+            if (i > 0) ListDivider()
+            Column(
+                Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.padding(horizontal = JvSpace.lg, vertical = JvSpace.md),
+                verticalArrangement = Arrangement.spacedBy(JvSpace.xxs),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(a.symbol, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                    Text(a.valueEur?.let { formatMoney(it, "EUR") } ?: NO_PRICE, style = MaterialTheme.typography.bodyMedium.tabular())
+                }
+                MutedText(
+                    "${formatDecimal(a.amount)} · EUR price ${a.priceEur?.let { formatPrice(it, "EUR") } ?: DASH}" +
+                        " · weight ${a.weightPct?.let { formatPercent(it, sign = false) } ?: DASH}",
+                )
+                a.weightPct?.let { Meter(pct(it)) }
+            }
+        }
+    }
+}
+
+/** Adding a public address. What is typed is never saved past the page (no saveable state)
+ *  and a field holding key material is emptied at once. */
+@Composable
+private fun AddWalletForm(
+    available: List<CryptoChain>, busy: Boolean,
+    add: (WalletKind, String, List<CryptoChain>, String, () -> Unit, (String) -> Unit) -> Unit,
+) {
+    val kinds = kindsAvailable(available)
+    val evm = EVM_CHAINS.filter { it in available }
+    var kind by remember(kinds) { mutableStateOf(kinds.firstOrNull()) }
+    var chains by remember(available) { mutableStateOf(evm) }
+    var address by remember { mutableStateOf("") }
+    var label by remember { mutableStateOf("") }
+    var issue by remember { mutableStateOf<DraftIssue?>(null) }
+    var formError by remember { mutableStateOf("") }
+    ListSection("Add a wallet") {
+        Column(Modifier.padding(JvSpace.lg), verticalArrangement = Arrangement.spacedBy(JvSpace.md)) {
+            MutedText(CRYPTO_HINT)
+            val chosen = kind
+            if (chosen == null) {
+                MutedText(NO_CHAINS)
+            } else {
+                SectionLabel("Chain")
+                Segmented(kinds.map { it.wire to it.label }, chosen.wire, { wire ->
+                    kind = kinds.first { it.wire == wire }
+                    chains = evm
+                    issue = null
+                })
+                if (chosen == WalletKind.EVM) {
+                    SectionLabel("Chains")
+                    Column {
+                        evm.forEach { c ->
+                            val checked = c in chains
+                            Row(
+                                Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                                    .toggleable(value = checked, role = Role.Checkbox, onValueChange = { on -> chains = if (on) chains + c else chains - c }),
+                                horizontalArrangement = Arrangement.spacedBy(JvSpace.sm), verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(checked = checked, onCheckedChange = null)
+                                Text(c.label, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = address, onValueChange = { address = it }, label = { Text("Address") }, singleLine = true, shape = JvShapes.md,
+                    isError = issue?.field == DraftField.ADDRESS, textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = PlexMono),
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = label, onValueChange = { if (it.length <= CryptoLimits.LABEL) label = it }, label = { Text("Label (optional)") },
+                    singleLine = true, shape = JvShapes.md, isError = issue?.field == DraftField.LABEL, modifier = Modifier.fillMaxWidth(),
+                )
+                issue?.let { ErrorText(it.message) }
+                if (formError.isNotEmpty()) ErrorText(formError)
+                ActionButton("Add wallet", {
+                    formError = ""
+                    val found = draftIssue(chosen, address, chains, label)
+                    issue = found
+                    if (found == null) {
+                        add(chosen, address, chains, label, { address = ""; label = "" }) { formError = it }
+                    } else if (found.key) {
+                        // Key material is never kept: the field is emptied, the message is fixed.
+                        if (found.field == DraftField.LABEL) label = "" else address = ""
+                    }
+                }, enabled = !busy)
+            }
+        }
+    }
+}
