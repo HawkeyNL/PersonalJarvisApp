@@ -205,6 +205,8 @@ final class CryptoTests: XCTestCase {
         XCTAssertTrue(Crypto.isKeyMaterial((1...12).map { "w\($0)" }.joined(separator: ",\(mark)")))
         XCTAssertTrue(Crypto.isKeyMaterial("[1\u{20E3},2]"))
         XCTAssertTrue(Crypto.isKeyMaterial("-----BEGIN\(mark) KEY"))
+        // U+0085 (next line) is Unicode whitespace, as in Rust's is_whitespace.
+        XCTAssertTrue(Crypto.isKeyMaterial((1...12).map { "w\($0)" }.joined(separator: "\u{0085}")))
     }
 
     // MARK: Per-chain format checks

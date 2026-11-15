@@ -330,7 +330,7 @@ struct TradingPage: View {
                 tradingNote("\(Trading.sourceLabel(data)) · as of \(Trading.asOfText(data.as_of))")
             }
             if let sum = total.value, sum.shown { totalCard(sum) }
-            TradingStatus(state: portfolio, what: "your portfolio", retry: loadPortfolio) { data, empty in
+            TradingStatus(state: portfolio, what: "your portfolio", retry: { await loadPortfolio(); await loadTotal() }) { data, empty in
                 if empty {
                     UnavailableState(title: "Nothing in your IBKR account yet", kind: .empty,
                                      detail: "Core is connected, but the account holds no positions and no cash.", symbol: "chart.line.uptrend.xyaxis")
@@ -339,6 +339,7 @@ struct TradingPage: View {
                         Kpi(label: "Positions", value: String(data.positions.count),
                             detail: "\(plural(data.positions.count, "instrument", "instruments")) at IBKR"),
                     ])
+                    if case .error = total { tradingNote(Crypto.totalFailedText) }
                 }
             }
             valueCard
@@ -367,10 +368,8 @@ struct TradingPage: View {
 
     /// IBKR's own value: "Total value" while Core has no total (an older Core, 404/405).
     private func totalKpi(_ data: Portfolio) -> Kpi {
-        var detail = "incl. \(Trading.formatMoney(data.cash, data.base_currency)) cash"
-        if case .error = total { detail += ". \(Crypto.totalFailedText)" }
-        return Kpi(label: total.value == nil ? "Total value" : "IBKR value", value: Trading.formatMoney(data.net_liquidation, data.base_currency),
-                   detail: detail)
+        Kpi(label: total.value == nil ? "Total value" : "IBKR value", value: Trading.formatMoney(data.net_liquidation, data.base_currency),
+            detail: "incl. \(Trading.formatMoney(data.cash, data.base_currency)) cash")
     }
 
     /// IBKR plus the crypto wallets, each part with its own time.
@@ -1027,7 +1026,7 @@ private struct CryptoPage: View {
         PageScaffold(title: Crypto.title, subtitle: Crypto.subtitle) {
             switch overview {
             case .loading:
-                LoadingState(label: "Loading your wallets", rows: 3)
+                LoadingState(label: "Loading your wallets…", rows: 3)
             case let .ok(data):
                 content(data)
             default:
