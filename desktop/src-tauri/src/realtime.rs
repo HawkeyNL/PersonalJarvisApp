@@ -125,7 +125,7 @@ mod tests {
     }
 
     #[test]
-    fn memecoin_roadmap_and_job_hints_decode() {
+    fn memecoin_roadmap_job_and_crypto_hints_decode() {
         for (kind, payload) in [
             (
                 "trading.meme.strategy_changed",
@@ -139,6 +139,10 @@ mod tests {
             (
                 "jobs.run_finished",
                 serde_json::json!({ "job_id": "j1", "run_id": "u1", "status": "ok" }),
+            ),
+            (
+                "trading.crypto.updated",
+                serde_json::json!({ "as_of": "2026-11-15T10:00:00Z" }),
             ),
         ] {
             let event = decode(&frame(2, kind, payload.clone())).unwrap().unwrap();

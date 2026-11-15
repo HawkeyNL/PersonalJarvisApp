@@ -93,6 +93,16 @@ interface JarvisApi {
     suspend fun addHolding(endpoint: HomeNodeEndpoint, token: String, symbol: String, quantity: String, avgCost: String): ApiResult<Unit> =
         ApiResult.InvalidResponse("Not supported")
     suspend fun deleteHolding(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> = ApiResult.InvalidResponse("Not supported")
+    /** Read-only crypto wallets (desktop cryptoApi.ts); answers pass the guards in Crypto.kt.
+     *  [addWallet] checks the input with draftIssue first and sends nothing it refuses. */
+    suspend fun cryptoOverview(endpoint: HomeNodeEndpoint, token: String): ApiResult<CryptoOverview> = ApiResult.InvalidResponse("Not supported")
+    suspend fun addWallet(endpoint: HomeNodeEndpoint, token: String, kind: WalletKind, address: String, chains: List<CryptoChain>, label: String): ApiResult<Unit> =
+        ApiResult.InvalidResponse("Not supported")
+    suspend fun deleteWallet(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> = ApiResult.InvalidResponse("Not supported")
+    /** Asks Core for a refresh pass; a 429 reads as [CryptoRefresh.Cooldown]. */
+    suspend fun refreshCrypto(endpoint: HomeNodeEndpoint, token: String): ApiResult<CryptoRefresh> = ApiResult.InvalidResponse("Not supported")
+    /** IBKR plus crypto wallets in EUR (GET /v1/trading/total). */
+    suspend fun portfolioTotal(endpoint: HomeNodeEndpoint, token: String): ApiResult<PortfolioTotal> = ApiResult.InvalidResponse("Not supported")
     /** The memecoin PAPER trader (desktop memecoinApi.ts); answers pass the guards in
      *  Memecoin.kt and MemeStrategies.kt. Pause and disable answer Core's raw JSON, which only
      *  counts when it confirms. */
