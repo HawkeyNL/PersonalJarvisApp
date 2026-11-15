@@ -407,7 +407,7 @@ fun TradingScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
                 if (i > 0) ListDivider()
                 when (screen) {
                     Screen.STOCKS -> NavRow(JvIcon.TREND, "Stocks", "Holdings, allocation, deposit and dividends", { onNavigate(screen) })
-                    Screen.CRYPTO -> NavRow(JvIcon.LAYERS, "Crypto", "Your self-custody wallets, read-only, in EUR", { onNavigate(screen) })
+                    Screen.CRYPTO -> NavRow(JvIcon.LAYERS, "Crypto", CRYPTO_SUBTITLE, { onNavigate(screen) })
                     Screen.MEMECOIN -> NavRow(JvIcon.SPARK, "Memecoin", "The paper trader, its strategies and Claude's decisions", { onNavigate(screen) })
                     Screen.POSITIONS -> NavRow(JvIcon.LINES, "Positions", "Every open IBKR position", { onNavigate(screen) })
                     Screen.HOLDINGS -> NavRow(JvIcon.BRIEFCASE, "Holdings", "Manual holdings and the IBKR status", { onNavigate(screen) })
