@@ -124,6 +124,13 @@ export function readTotal(x: unknown): PortfolioTotal | null {
 /** "IBKR", "Crypto"; another source Core adds later shows as Core names it. */
 export const partLabel = (source: string) => (source === "crypto" ? "Crypto" : source);
 export const PARTIAL_TEXT = "Partial: a part that is set up has no value right now and is left out.";
+/** After a failed total read: an older Core without the route (404/405)
+ *  shows the IBKR value as the total; any other failure says the crypto
+ *  wallets are missing from it. */
+export function totalFailed(error: unknown): boolean {
+  const e = error as ErrorShape;
+  return !(e?.name === "ApiError" && (e.status === 404 || e.status === 405));
+}
 export const TOTAL_FAILED_TEXT = "Crypto wallets are not in this value: Core could not give the total just now.";
 
 /** The kinds the add form offers: those with a chain Core has on. */
@@ -228,8 +235,8 @@ function keyToken(token: string): boolean {
  *  private key, 64 or 128 hex digits, a WIF key or base58 of 64 bytes. */
 export function isKeyMaterial(input: string): boolean {
   return input.includes("-----BEGIN")
-    || input.split(/[\s,;-]/u).filter(Boolean).length >= 12
-    || /^\s*\[\s*\d/u.test(input)
+    || input.split(/[\s\u0085,;-]/u).filter(Boolean).length >= 12
+    || /^[\s\u0085]*\[[\s\u0085]*\d/u.test(input)
     || input.split(/[^0-9A-Za-z]/).some(keyToken);
 }
 

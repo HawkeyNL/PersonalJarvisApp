@@ -5,7 +5,7 @@ import {
   ATTRIBUTION, CHAINS_TEXT, DELETE_CONFIRM, HINT, INVALID_ADDRESS_TEXT, KEY_MATERIAL_TEXT, LABEL_TEXT, NEEDS_CORE, NO_PRICE, OFF_DETAIL, OFF_KEY,
   OFF_TITLE, PARTIAL_TEXT, STATUS_LABEL, STATUS_TONE, TESTNET_TEXT, XPUB_TEXT, addFailureText, addressIssue, cooldownText, draftIssue, failureOf,
   failureText, hiddenText, isCryptoUpdated, isId, isKeyMaterial, isKeyMaterialRefusal, kindsAvailable, newWallet, otherTokensText, partLabel,
-  readOverview, readTotal, removeFailureText, retryAfterSecs, shortAddress, walletErrorText, walletName,
+  readOverview, readTotal, removeFailureText, retryAfterSecs, shortAddress, totalFailed, walletErrorText, walletName,
 } from "../src/crypto.ts";
 
 // Neutral test data only: public example addresses from the specs, and
@@ -150,6 +150,21 @@ test("key material is refused before sending, with Core's fixed message and no e
   assert.equal(KEY_MATERIAL_TEXT, "This looks like a private key or recovery phrase; it was not stored. Never enter one: add a public address only.");
 });
 
+test("a long label is checked for key material before its length", () => {
+  // The label input lets long pastes through (maxlength 160), so a phrase or
+  // key never gets cut to a fragment that passes both checks.
+  for (const label of [`Cold ${mnemonic12}`, `Cold ${HEX64}`]) {
+    assert.ok(label.length > 40);
+    assert.deepEqual(draftIssue({ kind: "evm", address: EVM, label, chains: ["base"] }), { field: "label", message: KEY_MATERIAL_TEXT, key: true });
+  }
+});
+
+test("words split on every Rust whitespace, U+0085 too", () => {
+  assert.ok(isKeyMaterial(mnemonic12.replaceAll(" ", "\u0085")));
+  assert.ok(isKeyMaterial(`\u0085[\u0085${Array(64).fill("174").join(",")}]`));
+  assert.ok(isKeyMaterial(mnemonic12.replaceAll(" ", "\u00a0")));
+});
+
 test("public addresses and plain words are not key material", () => {
   for (const text of [
     "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2", "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy",
@@ -218,6 +233,14 @@ test("off, an older Core and refusals get fixed wording", () => {
   assert.equal(addFailureText(apiError(503, { error: "crypto wallets are not enabled" })), `Not added. ${OFF_TITLE}`);
   assert.equal(removeFailureText(apiError(404)), null, "already gone");
   assert.match(removeFailureText(apiError(500)), /^Not removed\./);
+});
+
+test("the desk falls back to IBKR quietly only on an older Core", () => {
+  assert.equal(totalFailed(apiError(404)), false);
+  assert.equal(totalFailed(apiError(405)), false);
+  for (const error of [apiError(500), apiError(503), apiError(401), { name: "NetworkError" }, new Error("x"), null]) {
+    assert.equal(totalFailed(error), true, JSON.stringify(error));
+  }
 });
 
 test("a refused refresh waits for Core's cooldown", () => {

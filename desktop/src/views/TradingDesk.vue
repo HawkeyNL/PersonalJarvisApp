@@ -12,7 +12,7 @@ import {
   type HistoryRange, type Portfolio, type PortfolioHistory,
 } from "../trading";
 import { devDataSet, tradingApi, useTradingRead } from "../tradingApi";
-import { PARTIAL_TEXT, TOTAL_FAILED_TEXT, partLabel, readTotal, type PortfolioTotal } from "../crypto";
+import { PARTIAL_TEXT, TOTAL_FAILED_TEXT, partLabel, readTotal, totalFailed, type PortfolioTotal } from "../crypto";
 import { cryptoApi, useCryptoRefetch } from "../cryptoApi";
 
 // Trading dashboard: every pot on one desk. Read-only; only the IBKR stocks
@@ -37,14 +37,18 @@ async function loadTotal(): Promise<void> {
       const read = readTotal(await cryptoApi.total());
       next = read ? { kind: "ok", total: read } : { kind: "ibkr-only", failed: true };
     } catch (error) {
-      const e = error as { name?: string; status?: number } | null;
-      next = { kind: "ibkr-only", failed: !(e?.name === "ApiError" && (e.status === 404 || e.status === 405)) };
+      next = { kind: "ibkr-only", failed: totalFailed(error) };
     }
   }
   if (id === totalSeq) total.value = next;
 }
 watch(devDataSet, () => void loadTotal(), { immediate: true });
 useCryptoRefetch(() => void loadTotal());
+/** Try again on the portfolio reads the total again too. */
+function retryPortfolio(): void {
+  void reloadPortfolio();
+  void loadTotal();
+}
 /** The total card: shown once a part is set up (else IBKR's own state says why). */
 const totalShown = computed(() => (total.value.kind === "ok" && (total.value.total.parts.length > 0 || total.value.total.partial) ? total.value.total : null));
 
@@ -89,7 +93,7 @@ const changeTone = computed(() => ({ pos: "pos", neg: "neg", flat: "" })[signTon
       <span v-if="totalShown.partial" class="t-xs t-2">{{ PARTIAL_TEXT }}</span>
     </div>
 
-    <TradingStatus :state="portfolio" what="your portfolio" @retry="reloadPortfolio">
+    <TradingStatus :state="portfolio" what="your portfolio" @retry="retryPortfolio">
       <template #default="{ data, empty }">
         <div v-if="empty" class="card empty">
           <span class="tile acc" aria-hidden="true"><NavIcon name="stocks" /></span>

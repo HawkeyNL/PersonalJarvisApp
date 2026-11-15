@@ -72,8 +72,8 @@ async function add(): Promise<void> {
   issue.value = draftIssue(draft.value);
   const body = issue.value ? null : newWallet(draft.value);
   if (!body) {
-    // Key material is never kept: the field is emptied, the message is fixed.
-    if (issue.value?.key) draft.value[issue.value.field === "label" ? "label" : "address"] = "";
+    // Key material is never kept: both fields are emptied, the message is fixed.
+    if (issue.value?.key) clearInput();
     await nextTick();
     formEl.value?.querySelector<HTMLElement>(`[name="${issue.value?.field}"]`)?.focus();
     return;
@@ -81,9 +81,12 @@ async function add(): Promise<void> {
   busy.value = true;
   try {
     await cryptoApi.add(body);
+    // Locked meanwhile: the lock already cleared the form; say nothing behind it.
+    if (locked.value) return;
     clearInput();
     notice.value = ADDED;
   } catch (error) {
+    if (locked.value) return;
     formError.value = addFailureText(error);
     if (isKeyMaterialRefusal(error)) clearInput();
   } finally {
@@ -244,7 +247,8 @@ const refreshedText = (w: Wallet) =>
           </label>
           <label class="field"><span class="label">Label <span class="t-2">(optional)</span></span>
             <input
-              v-model="draft.label" name="label" class="input" type="text" autocomplete="off" :maxlength="LIMITS.label"
+              v-model="draft.label" name="label" class="input" type="text" autocomplete="off" spellcheck="false"
+              :maxlength="LIMITS.label * 4"
               :aria-invalid="issue?.field === 'label'"
             />
           </label>
