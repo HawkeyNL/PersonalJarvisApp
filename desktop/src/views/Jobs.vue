@@ -5,10 +5,10 @@ import NavIcon from "../components/NavIcon.vue";
 import PageShell from "../components/PageShell.vue";
 import JobForm from "../components/jobs/JobForm.vue";
 import {
-  FULL_TEXT, KIND_DETAIL, KIND_LABEL, LIMITS, NEW_KINDS, NOT_CONFIGURED_TEXT, NOT_CONFIRMED, RUN_STATUS_LABEL, RUN_STATUS_TONE,
+  FULL_TEXT, HEALTH_REVIEW_NEEDS_CORE, KIND_DETAIL, KIND_LABEL, LIMITS, NEW_KINDS, NOT_CONFIGURED_TEXT, NOT_CONFIRMED, RUN_STATUS_LABEL, RUN_STATUS_TONE,
   TIMES_IN_ZONE, countText, failureOf, failureText, jobTitle, newDraft, newJob, nextRunText, originText, ownerJobCount, readJobAnswer,
   readJobList, readRuns, runsText, scheduleText, stateBadge, todayInZone, unsupportedText, writeFailureText, zonedText,
-  type Draft, type Failure, type Job, type Run,
+  type Draft, type Failure, type Job, type Kind, type Run,
 } from "../jobs";
 import { coalesce } from "../coalesce";
 import { jobApi, useJobRefetch } from "../jobsApi";
@@ -47,16 +47,18 @@ const today = todayInZone();
 const rows = computed(() => (state.value.kind === "ok" ? state.value.rows : []));
 const owned = computed(() => ownerJobCount(rows.value.map((r) => r.job)));
 const full = computed(() => owned.value >= LIMITS.ownerJobs);
-const reviewMissing = computed(() => state.value.kind === "ok" && !rows.value.some((r) => r.job.kind === "dependency_review"));
+const missing = (kind: Kind) => state.value.kind === "ok" && !rows.value.some((r) => r.job.kind === kind);
+const reviewMissing = computed(() => missing("dependency_review"));
+const checkMissing = computed(() => missing("health_review"));
 
 // ---- create ------------------------------------------------------------------
 const router = useRouter();
-/** Which form is open: a new job of the owner's kinds, or the review setup. */
-const creating = ref<"job" | "review" | null>(null);
+/** Which form is open: a new job of the owner's kinds, or a singleton's setup. */
+const creating = ref<"job" | "review" | "check" | null>(null);
 const busy = ref(false);
 const error = ref("");
 
-function open(which: "job" | "review"): void {
+function open(which: "job" | "review" | "check"): void {
   creating.value = which;
   error.value = "";
 }
@@ -162,6 +164,19 @@ async function create(draft: Draft): Promise<void> {
           <p v-if="error" class="err" role="alert">{{ error }}</p>
         </template>
         <div v-else><button type="button" class="btn btn-secondary" :disabled="creating === 'job'" @click="open('review')">Set up</button></div>
+      </section>
+
+      <section v-if="checkMissing" class="card jb-col" aria-labelledby="jb-new-check">
+        <h2 id="jb-new-check">{{ KIND_LABEL.health_review }}</h2>
+        <p class="t-sm t-2">{{ KIND_DETAIL.health_review }}</p>
+        <template v-if="creating === 'check'">
+          <JobForm :initial="newDraft('health_review')" :busy="busy" submit="Set up" cancel @save="create" @cancel="creating = null" />
+          <p v-if="error" class="err" role="alert">{{ error }}</p>
+        </template>
+        <div v-else class="jb-col">
+          <p class="t-xs t-2">{{ HEALTH_REVIEW_NEEDS_CORE }}</p>
+          <div><button type="button" class="btn btn-secondary" :disabled="creating === 'job'" @click="open('check')">Set up the morning check</button></div>
+        </div>
       </section>
     </template>
   </PageShell>

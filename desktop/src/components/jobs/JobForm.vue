@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import {
-  CADENCE_LABEL, EVERY_UNIT, KIND_DETAIL, KIND_LABEL, LIMITS, TIMES_IN_ZONE, WEEKDAYS, cadencesFor, draftIssue, latestStart, ordinal,
+  CADENCE_LABEL, EVERY_UNIT, KIND_DETAIL, KIND_LABEL, LIMITS, TIMES_IN_ZONE, WEEKDAYS, cadencesFor, draftIssue, isSingleton, latestStart, ordinal,
   todayInZone, type Draft, type Field, type Kind,
 } from "../../jobs";
 import { readList, type Roadmap } from "../../roadmaps";
@@ -20,7 +20,7 @@ const issue = ref<{ field: Field; message: string } | null>(null);
 const formEl = ref<HTMLFormElement | null>(null);
 const today = todayInZone();
 const cadences = computed(() => cadencesFor(draft.value.kind));
-const fixed = computed(() => draft.value.kind === "dependency_review");
+const fixed = computed(() => isSingleton(draft.value.kind));
 const invalid = (field: Field) => issue.value?.field === field;
 
 function pickKind(kind: Kind): void {
@@ -30,7 +30,7 @@ function pickKind(kind: Kind): void {
 
 // null while loading or when the roadmaps could not be read.
 const roadmaps = ref<Roadmap[] | null>(null);
-if (props.initial.kind === "dependency_review") {
+if (isSingleton(props.initial.kind)) {
   roadmapApi.list().then((x) => (roadmaps.value = readList(x)?.filter((r) => !r.archived_at) ?? null), () => {});
 }
 const known = (id: string) => roadmaps.value?.some((r) => r.id === id) ?? false;
@@ -90,7 +90,8 @@ async function save(): Promise<void> {
       />
       <span id="jb-threshold-help" class="help">You hear about a disk at or above this. {{ LIMITS.thresholdMin }} to {{ LIMITS.thresholdMax }}.</span>
     </label>
-    <label v-if="draft.kind === 'dependency_review'" class="field"><span class="label">Propose upgrades to a roadmap <span class="t-2">(optional)</span></span>
+    <label v-if="fixed" class="field">
+      <span class="label">{{ draft.kind === "health_review" ? "Put things to fix on a roadmap" : "Propose upgrades to a roadmap" }} <span class="t-2">(optional)</span></span>
       <select v-model="draft.roadmap_id" class="input" :disabled="roadmaps === null && !draft.roadmap_id">
         <option :value="null">No roadmap</option>
         <option v-if="draft.roadmap_id && !known(draft.roadmap_id)" :value="draft.roadmap_id">
@@ -98,7 +99,10 @@ async function save(): Promise<void> {
         </option>
         <option v-for="r in roadmaps ?? []" :key="r.id" :value="r.id">{{ r.title }}</option>
       </select>
-      <span class="help">Each run then proposes one item per fixable alert. You accept or reject the proposal on the roadmap.</span>
+      <span v-if="draft.kind === 'health_review'" class="help">
+        Each run then proposes the things to fix. You accept or reject the proposal on the roadmap. Without a roadmap, a run only records its summary.
+      </span>
+      <span v-else class="help">Each run then proposes one item per fixable alert. You accept or reject the proposal on the roadmap.</span>
     </label>
 
     <fieldset class="jb-fieldset">
