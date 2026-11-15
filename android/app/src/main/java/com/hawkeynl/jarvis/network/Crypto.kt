@@ -88,10 +88,10 @@ private val ADDRESS = Regex("^[0-9A-Za-z]{20,128}$")
 private val CURRENCY = Regex("^[A-Z]{3}$")
 
 private fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
-private fun JsonObject.dec(key: String): String = text(key)?.takeIf { DECIMAL.matches(it) } ?: throw IllegalArgumentException()
-private fun JsonObject.optDec(key: String): String? = text(key)?.takeIf { DECIMAL.matches(it) }
+private fun JsonObject.walletDec(key: String): String = text(key)?.takeIf { DECIMAL.matches(it) } ?: throw IllegalArgumentException()
+private fun JsonObject.walletOptDec(key: String): String? = text(key)?.takeIf { DECIMAL.matches(it) }
 private fun validTime(value: String?): String? = value?.takeIf { it.length <= 64 && isoMillis(it) != null }
-private fun JsonObject.time(key: String): String = validTime(text(key)) ?: throw IllegalArgumentException()
+private fun JsonObject.walletTime(key: String): String = validTime(text(key)) ?: throw IllegalArgumentException()
 
 private fun chainOf(x: JsonElement?): CryptoChain? =
     (x as? JsonPrimitive)?.takeIf { it.isString }?.content.let { wire -> CryptoChain.entries.firstOrNull { it.wire == wire } }
@@ -103,7 +103,7 @@ private fun chainList(x: JsonElement?): List<CryptoChain> =
 private fun readBalance(x: JsonElement): WalletBalance {
     val o = x.obj()
     val symbol = o.text("symbol")?.takeIf { SYMBOL.matches(it) } ?: throw IllegalArgumentException()
-    return WalletBalance(chainOf(o["chain"]), symbol, o.dec("amount"), o.optDec("price_eur"), o.optDec("value_eur"))
+    return WalletBalance(chainOf(o["chain"]), symbol, o.walletDec("amount"), o.walletOptDec("price_eur"), o.walletOptDec("value_eur"))
 }
 
 private fun readWallet(x: JsonElement): Wallet {
@@ -120,7 +120,7 @@ private fun readWallet(x: JsonElement): Wallet {
     return Wallet(
         id, WalletKind.entries.firstOrNull { it.wire == kind }, chainList(o["chains"]), address, label?.ifEmpty { null },
         WalletStatus.entries.firstOrNull { it != WalletStatus.UNKNOWN && it.wire == status } ?: WalletStatus.UNKNOWN,
-        error, validTime(o.text("last_refresh_at")), other, o.dec("value_eur"), balances,
+        error, validTime(o.text("last_refresh_at")), other, o.walletDec("value_eur"), balances,
     )
 }
 
@@ -133,11 +133,11 @@ fun readCryptoOverview(x: JsonElement): CryptoOverview? = guarded {
     val assets = o.array("assets", CryptoLimits.ASSETS).map {
         val a = it.obj()
         CryptoAsset(
-            a.text("symbol")?.takeIf { s -> SYMBOL.matches(s) } ?: throw IllegalArgumentException(), a.dec("amount"),
-            a.optDec("price_eur"), a.optDec("value_eur"), a.optDec("weight_pct"),
+            a.text("symbol")?.takeIf { s -> SYMBOL.matches(s) } ?: throw IllegalArgumentException(), a.walletDec("amount"),
+            a.walletOptDec("price_eur"), a.walletOptDec("value_eur"), a.walletOptDec("weight_pct"),
         )
     }
-    CryptoOverview(o.time("as_of"), o.dec("total_eur"), chainList(o["chains_available"]), wallets.filterNotNull(), assets, wallets.count { it == null })
+    CryptoOverview(o.walletTime("as_of"), o.walletDec("total_eur"), chainList(o["chains_available"]), wallets.filterNotNull(), assets, wallets.count { it == null })
 }
 
 /** GET /v1/trading/total: at most a few parts, each with its own time. */
@@ -147,9 +147,9 @@ fun readPortfolioTotal(x: JsonElement): PortfolioTotal? = guarded {
     val parts = o.array("parts", 8).map {
         val p = it.obj()
         val source = p.text("source")?.takeIf { s -> s.isNotEmpty() && s.length <= 32 } ?: throw IllegalArgumentException()
-        TotalPart(source, p.dec("value"), p.time("as_of"))
+        TotalPart(source, p.walletDec("value"), p.walletTime("as_of"))
     }
-    PortfolioTotal(o.time("as_of"), currency, o.dec("total"), parts, o.bool("partial"))
+    PortfolioTotal(o.walletTime("as_of"), currency, o.walletDec("total"), parts, o.bool("partial"))
 }
 
 /** "IBKR", "Crypto"; another source Core adds later shows as Core names it. */
