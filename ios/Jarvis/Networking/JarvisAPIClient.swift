@@ -374,6 +374,22 @@ actor JarvisAPIClient {
                                  expectedBinding: expectedBinding, limit: 64 * 1024, response: MemeAnswer.self)
     }
 
+    // Read-only crypto wallets (desktop cryptoApi.ts). The answers are not needed: the page reloads.
+    func addCryptoWallet(_ body: NewCryptoWallet, token: String, expectedBinding: UUID) async throws {
+        _ = try await request(path: "\(Crypto.path)/wallets", method: "POST", body: body, token: token,
+                              expectedBinding: expectedBinding, limit: 64 * 1024, response: EmptyOrJSON.self)
+    }
+
+    func deleteCryptoWallet(id: UUID, token: String, expectedBinding: UUID) async throws {
+        try await delete(Crypto.walletPath(id), token: token, expectedBinding: expectedBinding)
+    }
+
+    /// A 429 within Core's cooldown throws `CryptoCooldown` with Core's wait.
+    func refreshCrypto(token: String, expectedBinding: UUID) async throws {
+        _ = try await request(path: "\(Crypto.path)/refresh", method: "POST", body: [String: String](), token: token,
+                              expectedBinding: expectedBinding, limit: 64 * 1024, cooldown: true, response: EmptyOrJSON.self)
+    }
+
     private func delete(_ path: String, token: String, expectedBinding: UUID) async throws {
         _ = try await request(path: path, method: "DELETE", token: token,
                               expectedBinding: expectedBinding, response: EmptyOrJSON.self)
@@ -429,6 +445,7 @@ actor JarvisAPIClient {
         expectedBinding: UUID? = nil,
         limit: Int = BoundedAPIResponse.maximumBytes,
         resourceTimeout: TimeInterval? = nil,
+        cooldown: Bool = false,
         response: Response.Type
     ) async throws -> Response {
         try Task.checkCancellation()
@@ -459,6 +476,9 @@ actor JarvisAPIClient {
             guard (200..<300).contains(http.statusCode) else {
                 if http.statusCode == 401 { throw JarvisAPIError.unauthorized }
                 let body = try? decoder.decode(APIErrorBody.self, from: data)
+                if cooldown, http.statusCode == 429, let seconds = body?.retry_after_secs, seconds >= 1 {
+                    throw CryptoCooldown(seconds: min(seconds, Crypto.maxRetrySecs))
+                }
                 if body?.code == "pairing_password_not_set" {
                     throw JarvisAPIError.rejected(status: http.statusCode, message: "Set an account password on an active device first.")
                 }
@@ -469,6 +489,8 @@ actor JarvisAPIClient {
             }
             return try decoder.decode(Response.self, from: data)
         } catch let error as JarvisAPIError {
+            throw error
+        } catch let error as CryptoCooldown {
             throw error
         } catch is CancellationError {
             throw CancellationError()
