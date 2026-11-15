@@ -195,19 +195,22 @@ private fun signTone(value: String?): Tone = when (decimalSign(value)) {
 }
 
 /** Every trading read renders through this: loading, not connected (with what to do), an
- *  error, and a stale banner above data. [content] gets the data and whether it is empty. */
+ *  error, and a stale banner above data. [content] gets the data and whether it is empty.
+ *  [retry] reads it again (by default this read alone). */
 @Composable
-private fun <T> TradingStatus(read: TradingRead<T>, what: String, content: @Composable (T, Boolean) -> Unit) {
+private fun <T> TradingStatus(
+    read: TradingRead<T>, what: String, retry: () -> Unit = read.reload, content: @Composable (T, Boolean) -> Unit,
+) {
     when (val state = read.state) {
         TradingState.Loading -> Skeleton("Loading $what…")
         is TradingState.Disconnected -> {
             val (title, detail) = notConnectedText(state.reason)
-            StateCard(title, detail, error = false, retry = read.reload)
+            StateCard(title, detail, error = false, retry = retry)
         }
-        is TradingState.Failed -> StateCard("Could not load $what", errorText(state.reason), error = true, retry = read.reload)
+        is TradingState.Failed -> StateCard("Could not load $what", errorText(state.reason), error = true, retry = retry)
         is TradingState.Ready -> {
             state.staleMs?.let { age ->
-                Banner("Prices are ${ageText(age)} old. Core got no newer data from IBKR; values may be off.", warn = true, retry = read.reload)
+                Banner("Prices are ${ageText(age)} old. Core got no newer data from IBKR; values may be off.", warn = true, retry = retry)
             }
             content(state.data, state.empty)
         }
@@ -313,7 +316,8 @@ fun TradingScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
                 if (sum.partial) Text(PARTIAL_TEXT, color = JvTheme.colors.textSecondary, style = MaterialTheme.typography.bodySmall)
             }
         }
-        TradingStatus(portfolio, "your portfolio") { data, empty ->
+        // Trying the portfolio again reads the total again too (desktop TradingDesk).
+        TradingStatus(portfolio, "your portfolio", retry = { portfolio.reload(); totalTick++ }) { data, empty ->
             if (empty) {
                 ListSection(null) {
                     EmptyState("Nothing in your IBKR account yet", body = "Core is connected, but the account holds no positions and no cash.", icon = JvIcon.TREND)
@@ -1110,7 +1114,8 @@ fun CryptoScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
                     // 60 s) runs. Listen for trading.crypto.updated once the app has realtime refetch.
                     for (wait in listOf(10_000L, 50_000L)) {
                         delay(wait)
-                        latest.launch { load() }
+                        // Never over a running add or remove: Latest would cancel it.
+                        if (!busy) latest.launch { load() }
                     }
                 }
                 is CryptoRefresh.Cooldown -> cooldownUntil = System.currentTimeMillis() + answer.seconds * 1_000
@@ -1295,12 +1300,15 @@ private fun AddWalletForm(
                 OutlinedTextField(
                     value = address, onValueChange = { address = it }, label = { Text("Address") }, singleLine = true, shape = JvShapes.md,
                     isError = issue?.field == DraftField.ADDRESS, textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = PlexMono),
-                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii),
+                    // A password keyboard keeps a pasted key out of the keyboard's learning (SettingsScreen).
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
-                    value = label, onValueChange = { if (it.length <= CryptoLimits.LABEL) label = it }, label = { Text("Label (optional)") },
+                    // Room past the limit, so draftIssue sees key material first, then the 40 characters.
+                    value = label, onValueChange = { if (it.length <= CryptoLimits.LABEL * 4) label = it }, label = { Text("Label (optional)") },
                     singleLine = true, shape = JvShapes.md, isError = issue?.field == DraftField.LABEL, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
                 )
                 issue?.let { ErrorText(it.message) }
                 if (formError.isNotEmpty()) ErrorText(formError)
@@ -1311,8 +1319,9 @@ private fun AddWalletForm(
                     if (found == null) {
                         add(chosen, address, chains, label, { address = ""; label = "" }) { formError = it }
                     } else if (found.key) {
-                        // Key material is never kept: the field is emptied, the message is fixed.
-                        if (found.field == DraftField.LABEL) label = "" else address = ""
+                        // Key material is never kept: both fields are emptied, the message is fixed.
+                        address = ""
+                        label = ""
                     }
                 }, enabled = !busy)
             }

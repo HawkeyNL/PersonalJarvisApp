@@ -262,6 +262,11 @@ fun isKeyMaterial(input: String): Boolean =
         JSON_BYTES.containsMatchIn(input) ||
         input.split(NOT_ALNUM).any(::isKeyToken)
 
+private val EDGE_SPACE = Regex("^\\p{IsWhite_Space}+|\\p{IsWhite_Space}+$")
+
+/** Rust's str::trim: Unicode White_Space at both ends (Kotlin's trim() differs, e.g. on U+FEFF). */
+internal fun coreTrim(text: String): String = text.replace(EDGE_SPACE, "")
+
 private val BECH32 = Regex("^bc1([02-9ac-hj-np-z]{39}|[02-9ac-hj-np-z]{59})$")
 private val LEGACY = Regex("^[13][1-9A-HJ-NP-Za-km-z]{25,34}$")
 private val TESTNET_LEGACY = Regex("^[mn2][1-9A-HJ-NP-Za-km-z]{25,34}$")
@@ -270,7 +275,7 @@ private val EVM_ADDRESS = Regex("^0x[0-9a-fA-F]{40}$")
 /** Why the address does not fit the kind, or null. Shape only: Core checks the checksum
  *  again (400). Key material is checked before this. */
 fun addressIssue(kind: WalletKind, input: String): String? {
-    val a = input.trim()
+    val a = coreTrim(input)
     return when (kind) {
         WalletKind.BITCOIN -> {
             val lower = a.lowercase()
@@ -297,7 +302,9 @@ fun draftIssue(kind: WalletKind, address: String, chains: List<CryptoChain>, lab
     if (isKeyMaterial(label)) return DraftIssue(DraftField.LABEL, KEY_MATERIAL_TEXT, key = true)
     addressIssue(kind, address)?.let { return DraftIssue(DraftField.ADDRESS, it) }
     if (kind == WalletKind.EVM && EVM_CHAINS.none { it in chains }) return DraftIssue(DraftField.CHAINS, CHAINS_TEXT)
-    if (label.isNotBlank() && !validText(label.trim(), CryptoLimits.LABEL)) return DraftIssue(DraftField.LABEL, LABEL_TEXT)
+    // 1 to 40 characters after Core's trim, counted in code points like Core.
+    val l = coreTrim(label)
+    if (l.isNotEmpty() && !validText(l, CryptoLimits.LABEL)) return DraftIssue(DraftField.LABEL, LABEL_TEXT)
     return null
 }
 
@@ -307,8 +314,8 @@ fun newWallet(kind: WalletKind, address: String, chains: List<CryptoChain>, labe
     if (draftIssue(kind, address, chains, label) != null) return null
     return buildJsonObject {
         put("kind", kind.wire)
-        put("address", address.trim())
-        label.trim().takeIf { it.isNotEmpty() }?.let { put("label", it) }
+        put("address", coreTrim(address))
+        coreTrim(label).takeIf { it.isNotEmpty() }?.let { put("label", it) }
         if (kind == WalletKind.EVM) putJsonArray("chains") { EVM_CHAINS.filter { it in chains }.forEach { add(JsonPrimitive(it.wire)) } }
     }
 }

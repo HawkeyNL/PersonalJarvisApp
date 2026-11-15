@@ -140,6 +140,24 @@ class CryptoTest {
         )
     }
 
+    @Test fun `words split by Unicode white space count as Core counts them`() {
+        val words = List(12) { "abandon" }
+        assertTrue("no-break space", isKeyMaterial(words.joinToString("\u00A0")))
+        assertTrue("next line", isKeyMaterial(words.joinToString("\u0085")))
+        assertFalse("a zero-width no-break space is not white space", isKeyMaterial(words.joinToString("\uFEFF")))
+        // A phrase in a label longer than 40 characters is refused as key material, not as too long.
+        val phrase = words.joinToString(" ")
+        assertTrue(phrase.length > 40)
+        assertEquals(DraftIssue(DraftField.LABEL, KEY_MATERIAL_TEXT, key = true), draftIssue(WalletKind.SOLANA, sol, emptyList(), phrase))
+        // Core's trim (Rust str::trim): U+00A0 and U+0085 are trimmed, U+FEFF is kept.
+        assertEquals(sol, coreTrim("\u00A0\u0085 $sol\u2003"))
+        assertEquals("\uFEFF$sol", coreTrim("\uFEFF$sol"))
+        assertEquals(json("""{"kind":"solana","address":"$sol","label":"Cold"}"""), newWallet(WalletKind.SOLANA, "\u00A0$sol\u0085", emptyList(), "\u2003Cold\u00A0"))
+        // 40 code points is the limit, also for characters outside the BMP.
+        assertNull(draftIssue(WalletKind.SOLANA, sol, emptyList(), "\uD83D\uDE00".repeat(40)))
+        assertEquals(DraftIssue(DraftField.LABEL, LABEL_TEXT), draftIssue(WalletKind.SOLANA, sol, emptyList(), "\uD83D\uDE00".repeat(41)))
+    }
+
     @Test fun `public addresses are not key material`() {
         for (address in listOf(
             "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2", "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy",
