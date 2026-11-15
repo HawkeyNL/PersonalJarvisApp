@@ -57,7 +57,7 @@ final class CryptoTests: XCTestCase {
         XCTAssertEqual(Crypto.shortAddress("abc"), "abc")
         // Without a label the kind names the wallet; a pending one was not refreshed yet.
         let pending = try XCTUnwrap(read(overview(wallets: [wallet(["label": NSNull(), "status": "pending", "last_refresh_at": NSNull(),
-                                                                    "balances": [], "value_eur": "0"])])))
+                                                                    "balances": [] as [Any], "value_eur": "0"])])))
         XCTAssertEqual(pending.wallets[0].name, "EVM")
         XCTAssertEqual(Crypto.refreshedText(pending.wallets[0]), "Not refreshed yet")
         let now = try XCTUnwrap(parseCoreDate("2026-11-15T10:04:00Z"))
@@ -132,16 +132,16 @@ final class CryptoTests: XCTestCase {
         XCTAssertEqual(Crypto.partLabel("bank"), "bank", "a later source shows as Core names it")
         XCTAssertEqual(Crypto.partialText, "Partial: a part that is set up has no value right now and is left out.")
         let none = try XCTUnwrap(total(["source": "Jarvis", "as_of": "2026-11-15T10:00:00Z", "base_currency": "EUR", "total": "0",
-                                        "parts": [], "partial": false]))
+                                        "parts": [] as [Any], "partial": false]))
         XCTAssertFalse(none.shown, "nothing set up: the desk shows IBKR's own state")
         let at = "2026-11-15T10:00:00Z"
         for bad: [String: Any] in [
-            ["as_of": "x", "base_currency": "EUR", "total": "1", "parts": [], "partial": false],
-            ["as_of": at, "base_currency": "euro", "total": "1", "parts": [], "partial": false],
-            ["as_of": at, "base_currency": "EUR", "total": "1.2.3", "parts": [], "partial": false],
+            ["as_of": "x", "base_currency": "EUR", "total": "1", "parts": [] as [Any], "partial": false],
+            ["as_of": at, "base_currency": "euro", "total": "1", "parts": [] as [Any], "partial": false],
+            ["as_of": at, "base_currency": "EUR", "total": "1.2.3", "parts": [] as [Any], "partial": false],
             ["as_of": at, "base_currency": "EUR", "total": "1", "parts": [["source": "", "value": "1", "as_of": at]], "partial": false],
             ["as_of": at, "base_currency": "EUR", "total": "1", "parts": [["source": "IBKR", "value": "x", "as_of": at]], "partial": false],
-            ["as_of": at, "base_currency": "EUR", "total": "1", "parts": [], "partial": "no"],
+            ["as_of": at, "base_currency": "EUR", "total": "1", "parts": [] as [Any], "partial": "no"],
         ] {
             XCTAssertNil(total(bad), "\(bad)")
         }
@@ -198,6 +198,13 @@ final class CryptoTests: XCTestCase {
         ] {
             XCTAssertFalse(Crypto.isKeyMaterial(address), address)
         }
+    }
+
+    func testACombiningMarkHidesNoSeparatorOrMarker() {
+        let mark = "\u{0301}"
+        XCTAssertTrue(Crypto.isKeyMaterial((1...12).map { "w\($0)" }.joined(separator: ",\(mark)")))
+        XCTAssertTrue(Crypto.isKeyMaterial("[1\u{20E3},2]"))
+        XCTAssertTrue(Crypto.isKeyMaterial("-----BEGIN\(mark) KEY"))
     }
 
     // MARK: Per-chain format checks
@@ -314,6 +321,7 @@ final class CryptoTests: XCTestCase {
         XCTAssertTrue(Crypto.isKeyMaterialRefusal(keyRefusal))
         XCTAssertEqual(Crypto.addFailureText(keyRefusal), Crypto.keyMaterialText)
         XCTAssertFalse(Crypto.isKeyMaterialRefusal(JarvisAPIError.rejected(status: 400, message: "only mainnet addresses are supported")))
+        XCTAssertTrue(Crypto.isKeyMaterialRefusal(JarvisAPIError.rejected(status: 400, message: "reworded")), "an unknown 400 clears the form")
         XCTAssertNil(Crypto.removeFailureText(JarvisAPIError.rejected(status: 404, message: nil)), "already gone counts as removed")
         XCTAssertEqual(Crypto.removeFailureText(JarvisAPIError.rejected(status: 500, message: "raw")),
                        "Not removed. Core returned an answer this app does not understand, or an error. Try again later.")
@@ -371,9 +379,11 @@ final class CryptoWriteModelTests: XCTestCase {
         XCTAssertEqual(CryptoCoreProtocol.requests(), ["POST /v1/trading/crypto/refresh"])
         // Without a usable wait it stays a plain 429: Core's minute applies.
         CryptoCoreProtocol.reset(status: 429, body: #"{"retry_after_secs":-1}"#)
-        do { try await model.refreshCrypto() } catch { XCTAssertEqual(Crypto.retryAfterSecs(error), 60) }
+        do { try await model.refreshCrypto(); XCTFail("a 429 is a refusal") } catch { XCTAssertEqual(Crypto.retryAfterSecs(error), 60) }
         CryptoCoreProtocol.reset(status: 429, body: #"{"retry_after_secs":99999}"#)
-        do { try await model.refreshCrypto() } catch { XCTAssertEqual(Crypto.retryAfterSecs(error), 3600, "capped, as desktop") }
+        do { try await model.refreshCrypto(); XCTFail("a 429 is a refusal") } catch {
+            XCTAssertEqual(Crypto.retryAfterSecs(error), 3600, "capped, as desktop")
+        }
     }
 }
 

@@ -1188,6 +1188,8 @@ private struct CryptoPage: View {
 
     private func refresh() async {
         guard !busy, cooldownUntil == nil else { return }
+        busy = true
+        defer { busy = false }
         notice = nil
         do {
             try await model.refreshCrypto()
@@ -1287,6 +1289,7 @@ private struct AddCryptoWalletSheet: View {
                     TextField("Label (optional)", text: $label)
                         .textFieldStyle(.roundedBorder)
                         .autocorrectionDisabled()
+                        .privacySensitive()
                     if let error { JobNotice(text: error, style: .danger) }
                     HStack(spacing: JV.Space.xs) {
                         Spacer(minLength: 0)
@@ -1315,8 +1318,8 @@ private struct AddCryptoWalletSheet: View {
         let body: NewCryptoWallet
         switch Crypto.newWallet(kind: kind, address: address, label: label, chains: Array(chains)) {
         case let .failure(issue):
-            // Key material is never kept: the field is emptied, the message is fixed.
-            if issue.key { if issue.field == .label { label = "" } else { address = "" } }
+            // Key material is never kept: both fields are emptied, the message is fixed.
+            if issue.key { address = ""; label = "" }
             error = issue.message
             return
         case let .success(wallet):

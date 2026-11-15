@@ -235,7 +235,6 @@ enum Crypto {
     static let totalPath = "/v1/trading/total"
     static func walletPath(_ id: UUID) -> String { "\(path)/wallets/\(id.uuidString.lowercased())" }
 
-    static let maxWallets = 20
     /// Entries read from one answer, readable or not.
     static let maxListed = 50
     static let maxLabel = 40
@@ -402,10 +401,12 @@ enum Crypto {
         return "Not added. \(failureText(failure(error)))"
     }
 
-    /// Core refused the body as key material: the form forgets what was typed.
+    /// Core refused the body as key material, or with a 400 this app does not know (fail
+    /// closed): the form forgets what was typed.
     static func isKeyMaterialRefusal(_ error: Error) -> Bool {
         guard case let .rejected(400, message)? = error as? JarvisAPIError else { return false }
-        return message.flatMap { refusalTexts[$0] } == keyMaterialText
+        let known = message.flatMap { refusalTexts[$0] }
+        return known == nil || known == keyMaterialText
     }
 
     /// The notice after a failed remove; nil when the wallet is already gone.
@@ -454,12 +455,15 @@ enum Crypto {
     /// words, a JSON byte array, or a token that is an extended private key, 32 or 64 bytes
     /// of hex, a WIF key or a base58 64-byte Solana secret.
     static func isKeyMaterial(_ input: String) -> Bool {
-        if input.contains("-----BEGIN") { return true }
-        let words = input.split { $0.isWhitespace || $0 == "," || $0 == ";" || $0 == "-" }
+        // On scalars, as Rust works on chars: a combining mark never hides a separator.
+        let scalars = input.unicodeScalars
+        if Data(input.utf8).range(of: Data("-----BEGIN".utf8)) != nil { return true }
+        let words = scalars.split { $0.properties.isWhitespace || $0 == "," || $0 == ";" || $0 == "-" }
         if words.count >= 12 { return true }
-        let start = input.drop { $0.isWhitespace }
-        if start.first == "[", start.dropFirst().drop(while: \.isWhitespace).first.map({ $0.isASCII && $0.isNumber }) == true { return true }
-        return input.unicodeScalars.split { !($0.isASCII && CharacterSet.alphanumerics.contains($0)) }
+        let start = scalars.drop { $0.properties.isWhitespace }
+        if start.first == "[", let next = start.dropFirst().drop(while: { $0.properties.isWhitespace }).first,
+           ("0"..."9").contains(next) { return true }
+        return scalars.split { !($0.isASCII && CharacterSet.alphanumerics.contains($0)) }
             .contains { isKeyToken(String(String.UnicodeScalarView($0))) }
     }
 
