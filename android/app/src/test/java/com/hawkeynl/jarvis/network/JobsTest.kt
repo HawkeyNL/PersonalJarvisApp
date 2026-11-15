@@ -346,6 +346,46 @@ class JobsTest {
         assertNull(readJob(json("""{"id":"$j1","ok":true}""")))
     }
 
+    @Test fun `a morning check is a daily or weekly singleton with a roadmap only`() {
+        val roadmap = "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c73"
+        val health = readJob(json("""{"id":"$j1","kind":"health_review","cadence":"daily","at_minute":420,"enabled":true,"revision":1,"params":{"roadmap_id":"$roadmap"}}"""))!!
+        assertEquals(JobKind.HEALTH_REVIEW, health.kind)
+        assertEquals(roadmap, health.params.roadmapId)
+        assertEquals("Morning check", jobTitle(health))
+        assertEquals("Every morning Jarvis checks Core's own health and proposes things to fix on a roadmap you pick.", JobKind.HEALTH_REVIEW.detail)
+        assertEquals("Daily at 07:00", scheduleText(health, today))
+        // Not counted towards the owner's 10, like a dependency review.
+        val p = readJob(json(prompt))!!
+        assertEquals("1 of 10 jobs", jobCountText(listOf(p, health)))
+        assertEquals(listOf(Cadence.WEEKLY, Cadence.DAILY), cadencesOf(JobKind.HEALTH_REVIEW))
+        assertFalse(hasRecurrence(JobKind.HEALTH_REVIEW))
+        assertFalse(JobKind.HEALTH_REVIEW in OWNER_KINDS)
+        // Core's default: daily at 07:00; the body carries only the roadmap.
+        assertEquals(json("""{"kind":"health_review","cadence":"daily","at_minute":420,"enabled":true,"params":{}}"""), newJob(newDraft(JobKind.HEALTH_REVIEW), today))
+        assertEquals(
+            json("""{"kind":"health_review","cadence":"weekly","weekday":1,"at_minute":420,"enabled":true,"params":{"roadmap_id":"$roadmap"}}"""),
+            newJob(newDraft(JobKind.HEALTH_REVIEW).copy(cadence = Cadence.WEEKLY, roadmapId = roadmap, title = "x", every = "3", startDate = "2026-12-01", maxRuns = "2", threshold = "90"), today),
+        )
+        for (cadence in listOf(Cadence.ONCE, Cadence.MONTHLY)) {
+            assertEquals("A morning check runs daily or weekly.", draftError(newDraft(JobKind.HEALTH_REVIEW).copy(cadence = cadence), today))
+        }
+        assertEquals(json("""{"params":{}}"""), jobPatch(health, toDraft(health).copy(roadmapId = null), today))
+        assertEquals("Core refused this: a morning check already exists.", writeFailureText(ApiResult.HttpError(409, null), update = false, JobKind.HEALTH_REVIEW))
+        assertEquals(KIND_NOT_KNOWN, writeFailureText(ApiResult.HttpError(422, null), update = false, JobKind.HEALTH_REVIEW))
+        assertEquals("Needs Jarvis Core v0.0.90 or later.", HEALTH_REVIEW_NEEDS_CORE)
+        // Its run codes; a run of an unknown kind still reads, without a kind.
+        assertEquals("Core could not read any of its own signals.", jobErrorText("signals_unavailable", JobKind.HEALTH_REVIEW))
+        assertEquals("Some signals could not be read; the rest were checked.", jobErrorText("source_unavailable", JobKind.HEALTH_REVIEW))
+        assertEquals("The roadmap is gone or archived, so no proposal was made.", jobErrorText("roadmap_unavailable", JobKind.HEALTH_REVIEW))
+        val healthRun = readRuns(json("""{"runs":[${withField(withField(withField(run, "kind", "\"health_review\""), "status", "\"partial\""), "error_code", "\"source_unavailable\"")}]}"""))!!.single()
+        assertEquals(JobKind.HEALTH_REVIEW, healthRun.kind)
+        assertNull(readRuns(json("""{"runs":[${withField(run, "kind", "\"later_kind\"")}]}"""))!!.single().kind)
+        // A kind this build does not know is still skipped as unsupported.
+        val later = readJobList(json("""{"status":"ok","jobs":[$job,${withField(job, "kind", "\"later_kind\"")}]}"""))!!
+        assertEquals(1, later.jobs.size)
+        assertEquals(1, later.unsupported)
+    }
+
     @Test fun `only a Core UUID can go into a jobs URL`() {
         assertTrue(isJobId(j1))
         for (bad in listOf("", "../x", "$j1/run", "$j1?x=1", "j1")) assertEquals(bad, false, isJobId(bad))
