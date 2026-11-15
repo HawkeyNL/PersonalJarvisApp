@@ -89,7 +89,7 @@ enum JobProposals {
         case .prompt: p.text == nil && p.threshold_percent == nil
         case .reminder: p.instruction == nil && p.notify == nil && p.threshold_percent == nil
         case .diskCheck: p.title == nil && p.instruction == nil && p.text == nil && p.notify == nil
-        case .dependencyReview: false
+        case .dependencyReview, .healthReview: false
         }
         let cadence = body.cadence ?? .weekly
         guard paramsFit, p.roadmap_id == nil, body.weekday == nil || cadence == .weekly, body.month_day == nil || cadence == .monthly,

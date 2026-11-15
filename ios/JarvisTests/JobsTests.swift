@@ -338,6 +338,50 @@ final class JobsTests: XCTestCase {
         XCTAssertNil(Jobs.issue(.dependencyReview, JobDraft()))
     }
 
+    func testTheMorningCheckIsASingletonWithARoadmapOnly() throws {
+        let check = job(["kind": "health_review", "cadence": "daily", "weekday": NSNull(), "id": "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c75",
+                         "params": ["roadmap_id": "r1"], "origin": "owner"])
+        let reminder = job(["kind": "reminder", "cadence": "daily", "weekday": NSNull(), "params": ["title": "Water"], "id": u1])
+        let value = try XCTUnwrap(list(#"{"status":"ok","jobs":[\#(check),\#(job()),\#(reminder)]}"#))
+        XCTAssertEqual(value.unsupported, 0)
+        let morning = value.jobs[0]
+        XCTAssertEqual(morning.kind, .healthReview)
+        XCTAssertEqual(morning.title, "Morning check")
+        XCTAssertEqual(morning.roadmapId, "r1")
+        XCTAssertEqual(Jobs.scheduleText(morning), "Daily at 07:00")
+        XCTAssertEqual(value.ownerJobs, 1, "neither the morning check nor the dependency review counts")
+        XCTAssertEqual(JobKind.healthReview.detail,
+                       "Every morning Jarvis checks Core's own health and proposes things to fix on a roadmap you pick.")
+        XCTAssertTrue(JobKind.healthReview.singleton && JobKind.dependencyReview.singleton)
+        XCTAssertFalse(JobKind.prompt.singleton || JobKind.reminder.singleton || JobKind.diskCheck.singleton)
+
+        // A new one starts daily at 07:00 and sends only its schedule and roadmap.
+        var draft = Jobs.newDraft(.healthReview)
+        XCTAssertEqual(draft.cadence, .daily)
+        XCTAssertEqual(draft.minute, 7 * 60)
+        XCTAssertEqual(Jobs.newDraft(.prompt).cadence, .weekly)
+        draft.title = "x"; draft.text = "y"; draft.threshold = 90; draft.every = 3; draft.maxRuns = 2; draft.startDate = "2026-12-01"
+        XCTAssertEqual(try sorted(Jobs.newJob(.healthReview, draft)),
+                       #"{"at_minute":420,"cadence":"daily","enabled":true,"kind":"health_review","params":{}}"#, "no roadmap: empty params")
+        draft.cadence = .weekly; draft.weekday = 2; draft.roadmapId = "r1"
+        XCTAssertEqual(try sorted(Jobs.newJob(.healthReview, draft)),
+                       #"{"at_minute":420,"cadence":"weekly","enabled":true,"kind":"health_review","params":{"roadmap_id":"r1"},"weekday":2}"#)
+        XCTAssertNil(Jobs.issue(.healthReview, draft), "every, start date and run limit are not its fields")
+        // A change sends only what changed: a cleared roadmap is empty params.
+        draft = JobDraft(morning)
+        XCTAssertNil(Jobs.patch(morning, draft))
+        draft.roadmapId = nil
+        XCTAssertEqual(try sorted(try XCTUnwrap(Jobs.patch(morning, draft))), #"{"params":{}}"#)
+
+        XCTAssertEqual(Jobs.errorText("signals_unavailable", kind: .healthReview), "Core could not read any of its own signals.")
+        XCTAssertEqual(Jobs.errorText("source_unavailable", kind: .healthReview), "Some signals could not be read; the rest were checked.")
+        XCTAssertEqual(Jobs.writeFailureText(JarvisAPIError.rejected(status: 409, message: "raw"), update: false, kind: .healthReview),
+                       "Core refused this: a morning check already exists.")
+        XCTAssertEqual(Jobs.writeFailureText(JarvisAPIError.rejected(status: 422, message: "raw"), update: false, kind: .healthReview),
+                       Jobs.kindNotKnown, "an older Core does not know the kind")
+        XCTAssertEqual(Jobs.healthReviewNeedsCore, "Needs Jarvis Core v0.0.90 or later.")
+    }
+
     func testRefusalsGetFixedWording() {
         XCTAssertEqual(Jobs.runNowFailureText(JarvisAPIError.rejected(status: 429, message: nil)), Jobs.runNowRefused)
         XCTAssertTrue(Jobs.runNowFailureText(JarvisAPIError.rejected(status: 409, message: nil)).contains("scheduler is off"))
@@ -610,6 +654,7 @@ final class JobProposalsTests: XCTestCase {
             entry("not-a-uuid", disk),
             ["body": disk] as [String: Any],
             entry(id(1), merged(disk, ["kind": "dependency_review"])),
+            entry(id(1), merged(disk, ["kind": "health_review", "params": [String: Any]()])),
             entry(id(2), merged(disk, ["kind": "shell"])),
             entry(id(3), merged(disk, ["cadence": "hourly"])),
             entry(id(4), "disk_check"),

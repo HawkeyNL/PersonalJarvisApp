@@ -48,6 +48,7 @@ private func jobSymbol(_ kind: JobKind) -> String {
     case .reminder: "bell"
     case .diskCheck: "internaldrive"
     case .dependencyReview: "shippingbox"
+    case .healthReview: "stethoscope"
     }
 }
 
@@ -79,7 +80,8 @@ struct JobsPage: View {
         }
         .navigationDestination(item: $open) { id in JobPage(model: model, id: id, navigate: navigate) }
         .sheet(isPresented: $creating) {
-            NewJobSheet(model: model, kinds: newKinds, created: { await load() })
+            NewJobSheet(model: model, kinds: newKinds, title: newKinds == [.healthReview] ? JobKind.healthReview.label : "New job",
+                        created: { await load() })
         }
         .refreshable { await load() }
         .task { await load() }
@@ -104,13 +106,28 @@ struct JobsPage: View {
                 .disabled(kinds(value).isEmpty)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // As desktop's review setup: the one morning check has its own card while there is none.
+        if !value.jobs.contains(where: { $0.kind == .healthReview }) {
+            VStack(alignment: .leading, spacing: JV.Space.sm) {
+                Text(verbatim: JobKind.healthReview.label).font(JV.font(17, .semibold, relativeTo: .headline)).foregroundStyle(JV.textPrimary)
+                    .accessibilityAddTraits(.isHeader)
+                Text(verbatim: JobKind.healthReview.detail).font(JV.font(13)).foregroundStyle(JV.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(verbatim: Jobs.healthReviewNeedsCore).font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
+                Button("Set up the morning check") { newKinds = [.healthReview]; creating = true }
+                    .buttonStyle(JVButtonStyle(kind: .secondary))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .jvCard(padding: JV.Space.md)
+        }
     }
 
-    /// The kinds there is room for: one dependency review, and 10 jobs of the others.
+    /// The kinds "New job" offers: one dependency review, and 10 jobs of the others. The
+    /// morning check has its own card.
     private func kinds(_ value: JobList) -> [JobKind] {
         let review = value.jobs.contains { $0.kind == .dependencyReview }
         let full = value.ownerJobs >= Jobs.maxOwnerJobs
-        return JobKind.allCases.filter { $0 == .dependencyReview ? !review : !full }
+        return JobKind.allCases.filter { $0 != .healthReview && ($0 == .dependencyReview ? !review : !full) }
     }
 
     private func row(_ job: ScheduledJob) -> ActivityRow {
@@ -161,7 +178,8 @@ struct NewJobSheet: View {
     @ObservedObject var model: JarvisAppModel
     let kinds: [JobKind]
     let title: String
-    let initial: JobDraft
+    /// Nil: the kind's new draft.
+    let initial: JobDraft?
     let submit: String
     let created: () async -> Void
     /// Sends the job instead of a plain create: the notice to show, or nil when the sheet closes.
@@ -171,7 +189,7 @@ struct NewJobSheet: View {
     @State private var busy = false
     @State private var error: String?
 
-    init(model: JarvisAppModel, kinds: [JobKind], title: String = "New job", initial: JobDraft = JobDraft(), submit: String = "Set up",
+    init(model: JarvisAppModel, kinds: [JobKind], title: String = "New job", initial: JobDraft? = nil, submit: String = "Set up",
          created: @escaping () async -> Void = {}, write: ((NewJob, JobDraft) async -> String?)? = nil) {
         self.model = model
         self.kinds = kinds
@@ -198,7 +216,7 @@ struct NewJobSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                     if let error { JobNotice(text: error, style: .danger) }
                     // A new kind starts from a fresh editor.
-                    JobForm(model: model, kind: kind, initial: initial, busy: busy, submit: submit, creating: true,
+                    JobForm(model: model, kind: kind, initial: initial ?? Jobs.newDraft(kind), busy: busy, submit: submit, creating: true,
                             cancel: { dismiss() }) { draft in Task { await create(draft) } }
                         .id(kind)
                 }
@@ -605,7 +623,7 @@ struct JobForm: View {
         _draft = State(initialValue: initial)
     }
 
-    private var cadences: [JobCadence] { kind == .dependencyReview ? [.weekly, .daily] : JobCadence.allCases }
+    private var cadences: [JobCadence] { kind.singleton ? [.daily, .weekly] : JobCadence.allCases }
 
     private var time: Binding<Date> {
         Binding(get: { Jobs.date(minute: draft.minute) }, set: { draft.minute = Jobs.minute(of: $0) })
@@ -664,7 +682,7 @@ struct JobForm: View {
             if let issue { AccessibilityNotification.Announcement(issue).post() }
         }
         .task {
-            guard kind == .dependencyReview else { return }
+            guard kind.singleton else { return }
             let result = await model.coreRead("/v1/roadmaps", as: RoadmapList.self).checked(Roadmaps.valid)
             guard !Task.isCancelled else { return }
             roadmaps = result.value?.roadmaps.filter { $0.archived_at == nil }
@@ -687,7 +705,7 @@ struct JobForm: View {
         case .diskCheck:
             Stepper(value: $draft.threshold, in: 50...99) { Text(verbatim: "Tell me at \(draft.threshold)% full") }
             caption("You hear about a disk at or above this. 50 to 99.")
-        case .dependencyReview:
+        case .dependencyReview, .healthReview:
             roadmapPicker
         }
     }
@@ -702,7 +720,7 @@ struct JobForm: View {
         if draft.cadence == .once {
             DatePicker("On", selection: start, in: startRange, displayedComponents: .date)
                 .environment(\.timeZone, Jobs.timeZone)
-        } else if kind != .dependencyReview {
+        } else if !kind.singleton {
             Stepper(value: $draft.every, in: draft.cadence.everyRange) {
                 Text(verbatim: draft.every == 1 ? "Every \(draft.cadence.unit.dropLast())" : "Every \(draft.every) \(draft.cadence.unit)")
             }
@@ -730,7 +748,7 @@ struct JobForm: View {
                 .environment(\.timeZone, Jobs.timeZone)
                 .accessibilityHint("\(Jobs.timeZoneName) time")
         }
-        if draft.cadence != .once && kind != .dependencyReview {
+        if draft.cadence != .once && !kind.singleton {
             Toggle("Start on a later day", isOn: laterStart)
             if draft.startDate != nil {
                 DatePicker("Starting", selection: start, in: startRange, displayedComponents: .date)
@@ -756,7 +774,7 @@ struct JobForm: View {
 
     @ViewBuilder private var roadmapPicker: some View {
         VStack(alignment: .leading, spacing: JV.Space.xxs) {
-            LabeledContent("Propose upgrades to a roadmap (optional)") {
+            LabeledContent(kind == .healthReview ? "Put things to fix on a roadmap (optional)" : "Propose upgrades to a roadmap (optional)") {
                 Picker("Roadmap", selection: $draft.roadmapId) {
                     Text("No roadmap").tag(String?.none)
                     if let current = draft.roadmapId, !(roadmaps ?? []).contains(where: { Self.key($0) == current }) {
@@ -767,7 +785,9 @@ struct JobForm: View {
                 .labelsHidden()
                 .disabled(roadmaps == nil && draft.roadmapId == nil)
             }
-            caption("Each run then proposes one item per fixable alert. You accept or reject the proposal on the roadmap.")
+            caption(kind == .healthReview
+                ? "Each run then proposes the things to fix. You accept or reject the proposal on the roadmap. Without a roadmap, a run only records its summary."
+                : "Each run then proposes one item per fixable alert. You accept or reject the proposal on the roadmap.")
         }
     }
 }
