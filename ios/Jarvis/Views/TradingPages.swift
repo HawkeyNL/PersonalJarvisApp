@@ -1,12 +1,14 @@
 import Charts
 import SwiftUI
+import UIKit
 
 // Trading (desktop TradingDesk.vue, TradingStocks.vue, TradingStock.vue, TradingPositions.vue
-// and the holdings view Trading.vue): Core's read-only IBKR portfolio, one instrument's
-// prices, every open position and the manual holdings. Towards IBKR this is read-only:
+// TradingCrypto.vue and the holdings view Trading.vue): Core's read-only IBKR portfolio, one
+// instrument's prices, every open position, the crypto wallets and the manual holdings.
+// Towards IBKR this is read-only:
 // nothing here can place an order. Amounts are Core's decimal strings, formatted as text.
 
-private enum TradingRoute: Hashable { case stocks, positions, holdings, ibkr, memecoin, stock(Int) }
+private enum TradingRoute: Hashable { case stocks, positions, holdings, ibkr, memecoin, crypto, stock(Int) }
 
 /// Colour of a signed amount; the sign is always in the text too.
 func signColor(_ value: String?) -> Color {
@@ -297,6 +299,7 @@ private struct TradingDestination: View {
         case .ibkr: HoldingsPage(model: model, ibkr: true)
         case let .stock(conid): StockPage(model: model, conid: conid)
         case .memecoin: MemecoinPage(model: model)
+        case .crypto: CryptoPage(model: model)
         }
     }
 }
@@ -308,6 +311,8 @@ private struct TradingDestination: View {
 struct TradingPage: View {
     @ObservedObject var model: JarvisAppModel
     @State private var portfolio: TradingState<Portfolio> = .loading
+    /// IBKR plus the crypto wallets; an older Core has no total.
+    @State private var total: Availability<PortfolioTotal> = .loading
     @State private var history: TradingState<PortfolioHistory> = .loading
     /// Worked out once per history read.
     @State private var historyChart: ChartData?
@@ -315,6 +320,7 @@ struct TradingPage: View {
     @State private var route: TradingRoute?
     /// Reads already in flight must not overwrite newer answers.
     @State private var loads = 0
+    @State private var totalLoads = 0
     @State private var historyLoads = 0
 
     var body: some View {
@@ -323,15 +329,13 @@ struct TradingPage: View {
             if let data = portfolio.value {
                 tradingNote("\(Trading.sourceLabel(data)) · as of \(Trading.asOfText(data.as_of))")
             }
+            if let sum = total.value, sum.shown { totalCard(sum) }
             TradingStatus(state: portfolio, what: "your portfolio", retry: loadPortfolio) { data, empty in
                 if empty {
                     UnavailableState(title: "Nothing in your IBKR account yet", kind: .empty,
                                      detail: "Core is connected, but the account holds no positions and no cash.", symbol: "chart.line.uptrend.xyaxis")
                 } else {
-                    KpiGrid(kpis: [
-                        Kpi(label: "Total value", value: Trading.formatMoney(data.net_liquidation, data.base_currency),
-                            detail: "incl. \(Trading.formatMoney(data.cash, data.base_currency)) cash"),
-                    ] + valueKpis(data) + [
+                    KpiGrid(kpis: [totalKpi(data)] + valueKpis(data) + [
                         Kpi(label: "Positions", value: String(data.positions.count),
                             detail: "\(plural(data.positions.count, "instrument", "instruments")) at IBKR"),
                     ])
@@ -347,15 +351,42 @@ struct TradingPage: View {
                     ListDivider()
                     link("Manual holdings", symbol: "square.and.pencil", to: .holdings)
                     ListDivider()
+                    link("Crypto", symbol: "wallet.pass", to: .crypto)
+                    ListDivider()
                     link("IBKR status", symbol: "link", to: .ibkr)
                 }
                 .jvCard(padding: 0)
             }
         }
         .navigationDestination(item: $route) { route in TradingDestination(model: model, route: route) }
-        .refreshable { await loadPortfolio(); await loadHistory() }
+        .refreshable { await loadPortfolio(); await loadTotal(); await loadHistory() }
         .task { await loadPortfolio() }
+        .task { await loadTotal() }
         .task(id: range) { await loadHistory() }
+    }
+
+    /// IBKR's own value: "Total value" while Core has no total (an older Core, 404/405).
+    private func totalKpi(_ data: Portfolio) -> Kpi {
+        var detail = "incl. \(Trading.formatMoney(data.cash, data.base_currency)) cash"
+        if case .error = total { detail += ". \(Crypto.totalFailedText)" }
+        return Kpi(label: total.value == nil ? "Total value" : "IBKR value", value: Trading.formatMoney(data.net_liquidation, data.base_currency),
+                   detail: detail)
+    }
+
+    /// IBKR plus the crypto wallets, each part with its own time.
+    private func totalCard(_ sum: PortfolioTotal) -> some View {
+        VStack(alignment: .leading, spacing: JV.Space.xxs) {
+            Text("Total value").font(JV.font(13)).foregroundStyle(JV.textSecondary)
+            Text(verbatim: Trading.formatMoney(sum.total, sum.base_currency)).font(JV.number(20, .semibold, relativeTo: .title3))
+                .foregroundStyle(JV.textPrimary)
+            ForEach(Array(sum.parts.enumerated()), id: \.offset) { _, part in
+                tradingNote("\(Crypto.partLabel(part.source)) \(Trading.formatMoney(part.value, sum.base_currency)) · as of \(Trading.asOfText(part.as_of))")
+            }
+            if sum.partial { tradingNote(Crypto.partialText) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jvCard(padding: JV.Space.md)
+        .accessibilityElement(children: .combine)
     }
 
     private func link(_ title: String, symbol: String, to route: TradingRoute) -> some View {
@@ -365,7 +396,7 @@ struct TradingPage: View {
     private var valueCard: some View {
         VStack(alignment: .leading, spacing: JV.Space.sm) {
             HStack(spacing: JV.Space.xs) {
-                Text("Total value").font(JV.font(18, .semibold, relativeTo: .title3)).foregroundStyle(JV.textPrimary)
+                Text("IBKR value").font(JV.font(18, .semibold, relativeTo: .title3)).foregroundStyle(JV.textPrimary)
                     .accessibilityAddTraits(.isHeader)
                 if let ratio = historyChart?.ratio {
                     Badge(text: Trading.formatPercent(ratio), style: Trading.sign(ratio) == 1 ? .positive : Trading.sign(ratio) == -1 ? .negative : .neutral)
@@ -376,7 +407,7 @@ struct TradingPage: View {
                 if empty {
                     Text("Not enough history for this period yet.").font(JV.font(13)).foregroundStyle(JV.textSecondary)
                 } else if let chart = historyChart {
-                    TradingChart(series: chart.series, label: chart.label("Total value over \(range == "ALL" ? "all time" : range)") {
+                    TradingChart(series: chart.series, label: chart.label("IBKR value over \(range == "ALL" ? "all time" : range)") {
                         Trading.formatMoney($0, data.base_currency)
                     })
                 }
@@ -439,6 +470,14 @@ struct TradingPage: View {
         let result = await model.coreRead("/v1/trading/portfolio", as: Portfolio.self).checked(Trading.valid)
         guard !Task.isCancelled, mine == loads else { return }
         portfolio = Trading.state(result) { $0.positions.isEmpty && Trading.sign($0.net_liquidation) == 0 }
+    }
+
+    private func loadTotal() async {
+        totalLoads += 1
+        let mine = totalLoads
+        let result = await model.coreRead(Crypto.totalPath, as: PortfolioTotal.self).checked(Crypto.valid)
+        guard !Task.isCancelled, mine == totalLoads else { return }
+        total = result
     }
 
     private func loadHistory() async {
@@ -962,5 +1001,340 @@ private struct HoldingsPage: View {
         let result = await model.coreRead("/v1/trading/portfolio", as: Portfolio.self).checked(Trading.valid)
         guard !Task.isCancelled, mine == ibkrLoads else { return }
         ibkr = Trading.state(result) { $0.positions.isEmpty }
+    }
+}
+
+// MARK: - Crypto
+
+/// Read-only self-custody wallets by public address (desktop TradingCrypto.vue): their EUR
+/// value per wallet and per asset, add and remove, and a refresh within Core's one-minute
+/// cooldown. Nothing here signs or sends; key material is refused before any request.
+private struct CryptoPage: View {
+    @ObservedObject var model: JarvisAppModel
+    @State private var overview: Availability<CryptoOverview> = .loading
+    @State private var adding = false
+    /// The chains Core had on when Add was tapped.
+    @State private var addChains: [CryptoChain] = []
+    @State private var removing: CryptoWallet?
+    @State private var notice: String?
+    @State private var busy = false
+    @State private var cooldownUntil: Date?
+    @State private var copied: String?
+    /// A read already in flight must not overwrite a newer answer.
+    @State private var loads = 0
+
+    var body: some View {
+        PageScaffold(title: Crypto.title, subtitle: Crypto.subtitle) {
+            switch overview {
+            case .loading:
+                LoadingState(label: "Loading your wallets", rows: 3)
+            case let .ok(data):
+                content(data)
+            default:
+                if let failure = Crypto.failure(overview) {
+                    UnavailableState(title: failure == .off ? Crypto.offTitle : "Could not load your wallets", kind: .error,
+                                     detail: failure == .off ? Crypto.offDetail : Crypto.failureText(failure), symbol: "wallet.pass",
+                                     action: UnavailableState.Action(label: "Try again", run: load))
+                }
+            }
+        }
+        .sheet(isPresented: $adding) {
+            AddCryptoWalletSheet(model: model, available: addChains) { added in
+                if added { notice = Crypto.added }
+                await load()
+            }
+        }
+        .confirmationDialog(Crypto.removeConfirm, isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+                            titleVisibility: .visible, presenting: removing) { wallet in
+            Button("Remove", role: .destructive) { Task { await remove(wallet) } }
+            Button("Cancel", role: .cancel) {}
+        }
+        .refreshable { await load() }
+        .task { await load() }
+        .onChange(of: notice) { _, notice in
+            if let notice { AccessibilityNotification.Announcement(notice).post() }
+        }
+    }
+
+    @ViewBuilder private func content(_ data: CryptoOverview) -> some View {
+        if let notice { JobNotice(text: notice) }
+        if let until = cooldownUntil {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let seconds = Int(until.timeIntervalSince(context.date).rounded(.up))
+                if seconds > 0 { tradingNote(Crypto.cooldownText(seconds)) }
+            }
+        }
+        KpiGrid(kpis: [
+            Kpi(label: "Crypto value", value: Trading.formatMoney(data.total_eur, "EUR"),
+                detail: data.wallets.isEmpty ? "No wallets yet" : "as of \(Trading.asOfText(data.as_of))"),
+            Kpi(label: "Wallets", value: String(data.wallets.count), detail: "read-only, public addresses"),
+        ])
+        if data.hidden > 0 { JobNotice(text: Crypto.hiddenText(data.hidden), style: .negative) }
+        tradingNote(Crypto.hint)
+        HStack(spacing: JV.Space.xs) {
+            Button("Add wallet") { notice = nil; addChains = data.chains_available; adding = true }
+                .buttonStyle(JVButtonStyle(kind: .primary))
+                .disabled(busy || data.kinds.isEmpty)
+            Button("Refresh") { Task { await refresh() } }
+                .buttonStyle(JVButtonStyle(kind: .secondary))
+                .disabled(busy || cooldownUntil != nil)
+        }
+        if data.kinds.isEmpty { tradingNote("No chain is on in Core, so no wallet can be added.") }
+        ListSection(title: "Wallets") {
+            if data.wallets.isEmpty {
+                UnavailableState(title: "No wallets yet", kind: .empty, detail: "Add a public address above to see its balances here.",
+                                 symbol: "wallet.pass")
+            } else {
+                VStack(spacing: JV.Space.sm) {
+                    ForEach(data.wallets) { wallet in walletCard(wallet) }
+                }
+            }
+        }
+        if !data.assets.isEmpty {
+            ListSection(title: "By asset") {
+                VStack(spacing: 0) {
+                    ForEach(Array(data.assets.enumerated()), id: \.offset) { index, asset in
+                        if index > 0 { ListDivider(inset: 0) }
+                        assetRow(asset)
+                    }
+                }
+                .jvCard(padding: 0)
+            }
+        }
+        tradingNote(Crypto.attribution)
+    }
+
+    private func walletCard(_ wallet: CryptoWallet) -> some View {
+        VStack(alignment: .leading, spacing: JV.Space.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: JV.Space.xs) {
+                Text(verbatim: wallet.name).font(JV.font(15, .medium)).foregroundStyle(JV.textPrimary).lineLimit(2)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 4)
+                Text(verbatim: Trading.formatMoney(wallet.value_eur, "EUR")).font(JV.number(15, .medium)).foregroundStyle(JV.textPrimary)
+            }
+            HStack(spacing: JV.Space.xs) {
+                Text(verbatim: Crypto.shortAddress(wallet.address)).font(JV.mono(13)).foregroundStyle(JV.textSecondary)
+                Button(copied == wallet.id ? "Copied" : "Copy") { copy(wallet) }
+                    .buttonStyle(JVButtonStyle(kind: .quiet, size: .small))
+                    .accessibilityLabel(Text(verbatim: "Copy the address of \(wallet.name)"))
+                Spacer(minLength: 0)
+                Badge(text: wallet.status.label, style: wallet.status.tone.badge)
+            }
+            if !wallet.chains.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: JV.Space.xxs) {
+                        ForEach(wallet.chains, id: \.self) { chain in Badge(text: chain.label, dot: false) }
+                    }
+                }
+            }
+            tradingNote(Crypto.refreshedText(wallet))
+            if let code = wallet.error { JobNotice(text: Crypto.walletErrorText(code), style: .danger) }
+            if wallet.other_tokens > 0 { tradingNote(Crypto.otherTokensText(wallet.other_tokens)) }
+            ForEach(Array(wallet.balances.enumerated()), id: \.offset) { _, balance in
+                HStack(alignment: .firstTextBaseline, spacing: JV.Space.xs) {
+                    Text(verbatim: balance.symbol).font(JV.mono(13, .medium)).foregroundStyle(JV.textPrimary)
+                    Text(verbatim: balance.chain?.label ?? "Other").font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
+                    Spacer(minLength: 4)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(verbatim: Trading.formatDecimal(balance.amount)).font(JV.number(13)).foregroundStyle(JV.textPrimary)
+                        Text(verbatim: balance.value_eur.map { Trading.formatMoney($0, "EUR") } ?? Crypto.noPrice)
+                            .font(JV.number(12)).foregroundStyle(JV.textSecondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+            HStack {
+                Spacer()
+                Button("Remove wallet") { notice = nil; removing = wallet }
+                    .buttonStyle(JVButtonStyle(kind: .quiet, size: .small))
+                    .disabled(busy)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jvCard(padding: JV.Space.md)
+    }
+
+    /// Asset and value, then amount, EUR price and weight.
+    private func assetRow(_ asset: CryptoAsset) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(verbatim: asset.symbol).font(JV.mono(15, .semibold)).foregroundStyle(JV.textPrimary)
+                Spacer(minLength: 4)
+                Text(verbatim: asset.value_eur.map { Trading.formatMoney($0, "EUR") } ?? Crypto.noPrice)
+                    .font(JV.number(15, .medium)).foregroundStyle(JV.textPrimary)
+            }
+            tradingNote([
+                "Amount \(Trading.formatDecimal(asset.amount))",
+                "EUR price \(asset.price_eur.map { Trading.formatPrice($0, "EUR") } ?? Trading.dash)",
+                "Weight \(asset.weight_pct.map { Trading.formatPercent($0, sign: false) } ?? Trading.dash)",
+            ].joined(separator: " · "))
+        }
+        .padding(.horizontal, JV.Space.md)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// A public address, copied to this device only (no Universal Clipboard).
+    private func copy(_ wallet: CryptoWallet) {
+        UIPasteboard.general.setItems([["public.utf8-plain-text": wallet.address]], options: [.localOnly: true])
+        copied = wallet.id
+        AccessibilityNotification.Announcement("Copied").post()
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            if copied == wallet.id { copied = nil }
+        }
+    }
+
+    private func refresh() async {
+        guard !busy, cooldownUntil == nil else { return }
+        notice = nil
+        do {
+            try await model.refreshCrypto()
+            notice = Crypto.refreshAsked
+        } catch {
+            guard let seconds = Crypto.retryAfterSecs(error) else {
+                notice = "Not refreshed. \(Crypto.failureText(Crypto.failure(error)))"
+                return
+            }
+            // Refresh stays off until Core's cooldown ends.
+            let until = Date().addingTimeInterval(TimeInterval(seconds))
+            cooldownUntil = until
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                if cooldownUntil == until { cooldownUntil = nil }
+            }
+        }
+    }
+
+    private func remove(_ wallet: CryptoWallet) async {
+        guard !busy, let id = wallet.uuid else { return }
+        busy = true
+        notice = nil
+        do {
+            try await model.deleteCryptoWallet(id)
+            notice = Crypto.removed
+        } catch {
+            notice = Crypto.removeFailureText(error) ?? Crypto.removed
+        }
+        await load()
+        busy = false
+    }
+
+    private func load() async {
+        loads += 1
+        let mine = loads
+        let result = await model.coreRead(Crypto.path, as: CryptoOverview.self)
+        guard !Task.isCancelled, mine == loads else { return }
+        overview = result
+    }
+}
+
+/// A new wallet (in a sheet): its chain (only kinds Core has a chain on), for EVM which
+/// chains (all available ones ticked), the public address and an optional label. Key
+/// material is refused here before anything is sent, and the field that held it is emptied.
+private struct AddCryptoWalletSheet: View {
+    @ObservedObject var model: JarvisAppModel
+    let available: [CryptoChain]
+    /// Called after every attempt; true when Core added the wallet.
+    let done: (Bool) async -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var kind: CryptoWalletKind
+    @State private var chains: Set<CryptoChain>
+    @State private var address = ""
+    @State private var label = ""
+    @State private var error: String?
+    @State private var busy = false
+
+    init(model: JarvisAppModel, available: [CryptoChain], done: @escaping (Bool) async -> Void) {
+        self.model = model
+        self.available = available
+        self.done = done
+        let kinds = CryptoWalletKind.allCases.filter { kind in kind.chains.contains { available.contains($0) } }
+        _kind = State(initialValue: kinds.contains(.evm) ? .evm : kinds.first ?? .bitcoin)
+        _chains = State(initialValue: Set(CryptoChain.evm.filter { available.contains($0) }))
+    }
+
+    private var kinds: [CryptoWalletKind] { CryptoWalletKind.allCases.filter { kind in kind.chains.contains { available.contains($0) } } }
+    private var evmChains: [CryptoChain] { CryptoChain.evm.filter { available.contains($0) } }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: JV.Space.md) {
+                    tradingNote(Crypto.hint)
+                    LabeledContent("Chain") {
+                        Picker("Chain", selection: $kind) {
+                            ForEach(kinds, id: \.self) { kind in Text(verbatim: kind.label).tag(kind) }
+                        }
+                        .labelsHidden()
+                        .disabled(busy)
+                    }
+                    if kind == .evm {
+                        Text("Chains").font(JV.font(13, .medium)).foregroundStyle(JV.textPrimary)
+                        ForEach(evmChains, id: \.self) { chain in
+                            Toggle(chain.label, isOn: Binding(get: { chains.contains(chain) },
+                                                              set: { on in if on { chains.insert(chain) } else { chains.remove(chain) } }))
+                        }
+                    }
+                    TextField("Address", text: $address)
+                        .font(JV.mono(15))
+                        .textFieldStyle(.roundedBorder)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.asciiCapable)
+                        .privacySensitive()
+                    TextField("Label (optional)", text: $label)
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled()
+                    if let error { JobNotice(text: error, style: .danger) }
+                    HStack(spacing: JV.Space.xs) {
+                        Spacer(minLength: 0)
+                        Button("Cancel") { dismiss() }.buttonStyle(JVButtonStyle(kind: .secondary)).disabled(busy)
+                        Button("Add wallet") { Task { await add() } }.buttonStyle(JVButtonStyle(kind: .primary)).disabled(busy)
+                    }
+                }
+                .font(JV.font(15))
+                .foregroundStyle(JV.textPrimary)
+                .padding(JV.Space.md)
+            }
+            .navigationTitle("Add a wallet")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .interactiveDismissDisabled(busy)
+        .privacyCover()
+        .onChange(of: kind) { _, _ in chains = Set(evmChains) }
+        .onChange(of: error) { _, error in
+            if let error { AccessibilityNotification.Announcement(error).post() }
+        }
+    }
+
+    private func add() async {
+        guard !busy else { return }
+        error = nil
+        let body: NewCryptoWallet
+        switch Crypto.newWallet(kind: kind, address: address, label: label, chains: Array(chains)) {
+        case let .failure(issue):
+            // Key material is never kept: the field is emptied, the message is fixed.
+            if issue.key { if issue.field == .label { label = "" } else { address = "" } }
+            error = issue.message
+            return
+        case let .success(wallet):
+            body = wallet
+        }
+        busy = true
+        do {
+            try await model.addCryptoWallet(body)
+            address = ""
+            label = ""
+            await done(true)
+            busy = false
+            dismiss()
+        } catch {
+            self.error = Crypto.addFailureText(error)
+            if Crypto.isKeyMaterialRefusal(error) { address = ""; label = "" }
+            await done(false)
+            busy = false
+        }
     }
 }

@@ -299,6 +299,13 @@ final class JarvisAppModel: ObservableObject {
 
     func deleteHolding(_ id: String) async throws { try await ownerWrite { try await self.chat.deleteHolding(id: id) } }
 
+    // Crypto wallets: the same gate.
+    func addCryptoWallet(_ body: NewCryptoWallet) async throws { try await ownerWrite { try await self.chat.addCryptoWallet(body) } }
+
+    func deleteCryptoWallet(_ id: UUID) async throws { try await ownerWrite { try await self.chat.deleteCryptoWallet(id) } }
+
+    func refreshCrypto() async throws { try await ownerWrite { try await self.chat.refreshCrypto() } }
+
     // The memecoin paper trader's two tightening actions, behind the same gate.
     func pauseMemecoin() async throws -> MemeAnswer { try await ownerWrite { try await self.chat.pauseMemecoin() } }
 

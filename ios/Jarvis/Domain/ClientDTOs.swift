@@ -298,6 +298,8 @@ struct APIErrorBody: Decodable {
     let error: String?
     let hint: String?
     var code: String? = nil
+    /// A 429's wait, on Core's crypto refresh.
+    var retry_after_secs: Int? = nil
 }
 
 // Read-only subset of /v1/system/registry used by the Resources, Health and
