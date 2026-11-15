@@ -13,6 +13,9 @@ export class ApiError extends Error {
     public readonly path: string,
     /** Machine-readable Core error code; compared only, never displayed. */
     public readonly code?: string,
+    /** The error answer of an owner call, for guards that read a fixed
+     *  field (a retry delay, a known refusal); never displayed as is. */
+    public readonly body?: unknown,
   ) {
     super(`HTTP ${status} (${path})`);
     this.name = "ApiError";
@@ -126,7 +129,7 @@ async function authenticatedRequest<T>(
     throw new NetworkError("unreachable", path);
   }
   if (response.status < 200 || response.status >= 300) {
-    throw new ApiError(response.status, path);
+    throw new ApiError(response.status, path, undefined, response.body);
   }
   return response.body as T;
 }

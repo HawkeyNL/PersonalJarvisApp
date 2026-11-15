@@ -391,6 +391,45 @@ class KtorJarvisApi(
         return jobCall({ }) { client.prepareDelete(endpoint.url("/v1/holdings/$id")) { bearerAuth(token) } }
     }
 
+    override suspend fun cryptoOverview(endpoint: HomeNodeEndpoint, token: String) =
+        jobCall({ requireNotNull(readCryptoOverview(it)) }, coreError = true) { client.prepareGet(endpoint.url("/v1/trading/crypto")) { bearerAuth(token) } }
+
+    override suspend fun addWallet(
+        endpoint: HomeNodeEndpoint, token: String, kind: WalletKind, address: String, chains: List<CryptoChain>, label: String,
+    ): ApiResult<Unit> {
+        // Refused input (key material above all) never leaves the phone.
+        val body = newWallet(kind, address, chains, label) ?: return ApiResult.InvalidResponse(INVALID_WALLET)
+        // Only the status matters; the body is read within the bound and dropped.
+        return jobCall({ }, coreError = true) {
+            client.preparePost(endpoint.url("/v1/trading/crypto/wallets")) { bearerAuth(token); setBody(TextContent(body.toString(), ContentType.Application.Json)) }
+        }
+    }
+
+    override suspend fun deleteWallet(endpoint: HomeNodeEndpoint, token: String, id: String): ApiResult<Unit> {
+        if (!isJobId(id)) return ApiResult.InvalidResponse(INVALID_WALLET)
+        return jobCall({ }, coreError = true) { client.prepareDelete(endpoint.url("/v1/trading/crypto/wallets/$id")) { bearerAuth(token) } }
+    }
+
+    override suspend fun refreshCrypto(endpoint: HomeNodeEndpoint, token: String): ApiResult<CryptoRefresh> = try {
+        client.preparePost(endpoint.url("/v1/trading/crypto/refresh")) {
+            bearerAuth(token); setBody(TextContent("{}", ContentType.Application.Json))
+        }.execute { response ->
+            when {
+                response.status == HttpStatusCode.TooManyRequests -> ApiResult.Success(CryptoRefresh.Cooldown(retryAfterSecs(smallJson(response))))
+                response.status == HttpStatusCode.Unauthorized -> ApiResult.Unauthorized
+                response.status.value !in 200..299 -> ApiResult.HttpError(response.status.value, coreErrorText(response))
+                else -> ApiResult.Success(CryptoRefresh.Queued)
+            }
+        }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        networkFailure(error)
+    }
+
+    override suspend fun portfolioTotal(endpoint: HomeNodeEndpoint, token: String) =
+        jobCall({ requireNotNull(readPortfolioTotal(it)) }) { client.prepareGet(endpoint.url("/v1/trading/total")) { bearerAuth(token) } }
+
     override suspend fun memeOverview(endpoint: HomeNodeEndpoint, token: String) =
         jobCall({ requireNotNull(readOverview(it)) }) { client.prepareGet(endpoint.url("/v1/trading/meme/overview")) { bearerAuth(token) } }
 
@@ -523,14 +562,15 @@ class KtorJarvisApi(
 
     /** A Jobs or Roadmaps call: the answer is read within [limit] and passed through [read],
      *  which throws IllegalArgumentException for a shape the guards refuse. An answer over the
-     *  limit fails closed, also for a write. */
+     *  limit fails closed, also for a write. [coreError]: a refusal carries Core's short
+     *  `error` text (a fixed string the caller maps to its own words, never shows). */
     private suspend fun <T> jobCall(
-        read: (JsonElement) -> T, limit: Int = MAX_JOBS_BYTES, statement: suspend () -> HttpStatement,
+        read: (JsonElement) -> T, limit: Int = MAX_JOBS_BYTES, coreError: Boolean = false, statement: suspend () -> HttpStatement,
     ): ApiResult<T> = try {
         statement().execute { response ->
             when {
                 response.status == HttpStatusCode.Unauthorized -> ApiResult.Unauthorized
-                response.status.value !in 200..299 -> ApiResult.HttpError(response.status.value, null)
+                response.status.value !in 200..299 -> ApiResult.HttpError(response.status.value, if (coreError) coreErrorText(response) else null)
                 else -> try {
                     val json = boundedJson(response, limit)
                     ApiResult.Success(withContext(Dispatchers.Default) { read(json) })
@@ -553,6 +593,10 @@ class KtorJarvisApi(
             require(bytes.size <= limit)
             runCatching { Json.parseToJsonElement(bytes.decodeToString()) }.getOrDefault(JsonNull)
         }
+
+    /** Core's `error` text of a refusal, at most 300 characters; null otherwise. */
+    private suspend fun coreErrorText(response: io.ktor.client.statement.HttpResponse): String? =
+        ((smallJson(response) as? JsonObject)?.get("error") as? JsonPrimitive)?.takeIf { it.isString && it.content.length <= 300 }?.content
 
     /** A small JSON reply, read with a size bound; null when too large or not JSON. */
     private suspend fun smallJson(response: io.ktor.client.statement.HttpResponse, limit: Int = MAX_REPLY_BYTES): JsonElement? =
