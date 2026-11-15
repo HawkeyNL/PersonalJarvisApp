@@ -12,27 +12,35 @@ import { validHttpsUrl, validText } from "./roadmaps.ts";
 
 export const TIME_ZONE = "Europe/Amsterdam";
 export const NEEDS_CORE = "Needs Jarvis Core v0.0.87 or later.";
+/** The morning check (`health_review`) came with a later Core. */
+export const HEALTH_REVIEW_NEEDS_CORE = "Needs Jarvis Core v0.0.90 or later.";
 export const TIMES_IN_ZONE = `Times are in ${TIME_ZONE} time.`;
 
-export const KINDS = ["prompt", "reminder", "disk_check", "dependency_review"] as const;
+export const KINDS = ["prompt", "reminder", "disk_check", "dependency_review", "health_review"] as const;
 export type Kind = (typeof KINDS)[number];
-/** The kinds "New job" offers; the one dependency review has its own setup. */
+/** At most one of each on a Home Node, set up on its own card, daily or
+ *  weekly only and not counted in the owner's 10. */
+export const SINGLETON_KINDS = ["dependency_review", "health_review"] as const satisfies readonly Kind[];
+export const isSingleton = (kind: Kind) => (SINGLETON_KINDS as readonly Kind[]).includes(kind);
+/** The kinds "New job" offers; the singletons have their own setup. */
 export const NEW_KINDS = ["prompt", "reminder", "disk_check"] as const satisfies readonly Kind[];
 export const KIND_LABEL: Record<Kind, string> = {
   prompt: "Research", reminder: "Reminder", disk_check: "Disk check", dependency_review: "Dependency review",
+  health_review: "Morning check",
 };
 export const KIND_DETAIL: Record<Kind, string> = {
   prompt: "Searches the web for your instruction and posts the answer to the job's conversation.",
   reminder: "Posts your text to the job's conversation and sends you a push with the title.",
   disk_check: "Tells you when a Home Node disk is fuller than the threshold. It changes nothing on the host.",
   dependency_review: "Reads the open Dependabot alerts and pull requests of your repositories and puts them in order.",
+  health_review: "Every morning Jarvis checks Core's own health and proposes things to fix on a roadmap you pick.",
 };
 
 export const CADENCES = ["once", "daily", "weekly", "monthly"] as const;
 export type Cadence = (typeof CADENCES)[number];
 export const CADENCE_LABEL: Record<Cadence, string> = { once: "Once", daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
-/** A dependency review keeps the schedules it had: daily or weekly. */
-export const cadencesFor = (kind: Kind): readonly Cadence[] => (kind === "dependency_review" ? ["daily", "weekly"] : CADENCES);
+/** A dependency review or morning check runs daily or weekly. */
+export const cadencesFor = (kind: Kind): readonly Cadence[] => (isSingleton(kind) ? ["daily", "weekly"] : CADENCES);
 export const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 /** The unit `every` counts in, singular and plural. */
@@ -355,9 +363,9 @@ export function originText(job: Job): string | null {
   return job.expires_at ? `Set up by Jarvis · expires ${dayText(job.expires_at)}` : "Set up by Jarvis";
 }
 
-/** The owner's jobs that count towards Core's 10 (not the dependency review,
- *  not Jarvis's own). */
-export const ownerJobCount = (jobs: Job[]) => jobs.filter((j) => j.origin === "owner" && j.kind !== "dependency_review").length;
+/** The owner's jobs that count towards Core's 10 (not the dependency review
+ *  or morning check, not Jarvis's own). */
+export const ownerJobCount = (jobs: Job[]) => jobs.filter((j) => j.origin === "owner" && !isSingleton(j.kind)).length;
 /** `unsupported`: jobs this build cannot show; Core may count them too. */
 export const countText = (n: number, unsupported = 0) =>
   `${n} of ${LIMITS.ownerJobs} jobs${unsupported ? ", not counting any this app cannot show" : ""}`;
@@ -379,7 +387,7 @@ export type Draft = {
 };
 
 export const newDraft = (kind: Kind = "prompt"): Draft => ({
-  kind, cadence: "weekly", weekday: 1, month_day: 1, every: 1, start_date: "", max_runs: "", time: "07:00", enabled: true,
+  kind, cadence: kind === "health_review" ? "daily" : "weekly", weekday: 1, month_day: 1, every: 1, start_date: "", max_runs: "", time: "07:00", enabled: true,
   roadmap_id: null, title: "", instruction: "", text: "", notify: true, threshold: LIMITS.threshold,
 });
 
@@ -418,7 +426,7 @@ export function draftIssue(d: Draft, today: string): DraftIssue | null {
       return issue("threshold", `Pick a threshold from ${LIMITS.thresholdMin} to ${LIMITS.thresholdMax} percent.`);
     }
   }
-  if (d.kind !== "dependency_review") {
+  if (!isSingleton(d.kind)) {
     if (d.cadence !== "once") {
       const every = count(d.every);
       const most = LIMITS.every[d.cadence];
@@ -457,14 +465,15 @@ function paramsOf(d: Draft): BodyParams {
     case "prompt": return { title: d.title.trim(), instruction: d.instruction.trim(), notify: d.notify };
     case "reminder": return { title: d.title.trim(), ...(d.text.trim() ? { text: d.text.trim() } : {}) };
     case "disk_check": return { threshold_percent: Number(count(d.threshold)) };
-    case "dependency_review": return d.roadmap_id ? { roadmap_id: d.roadmap_id } : {};
+    case "dependency_review":
+    case "health_review": return d.roadmap_id ? { roadmap_id: d.roadmap_id } : {};
   }
 }
 
 /** The schedule as Core stores it from this draft: no every, start date or
- *  run limit for a dependency review, no run limit for a one-time job. */
+ *  run limit for a singleton, no run limit for a one-time job. */
 function scheduleOf(d: Draft) {
-  const fixed = d.kind === "dependency_review";
+  const fixed = isSingleton(d.kind);
   const repeats = !fixed && d.cadence !== "once";
   const max = count(d.max_runs);
   return {
@@ -503,7 +512,7 @@ export function jobPatch(job: Job, d: Draft): JobPatch | null {
   if (cadenceChanged) patch.cadence = d.cadence;
   if (d.cadence === "weekly" && d.weekday !== job.weekday) patch.weekday = d.weekday;
   if (d.cadence === "monthly" && d.month_day !== job.month_day) patch.month_day = d.month_day;
-  if (d.kind !== "dependency_review") {
+  if (!isSingleton(d.kind)) {
     if (d.cadence !== "once" && s.every !== (cadenceChanged ? 1 : job.every)) patch.every = s.every;
     if (s.start_date !== job.start_date) patch.start_date = s.start_date;
     if (s.max_runs !== (d.cadence === "once" ? null : job.max_runs)) patch.max_runs = s.max_runs;
@@ -541,6 +550,8 @@ const ERROR_TEXT: Record<string, string> = {
   roadmap_changed: "The roadmap changed while the run read it. The next run proposes again.",
   roadmap_limit: "The roadmap holds its maximum of items or pending proposals, so no proposal was made.",
   roadmap_proposal_failed: "The roadmap proposal could not be made.",
+  signals_unavailable: "Core could not read any of its own signals.",
+  source_unavailable: "Some signals could not be read; the rest were checked.",
 };
 /** Where a code means something else for one kind of job. */
 const KIND_ERROR_TEXT: Record<string, Record<string, string>> = {
@@ -617,13 +628,15 @@ export const INVALID_TEXT =
   "Core refused this as invalid: for example a one-time job that is not in the future, an archived roadmap, or a research title or instruction that may hold personal or financial details. Check the fields and try again.";
 
 /** The notice after a failed write. A 409 on a change or delete is a
- *  revision conflict; on a create, no room: a second dependency review, or
- *  the owner's 10 jobs. */
+ *  revision conflict; on a create, no room: a second dependency review or
+ *  morning check, or the owner's 10 jobs. */
 export function writeFailureText(error: unknown, update: boolean, kind?: Kind): string {
   const e = error as { name?: string; status?: number } | null;
   if (e?.name === "ApiError" && e.status === 409) {
     if (update) return CHANGED_ELSEWHERE;
-    return kind === "dependency_review" ? "Core refused this: a dependency review already exists." : `Core refused this. ${FULL_TEXT}`;
+    if (kind === "dependency_review") return "Core refused this: a dependency review already exists.";
+    if (kind === "health_review") return "Core refused this: a morning check already exists.";
+    return `Core refused this. ${FULL_TEXT}`;
   }
   if (e?.name === "ApiError" && e.status === 400) return INVALID_TEXT;
   if (e?.name === "ApiError" && e.status === 422 && !update) return KIND_NOT_KNOWN;

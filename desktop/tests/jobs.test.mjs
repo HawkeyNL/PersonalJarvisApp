@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  CHANGED_ELSEWHERE, FULL_TEXT, INVALID_TEXT, NEEDS_CORE, PAUSED_AFTER_FAILURES, RUN_NOW_REFUSED, countText, dateText, deleteFailureText, deleteNote,
+  CHANGED_ELSEWHERE, FULL_TEXT, HEALTH_REVIEW_NEEDS_CORE, INVALID_TEXT, KIND_DETAIL, KIND_LABEL, NEEDS_CORE, NEW_KINDS, cadencesFor, PAUSED_AFTER_FAILURES, RUN_NOW_REFUSED, countText, dateText, deleteFailureText, deleteNote,
   draftIssue, errorText, failureOf, failureText, isFinished, jobPatch, jobTitle, latestStart, minuteToTime, newDraft, newJob, nextRunText,
   ordinal, originText, ownerJobCount, readJobAnswer, readJobList, readRunDetail, readRuns, runFinished, runNowFailureText, runsText,
   scheduleText, stateBadge, timeToMinute, toDraft, todayInZone, unsupportedText, writeFailureText, zonedText,
@@ -238,6 +238,40 @@ test("job state: paused after failures, finished, Jarvis's own, counts", () => {
   assert.equal(countText(2, 1), "2 of 10 jobs, not counting any this app cannot show");
   assert.equal(deleteNote({ ...p, conversation_id: J3 }), "Its runs are deleted too. Its conversation stays in chat.");
   assert.equal(deleteNote(p), "Its runs are deleted too.");
+});
+
+test("the morning check is a daily or weekly singleton with a roadmap only", () => {
+  const R1 = "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c76";
+  const check = { ...job, ...core, id: J2, kind: "health_review", cadence: "daily", weekday: null, params: { roadmap_id: R1 } };
+  const list = readJobList({ status: "ok", jobs: [job, check, { ...check, id: J3, kind: "log_review" }] });
+  assert.equal(list.unsupported, 1, "an unknown kind is still left out");
+  const [review, c] = list.jobs;
+  assert.equal(c.kind, "health_review");
+  assert.equal(c.params.roadmap_id, R1);
+  assert.equal(jobTitle(c), "Morning check");
+  assert.equal(KIND_LABEL.health_review, "Morning check");
+  assert.equal(KIND_DETAIL.health_review, "Every morning Jarvis checks Core's own health and proposes things to fix on a roadmap you pick.");
+  assert.equal(HEALTH_REVIEW_NEEDS_CORE, "Needs Jarvis Core v0.0.90 or later.");
+  assert.ok(!NEW_KINDS.includes("health_review"), "set up on its own card");
+  assert.deepEqual(cadencesFor("health_review"), ["daily", "weekly"]);
+  const [p] = readJobList({ status: "ok", jobs: [prompt] }).jobs;
+  assert.equal(ownerJobCount([review, c, p]), 1, "neither singleton counts");
+  // Default daily 07:00; no every, start date or limit; only roadmap_id.
+  const draft = { ...newDraft("health_review"), title: "x", instruction: "y", text: "z", threshold: 60, notify: false };
+  assert.deepEqual(newJob(draft, TODAY), { kind: "health_review", cadence: "daily", at_minute: 420, enabled: true, params: {} });
+  assert.deepEqual(newJob({ ...draft, cadence: "weekly", weekday: 3, every: 2, max_runs: 5, start_date: "2027-01-01", roadmap_id: R1 }, TODAY), {
+    kind: "health_review", cadence: "weekly", weekday: 3, at_minute: 420, enabled: true, params: { roadmap_id: R1 },
+  });
+  assert.equal(draftIssue({ ...draft, every: 0, start_date: "nope" }, TODAY), null);
+  assert.equal(jobPatch(c, toDraft(c)), null);
+  assert.deepEqual(jobPatch(c, { ...toDraft(c), roadmap_id: null }), { params: {} });
+  assert.deepEqual(jobPatch(c, { ...toDraft(c), cadence: "weekly" }), { cadence: "weekly", weekday: 1 });
+  // Run codes and refusals.
+  assert.equal(errorText("signals_unavailable", "health_review"), "Core could not read any of its own signals.");
+  assert.equal(errorText("source_unavailable", "health_review"), "Some signals could not be read; the rest were checked.");
+  assert.match(errorText("roadmap_limit", "health_review"), /maximum of items/);
+  assert.equal(writeFailureText(apiError(409), false, "health_review"), "Core refused this: a morning check already exists.");
+  assert.match(writeFailureText(apiError(422), false, "health_review"), /Update Core/);
 });
 
 // Core refuses a body naming a field of its own (origin, owner_id, ...).
