@@ -9,6 +9,10 @@ enum JobKind: String, Codable, CaseIterable {
     case prompt, reminder
     case diskCheck = "disk_check"
     case dependencyReview = "dependency_review"
+    case healthReview = "health_review"
+
+    /// At most one per node, daily or weekly, with only a roadmap; not in the owner's 10.
+    var singleton: Bool { self == .dependencyReview || self == .healthReview }
 
     var label: String {
         switch self {
@@ -16,6 +20,7 @@ enum JobKind: String, Codable, CaseIterable {
         case .reminder: "Reminder"
         case .diskCheck: "Disk check"
         case .dependencyReview: "Dependency review"
+        case .healthReview: "Morning check"
         }
     }
 
@@ -25,6 +30,7 @@ enum JobKind: String, Codable, CaseIterable {
         case .reminder: "Posts your text to the job's conversation and sends you a push with the title."
         case .diskCheck: "Tells you when a Home Node disk is fuller than the threshold. It changes nothing on the host."
         case .dependencyReview: "Reads the open Dependabot alerts and pull requests of your repositories and puts them in order."
+        case .healthReview: "Every morning Jarvis checks Core's own health and proposes things to fix on a roadmap you pick."
         }
     }
 }
@@ -137,9 +143,9 @@ struct JobList: Decodable {
     /// False when Core's scheduler is off: jobs can be changed, but none runs.
     var configured: Bool { status == "ok" }
 
-    /// The owner's jobs that count towards Core's limit of 10: not the dependency review,
-    /// not Jarvis's own.
-    var ownerJobs: Int { jobs.filter { !$0.byJarvis && $0.kind != .dependencyReview }.count }
+    /// The owner's jobs that count towards Core's limit of 10: not the dependency review or
+    /// the morning check, not Jarvis's own.
+    var ownerJobs: Int { jobs.filter { !$0.byJarvis && !$0.kind.singleton }.count }
 }
 
 struct JobRun: Decodable, Identifiable {
@@ -411,6 +417,8 @@ struct JobPatch: Encodable, Equatable {
 
 enum Jobs {
     static let timeZoneName = "Europe/Amsterdam"
+    /// The morning check (`health_review`) came with a later Core.
+    static let healthReviewNeedsCore = "Needs Jarvis Core v0.0.90 or later."
     private static let zone = TimeZone(identifier: timeZoneName)
     /// False when this device cannot read the schedule's zone: the Jobs page then shows no
     /// times at all rather than wrong ones (fail closed); `timeZone` is never shown then.
@@ -615,19 +623,26 @@ enum Jobs {
     static func params(_ kind: JobKind, _ draft: JobDraft) -> JobParamsBody {
         let trim = { (text: String) in text.trimmingCharacters(in: .whitespacesAndNewlines) }
         switch kind {
-        case .dependencyReview: return JobParamsBody(roadmap_id: draft.roadmapId)
+        case .dependencyReview, .healthReview: return JobParamsBody(roadmap_id: draft.roadmapId)
         case .prompt: return JobParamsBody(title: trim(draft.title), instruction: trim(draft.instruction), notify: draft.notify)
         case .reminder: return JobParamsBody(title: trim(draft.title), text: trim(draft.text).isEmpty ? nil : trim(draft.text))
         case .diskCheck: return JobParamsBody(threshold_percent: draft.threshold)
         }
     }
 
+    /// A new job's editor: a morning check starts daily at 07:00, the others weekly.
+    static func newDraft(_ kind: JobKind) -> JobDraft {
+        var draft = JobDraft()
+        if kind == .healthReview { draft.cadence = .daily }
+        return draft
+    }
+
     /// The create body: a weekday only for a weekly job, a month day only for a monthly
-    /// one, no `every` or run limit for a one-time job, and a dependency review only daily
-    /// or weekly, as before.
+    /// one, no `every` or run limit for a one-time job, and a dependency review or morning
+    /// check only daily or weekly.
     static func newJob(_ kind: JobKind, _ draft: JobDraft) -> NewJob {
         let once = draft.cadence == .once
-        let review = kind == .dependencyReview
+        let review = kind.singleton
         return NewJob(kind: kind, cadence: draft.cadence,
                       weekday: draft.cadence == .weekly ? draft.weekday : nil,
                       month_day: draft.cadence == .monthly ? draft.monthDay : nil,
@@ -665,7 +680,7 @@ enum Jobs {
             return "The text can be at most 500 characters on one line."
         }
         if kind == .diskCheck, !(50...99).contains(draft.threshold) { return "Pick a threshold from 50 to 99 percent." }
-        if kind != .dependencyReview {
+        if !kind.singleton {
             let every = draft.cadence.everyRange
             if !every.contains(draft.every) { return "Repeat every 1 to \(every.upperBound) \(draft.cadence.unit)." }
             if let most = draft.maxRuns, !(1...100).contains(most) { return "Stop after 1 to 100 runs, or leave it empty." }
@@ -704,6 +719,8 @@ enum Jobs {
         "roadmap_changed": "The roadmap changed while the run read it. The next run proposes again.",
         "roadmap_limit": "The roadmap holds its maximum of items or pending proposals, so no proposal was made.",
         "roadmap_proposal_failed": "The roadmap proposal could not be made.",
+        "signals_unavailable": "Core could not read any of its own signals.",
+        "source_unavailable": "Some signals could not be read; the rest were checked.",
     ]
 
     /// Where a code means something else for one kind of job.
@@ -776,7 +793,11 @@ enum Jobs {
         if isUnreadable(error) { return notConfirmed }
         if status(error) == 409 {
             if update { return changedElsewhere }
-            return kind == .dependencyReview ? "Core refused this: a dependency review already exists." : "Core refused this. \(full)"
+            switch kind {
+            case .dependencyReview: return "Core refused this: a dependency review already exists."
+            case .healthReview: return "Core refused this: a morning check already exists."
+            default: return "Core refused this. \(full)"
+            }
         }
         if status(error) == 400 { return invalidText }
         if !update, status(error) == 422 { return kindNotKnown }
