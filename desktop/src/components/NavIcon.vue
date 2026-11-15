@@ -50,6 +50,7 @@ export const PATHS = {
   briefcase: "M3 8h18v12H3zM8 8V5h8v3M3 13h18",
   moon: "M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z",
   stocks: "M4 20V10M10 20V4M16 20v-7M22 20H2",
+  wallet: "M3 7h15a3 3 0 0 1 3 3v8a2 2 0 0 1-2 2H3zM3 7l12-3v3M16.5 13.5h.01",
   coin: "M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18M9 10h.01M15 10h.01M8.5 14.5c2 2 5 2 7 0",
   futures: "M3 12h4l3-7 4 14 3-7h4",
   orders: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",

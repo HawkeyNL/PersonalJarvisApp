@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import NavIcon from "../components/NavIcon.vue";
 import PageShell from "../components/PageShell.vue";
 import JvSegmented from "../components/jv/JvSegmented.vue";
@@ -11,7 +11,9 @@ import {
   HISTORY_RANGES, asOfText, changeRatio, decimalSign, readHistory, readPortfolio, formatMoney, formatPercent, onTarget, signTone, sourceLabel,
   type HistoryRange, type Portfolio, type PortfolioHistory,
 } from "../trading";
-import { tradingApi, useTradingRead } from "../tradingApi";
+import { devDataSet, tradingApi, useTradingRead } from "../tradingApi";
+import { PARTIAL_TEXT, TOTAL_FAILED_TEXT, partLabel, readTotal, type PortfolioTotal } from "../crypto";
+import { cryptoApi, useCryptoRefetch } from "../cryptoApi";
 
 // Trading dashboard: every pot on one desk. Read-only; only the IBKR stocks
 // pot has data, the others say plainly that they are not built yet.
@@ -21,6 +23,30 @@ const { state: portfolio, reload: reloadPortfolio } = useTradingRead<Portfolio>(
   read: readPortfolio,
   isEmpty: (p) => p.positions.length === 0 && decimalSign(p.net_liquidation) === 0,
 });
+
+// The total over IBKR and the crypto wallets (GET /v1/trading/total). A Core
+// before v0.0.90 has no such route: the IBKR net liquidation is the total then.
+const total = ref<{ kind: "loading" } | { kind: "ok"; total: PortfolioTotal } | { kind: "ibkr-only"; failed: boolean }>({ kind: "loading" });
+let totalSeq = 0;
+async function loadTotal(): Promise<void> {
+  const id = ++totalSeq;
+  let next: typeof total.value;
+  if (devDataSet.value !== "live") next = { kind: "ibkr-only", failed: false }; // dev fixtures: IBKR only
+  else {
+    try {
+      const read = readTotal(await cryptoApi.total());
+      next = read ? { kind: "ok", total: read } : { kind: "ibkr-only", failed: true };
+    } catch (error) {
+      const e = error as { name?: string; status?: number } | null;
+      next = { kind: "ibkr-only", failed: !(e?.name === "ApiError" && (e.status === 404 || e.status === 405)) };
+    }
+  }
+  if (id === totalSeq) total.value = next;
+}
+watch(devDataSet, () => void loadTotal(), { immediate: true });
+useCryptoRefetch(() => void loadTotal());
+/** The total card: shown once a part is set up (else IBKR's own state says why). */
+const totalShown = computed(() => (total.value.kind === "ok" && (total.value.total.parts.length > 0 || total.value.total.partial) ? total.value.total : null));
 
 const range = ref<HistoryRange>("3M");
 const RANGES = HISTORY_RANGES.map((id) => ({ id, label: id === "ALL" ? "All" : id }));
@@ -39,7 +65,7 @@ const rangeRatio = computed(() => {
   return points.length > 1 ? changeRatio(points[0].value, points[points.length - 1].value) : null;
 });
 const rangeChange = computed(() => (rangeRatio.value === null ? null : formatPercent(rangeRatio.value)));
-const chartLabel = computed(() => `Total value over ${range.value === "ALL" ? "all time" : range.value}: ${rangeChange.value ?? "no change data"}`);
+const chartLabel = computed(() => `IBKR value over ${range.value === "ALL" ? "all time" : range.value}: ${rangeChange.value ?? "no change data"}`);
 const changeTone = computed(() => ({ pos: "pos", neg: "neg", flat: "" })[signTone(rangeRatio.value)]);
 </script>
 
@@ -52,6 +78,17 @@ const changeTone = computed(() => ({ pos: "pos", neg: "neg", flat: "" })[signTon
       </p>
     </template>
 
+    <div v-if="totalShown" class="card td-kpi" role="group" aria-labelledby="desk-total">
+      <span id="desk-total" class="t-sm t-2">Total value</span>
+      <span class="big">{{ formatMoney(totalShown.total, totalShown.base_currency) }}</span>
+      <ul class="desk-parts t-xs t-2">
+        <li v-for="p in totalShown.parts" :key="p.source">
+          {{ partLabel(p.source) }} {{ formatMoney(p.value, totalShown.base_currency) }} · as of {{ asOfText(p.as_of) }}
+        </li>
+      </ul>
+      <span v-if="totalShown.partial" class="t-xs t-2">{{ PARTIAL_TEXT }}</span>
+    </div>
+
     <TradingStatus :state="portfolio" what="your portfolio" @retry="reloadPortfolio">
       <template #default="{ data, empty }">
         <div v-if="empty" class="card empty">
@@ -61,9 +98,10 @@ const changeTone = computed(() => ({ pos: "pos", neg: "neg", flat: "" })[signTon
         </div>
         <div v-else class="td-kpis">
           <div class="card td-kpi">
-            <span class="t-sm t-2">Total value</span>
+            <span class="t-sm t-2">{{ total.kind === "ok" ? "IBKR value" : "Total value" }}</span>
             <span class="big">{{ formatMoney(data.net_liquidation, data.base_currency) }}</span>
             <span class="t-xs t-2">incl. {{ formatMoney(data.cash, data.base_currency) }} cash</span>
+            <span v-if="total.kind === 'ibkr-only' && total.failed" class="t-xs t-2">{{ TOTAL_FAILED_TEXT }}</span>
           </div>
           <div class="card td-kpi">
             <span class="t-sm t-2">Today</span>
@@ -87,7 +125,7 @@ const changeTone = computed(() => ({ pos: "pos", neg: "neg", flat: "" })[signTon
     <section class="card td-col" aria-labelledby="desk-value">
       <div class="td-card-head">
         <div class="td-title">
-          <h2 id="desk-value">Total value</h2>
+          <h2 id="desk-value">IBKR value</h2>
           <span v-if="rangeChange" class="badge" :class="changeTone"><span class="dot" aria-hidden="true"></span>{{ rangeChange }}</span>
         </div>
         <JvSegmented v-model="range" :items="RANGES" label="Period" controls="desk-chart" class="td-seg" />
@@ -155,6 +193,7 @@ const changeTone = computed(() => ({ pos: "pos", neg: "neg", flat: "" })[signTon
 </template>
 
 <style scoped>
+.desk-parts { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
 .pot-name { display: flex; flex-direction: column; min-width: 0; }
 .pot-value { align-items: flex-end; }
 .pot-value .big { overflow-wrap: anywhere; min-width: 0; }

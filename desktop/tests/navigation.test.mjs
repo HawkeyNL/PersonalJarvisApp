@@ -4,7 +4,7 @@ import {createMemoryHistory, createRouter} from "vue-router";
 
 import {NAV, PAGES, REDIRECTS, ariaCurrent, buildRoutes} from "../src/navigation.ts";
 
-const VIEWS = ["home", "agents", "integrations", "health", "memory", "roadmaps", "roadmap", "jobs", "job", "jobrun", "trading", "desk", "stocks", "stock", "positions", "memecoin", "memestrategies", "memestrategy", "tasks", "context", "settings", "soon"];
+const VIEWS = ["home", "agents", "integrations", "health", "memory", "roadmaps", "roadmap", "jobs", "job", "jobrun", "trading", "desk", "stocks", "stock", "positions", "crypto", "memecoin", "memestrategies", "memestrategy", "tasks", "context", "settings", "soon"];
 const stub = name => ({name, render: () => null});
 
 async function routerAt(path) {
@@ -16,7 +16,7 @@ async function routerAt(path) {
 test("sidebar follows the agreed sections and entries", () => {
   assert.deepEqual(NAV.map(s => [s.label ?? null, s.items.map(i => i.label)]), [
     ["Jarvis", ["Chat", "Memory", "Roadmaps", "Jobs"]],
-    ["Trading", ["Dashboard", "Stocks", "Memecoin", "Futures", "Positions", "Autonomy"]],
+    ["Trading", ["Dashboard", "Stocks", "Crypto", "Memecoin", "Futures", "Positions", "Autonomy"]],
     ["Activity", ["Approvals", "Runs", "Notifications"]],
     [null, ["Content"]],
     ["System", ["System health", "Settings", "Devices", "Core Admin"]],
@@ -55,6 +55,7 @@ test("pages map onto the existing views", async () => {
   assert.equal(await view("/trading"), "desk");
   assert.equal(await view("/trading/stocks"), "stocks");
   assert.equal(await view("/trading/positions"), "positions");
+  assert.equal(await view("/trading/crypto"), "crypto");
   assert.equal(await view("/trading/holdings"), "trading");
   assert.equal(await view("/trading/ibkr"), "trading");
   assert.equal(await view("/runs"), "tasks");
