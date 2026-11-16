@@ -22,7 +22,7 @@ const val ROADMAP_CORE_TOO_OLD = "Update Jarvis Core to add roadmaps from chat."
 /** [items] carry their place as id and position, so the Roadmaps grouping reads them.
  *  [roadmapId] is set for items on an existing roadmap ([title] is then its title). */
 data class RoadmapProposal(
-    val id: String, val roadmapId: String?, val title: String, val phases: List<String>,
+    val id: String, val roadmapId: String?, val title: String, val description: String?, val phases: List<String>,
     val items: List<RoadmapItem>, val body: JsonObject,
 )
 
@@ -82,14 +82,15 @@ fun readRoadmapProposal(x: JsonElement?): RoadmapProposal? = guarded {
     val items = body.array("items", 100).mapIndexed { i, item -> readItem(item, i) }
     if (roadmapId != null) {
         require(body.keys == setOf("items") && items.isNotEmpty())
-        RoadmapProposal(id, roadmapId, title, emptyList(), items, body)
+        RoadmapProposal(id, roadmapId, title, null, emptyList(), items, body)
     } else {
         require(NEW_KEYS.containsAll(body.keys) && "roadmap_id" !in o)
         val phases = (if ("phases" in body) body.array("phases", RoadmapLimits.PHASES) else JsonArray(emptyList())).map { it.text(RoadmapLimits.PHASE) }
         require(phases.toSet().size == phases.size && items.all { it.phase == null || it.phase in phases })
-        // Checked, not shown (as desktop).
-        body.optText("description", RoadmapLimits.DESCRIPTION, multiline = true)
-        RoadmapProposal(id, null, body["title"].text(RoadmapLimits.ROADMAP_TITLE), phases, items, body)
+        RoadmapProposal(
+            id, null, body["title"].text(RoadmapLimits.ROADMAP_TITLE),
+            body.optText("description", RoadmapLimits.DESCRIPTION, multiline = true), phases, items, body,
+        )
     }
 }
 
@@ -109,8 +110,9 @@ fun roadmapHeading(p: RoadmapProposal): String =
 fun roadmapSummary(p: RoadmapProposal): String =
     if (p.roadmapId == null) "${plural(p.items.size, "item")} in ${plural(p.phases.size, "phase")}" else plural(p.items.size, "item")
 
-/** The groups the card shows: a new roadmap's phases in order (as the Roadmaps rail), or the
- *  phases the items name, in the order they first appear. */
+/** The groups the card shows: a new roadmap's phases in order (as the Roadmaps rail, empty
+ *  ones included, since Add creates them), or the phases the items name, in the order they
+ *  first appear. */
 fun roadmapGroups(p: RoadmapProposal): List<PhaseGroup> =
     groupByPhase(p.phases.ifEmpty { p.items.mapNotNull { it.phase }.distinct() }, p.items)
 
@@ -122,7 +124,7 @@ private val UNCONFIRMED = RoadmapAddResult(ProposalState.UNCONFIRMED, null, ROAD
 
 private fun opened(error: String) = RoadmapAddResult(ProposalState.OPEN, null, error)
 
-/** A write's answer, as desktop: a readable 2xx is added; 400, 413 and a 409 are refusals;
+/** A write's answer, as desktop: a readable 2xx is added; 400, 409, 413 and 422 are refusals;
  *  404 or 405 is an older Core; any other refusal opens the card again with the failure text;
  *  anything else (a 2xx this build cannot read, no answer, any 5xx, an answer the lock
  *  dropped: null) is not confirmed and Add stays off. */
@@ -131,7 +133,7 @@ private fun outcome(result: ApiResult<RoadmapSnapshot?>?): RoadmapAddResult = wh
     result == ApiResult.Unauthorized -> opened(roadmapFailureText(JobFailure.SIGNIN))
     result !is ApiResult.HttpError || result.status >= 500 -> UNCONFIRMED
     result.status == 404 || result.status == 405 -> opened(ROADMAP_CORE_TOO_OLD)
-    result.status == 400 || result.status == 409 || result.status == 413 -> opened(ROADMAP_REFUSED)
+    result.status in setOf(400, 409, 413, 422) -> opened(ROADMAP_REFUSED)
     else -> opened(roadmapFailureText(jobFailureOf(result)))
 }
 

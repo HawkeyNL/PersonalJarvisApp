@@ -41,6 +41,8 @@ internal fun RoadmapProposalCard(card: RoadmapChatCard, locked: Boolean, actions
     ) {
         Text(roadmapHeading(p), Modifier.semantics { heading() }, style = MaterialTheme.typography.titleSmall)
         MutedText(roadmapSummary(p))
+        // Everything Add sends shows: the description, and every phase, empty ones included.
+        p.description?.let { MutedText(it) }
         roadmapGroups(p).forEach { g ->
             SectionLabel(g.phase ?: "No phase", Modifier.padding(top = JvSpace.xs).semantics { heading() })
             g.items.forEach { item ->

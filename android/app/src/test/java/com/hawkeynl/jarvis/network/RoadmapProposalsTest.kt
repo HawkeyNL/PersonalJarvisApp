@@ -8,6 +8,7 @@ import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 // Mirrors desktop tests/roadmap-proposals.test.mjs. Neutral test data only.
@@ -37,6 +38,7 @@ class RoadmapProposalsTest {
         val p = read(entry(newBody))!!
         assertEquals(id1, p.id)
         assertNull(p.roadmapId)
+        assertEquals("Line one\nline two", p.description)
         assertEquals("Trip", p.title)
         assertEquals(listOf("Book", "Go"), p.phases)
         assertEquals(newBody, p.body)
@@ -67,6 +69,28 @@ class RoadmapProposalsTest {
         assertNull(read(entry(obj("""{"items":[{"title":"X"}]}"""), roadmap = roadmapId)))
     }
 
+    /** What the card shows (RoadmapProposalCard.kt), as text. */
+    private fun shown(p: RoadmapProposal): List<String> = listOfNotNull(roadmapHeading(p), roadmapSummary(p), p.description) +
+        roadmapGroups(p).flatMap { g ->
+            listOf(g.phase ?: "No phase") + g.items.flatMap { listOfNotNull(it.title, it.status.label, it.notes) + it.links.map(::linkLabel) }
+        }
+
+    /** Every string and number in [x] but the wire codes (`status`, `kind`) the card shows as words. */
+    private fun leaves(x: JsonElement, key: String? = null): List<String> = when (x) {
+        is JsonObject -> x.flatMap { (k, v) -> leaves(v, k) }
+        is kotlinx.serialization.json.JsonArray -> x.flatMap { leaves(it, key) }
+        else -> if (key == "status" || key == "kind") emptyList() else listOf((x as kotlinx.serialization.json.JsonPrimitive).content)
+    }
+
+    @Test fun `the card shows everything Add sends`() {
+        for (p in listOf(read(entry(newBody))!!, read(entry(itemsBody, roadmap = roadmapId, title = "Jarvis"))!!)) {
+            val text = shown(p)
+            for (leaf in leaves(p.body)) assertTrue(leaf, text.any { leaf in it })
+        }
+        // An empty phase still shows with its heading.
+        assertTrue("Go" in shown(read(entry(newBody))!!))
+    }
+
     @Test fun `only the first entry counts`() {
         assertEquals(id1, read(entry(newBody), entry(newBody, id2))!!.id)
         assertNull(read("""{"id":"x"}""", entry(newBody, id2)))
@@ -93,6 +117,8 @@ class RoadmapProposalsTest {
             entry(with(newBody, "items", null)),
             entry(with(newBody, "items", "{}")),
             entry(with(newBody, "phases", "\"Book\"")),
+            entry(with(newBody, "phases", """{"0":"Book"}""")),
+            entry(with(newBody, "phases", "null")),
             entry(with(newBody, "phases", """["Book","Book"]""")),
             entry(with(newBody, "description", "null")),
             entry(obj("""{"title":"T","items":[{"title":"A","position":1}]}""")),
@@ -117,7 +143,7 @@ class RoadmapProposalsTest {
         val long = { n: Int -> "x".repeat(n) }
         assertNotNull(read(entry(obj("""{"title":"${long(120)}","description":"${long(2000)}","phases":[${(1..20).joinToString(",") { "\"" + "P$it".padEnd(60, 'x') + "\"" }}],
             "items":[{"title":"${long(200)}","status":"planned","notes":"${long(4000)}"}]}"""))))
-        val bad = listOf(
+        val bad = mutableListOf(
             obj("""{"title":"${long(121)}","items":[]}"""),
             obj("""{"title":" ","items":[]}"""),
             obj("""{"title":"T","description":"${long(2001)}","items":[]}"""),
@@ -128,7 +154,13 @@ class RoadmapProposalsTest {
             obj("""{"title":"T","items":[{"title":"Hidden\u202Etext","status":"planned"}]}"""),
             obj("""{"title":"T","items":[{"title":"A","status":"planned","notes":"${long(4001)}"}]}"""),
         )
+        // Hidden and bidi characters (U+202E) anywhere Core's text rules apply.
+        val rlo = "\\u202E"
+        for (field in listOf("title", "description")) bad += with(obj("""{"title":"T","items":[]}"""), field, "\"A${rlo}B\"")
+        bad += obj("""{"title":"T","phases":["A${rlo}B"],"items":[]}""")
+        bad += obj("""{"title":"T","items":[{"title":"A","status":"planned","notes":"A${rlo}B"}]}""")
         for (body in bad) assertNull(body.toString(), read(entry(body)))
+        assertNull(read(entry(obj("""{"items":[{"title":"A","status":"planned","phase":"A${rlo}B"}]}"""), roadmap = roadmapId)))
         assertNull(read(entry(itemsBody, roadmap = roadmapId, title = long(121))))
     }
 
@@ -210,12 +242,12 @@ class RoadmapProposalsTest {
     @Test fun `4xx opens the card again with the refusal`() {
         val refused = RoadmapAddResult(ProposalState.OPEN, null, ROADMAP_REFUSED)
         // A 409 on a new roadmap is a refusal, never retried.
-        for (status in listOf(400, 409, 413)) assertEquals("$status", refused, addNew(ApiResult.HttpError(status, null)))
-        for (status in listOf(400, 413)) assertEquals("$status", refused, addItems(ApiResult.HttpError(status, null)).first)
+        for (status in listOf(400, 409, 413, 422)) assertEquals("$status", refused, addNew(ApiResult.HttpError(status, null)))
+        for (status in listOf(400, 413, 422)) assertEquals("$status", refused, addItems(ApiResult.HttpError(status, null)).first)
         // Other refusals open the card again with the failure text.
         assertEquals(RoadmapAddResult(ProposalState.OPEN, null, roadmapFailureText(JobFailure.SIGNIN)), addNew(ApiResult.Unauthorized))
         val failed = RoadmapAddResult(ProposalState.OPEN, null, roadmapFailureText(JobFailure.FAILED))
-        for (status in listOf(403, 422, 429, 302)) assertEquals("$status", failed, addNew(ApiResult.HttpError(status, null)))
+        for (status in listOf(403, 429, 302)) assertEquals("$status", failed, addNew(ApiResult.HttpError(status, null)))
     }
 
     @Test fun `a 409 reads the revision again and retries once`() {
