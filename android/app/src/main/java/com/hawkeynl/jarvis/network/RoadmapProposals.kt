@@ -76,7 +76,7 @@ fun readRoadmapProposal(x: JsonElement?): RoadmapProposal? = guarded {
     val o = (x as? JsonArray)?.firstOrNull().obj()
     require(PROPOSAL_KEYS.containsAll(o.keys))
     val id = o.str("id", 64).also { require(isJobId(it)) }
-    val roadmapId = o.optStr("roadmap_id", 64)?.also { require(isRoadmapId(it)) }
+    val roadmapId = o.optStr("roadmap_id", 64)?.also { require(isJobId(it)) }
     val title = o["title"].text(RoadmapLimits.ROADMAP_TITLE)
     val body = o["body"].obj()
     val items = body.array("items", 100).mapIndexed { i, item -> readItem(item, i) }

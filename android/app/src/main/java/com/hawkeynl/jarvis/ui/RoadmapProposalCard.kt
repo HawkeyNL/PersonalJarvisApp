@@ -47,11 +47,11 @@ internal fun RoadmapProposalCard(card: RoadmapChatCard, locked: Boolean, actions
             SectionLabel(g.phase ?: "No phase", Modifier.padding(top = JvSpace.xs).semantics { heading() })
             g.items.forEach { item ->
                 Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm), verticalAlignment = Alignment.CenterVertically) {
-                    Text(item.title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                     StatusBadge(item.status.label, tone = statusTone(item.status))
+                    Text(item.title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                 }
-                if (item.links.isNotEmpty()) MutedText(item.links.joinToString(", ", transform = ::linkLabel))
                 item.notes?.let { MutedText(it) }
+                if (item.links.isNotEmpty()) MutedText(item.links.joinToString(", ", transform = ::linkLabel))
             }
         }
         val live = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
