@@ -133,7 +133,7 @@ fun parsePhases(text: String): List<String>? {
 }
 
 private val REPO = Regex("^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$")
-private val TAG = Regex("^[A-Za-z0-9._+/-]{1,100}$")
+internal val TAG = Regex("^[A-Za-z0-9._+/-]{1,100}$")
 fun validRepo(repo: String): Boolean = REPO.matches(repo) && !Regex("/\\.{1,2}$").containsMatchIn(repo)
 private fun validNumber(n: Long?): Boolean = n != null && n in 1..RoadmapLimits.LINK_NUMBER
 
@@ -532,4 +532,6 @@ sealed interface RoadmapWrite {
     data class CreateItem(val item: JsonObject) : RoadmapWrite
     data class UpdateItem(val itemId: String, val patch: JsonObject) : RoadmapWrite
     data class DeleteItem(val itemId: String) : RoadmapWrite
+    /** 1 to 100 items in one revision (POST …/items/batch); a Core before v0.0.92 answers 405. */
+    data class CreateItems(val body: JsonObject) : RoadmapWrite
 }

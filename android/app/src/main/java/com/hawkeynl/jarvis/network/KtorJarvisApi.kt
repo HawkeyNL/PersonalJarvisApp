@@ -538,6 +538,7 @@ class KtorJarvisApi(
             is RoadmapWrite.CreateItem -> Triple(HttpMethod.Post, "/items", write.item)
             is RoadmapWrite.UpdateItem -> Triple(HttpMethod.Patch, "/items/${write.itemId}", write.patch)
             is RoadmapWrite.DeleteItem -> Triple(HttpMethod.Delete, "/items/${write.itemId}", null)
+            is RoadmapWrite.CreateItems -> Triple(HttpMethod.Post, "/items/batch", write.body)
         }
         val itemId = (write as? RoadmapWrite.UpdateItem)?.itemId ?: (write as? RoadmapWrite.DeleteItem)?.itemId
         if (!isRoadmapId(id) || (itemId != null && !isRoadmapId(itemId)) || revision < 0) return ApiResult.InvalidResponse("Invalid roadmap id")

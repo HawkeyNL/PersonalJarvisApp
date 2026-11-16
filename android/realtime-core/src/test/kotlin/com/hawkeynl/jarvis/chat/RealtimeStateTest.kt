@@ -33,6 +33,19 @@ class RealtimeStateTest {
         }
     }
 
+    @Test fun roadmapProposalsAreOptionalAndAnyShapeDecodes() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val run = """{"run_id":"r","request_id":"q","conversation_id":"c"}"""
+        assertNull(json.decodeFromString<RealtimePayload>("""{"run":$run}""").roadmap_proposals)
+        for (shape in listOf("[]", "\"x\"", "{}", "[1,null]", """[{"id":"x","title":"T","body":{"items":[]}}]""")) {
+            val frame = """{"protocol":1,"epoch":"e","sequence":1,"event_id":"i","type":"assistant.completed",
+                "payload":{"run":$run,"roadmap_proposals":$shape}}"""
+            val event = decodeRealtimeEvent(json, frame)
+            assertEquals(shape, "r", event.payload.run?.run_id)
+            assertNotNull(shape, event.payload.roadmap_proposals)
+        }
+    }
+
     @Test fun messagePhotosAreOptionalIds() {
         val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         val message = """"id":"m","conversation_id":"c","role":"user","content":"","created_at":"t""""

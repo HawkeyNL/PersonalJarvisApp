@@ -23,6 +23,9 @@ import kotlinx.serialization.json.jsonObject
     /** `assistant.completed`: up to 3 jobs the answer proposed, kept raw here so any shape
      *  decodes; the app reads them with its own job checks (network/JobProposals.kt). */
     val job_proposals: JsonElement? = null,
+    /** `assistant.completed`: a roadmap the answer proposed, raw like [job_proposals]; the app
+     *  reads it with its own checks (network/RoadmapProposals.kt). */
+    val roadmap_proposals: JsonElement? = null,
 )
 @Serializable data class RealtimeEvent(val protocol: Int, val epoch: String, val sequence: Long, val event_id: String, val type: String, val payload: RealtimePayload)
 
