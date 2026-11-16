@@ -101,7 +101,8 @@ import kotlinx.serialization.json.JsonObject
  *  were opened from. Content comes from Core only; notes and proposals are plain text. */
 @Composable
 fun RoadmapsScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
-    var roadmapId by rememberSaveable { mutableStateOf<String?>(null) }
+    // A chat card's "View roadmap" opens on that roadmap.
+    var roadmapId by rememberSaveable { mutableStateOf(actions.takeRoadmapToOpen()) }
     val id = roadmapId
     if (id != null) {
         BackHandler { roadmapId = null }
@@ -112,7 +113,7 @@ fun RoadmapsScreen(actions: JarvisViewModel, onNavigate: (Screen) -> Unit) {
 }
 
 /** Desktop STATUS_TONE; the label always carries the meaning too. */
-private fun statusTone(status: RoadmapStatus): Tone = when (status) {
+internal fun statusTone(status: RoadmapStatus): Tone = when (status) {
     RoadmapStatus.LIVE, RoadmapStatus.READY -> Tone.OK
     RoadmapStatus.IN_PROGRESS -> Tone.WARN
     RoadmapStatus.PLANNED -> Tone.IDLE

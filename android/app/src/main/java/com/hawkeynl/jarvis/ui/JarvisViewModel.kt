@@ -109,6 +109,8 @@ data class JarvisUiState(
     val researchOffer: WebSearchOffer? = null,
     /** Jobs answers in the open conversation proposed; only Add or a saved edit makes one. */
     val jobProposals: List<com.hawkeynl.jarvis.network.ProposalCard> = emptyList(),
+    /** Roadmaps answers in the open conversation proposed; only Add makes one. */
+    val roadmapProposals: List<com.hawkeynl.jarvis.network.RoadmapChatCard> = emptyList(),
     /** A run Core started itself right after a reply (its automatic web search);
      *  only meaningful while its `run:` placeholder row is shown. */
     val webSearchRun: String? = null,
@@ -155,12 +157,16 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         identity++
         seenProposals.clear()
         jobToOpen = null
-        _state.update { it.copy(jobProposals = emptyList()) }
+        roadmapToOpen = null
+        _state.update { it.copy(jobProposals = emptyList(), roadmapProposals = emptyList()) }
     }
-    // Each job proposal shows once per sign-in, also after a replayed event. Main thread only.
+    // Each job or roadmap proposal shows once per sign-in, also after a replayed event. Main
+    // thread only.
     private val seenProposals = mutableSetOf<String>()
     /** A job a chat card opens on the Jobs screen; taken once by [takeJobToOpen]. */
     private var jobToOpen: String? = null
+    /** A roadmap a chat card opens on the Roadmaps screen; taken once by [takeRoadmapToOpen]. */
+    private var roadmapToOpen: String? = null
     /** One picked photo is shrunk at a time (each decode can take tens of MB). */
     private val preparing = kotlinx.coroutines.sync.Mutex()
     /** Photos picked while the app was locked (the picker stops this activity, which locks
@@ -308,7 +314,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
         val endpoint = _state.value.endpoint ?: return
         cancelDictation()
         viewModelScope.launch {
-            _state.update { it.copy(busy = true, error = null, researchOffer = null, jobProposals = emptyList()) }
+            _state.update { it.copy(busy = true, error = null, researchOffer = null, jobProposals = emptyList(), roadmapProposals = emptyList()) }
             when (val result = container.conversations.load(endpoint, id)) {
                 is ApiResult.Success -> _state.update {
                     it.copy(
@@ -338,6 +344,7 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 error = null,
                 researchOffer = null,
                 jobProposals = emptyList(),
+                roadmapProposals = emptyList(),
                 photoMeta = emptyMap(),
                 removedPhotos = emptySet(),
             )
@@ -367,6 +374,40 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun takeJobToOpen(): String? = jobToOpen.also { jobToOpen = null }
+
+    /** Creates a proposed roadmap, or adds its items to the existing one, exactly as Core sent
+     *  them. Never behind the lock or twice at once; a result for a sign-in or conversation the
+     *  owner has left is dropped. */
+    fun addRoadmapProposal(id: String) {
+        val state = _state.value
+        val start = com.hawkeynl.jarvis.network.startRoadmapAdd(
+            state.roadmapProposals, id, !state.locked && state.authenticated, identity, state.conversationId) ?: return
+        _state.update { it.copy(roadmapProposals = start.cards) }
+        viewModelScope.launch {
+            val result = com.hawkeynl.jarvis.network.addRoadmap(
+                start.proposal,
+                create = { body -> jobs { e, t -> createRoadmap(e, t, body) } },
+                read = { rid -> jobs { e, t -> roadmap(e, t, rid) } },
+                createItems = { rid, revision, body ->
+                    jobs { e, t -> writeRoadmap(e, t, rid, revision, com.hawkeynl.jarvis.network.RoadmapWrite.CreateItems(body)) }
+                },
+            )
+            _state.update {
+                it.copy(roadmapProposals = com.hawkeynl.jarvis.network.finishRoadmapAdd(it.roadmapProposals, start, result, identity, it.conversationId))
+            }
+        }
+    }
+
+    fun dismissRoadmapProposal(id: String) =
+        _state.update { it.copy(roadmapProposals = it.roadmapProposals.filterNot { card -> card.proposal.id == id }) }
+
+    /** Opens Roadmaps from a chat card: on the roadmap when [id] is set. */
+    fun openRoadmap(id: String?) {
+        roadmapToOpen = id?.takeIf { com.hawkeynl.jarvis.network.isRoadmapId(it) }
+        navigate(Screen.ROADMAPS)
+    }
+
+    fun takeRoadmapToOpen(): String? = roadmapToOpen.also { roadmapToOpen = null }
 
     /** Only the owner's click on a Core offer passes [research]. */
     fun searchWeb() {
@@ -1041,10 +1082,14 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 val run = p.run ?: return; val message = p.message ?: return
                 pending.remove(run.request_id)
                 // Each proposal shows once, under this answer, only while its conversation is open.
-                val fresh = if (_state.value.conversationId != message.conversation_id) emptyList() else com.hawkeynl.jarvis.network.newCards(
+                val open = _state.value.conversationId == message.conversation_id
+                val fresh = if (!open) emptyList() else com.hawkeynl.jarvis.network.newCards(
                     seenProposals, com.hawkeynl.jarvis.network.readProposals(p.job_proposals), message.conversation_id, message.id)
+                val roadmap = if (!open) null else com.hawkeynl.jarvis.network.newRoadmapCard(
+                    seenProposals, com.hawkeynl.jarvis.network.readRoadmapProposal(p.roadmap_proposals), message.conversation_id, message.id)
                 _state.update { state -> if (state.conversationId != message.conversation_id) state else state.copy(busy = false,
                     jobProposals = state.jobProposals + fresh,
+                    roadmapProposals = state.roadmapProposals + listOfNotNull(roadmap),
                     researchOffer = p.research_offer?.question?.trim()?.takeIf { it.isNotEmpty() }?.let { WebSearchOffer(message.conversation_id, it) },
                     messages = upsertRealtime(state.messages, ConversationMessage(message.role, message.content, message.model, message.created_at, message.id, message.attachments), "run:${run.run_id}")) }
             }

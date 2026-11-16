@@ -65,6 +65,7 @@ class RoadmapsApiTest {
             RoadmapWrite.CreateItem(newItem("T", null)) to (HttpMethod.Post to "/v1/roadmaps/$id/items"),
             RoadmapWrite.UpdateItem("i1", JsonObject(emptyMap())) to (HttpMethod.Patch to "/v1/roadmaps/$id/items/i1"),
             RoadmapWrite.DeleteItem("i1") to (HttpMethod.Delete to "/v1/roadmaps/$id/items/i1"),
+            RoadmapWrite.CreateItems(JsonObject(emptyMap())) to (HttpMethod.Post to "/v1/roadmaps/$id/items/batch"),
         )
         for ((write, route) in cases) {
             val (roadmaps, engine) = api(body = snapshot)
@@ -78,6 +79,15 @@ class RoadmapsApiTest {
         val (create, createEngine) = api(body = snapshot)
         create.writeRoadmap(endpoint, "t", id, 7, RoadmapWrite.CreateItem(newItem("T", "Now")))
         assertEquals("""{"title":"T","phase":"Now"}""", (createEngine.requestHistory.single().body as TextContent).text)
+    }
+
+    @Test fun `a batch sends its body as is and reads the roadmap beside item_ids`() = runTest {
+        val (roadmaps, engine) = api(body = """{"roadmap":$roadmap,"items":[],"item_ids":["a"]}""")
+        val body = """{"items":[{"title":"T","status":"planned"}]}"""
+        val result = roadmaps.writeRoadmap(endpoint, "t", id, 7, RoadmapWrite.CreateItems(kotlinx.serialization.json.Json.parseToJsonElement(body) as JsonObject))
+        assertEquals(4L, (result as ApiResult.Success).value!!.roadmap.revision)
+        assertEquals(body, (engine.requestHistory.single().body as TextContent).text)
+        assertEquals(ApiResult.HttpError(405, null), api(HttpStatusCode.MethodNotAllowed).first.writeRoadmap(endpoint, "t", id, 1, RoadmapWrite.CreateItems(JsonObject(emptyMap()))))
     }
 
     @Test fun `an unreadable or empty write answer still counts as done and a 409 stays a conflict`() = runTest {

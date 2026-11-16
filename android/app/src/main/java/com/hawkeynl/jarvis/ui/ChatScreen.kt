@@ -137,10 +137,11 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel, pickPhot
                     icon = JvIcon.CHAT,
                 )
             }
-            // Jobs an answer proposed show right under it, while its conversation is open. Keys
-            // stay unique: a message without an id, or with one seen before, is keyed by place
-            // (and shows no cards; cards are unique by id).
+            // Jobs and a roadmap an answer proposed show right under it, while its conversation
+            // is open. Keys stay unique: a message without an id, or with one seen before, is
+            // keyed by place (and shows no cards; cards are unique by id).
             val proposals = state.jobProposals.filter { it.conversationId == state.conversationId }
+            val roadmaps = state.roadmapProposals.filter { it.conversationId == state.conversationId }
             val keyed = HashSet<String>()
             state.messages.forEachIndexed { index, message ->
                 val id = message.id?.takeIf { keyed.add(it) }
@@ -149,6 +150,9 @@ internal fun ChatScreen(state: JarvisUiState, actions: JarvisViewModel, pickPhot
                     item(key = "jp:${card.id}") {
                         JobProposalCard(card, state.locked, editingProposal == card.id, { editingProposal = card.id }, actions)
                     }
+                }
+                if (id != null) roadmaps.filter { it.messageId == id }.forEach { card ->
+                    item(key = "rp:${card.proposal.id}") { RoadmapProposalCard(card, state.locked, actions) }
                 }
             }
             state.researchOffer?.takeIf { !state.busy && it.conversationId == state.conversationId && state.chips.isEmpty() }?.question?.let { question ->
