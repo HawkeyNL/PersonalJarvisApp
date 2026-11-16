@@ -23,6 +23,9 @@ struct RealtimePayload: Decodable {
     /// Jobs the answer proposed; only the owner's Add sends one. Read through
     /// `JobProposals.read`: a list or entry this app cannot read is skipped, never failing the event.
     var job_proposals: Lenient<[Lenient<JobProposal>]>?
+    /// A roadmap the answer proposed; only the owner's Add sends it. Read through
+    /// `RoadmapCards.read`: only the first entry counts, and one this app cannot read is skipped.
+    var roadmap_proposals: Lenient<[Lenient<ChatRoadmapProposal>]>?
 }
 struct RealtimeResearchOffer: Decodable { let question: String }
 /// A web search Core advised after the last reply in `conversationId`.

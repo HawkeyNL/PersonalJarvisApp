@@ -23,6 +23,8 @@ struct ChatView: View {
     @State private var editingProposal: ProposalCard?
     /// A job added from a proposal, opened from its card.
     @State private var openJob: UUID?
+    /// A roadmap added from a proposal, opened from its card.
+    @State private var openRoadmap: UUID?
 
     /// Core's own run after a reply, while its placeholder row is shown.
     private var searchingWeb: Bool {
@@ -102,6 +104,7 @@ struct ChatView: View {
                         write: { await model.addJobProposal(card.id, edited: ($0, $1)) })
         }
         .navigationDestination(item: $openJob) { id in JobPage(model: model, id: id, navigate: navigate) }
+        .navigationDestination(item: $openRoadmap) { id in RoadmapPage(model: model, id: id) }
         .photosPicker(isPresented: $picking, selection: $picked,
                       maxSelectionCount: max(1, ChatPhotos.maxPhotos - model.chips.count), matching: .images)
         .onChange(of: picked) { _, items in
@@ -166,6 +169,12 @@ struct ChatView: View {
                                                  edit: { if model.lockState == .unlocked { editingProposal = card } },
                                                  dismiss: { model.dismissJobProposal(card.id) },
                                                  viewJob: { openJob = $0 }, checkJobs: { navigate(.jobs) })
+                            }
+                            ForEach(model.roadmapProposals.filter { $0.messageId == message.id }) { card in
+                                RoadmapCardView(card: card, locked: model.lockState != .unlocked,
+                                                add: { Task { await model.addRoadmapProposal(card.id) } },
+                                                dismiss: { model.dismissRoadmapProposal(card.id) },
+                                                viewRoadmap: { openRoadmap = $0 }, checkRoadmaps: { navigate(.roadmaps) })
                             }
                         }
                         if let offer = model.researchOffer, offer.conversationId == model.currentConversationId,
@@ -634,6 +643,87 @@ private struct ProposalCardView: View {
         .onChange(of: card.state) { _, state in
             // Added, not confirmed or refused: said once it is known.
             guard state != .adding, let text = card.error ?? (state == .open ? nil : JobProposals.added) else { return }
+            AccessibilityNotification.Announcement(text).post()
+        }
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(verbatim: text).font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func status(_ text: String, link: String, action: @escaping () -> Void) -> some View {
+        HStack(spacing: JV.Space.xs) {
+            Text(verbatim: text).font(JV.font(13)).foregroundStyle(JV.textPrimary).fixedSize(horizontal: false, vertical: true)
+            Button(link, action: action).font(JV.font(13, .medium)).foregroundStyle(JV.accentText).buttonStyle(.plain)
+                .frame(minHeight: 44)
+        }
+    }
+}
+
+/// A roadmap a chat answer proposed, under that answer (desktop RoadmapProposalCard.vue):
+/// every item by phase with its status. Nothing is made until Add. Core's text is shown
+/// verbatim as plain text, never as links.
+private struct RoadmapCardView: View {
+    let card: RoadmapCard
+    let locked: Bool
+    let add: () -> Void
+    let dismiss: () -> Void
+    let viewRoadmap: (UUID) -> Void
+    let checkRoadmaps: () -> Void
+
+    private var busy: Bool { card.state == .adding }
+
+    var body: some View {
+        let proposal = card.proposal
+        VStack(alignment: .leading, spacing: JV.Space.xxs) {
+            Text(verbatim: RoadmapCards.heading(proposal)).font(JV.font(15, .medium)).foregroundStyle(JV.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            caption(RoadmapCards.summary(proposal))
+            ForEach(RoadmapCards.groups(proposal), id: \.phase) { group in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(verbatim: group.phase ?? "No phase").font(JV.font(13, .semibold)).foregroundStyle(JV.textPrimary)
+                        .accessibilityAddTraits(.isHeader)
+                    ForEach(group.items) { item in
+                        HStack(alignment: .firstTextBaseline, spacing: JV.Space.xs) {
+                            Badge(text: item.status.label, style: item.status.badge)
+                            Text(verbatim: item.title).font(JV.font(13)).foregroundStyle(JV.textPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .padding(.top, JV.Space.xxs)
+            }
+            switch card.state {
+            case let .added(roadmap):
+                status("\(RoadmapCards.added) ·", link: RoadmapCards.viewRoadmap) { viewRoadmap(roadmap) }
+            case .unconfirmed:
+                status(card.error ?? RoadmapCards.notConfirmed, link: RoadmapCards.checkRoadmaps, action: checkRoadmaps)
+            case .open, .adding:
+                if let error = card.error {
+                    Text(verbatim: error).font(JV.font(13)).foregroundStyle(JV.dangerText).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            HStack(spacing: JV.Space.xs) {
+                if card.state == .open || busy {
+                    Button(RoadmapCards.add, action: add)
+                        .buttonStyle(JVButtonStyle(kind: .secondary, size: .small)).disabled(locked || busy)
+                }
+                Button(RoadmapCards.dismiss, action: dismiss)
+                    .buttonStyle(JVButtonStyle(kind: .quiet, size: .small)).disabled(busy)
+            }
+            .padding(.top, JV.Space.xxs)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, JV.Space.md)
+        .padding(.vertical, JV.Space.sm)
+        .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text(verbatim: "Proposed roadmap: \(RoadmapCards.heading(proposal))"))
+        .onChange(of: card.state) { _, state in
+            // Added, not confirmed or refused: said once it is known.
+            guard state != .adding, let text = card.error ?? (state == .open ? nil : RoadmapCards.added) else { return }
             AccessibilityNotification.Announcement(text).post()
         }
     }
