@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  ADDED, ADD_NOT_CONFIRMED, ADD_REFUSED, ADD_TOO_OLD, addRoadmap, addRoadmapCard, proposalGroups, proposalHeading,
-  proposalSummary, readRoadmapProposal, withRoadmapProposal,
+  ADDED, ADD_NOT_CONFIRMED, ADD_REFUSED, ADD_TOO_OLD, addRoadmap, addRoadmapCard, proposalDescription, proposalGroups,
+  proposalHeading, proposalSummary, readRoadmapProposal, withRoadmapProposal,
 } from "../src/roadmapProposals.ts";
+import { STATUS_LABEL, linkLabel } from "../src/roadmaps.ts";
 
 // Neutral test data only: no real roadmap content belongs in this repository.
 const id = (n) => `00000000-0000-4000-8000-00000000000${n}`;
@@ -65,6 +66,21 @@ test("every invalid shape is skipped", () => {
   for (const p of bad) assert.equal(read(p), null, JSON.stringify(p).slice(0, 200));
 });
 
+test("hidden or bidi characters, and phases that are not a list of strings, are skipped", () => {
+  const rlo = "\u202E";
+  const bad = [
+    { ...fresh, body: { ...newBody, title: `Ex${rlo}ample` } },
+    { ...fresh, body: { ...newBody, items: [{ title: `x${rlo}`, status: "planned" }] } },
+    { ...fresh, body: { ...newBody, items: [{ title: "x", status: "planned", notes: `a${rlo}b` }] } },
+    { ...fresh, body: { ...newBody, phases: ["Done", `N${rlo}ow`] } },
+    { ...fresh, body: { ...newBody, phases: "Done" } },
+    { ...fresh, body: { ...newBody, phases: { 0: "Done" } } },
+    { ...fresh, body: { ...newBody, phases: ["Done", 7] } },
+    { ...fresh, body: { ...newBody, phases: null } },
+  ];
+  for (const p of bad) assert.equal(read(p), null, JSON.stringify(p).slice(0, 200));
+});
+
 test("an unknown status is skipped", () => {
   assert.equal(read({ ...existing, body: { items: [{ title: "x", status: "done" }] } }), null);
 });
@@ -110,10 +126,40 @@ test("the card's wording and grouping", () => {
     ["Done", [["First", "live"]]], ["Now", [["Second", "planned"]]], [null, [["Third", "blocked"]]],
   ]);
   assert.deepEqual(proposalGroups(two).map((g) => g.phase), ["Now", null]);
+  // Empty phases are shown too: they are created with the roadmap.
+  const empty = read({ ...fresh, body: { title: "x", phases: ["Now", "Later"], items: [{ title: "x", status: "planned", phase: "Now" }] } });
+  assert.deepEqual(proposalGroups(empty).map((g) => [g.phase, g.items.length]), [["Now", 1], ["Later", 0]]);
+  assert.equal(proposalDescription(read(fresh)), "A plan");
+  assert.equal(proposalDescription(empty), null);
+  assert.equal(proposalDescription(read(existing)), null);
   assert.equal(ADDED, "Added to Roadmaps");
   assert.equal(ADD_NOT_CONFIRMED, "Not confirmed: it may have been added.");
   assert.equal(ADD_REFUSED, "Core refused this roadmap, for example because a phase changed or a limit was reached. Ask Jarvis again.");
   assert.equal(ADD_TOO_OLD, "Update Jarvis Core to add roadmaps from chat.");
+});
+
+test("the card shows every text that is sent", () => {
+  const withEmptyPhase = { ...fresh, body: { ...newBody, phases: [...newBody.phases, "Later"] } };
+  for (const p of [fresh, withEmptyPhase, existing]) {
+    const proposal = read(p);
+    const groups = proposalGroups(proposal);
+    const shown = [
+      proposalHeading(proposal), proposalSummary(proposal), proposalDescription(proposal) ?? "",
+      ...groups.flatMap((g) => [g.phase ?? "No phase", ...g.items.flatMap((i) => [
+        i.title, STATUS_LABEL[i.status], i.notes ?? "", i.links.map(linkLabel).join(", "),
+      ])]),
+    ];
+    // Every string and number in the body, except status and link kind (shown as a label).
+    const sent = [];
+    const walk = (x, key) => {
+      if (Array.isArray(x)) x.forEach((v) => walk(v, key));
+      else if (x && typeof x === "object") for (const [k, v] of Object.entries(x)) walk(v, k);
+      else if (key === "status") sent.push(STATUS_LABEL[x]);
+      else if (key !== "kind") sent.push(String(x));
+    };
+    walk(proposal.body);
+    for (const s of sent) assert.ok(shown.some((t) => t.includes(s)), `${s} is not shown`);
+  }
 });
 
 // ---- add -------------------------------------------------------------------
@@ -146,7 +192,7 @@ test("2xx: items go on the existing roadmap's current revision", async () => {
 });
 
 test("4xx: the card opens again with the refusal text", async () => {
-  for (const status of [400, 413]) {
+  for (const status of [400, 413, 422]) {
     assert.deepEqual(await addRoadmap(read(fresh), guards({ create: async () => { throw apiError(status); } })), { state: "open", viewId: null, error: ADD_REFUSED });
   }
   // A new roadmap's 409 is a limit: no retry.
@@ -173,6 +219,15 @@ test("409: one retry on a fresh revision, then the refusal text", async () => {
   const twice = guards({ createItems: async () => { posts++; throw apiError(409); } });
   assert.deepEqual(await addRoadmap(read(existing), twice), { state: "open", viewId: null, error: ADD_REFUSED });
   assert.equal(posts, 2);
+  // The revision read fails on the retry: nothing more was written.
+  let reads = 0;
+  posts = 0;
+  const lost = guards({
+    get: async () => { if (reads++) throw Object.assign(new Error("x"), { name: "NetworkError" }); return snapshot(id(9), 4); },
+    createItems: async () => { posts++; throw apiError(409); },
+  });
+  assert.deepEqual(await addRoadmap(read(existing), lost), { state: "open", viewId: null, error: "No answer from your Home Node. Check the connection." });
+  assert.deepEqual([reads, posts], [2, 1]);
 });
 
 test("5xx, no answer or an unreadable answer: not confirmed", async () => {

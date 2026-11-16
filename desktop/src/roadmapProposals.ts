@@ -103,16 +103,20 @@ export function proposalSummary(p: Proposal): string {
 }
 
 /** The items grouped as the Roadmaps view groups them: a new roadmap's
- *  phases in order (empty ones left out), an existing roadmap's in the order
- *  the items name them, then the items without a phase. */
+ *  phases in order, empty ones included so the card shows every phase that
+ *  is sent; an existing roadmap's in the order the items name them; then the
+ *  items without a phase. */
 export function proposalGroups(p: Proposal): { phase: string | null; items: Item[] }[] {
   const items: Item[] = p.body.items.map((i, n) => ({
     id: String(n), title: i.title, status: i.status, auto_status: null, phase: i.phase ?? null, position: n,
     notes: i.notes ?? null, depends_on: [], links: i.links ?? [], updated_at: "",
   }));
   const phases = isNew(p) ? p.body.phases ?? [] : [...new Set(items.flatMap((i) => (i.phase === null ? [] : [i.phase])))];
-  return groupByPhase(phases, items).filter((g) => g.items.length);
+  return groupByPhase(phases, items);
 }
+
+/** A new roadmap's description, shown as sent; null when none. */
+export const proposalDescription = (p: Proposal): string | null => (isNew(p) ? p.body.description ?? null : null);
 
 // ---- add -----------------------------------------------------------------------
 
@@ -142,7 +146,7 @@ async function write(send: () => Promise<unknown>): Promise<AddResult | "conflic
     if (status >= 500) return UNCONFIRMED;
     if (status === 409) return "conflict";
     if (status === 404 || status === 405) return opened(ADD_TOO_OLD);
-    if (status === 400 || status === 413) return opened(ADD_REFUSED);
+    if (status === 400 || status === 413 || status === 422) return opened(ADD_REFUSED);
     return opened(failureText(failureOf(e)));
   }
 }

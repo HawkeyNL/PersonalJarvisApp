@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { ADDED, proposalGroups, proposalHeading, proposalSummary, type RoadmapCard } from "../../roadmapProposals";
+import { ADDED, proposalDescription, proposalGroups, proposalHeading, proposalSummary, type RoadmapCard } from "../../roadmapProposals";
 import { STATUS_LABEL, STATUS_TONE, linkLabel } from "../../roadmaps";
 import { addRoadmapProposal, dismissRoadmapProposal } from "../../assistant";
 import { locked } from "../../lock";
@@ -9,6 +9,7 @@ import { locked } from "../../lock";
 // until Add. All text is plain: links show as labels and never open.
 const props = defineProps<{ card: RoadmapCard }>();
 const heading = computed(() => proposalHeading(props.card));
+const description = computed(() => proposalDescription(props.card));
 const groups = computed(() => proposalGroups(props.card));
 const busy = computed(() => props.card.state === "adding");
 </script>
@@ -17,10 +18,11 @@ const busy = computed(() => props.card.state === "adding");
   <div class="proposal" role="group" :aria-label="heading">
     <strong class="wrap">{{ heading }}</strong>
     <span class="t-xs t-2">{{ proposalSummary(card) }}</span>
+    <span v-if="description" class="t-sm wrap notes">{{ description }}</span>
     <div class="groups">
       <section v-for="g in groups" :key="g.phase ?? ''">
         <h3 class="t-xs t-2">{{ g.phase ?? "No phase" }}</h3>
-        <ul>
+        <ul v-if="g.items.length">
           <li v-for="item in g.items" :key="item.id">
             <span class="row">
               <span class="badge" :class="STATUS_TONE[item.status]"><span class="dot" aria-hidden="true"></span>{{ STATUS_LABEL[item.status] }}</span>

@@ -181,6 +181,23 @@ mod tests {
             .unwrap();
         let emitted = serde_json::to_value(&event).unwrap();
         assert_eq!(emitted["payload"], payload);
+
+        // A new roadmap has no `roadmap_id`: it stays absent, never null.
+        let mut new_roadmap = payload;
+        new_roadmap["roadmap_proposals"] = serde_json::json!([{
+            "id": uuid::Uuid::from_u128(8),
+            "title": "Example",
+            "body": { "title": "Example", "phases": [], "items": [] },
+        }]);
+        let event = decode(&frame(3, "assistant.completed", new_roadmap.clone()))
+            .unwrap()
+            .unwrap();
+        let emitted = serde_json::to_value(&event).unwrap();
+        assert_eq!(emitted["payload"], new_roadmap);
+        let proposal = emitted["payload"]["roadmap_proposals"][0]
+            .as_object()
+            .unwrap();
+        assert!(!proposal.contains_key("roadmap_id"));
     }
 
     #[test]
