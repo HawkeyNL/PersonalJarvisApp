@@ -77,6 +77,7 @@ test("hidden or bidi characters, and phases that are not a list of strings, are 
     { ...fresh, body: { ...newBody, phases: { 0: "Done" } } },
     { ...fresh, body: { ...newBody, phases: ["Done", 7] } },
     { ...fresh, body: { ...newBody, phases: null } },
+    { ...fresh, body: { title: "x", phases: null, items: [{ title: "x", status: "planned" }] } },
   ];
   for (const p of bad) assert.equal(read(p), null, JSON.stringify(p).slice(0, 200));
 });

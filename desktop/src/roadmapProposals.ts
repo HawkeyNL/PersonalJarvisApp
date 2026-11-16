@@ -54,7 +54,7 @@ function validItems(x: unknown, phases: string[] | null): x is ProposalItem[] {
 }
 
 function validNewRoadmap(b: Record<string, unknown>): boolean {
-  const phases = b.phases ?? [];
+  const phases = b.phases === undefined ? [] : b.phases;
   if (!onlyKeys(b, ["title", "description", "phases", "items"]) || !text(b.title, LIMITS.roadmapTitle)) return false;
   if (!optText(b.description, LIMITS.description, true) || !Array.isArray(phases) || phases.length > LIMITS.phases) return false;
   if (!phases.every((p) => text(p, LIMITS.phase)) || new Set(phases).size !== phases.length) return false;
