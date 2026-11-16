@@ -909,8 +909,9 @@ enum RoadmapCards {
         return proposal.roadmapId == nil ? "\(items) in \(count(proposal.body.phases?.count ?? 0, "phase"))" : items
     }
 
-    /// Every item grouped as the Roadmaps view does: by the new roadmap's phases, or for an
-    /// existing roadmap by the phases its items name, in order.
+    /// Every item grouped as the Roadmaps view does: by the new roadmap's phases (empty ones
+    /// too, so the card shows every phase sent), or for an existing roadmap by the phases its
+    /// items name, in order.
     static func groups(_ proposal: ChatRoadmapProposal) -> [Roadmaps.PhaseGroup] {
         let items = proposal.body.items.enumerated().map { index, item in
             RoadmapItem(id: String(index), title: item.title, status: item.status, phase: item.phase, position: index,
@@ -982,7 +983,7 @@ enum RoadmapCards {
             guard let status = Jobs.status(error), (400..<500).contains(status) else { return (.unconfirmed, notConfirmed) }
             switch status {
             case 404, 405: return (.open, tooOld)
-            case 400, 409, 413: return (.open, refused)
+            case 400, 409, 413, 422: return (.open, refused)
             default: return (.open, Roadmaps.failureText(error))
             }
         }

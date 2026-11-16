@@ -680,6 +680,8 @@ private struct RoadmapCardView: View {
             Text(verbatim: RoadmapCards.heading(proposal)).font(JV.font(15, .medium)).foregroundStyle(JV.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             caption(RoadmapCards.summary(proposal))
+            // All that Add sends is shown: the description, every phase, each item's notes and links.
+            if let description = proposal.body.description { caption(description) }
             ForEach(RoadmapCards.groups(proposal), id: \.phase) { group in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(verbatim: group.phase ?? "No phase").font(JV.font(13, .semibold)).foregroundStyle(JV.textPrimary)
@@ -690,6 +692,7 @@ private struct RoadmapCardView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(verbatim: item.title).font(JV.font(13)).foregroundStyle(JV.textPrimary)
                                     .fixedSize(horizontal: false, vertical: true)
+                                if let notes = item.notes { caption(notes) }
                                 if !item.links.isEmpty { caption(RoadmapCards.linkText(item.links)) }
                             }
                         }

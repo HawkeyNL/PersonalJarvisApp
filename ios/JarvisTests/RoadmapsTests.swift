@@ -491,6 +491,43 @@ final class RoadmapCardsTests: XCTestCase {
         XCTAssertEqual(RoadmapCards.summary(empty), "0 items in 0 phases")
     }
 
+    /// What the card shows: the same parts ChatView renders.
+    private func shown(_ proposal: ChatRoadmapProposal) -> [String] {
+        [RoadmapCards.heading(proposal), RoadmapCards.summary(proposal), proposal.body.description].compactMap { $0 }
+            + RoadmapCards.groups(proposal).flatMap { group in
+                [group.phase ?? "No phase"] + group.items.flatMap { item in
+                    [item.status.label, item.title, item.notes, item.links.isEmpty ? nil : RoadmapCards.linkText(item.links)].compactMap { $0 }
+                }
+            }
+    }
+
+    /// Every text and number in a sent body, except the enum values `status` and `kind`.
+    private func leaves(_ value: Any, key: String = "") -> [String] {
+        switch value {
+        case let dict as [String: Any]: return dict.flatMap { leaves($0.value, key: $0.key) }
+        case let list as [Any]: return list.flatMap { leaves($0, key: key) }
+        case let text as String: return key == "status" || key == "kind" ? [] : [text]
+        case let number as NSNumber: return [number.stringValue]
+        default: return []
+        }
+    }
+
+    func testTheCardShowsEverythingAddSends() throws {
+        let body = merged(newBody, ["phases": ["Done", "Now", "Empty"]])
+        let proposal = try XCTUnwrap(read([newEntry(body)]))
+        let card = shown(proposal)
+        XCTAssertTrue(card.contains("Empty"), "an empty phase is shown")
+        let sent = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(proposal.body)))
+        for text in leaves(sent) {
+            XCTAssertTrue(card.contains { $0.contains(text) }, "not shown: \(text)")
+        }
+        let items = try XCTUnwrap(read([itemsEntry(merged(itemsBody, ["items": [["title": "Fourth", "status": "ready", "notes": "Why.\nMore."]]]))]))
+        let itemCard = shown(items)
+        for text in leaves(try JSONSerialization.jsonObject(with: JSONEncoder().encode(items.body))) {
+            XCTAssertTrue(itemCard.contains { $0.contains(text) }, "not shown: \(text)")
+        }
+    }
+
     func testItemsForAnExistingRoadmapRead() throws {
         let proposal = try XCTUnwrap(read([itemsEntry()]))
         XCTAssertEqual(proposal.roadmapId, UUID(uuidString: r1))
@@ -517,6 +554,13 @@ final class RoadmapCardsTests: XCTestCase {
             newEntry(merged(newBody, ["phases": (1...21).map { "P\($0)" }, "items": [Any]()])),
             newEntry(merged(newBody, ["phases": [String(repeating: "p", count: 61)], "items": [Any]()])),
             newEntry(merged(newBody, ["phases": ["Now", "Now"], "items": [Any]()])),
+            newEntry(merged(newBody, ["phases": "Now", "items": [Any]()])),
+            // Hidden and bidi characters anywhere.
+            newEntry(merged(newBody, ["title": "Example\u{202E}"]), ["title": "Example\u{202E}"]),
+            newEntry(merged(newBody, ["description": "A\u{202E} plan."])),
+            newEntry(merged(newBody, ["phases": ["Now\u{202E}"], "items": [Any]()])),
+            newEntry(newItem(["notes": "Note\u{202E}"])),
+            newEntry(newItem(["phase": "Now\u{200B}"])),
             // Unknown status, unknown item keys, and Core's text rules.
             newEntry(newItem(["status": "done"])),
             newEntry(newItem(["position": 0])),
@@ -677,8 +721,8 @@ final class RoadmapCardsTests: XCTestCase {
         // A 4xx opens the card again with why.
         let refused = "Core refused this roadmap, for example because a phase changed or a limit was reached. Ask Jarvis again."
         let open: [(JarvisAPIError, String)] = [
-            (rejected(400), refused), (rejected(409), refused), (rejected(413), refused),
-            (rejected(422), "Core returned an answer this app does not understand, or an error. Try again later."),
+            (rejected(400), refused), (rejected(409), refused), (rejected(413), refused), (rejected(422), refused),
+            (rejected(429), "Core returned an answer this app does not understand, or an error. Try again later."),
             (rejected(404), "Update Jarvis Core to add roadmaps from chat."),
             (rejected(405), "Update Jarvis Core to add roadmaps from chat."),
             (.unauthorized, "Your session is not valid. Sign in again from Settings."),
