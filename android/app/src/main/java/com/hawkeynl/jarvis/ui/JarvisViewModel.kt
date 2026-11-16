@@ -391,6 +391,10 @@ class JarvisViewModel(private val container: AppContainer) : ViewModel() {
                 createItems = { rid, revision, body ->
                     jobs { e, t -> writeRoadmap(e, t, rid, revision, com.hawkeynl.jarvis.network.RoadmapWrite.CreateItems(body)) }
                 },
+                allowed = {
+                    val now = _state.value
+                    !now.locked && now.authenticated && identity == start.identity && now.conversationId == start.conversationId
+                },
             )
             _state.update {
                 it.copy(roadmapProposals = com.hawkeynl.jarvis.network.finishRoadmapAdd(it.roadmapProposals, start, result, identity, it.conversationId))

@@ -12,15 +12,17 @@ import kotlinx.serialization.json.JsonPrimitive
 // live in memory only, for the conversation on screen. Pure, so tests load it directly.
 
 // The card's wording, in one place (desktop RoadmapProposalCard.vue).
-const val ROADMAP_ADDED = "Added to Roadmaps · View roadmap"
-const val ROADMAP_NOT_CONFIRMED = "Not confirmed: it may have been added. Check Roadmaps"
+const val ROADMAP_ADDED = "Added to Roadmaps"
+const val ROADMAP_VIEW = "View roadmap"
+const val ROADMAP_NOT_CONFIRMED = "Not confirmed: it may have been added."
+const val ROADMAP_CHECK = "Check Roadmaps"
 const val ROADMAP_REFUSED = "Core refused this roadmap, for example because a phase changed or a limit was reached. Ask Jarvis again."
 const val ROADMAP_CORE_TOO_OLD = "Update Jarvis Core to add roadmaps from chat."
 
 /** [items] carry their place as id and position, so the Roadmaps grouping reads them.
  *  [roadmapId] is set for items on an existing roadmap ([title] is then its title). */
 data class RoadmapProposal(
-    val id: String, val roadmapId: String?, val title: String, val description: String?, val phases: List<String>,
+    val id: String, val roadmapId: String?, val title: String, val phases: List<String>,
     val items: List<RoadmapItem>, val body: JsonObject,
 )
 
@@ -58,9 +60,8 @@ private fun readLink(x: JsonElement): RoadmapLink {
 private fun readItem(x: JsonElement, index: Int): RoadmapItem {
     val o = x.obj()
     require(ITEM_KEYS.containsAll(o.keys))
-    // Core's default when absent; present, it must be one this app knows.
-    val status = if ("status" in o) RoadmapStatus.entries.firstOrNull { it.wire == o.optStr("status") } ?: throw IllegalArgumentException()
-    else RoadmapStatus.PLANNED
+    // Core always sends the status; it must be one this app knows.
+    val status = RoadmapStatus.entries.firstOrNull { it.wire == o.optStr("status") } ?: throw IllegalArgumentException()
     return RoadmapItem(
         "$index", o["title"].text(RoadmapLimits.ITEM_TITLE), status, null, o.optText("phase", RoadmapLimits.PHASE),
         index.toLong(), o.optText("notes", RoadmapLimits.NOTES, multiline = true), emptyList(),
@@ -81,15 +82,14 @@ fun readRoadmapProposal(x: JsonElement?): RoadmapProposal? = guarded {
     val items = body.array("items", 100).mapIndexed { i, item -> readItem(item, i) }
     if (roadmapId != null) {
         require(body.keys == setOf("items") && items.isNotEmpty())
-        RoadmapProposal(id, roadmapId, title, null, emptyList(), items, body)
+        RoadmapProposal(id, roadmapId, title, emptyList(), items, body)
     } else {
         require(NEW_KEYS.containsAll(body.keys) && "roadmap_id" !in o)
         val phases = (if ("phases" in body) body.array("phases", RoadmapLimits.PHASES) else JsonArray(emptyList())).map { it.text(RoadmapLimits.PHASE) }
         require(phases.toSet().size == phases.size && items.all { it.phase == null || it.phase in phases })
-        RoadmapProposal(
-            id, null, body["title"].text(RoadmapLimits.ROADMAP_TITLE),
-            body.optText("description", RoadmapLimits.DESCRIPTION, multiline = true), phases, items, body,
-        )
+        // Checked, not shown (as desktop).
+        body.optText("description", RoadmapLimits.DESCRIPTION, multiline = true)
+        RoadmapProposal(id, null, body["title"].text(RoadmapLimits.ROADMAP_TITLE), phases, items, body)
     }
 }
 
@@ -120,31 +120,39 @@ data class RoadmapAddResult(val state: ProposalState, val roadmapId: String?, va
 
 private val UNCONFIRMED = RoadmapAddResult(ProposalState.UNCONFIRMED, null, ROADMAP_NOT_CONFIRMED)
 
-/** A write's answer: a readable 2xx is added; 404 or 405 is an older Core; any other refusal
- *  (4xx) lets the owner try again; anything else (a 2xx this build cannot read, no answer,
- *  any 5xx, an answer the lock dropped: null) is not confirmed and Add stays off. */
+private fun opened(error: String) = RoadmapAddResult(ProposalState.OPEN, null, error)
+
+/** A write's answer, as desktop: a readable 2xx is added; 400, 413 and a 409 are refusals;
+ *  404 or 405 is an older Core; any other refusal opens the card again with the failure text;
+ *  anything else (a 2xx this build cannot read, no answer, any 5xx, an answer the lock
+ *  dropped: null) is not confirmed and Add stays off. */
 private fun outcome(result: ApiResult<RoadmapSnapshot?>?): RoadmapAddResult = when {
     result is ApiResult.Success -> result.value?.let { RoadmapAddResult(ProposalState.ADDED, it.roadmap.id, "") } ?: UNCONFIRMED
-    result == ApiResult.Unauthorized -> RoadmapAddResult(ProposalState.OPEN, null, roadmapFailureText(JobFailure.SIGNIN))
-    result is ApiResult.HttpError && (result.status == 404 || result.status == 405) -> RoadmapAddResult(ProposalState.OPEN, null, ROADMAP_CORE_TOO_OLD)
-    result is ApiResult.HttpError && result.status in 400..499 -> RoadmapAddResult(ProposalState.OPEN, null, ROADMAP_REFUSED)
-    else -> UNCONFIRMED
+    result == ApiResult.Unauthorized -> opened(roadmapFailureText(JobFailure.SIGNIN))
+    result !is ApiResult.HttpError || result.status >= 500 -> UNCONFIRMED
+    result.status == 404 || result.status == 405 -> opened(ROADMAP_CORE_TOO_OLD)
+    result.status == 400 || result.status == 409 || result.status == 413 -> opened(ROADMAP_REFUSED)
+    else -> opened(roadmapFailureText(jobFailureOf(result)))
 }
 
-/** Sends the proposal's body exactly as Core gave it: one create for a new roadmap; for an
- *  existing one, its current revision ([read]) and then [createItems], read and sent once more
- *  after a 409. A failed read sent nothing, so the card opens again. */
+/** Sends the proposal's body exactly as Core gave it: one create for a new roadmap (a 409 is
+ *  a refusal); for an existing one, its current revision ([read]) and then [createItems], read
+ *  and sent once more after a 409. A failed read sent nothing, so the card opens again; so
+ *  does a lock or a sign-in or conversation change between the read and the write
+ *  ([allowed] false). */
 suspend fun addRoadmap(
     p: RoadmapProposal,
     create: suspend (JsonObject) -> ApiResult<RoadmapSnapshot?>?,
     read: suspend (String) -> ApiResult<RoadmapSnapshot>?,
     createItems: suspend (String, Long, JsonObject) -> ApiResult<RoadmapSnapshot?>?,
+    allowed: () -> Boolean,
 ): RoadmapAddResult {
     val id = p.roadmapId ?: return outcome(create(p.body))
     var result: ApiResult<RoadmapSnapshot?>? = null
     for (attempt in 1..2) {
-        val current = read(id) ?: return RoadmapAddResult(ProposalState.OPEN, null, "")
-        if (current !is ApiResult.Success) return RoadmapAddResult(ProposalState.OPEN, null, roadmapFailureText(jobFailureOf(current)))
+        val current = read(id) ?: return opened("")
+        if (current !is ApiResult.Success) return opened(roadmapFailureText(jobFailureOf(current)))
+        if (!allowed()) return opened("")
         result = createItems(id, current.value.roadmap.revision, p.body)
         if (!(result is ApiResult.HttpError && result.status == 409)) break
     }

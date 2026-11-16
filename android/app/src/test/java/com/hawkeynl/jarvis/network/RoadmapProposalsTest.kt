@@ -38,7 +38,6 @@ class RoadmapProposalsTest {
         assertEquals(id1, p.id)
         assertNull(p.roadmapId)
         assertEquals("Trip", p.title)
-        assertEquals("Line one\nline two", p.description)
         assertEquals(listOf("Book", "Go"), p.phases)
         assertEquals(newBody, p.body)
         assertEquals(listOf(RoadmapStatus.READY, RoadmapStatus.PLANNED, RoadmapStatus.PLANNED), p.items.map { it.status })
@@ -64,8 +63,8 @@ class RoadmapProposalsTest {
         val one = read(entry(obj("""{"items":[${item(1)}]}"""), roadmap = roadmapId, title = "Jarvis"))!!
         assertEquals("Add 1 item to Jarvis", roadmapHeading(one))
         assertEquals("1 item", roadmapSummary(one))
-        // Core's default status when an item leaves it out.
-        assertEquals(RoadmapStatus.PLANNED, read(entry(obj("""{"items":[{"title":"X"}]}"""), roadmap = roadmapId))!!.items.single().status)
+        // The status is required.
+        assertNull(read(entry(obj("""{"items":[{"title":"X"}]}"""), roadmap = roadmapId)))
     }
 
     @Test fun `only the first entry counts`() {
@@ -117,17 +116,17 @@ class RoadmapProposalsTest {
     @Test fun `text must fit Core's rules`() {
         val long = { n: Int -> "x".repeat(n) }
         assertNotNull(read(entry(obj("""{"title":"${long(120)}","description":"${long(2000)}","phases":[${(1..20).joinToString(",") { "\"" + "P$it".padEnd(60, 'x') + "\"" }}],
-            "items":[{"title":"${long(200)}","notes":"${long(4000)}"}]}"""))))
+            "items":[{"title":"${long(200)}","status":"planned","notes":"${long(4000)}"}]}"""))))
         val bad = listOf(
             obj("""{"title":"${long(121)}","items":[]}"""),
             obj("""{"title":" ","items":[]}"""),
             obj("""{"title":"T","description":"${long(2001)}","items":[]}"""),
             obj("""{"title":"T","phases":["${long(61)}"],"items":[]}"""),
             obj("""{"title":"T","phases":[${(1..21).joinToString(",") { "\"P$it\"" }}],"items":[]}"""),
-            obj("""{"title":"T","items":[{"title":"${long(201)}"}]}"""),
-            obj("""{"title":"T","items":[{"title":"Two\nlines"}]}"""),
-            obj("""{"title":"T","items":[{"title":"Hidden‮text"}]}"""),
-            obj("""{"title":"T","items":[{"title":"A","notes":"${long(4001)}"}]}"""),
+            obj("""{"title":"T","items":[{"title":"${long(201)}","status":"planned"}]}"""),
+            obj("""{"title":"T","items":[{"title":"Two\nlines","status":"planned"}]}"""),
+            obj("""{"title":"T","items":[{"title":"Hidden\u202Etext","status":"planned"}]}"""),
+            obj("""{"title":"T","items":[{"title":"A","status":"planned","notes":"${long(4001)}"}]}"""),
         )
         for (body in bad) assertNull(body.toString(), read(entry(body)))
         assertNull(read(entry(itemsBody, roadmap = roadmapId, title = long(121))))
@@ -174,21 +173,22 @@ class RoadmapProposalsTest {
     private val unconfirmed = RoadmapAddResult(ProposalState.UNCONFIRMED, null, ROADMAP_NOT_CONFIRMED)
 
     private fun addNew(answer: ApiResult<RoadmapSnapshot?>?): RoadmapAddResult = runBlocking {
-        addRoadmap(newProposal, { answer }, { error("no read") }, { _, _, _ -> error("no batch") })
+        addRoadmap(newProposal, { answer }, { error("no read") }, { _, _, _ -> error("no batch") }, { true })
     }
 
-    /** The items Add with [answers] in turn; the reads answer revisions 4, 5, … */
-    private class Calls(val answers: List<ApiResult<RoadmapSnapshot?>?>) {
+    /** An items Add answered with [answers] in turn; the reads answer revisions 4, 5, and so on. */
+    private class Calls(val answers: List<ApiResult<RoadmapSnapshot?>?>, val allowed: Boolean) {
         val reads = mutableListOf<String>()
         val writes = mutableListOf<Triple<String, Long, JsonObject>>()
     }
-    private fun addItems(vararg answers: ApiResult<RoadmapSnapshot?>?): Pair<RoadmapAddResult, Calls> {
-        val calls = Calls(answers.toList())
+    private fun addItems(vararg answers: ApiResult<RoadmapSnapshot?>?, allowed: Boolean = true): Pair<RoadmapAddResult, Calls> {
+        val calls = Calls(answers.toList(), allowed)
         val result = runBlocking {
             addRoadmap(
                 itemsProposal, { error("no create") },
                 { id -> calls.reads += id; ApiResult.Success(snapshot(revision = 3L + calls.reads.size)) },
                 { id, revision, body -> calls.writes += Triple(id, revision, body); calls.answers[calls.writes.size - 1] },
+                { calls.allowed },
             )
         }
         return result to calls
@@ -197,7 +197,7 @@ class RoadmapProposalsTest {
     @Test fun `2xx adds and names the roadmap to open`() {
         var sent: JsonObject? = null
         val created = runBlocking {
-            addRoadmap(newProposal, { sent = it; ApiResult.Success(snapshot(id = "new-id")) }, { error("no read") }, { _, _, _ -> error("no batch") })
+            addRoadmap(newProposal, { sent = it; ApiResult.Success(snapshot(id = "new-id")) }, { error("no read") }, { _, _, _ -> error("no batch") }, { true })
         }
         assertEquals(RoadmapAddResult(ProposalState.ADDED, "new-id", ""), created)
         assertEquals(newBody, sent)
@@ -209,11 +209,13 @@ class RoadmapProposalsTest {
 
     @Test fun `4xx opens the card again with the refusal`() {
         val refused = RoadmapAddResult(ProposalState.OPEN, null, ROADMAP_REFUSED)
-        for (status in listOf(400, 409, 413, 422)) assertEquals("$status", refused, addNew(ApiResult.HttpError(status, null)))
-        assertEquals(refused, addItems(ApiResult.HttpError(400, null)).first)
-        assertEquals(
-            RoadmapAddResult(ProposalState.OPEN, null, roadmapFailureText(JobFailure.SIGNIN)), addNew(ApiResult.Unauthorized),
-        )
+        // A 409 on a new roadmap is a refusal, never retried.
+        for (status in listOf(400, 409, 413)) assertEquals("$status", refused, addNew(ApiResult.HttpError(status, null)))
+        for (status in listOf(400, 413)) assertEquals("$status", refused, addItems(ApiResult.HttpError(status, null)).first)
+        // Other refusals open the card again with the failure text.
+        assertEquals(RoadmapAddResult(ProposalState.OPEN, null, roadmapFailureText(JobFailure.SIGNIN)), addNew(ApiResult.Unauthorized))
+        val failed = RoadmapAddResult(ProposalState.OPEN, null, roadmapFailureText(JobFailure.FAILED))
+        for (status in listOf(403, 422, 429, 302)) assertEquals("$status", failed, addNew(ApiResult.HttpError(status, null)))
     }
 
     @Test fun `a 409 reads the revision again and retries once`() {
@@ -227,7 +229,7 @@ class RoadmapProposalsTest {
 
     @Test fun `5xx, no answer or an unreadable answer is not confirmed`() {
         val answers = listOf(
-            ApiResult.HttpError(500, null), ApiResult.HttpError(503, null), ApiResult.HttpError(302, null),
+            ApiResult.HttpError(500, null), ApiResult.HttpError(503, null),
             ApiResult.Unreachable(UnreachableReason.TIMEOUT), ApiResult.InvalidResponse("Home Node sent an invalid answer"),
             ApiResult.Success(null), null,
         )
@@ -247,11 +249,16 @@ class RoadmapProposalsTest {
 
     @Test fun `a failed read sends nothing and opens the card again`() {
         val gone = runBlocking {
-            addRoadmap(itemsProposal, { error("no create") }, { ApiResult.HttpError(404, null) }, { _, _, _ -> error("no batch") })
+            addRoadmap(itemsProposal, { error("no create") }, { ApiResult.HttpError(404, null) }, { _, _, _ -> error("no batch") }, { true })
         }
         assertEquals(RoadmapAddResult(ProposalState.OPEN, null, roadmapFailureText(JobFailure.NOT_FOUND)), gone)
-        val locked = runBlocking { addRoadmap(itemsProposal, { error("no create") }, { null }, { _, _, _ -> error("no batch") }) }
+        val locked = runBlocking { addRoadmap(itemsProposal, { error("no create") }, { null }, { _, _, _ -> error("no batch") }, { true }) }
         assertEquals(RoadmapAddResult(ProposalState.OPEN, null, ""), locked)
+        // Locked, signed out or left between the read and the write: nothing is written.
+        val (between, calls) = addItems(ApiResult.Success(snapshot()), allowed = false)
+        assertEquals(RoadmapAddResult(ProposalState.OPEN, null, ""), between)
+        assertEquals(listOf(roadmapId), calls.reads)
+        assertEquals(emptyList<Triple<String, Long, JsonObject>>(), calls.writes)
     }
 
     @Test fun `never while locked, never twice, and a late result is gated`() {
