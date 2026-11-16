@@ -923,6 +923,9 @@ enum RoadmapCards {
         return Roadmaps.groupByPhase(phases, items)
     }
 
+    /// An item's links as plain labels ("owner/name#12, owner/name@v1.2.0"), never openable.
+    static func linkText(_ links: [RoadmapLink]) -> String { links.map(Roadmaps.linkLabel).joined(separator: ", ") }
+
     // MARK: Add
 
     /// Starts an Add: the card, now `adding`, when it is open and the app unlocked; nil
@@ -933,6 +936,9 @@ enum RoadmapCards {
         cards[index].error = nil
         return cards[index]
     }
+
+    /// The roadmap could not be read for its revision, so nothing was written.
+    struct RevisionReadFailed: Error { let error: Error }
 
     /// What Add sends: a new roadmap in one create; items for an existing roadmap on the
     /// revision read just before, read and tried once more after a 409. The roadmap's id;
@@ -946,7 +952,9 @@ enum RoadmapCards {
             return id
         }
         func once() async throws -> UUID {
-            guard try await createItems(roadmap, try await revision(roadmap), proposal.body) == roadmap else {
+            let current: Int
+            do { current = try await revision(roadmap) } catch { throw RevisionReadFailed(error: error) }
+            guard try await createItems(roadmap, current, proposal.body) == roadmap else {
                 throw JarvisAPIError.invalidResponse
             }
             return roadmap
@@ -963,16 +971,18 @@ enum RoadmapCards {
         cards[index].error = error
     }
 
-    /// Fails closed: only an HTTP refusal (4xx) lets the owner try again. Anything else (a
-    /// 2xx this app cannot read, no answer, any 5xx) is not confirmed, and Add stays off.
+    /// Fails closed: only an HTTP refusal (4xx) or a failed revision read (nothing sent) lets
+    /// the owner try again. Anything else (a 2xx this app cannot read, no answer, any 5xx) is
+    /// not confirmed, and Add stays off. A 409 left after the retry is Core's refusal.
     static func outcome(_ result: Result<UUID, Error>) -> (ProposalCard.State, String?) {
         switch result {
         case let .success(roadmap): return (.added(roadmap), nil)
         case let .failure(error):
+            if let read = error as? RevisionReadFailed { return (.open, Roadmaps.failureText(read.error)) }
             guard let status = Jobs.status(error), (400..<500).contains(status) else { return (.unconfirmed, notConfirmed) }
             switch status {
             case 404, 405: return (.open, tooOld)
-            case 400, 409, 413, 422: return (.open, refused)
+            case 400, 409, 413: return (.open, refused)
             default: return (.open, Roadmaps.failureText(error))
             }
         }

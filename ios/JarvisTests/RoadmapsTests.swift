@@ -482,6 +482,8 @@ final class RoadmapCardsTests: XCTestCase {
         XCTAssertEqual(groups.map(\.phase), ["Done", "Now", nil])
         XCTAssertEqual(groups.map { $0.items.map(\.title) }, [["First"], ["Second"], ["Third"]])
         XCTAssertEqual(groups[1].items.first?.status, .inProgress)
+        XCTAssertEqual(groups.map { $0.items.map(\.status.label) }, [["Live"], ["In progress"], ["Planned"]])
+        XCTAssertEqual(groups[0].items.first.map { RoadmapCards.linkText($0.links) }, "example/app#12, example/app@v1.0.0")
 
         let one = try XCTUnwrap(read([newEntry(merged(newBody, ["phases": ["Now"], "items": [["title": "Only", "status": "planned"]]]))]))
         XCTAssertEqual(RoadmapCards.summary(one), "1 item in 1 phase")
@@ -582,6 +584,14 @@ final class RoadmapCardsTests: XCTestCase {
             _ = try await RoadmapCards.add(proposal, create: { _ in nil }, revision: { _ in 0 }, createItems: { _, _, _ in nil })
             XCTFail("an answer without an id is not confirmed")
         } catch { XCTAssertEqual(error as? JarvisAPIError, .invalidResponse) }
+        // A 409 on a new roadmap is Core's refusal: no retry.
+        var creates = 0
+        do {
+            _ = try await RoadmapCards.add(proposal, create: { _ in creates += 1; throw self.rejected(409) },
+                                           revision: { _ in 0 }, createItems: { _, _, _ in nil })
+            XCTFail("refused")
+        } catch { XCTAssertEqual(RoadmapCards.outcome(.failure(error)).1, RoadmapCards.refused) }
+        XCTAssertEqual(creates, 1)
     }
 
     func testItemsGoOnTheCurrentRevisionAndA409IsTriedOnceMore() async throws {
@@ -606,8 +616,31 @@ final class RoadmapCardsTests: XCTestCase {
 
         // A second 409 is Core's refusal.
         calls = []; conflicts = 2
-        do { _ = try await add(); XCTFail("refused") } catch { XCTAssertEqual(Jobs.status(error), 409) }
+        do { _ = try await add(); XCTFail("refused") } catch {
+            XCTAssertEqual(Jobs.status(error), 409)
+            XCTAssertEqual(RoadmapCards.outcome(.failure(error)).1, RoadmapCards.refused)
+        }
         XCTAssertEqual(calls, ["GET true", "POST 5", "GET true", "POST 6"])
+
+        // A failed revision read sends nothing and opens the card again with why.
+        let reads: [(JarvisAPIError, String)] = [
+            (.unreachable, "No answer from your Home Node. Check the connection."),
+            (rejected(503), "Core could not read the roadmaps just now. Try again in a minute."),
+            (.invalidResponse, "Core returned an answer this app does not understand, or an error. Try again later."),
+        ]
+        for (failure, text) in reads {
+            var writes = 0
+            do {
+                _ = try await RoadmapCards.add(proposal, create: { _ in nil }, revision: { _ in throw failure },
+                                               createItems: { _, _, _ in writes += 1; return nil })
+                XCTFail("read failed")
+            } catch {
+                let (state, shown) = RoadmapCards.outcome(.failure(error))
+                XCTAssertEqual(state, .open)
+                XCTAssertEqual(shown, text)
+            }
+            XCTAssertEqual(writes, 0)
+        }
     }
 
     func testAddOutcomesFailClosed() throws {
@@ -644,7 +677,8 @@ final class RoadmapCardsTests: XCTestCase {
         // A 4xx opens the card again with why.
         let refused = "Core refused this roadmap, for example because a phase changed or a limit was reached. Ask Jarvis again."
         let open: [(JarvisAPIError, String)] = [
-            (rejected(400), refused), (rejected(409), refused), (rejected(422), refused),
+            (rejected(400), refused), (rejected(409), refused), (rejected(413), refused),
+            (rejected(422), "Core returned an answer this app does not understand, or an error. Try again later."),
             (rejected(404), "Update Jarvis Core to add roadmaps from chat."),
             (rejected(405), "Update Jarvis Core to add roadmaps from chat."),
             (.unauthorized, "Your session is not valid. Sign in again from Settings."),

@@ -687,8 +687,11 @@ private struct RoadmapCardView: View {
                     ForEach(group.items) { item in
                         HStack(alignment: .firstTextBaseline, spacing: JV.Space.xs) {
                             Badge(text: item.status.label, style: item.status.badge)
-                            Text(verbatim: item.title).font(JV.font(13)).foregroundStyle(JV.textPrimary)
-                                .fixedSize(horizontal: false, vertical: true)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(verbatim: item.title).font(JV.font(13)).foregroundStyle(JV.textPrimary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if !item.links.isEmpty { caption(RoadmapCards.linkText(item.links)) }
+                            }
                         }
                         .accessibilityElement(children: .combine)
                     }
@@ -720,7 +723,7 @@ private struct RoadmapCardView: View {
         .padding(.vertical, JV.Space.sm)
         .background(JV.bgSunken, in: RoundedRectangle(cornerRadius: JV.Radius.md, style: .continuous))
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text(verbatim: "Proposed roadmap: \(RoadmapCards.heading(proposal))"))
+        .accessibilityLabel(Text(verbatim: RoadmapCards.heading(proposal)))
         .onChange(of: card.state) { _, state in
             // Added, not confirmed or refused: said once it is known.
             guard state != .adding, let text = card.error ?? (state == .open ? nil : RoadmapCards.added) else { return }
