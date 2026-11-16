@@ -929,28 +929,28 @@ final class JarvisAppModel: ObservableObject {
     func dismissJobProposal(_ id: UUID) { jobProposals.removeAll { $0.id == id } }
 
     /// Adds a roadmap an answer proposed, its body as Core sent it (checked by
-    /// ChatRoadmapProposal). Never while locked or twice at once; each call is dropped once the
-    /// owner left the session, and a result for a session or conversation left is dropped.
+    /// ChatRoadmapProposal). Never while locked or twice at once; nothing more is sent once the
+    /// app locked or the owner left the session or conversation, and such a result is dropped.
     func addRoadmapProposal(_ id: UUID) async {
         guard let card = RoadmapCards.begin(id, in: &roadmapProposals, unlocked: isAuthenticated && lockState == .unlocked) else { return }
         let generation = presentation.id
         let conversation = currentConversationId
-        func gated<Answer>(_ call: () async throws -> Answer) async throws -> Answer {
-            guard presentation.accepts(generation) else { throw CancellationError() }
-            return try await ownerWrite(call)
-        }
         let result: Result<UUID, Error>
         do {
             result = .success(try await RoadmapCards.add(
                 card.proposal,
-                create: { body in try await gated { try await self.chat.createRoadmap(body) }.id },
+                proceed: {
+                    guard self.isAuthenticated, self.lockState == .unlocked, self.presentation.accepts(generation),
+                          self.currentConversationId == conversation else { throw RoadmapCards.Locked() }
+                },
+                create: { body in try await self.ownerWrite { try await self.chat.createRoadmap(body) }.id },
                 revision: { roadmap in
-                    let snapshot: RoadmapSnapshot = try await gated { try await self.auth.ownerGet(Roadmaps.path(roadmap)) as RoadmapSnapshot }
+                    let snapshot = try await self.ownerWrite { try await self.auth.ownerGet(Roadmaps.path(roadmap)) as RoadmapSnapshot }
                     guard Roadmaps.valid(snapshot), snapshot.roadmap.id == roadmap else { throw JarvisAPIError.invalidResponse }
                     return snapshot.roadmap.revision
                 },
                 createItems: { roadmap, revision, body in
-                    try await gated { try await self.chat.createRoadmapItems(roadmap, revision: revision, body: body) }.id
+                    try await self.ownerWrite { try await self.chat.createRoadmapItems(roadmap, revision: revision, body: body) }.id
                 }))
         } catch { result = .failure(error) }
         let current = presentation.accepts(generation) && currentConversationId == conversation

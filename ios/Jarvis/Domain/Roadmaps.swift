@@ -761,12 +761,23 @@ enum Roadmaps {
 // app checks it again and skips a card it would not send itself, never the message. Nothing
 // is written until the owner taps Add. Cards live in memory only, for the conversation on screen.
 
+/// `requireKnownKeys`, and no field is null: a field is left out only by being absent.
+private func requireKnownNonNullKeys(_ decoder: Decoder, _ allowed: Set<String>) throws {
+    try requireKnownKeys(decoder, allowed)
+    let container = try decoder.container(keyedBy: AnyKey.self)
+    for key in container.allKeys {
+        if try container.decodeNil(forKey: key) {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Null field \(key.stringValue)"))
+        }
+    }
+}
+
 /// A link as a chat card may carry it: pr, issue or release, no url and no cached state.
 private struct ChatRoadmapLink: Decodable {
     let link: RoadmapLink
 
     init(from decoder: Decoder) throws {
-        try requireKnownKeys(decoder, ["kind", "repo", "number", "tag"])
+        try requireKnownNonNullKeys(decoder, ["kind", "repo", "number", "tag"])
         link = try RoadmapLink(from: decoder)
     }
 }
@@ -782,7 +793,7 @@ struct ChatRoadmapItem: Codable, Equatable {
     private enum CodingKeys: String, CodingKey { case title, status, phase, notes, links }
 
     init(from decoder: Decoder) throws {
-        try requireKnownKeys(decoder, ["title", "status", "phase", "notes", "links"])
+        try requireKnownNonNullKeys(decoder, ["title", "status", "phase", "notes", "links"])
         let container = try decoder.container(keyedBy: CodingKeys.self)
         title = try container.decode(String.self, forKey: .title)
         status = try container.decode(RoadmapStatus.self, forKey: .status)
@@ -811,13 +822,13 @@ struct ChatRoadmapProposal: Decodable, Equatable {
     private enum Keys: String, CodingKey { case id, roadmap_id, title, body }
 
     init(from decoder: Decoder) throws {
-        try requireKnownKeys(decoder, ["id", "roadmap_id", "title", "body"])
+        try requireKnownNonNullKeys(decoder, ["id", "roadmap_id", "title", "body"])
         let container = try decoder.container(keyedBy: Keys.self)
         id = try container.decode(UUID.self, forKey: .id)
         roadmapId = try container.decodeIfPresent(UUID.self, forKey: .roadmap_id)
         title = try container.decode(String.self, forKey: .title)
         let body = try container.superDecoder(forKey: .body)
-        try requireKnownKeys(body, roadmapId == nil ? ["title", "description", "phases", "items"] : ["items"])
+        try requireKnownNonNullKeys(body, roadmapId == nil ? ["title", "description", "phases", "items"] : ["items"])
         self.body = try ChatRoadmapBody(from: body)
         guard RoadmapCards.valid(self) else {
             throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Not a roadmap this app would add"))
@@ -941,20 +952,29 @@ enum RoadmapCards {
     /// The roadmap could not be read for its revision, so nothing was written.
     struct RevisionReadFailed: Error { let error: Error }
 
+    /// The app locked, or the owner left the session or conversation, before a request: the
+    /// rest is not sent and the card opens again.
+    struct Locked: Error {}
+
     /// What Add sends: a new roadmap in one create; items for an existing roadmap on the
-    /// revision read just before, read and tried once more after a 409. The roadmap's id;
-    /// an answer without it throws `invalidResponse`.
+    /// revision read just before, read and tried once more after a 409. `proceed` runs before
+    /// every request (so also between the read and the write) and throws `Locked` to stop.
+    /// The roadmap's id; an answer without it throws `invalidResponse`.
     static func add(_ proposal: ChatRoadmapProposal,
+                    proceed: () async throws -> Void,
                     create: (ChatRoadmapBody) async throws -> UUID?,
                     revision: (UUID) async throws -> Int,
                     createItems: (UUID, Int, ChatRoadmapBody) async throws -> UUID?) async throws -> UUID {
         guard let roadmap = proposal.roadmapId else {
+            try await proceed()
             guard let id = try await create(proposal.body) else { throw JarvisAPIError.invalidResponse }
             return id
         }
         func once() async throws -> UUID {
+            try await proceed()
             let current: Int
             do { current = try await revision(roadmap) } catch { throw RevisionReadFailed(error: error) }
+            try await proceed()
             guard try await createItems(roadmap, current, proposal.body) == roadmap else {
                 throw JarvisAPIError.invalidResponse
             }
@@ -979,6 +999,7 @@ enum RoadmapCards {
         switch result {
         case let .success(roadmap): return (.added(roadmap), nil)
         case let .failure(error):
+            if error is Locked { return (.open, nil) }
             if let read = error as? RevisionReadFailed { return (.open, Roadmaps.failureText(read.error)) }
             guard let status = Jobs.status(error), (400..<500).contains(status) else { return (.unconfirmed, notConfirmed) }
             switch status {

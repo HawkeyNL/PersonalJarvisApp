@@ -305,8 +305,13 @@ actor JarvisAPIClient {
     // Roadmaps (desktop roadmapsApi.ts). Each write names the revision it builds on; Core
     // answers 409 when the roadmap moved on. The answers are not needed: the page reloads.
     /// The answer names the new roadmap, so the app can open it.
-    /// The body is a `NewRoadmap`, or a chat card's (with its items).
-    func createRoadmap(_ body: some Encodable, token: String, expectedBinding: UUID) async throws -> CreatedRoadmap {
+    func createRoadmap(_ body: NewRoadmap, token: String, expectedBinding: UUID) async throws -> CreatedRoadmap {
+        try await request(path: "/v1/roadmaps", method: "POST", body: body, token: token,
+                          expectedBinding: expectedBinding, response: CreatedRoadmap.self)
+    }
+
+    /// A chat card's new roadmap, with its items.
+    func createRoadmap(_ body: ChatRoadmapBody, token: String, expectedBinding: UUID) async throws -> CreatedRoadmap {
         try await request(path: "/v1/roadmaps", method: "POST", body: body, token: token,
                           expectedBinding: expectedBinding, response: CreatedRoadmap.self)
     }

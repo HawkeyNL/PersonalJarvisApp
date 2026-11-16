@@ -587,6 +587,18 @@ final class RoadmapCardsTests: XCTestCase {
             itemsEntry(merged(itemsBody, ["phases": ["Now"]])),
             itemsEntry(merged(itemsBody, ["title": "Example"])),
             itemsEntry(nil, ["roadmap_id": "not-a-uuid"]),
+            // A field is left out only by being absent: present but null is refused.
+            newEntry(nil, ["roadmap_id": NSNull()]),
+            itemsEntry(nil, ["roadmap_id": NSNull()]),
+            newEntry(merged(newBody, ["description": NSNull()])),
+            newEntry(merged(newBody, ["items": NSNull()])),
+            newEntry(newItem(["phase": NSNull()])),
+            newEntry(newItem(["notes": NSNull()])),
+            newEntry(newItem(["links": NSNull()])),
+            newEntry(newItem(["links": [["kind": "pr", "repo": NSNull(), "number": 1] as [String: Any]]])),
+            newEntry(newItem(["links": [["kind": "pr", "repo": "example/app", "number": NSNull()] as [String: Any]]])),
+            newEntry(newItem(["links": [["kind": "pr", "repo": "example/app", "number": 1, "tag": NSNull()] as [String: Any]]])),
+            newEntry(newItem(["links": [["kind": "release", "repo": "example/app", "tag": "v1", "number": NSNull()] as [String: Any]]])),
         ]
         for entry in bad {
             let event = try completed([entry])
@@ -619,19 +631,19 @@ final class RoadmapCardsTests: XCTestCase {
         let proposal = try XCTUnwrap(read([newEntry()]))
         let created = UUID()
         var bodies: [ChatRoadmapBody] = []
-        let id = try await RoadmapCards.add(proposal, create: { bodies.append($0); return created },
+        let id = try await RoadmapCards.add(proposal, proceed: {}, create: { bodies.append($0); return created },
                                             revision: { _ in XCTFail("no read"); return 0 },
                                             createItems: { _, _, _ in XCTFail("no batch"); return nil })
         XCTAssertEqual(id, created)
         XCTAssertEqual(bodies, [proposal.body])
         do {
-            _ = try await RoadmapCards.add(proposal, create: { _ in nil }, revision: { _ in 0 }, createItems: { _, _, _ in nil })
+            _ = try await RoadmapCards.add(proposal, proceed: {}, create: { _ in nil }, revision: { _ in 0 }, createItems: { _, _, _ in nil })
             XCTFail("an answer without an id is not confirmed")
         } catch { XCTAssertEqual(error as? JarvisAPIError, .invalidResponse) }
         // A 409 on a new roadmap is Core's refusal: no retry.
         var creates = 0
         do {
-            _ = try await RoadmapCards.add(proposal, create: { _ in creates += 1; throw self.rejected(409) },
+            _ = try await RoadmapCards.add(proposal, proceed: {}, create: { _ in creates += 1; throw self.rejected(409) },
                                            revision: { _ in 0 }, createItems: { _, _, _ in nil })
             XCTFail("refused")
         } catch { XCTAssertEqual(RoadmapCards.outcome(.failure(error)).1, RoadmapCards.refused) }
@@ -645,7 +657,7 @@ final class RoadmapCardsTests: XCTestCase {
         var revision = 4
         var conflicts = 1
         let add: () async throws -> UUID = {
-            try await RoadmapCards.add(proposal, create: { _ in XCTFail("no create"); return nil },
+            try await RoadmapCards.add(proposal, proceed: {}, create: { _ in XCTFail("no create"); return nil },
                                        revision: { id in calls.append("GET \(id == roadmap)"); return revision },
                                        createItems: { id, rev, body in
                                            calls.append("POST \(rev)")
@@ -675,7 +687,7 @@ final class RoadmapCardsTests: XCTestCase {
         for (failure, text) in reads {
             var writes = 0
             do {
-                _ = try await RoadmapCards.add(proposal, create: { _ in nil }, revision: { _ in throw failure },
+                _ = try await RoadmapCards.add(proposal, proceed: {}, create: { _ in nil }, revision: { _ in throw failure },
                                                createItems: { _, _, _ in writes += 1; return nil })
                 XCTFail("read failed")
             } catch {
@@ -685,6 +697,38 @@ final class RoadmapCardsTests: XCTestCase {
             }
             XCTAssertEqual(writes, 0)
         }
+    }
+
+    func testALockOrLeavingBetweenTheReadAndTheWriteSendsNothingMore() async throws {
+        let proposal = try XCTUnwrap(read([itemsEntry()]))
+        var calls: [String] = []
+        var checks = 0
+        do {
+            _ = try await RoadmapCards.add(proposal, proceed: {
+                checks += 1
+                calls.append("check")
+                // The app locks (or the conversation changes) once the revision was read.
+                if checks == 2 { throw RoadmapCards.Locked() }
+            }, create: { _ in XCTFail("no create"); return nil },
+            revision: { _ in calls.append("GET"); return 4 },
+            createItems: { _, _, _ in calls.append("POST"); return nil })
+            XCTFail("stopped")
+        } catch {
+            let (state, shown) = RoadmapCards.outcome(.failure(error))
+            XCTAssertEqual(state, .open, "the card opens again")
+            XCTAssertNil(shown)
+        }
+        XCTAssertEqual(calls, ["check", "GET", "check"])
+
+        // A new roadmap is checked before its create.
+        let new = try XCTUnwrap(read([newEntry()]))
+        var creates = 0
+        do {
+            _ = try await RoadmapCards.add(new, proceed: { throw RoadmapCards.Locked() }, create: { _ in creates += 1; return UUID() },
+                                           revision: { _ in 0 }, createItems: { _, _, _ in nil })
+            XCTFail("stopped")
+        } catch { XCTAssertTrue(error is RoadmapCards.Locked) }
+        XCTAssertEqual(creates, 0)
     }
 
     func testAddOutcomesFailClosed() throws {
