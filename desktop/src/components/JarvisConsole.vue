@@ -5,12 +5,14 @@ import { nextSpeechStatus } from "../speechStatus";
 import NavIcon from "./NavIcon.vue";
 import ChatPhoto from "./chat/ChatPhoto.vue";
 import JobProposalCard from "./chat/JobProposalCard.vue";
+import RoadmapProposalCard from "./chat/RoadmapProposalCard.vue";
 import {
   messages,
   send,
   thinking,
   researchOffer,
   jobProposals,
+  roadmapProposals,
   openConversation,
   startNewConversation,
   initChat,
@@ -373,6 +375,7 @@ onMounted(async () => {
             </ul>
           </div>
           <JobProposalCard v-for="card in jobProposals.filter((c) => c.messageId === m.canonicalId)" :key="card.id" :card="card" />
+          <RoadmapProposalCard v-for="card in roadmapProposals.filter((c) => c.messageId === m.canonicalId)" :key="card.id" :card="card" />
         </template>
       </div>
       <div v-if="researchOffer && researchOffer.conversationId === currentId && !thinking && !chips.length" class="offer">

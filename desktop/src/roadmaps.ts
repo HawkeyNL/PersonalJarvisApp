@@ -78,7 +78,7 @@ export function parsePhases(text: string): string[] | null {
 }
 
 const REPO = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
-const TAG = /^[A-Za-z0-9._+/-]{1,100}$/;
+export const TAG = /^[A-Za-z0-9._+/-]{1,100}$/;
 export const validRepo = (repo: string) => REPO.test(repo) && !/\/\.{1,2}$/.test(repo);
 const validNumber = (n: number) => Number.isInteger(n) && n >= 1 && n <= LIMITS.linkNumber;
 
