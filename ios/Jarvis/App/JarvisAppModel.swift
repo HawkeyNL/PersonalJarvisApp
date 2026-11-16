@@ -27,7 +27,9 @@ final class JarvisAppModel: ObservableObject {
     @Published private(set) var researchOffer: ResearchOffer?
     /// Jobs answers in this conversation proposed; only Add or a saved edit makes one.
     @Published private(set) var jobProposals: [ProposalCard] = []
-    /// Each proposal shows once per session, also after a replayed event.
+    /// Roadmaps answers in this conversation proposed; only Add makes one.
+    @Published private(set) var roadmapProposals: [RoadmapCard] = []
+    /// Each proposal (job or roadmap) shows once per session, also after a replayed event.
     private var seenProposals: Set<UUID> = []
     /// Photos in the composer, in order (ChatPhotos).
     @Published private(set) var chips: [PhotoChip] = []
@@ -85,7 +87,7 @@ final class JarvisAppModel: ObservableObject {
         messages = []; conversations = []; isSending = false; realtimeAvailable = false
         photos.removeAll()
         photoMeta = [:]; removedPhotos = []; researchOffer = nil
-        jobProposals = []; seenProposals = []
+        jobProposals = []; roadmapProposals = []; seenProposals = []
         if clearIdentity {
             dropChips()
             pendingRequests.clear(); currentConversationId = nil; currentConversationTitle = "New conversation"
@@ -860,7 +862,7 @@ final class JarvisAppModel: ObservableObject {
         let generation = presentation.id
         voiceInput.stop(discard: true)
         currentConversationId = id
-        researchOffer = nil; jobProposals = []
+        researchOffer = nil; jobProposals = []; roadmapProposals = []
         do {
             let conversation = try await chat.conversation(id: id)
             guard currentConversationId == id, presentation.accepts(generation) else { return }
@@ -885,7 +887,7 @@ final class JarvisAppModel: ObservableObject {
         currentConversationTitle = "New conversation"
         messages = []
         isSending = false
-        researchOffer = nil; jobProposals = []; photoMeta = [:]; removedPhotos = []
+        researchOffer = nil; jobProposals = []; roadmapProposals = []; photoMeta = [:]; removedPhotos = []
     }
 
     /// Delete the open conversation for good, its photos included (kept ones too), then
@@ -925,6 +927,37 @@ final class JarvisAppModel: ObservableObject {
     }
 
     func dismissJobProposal(_ id: UUID) { jobProposals.removeAll { $0.id == id } }
+
+    /// Adds a roadmap an answer proposed, its body as Core sent it (checked by
+    /// ChatRoadmapProposal). Never while locked or twice at once; nothing more is sent once the
+    /// app locked or the owner left the session or conversation, and such a result is dropped.
+    func addRoadmapProposal(_ id: UUID) async {
+        guard let card = RoadmapCards.begin(id, in: &roadmapProposals, unlocked: isAuthenticated && lockState == .unlocked) else { return }
+        let generation = presentation.id
+        let conversation = currentConversationId
+        let result: Result<UUID, Error>
+        do {
+            result = .success(try await RoadmapCards.add(
+                card.proposal,
+                proceed: {
+                    guard self.isAuthenticated, self.lockState == .unlocked, self.presentation.accepts(generation),
+                          self.currentConversationId == conversation else { throw RoadmapCards.Locked() }
+                },
+                create: { body in try await self.ownerWrite { try await self.chat.createRoadmap(body) }.id },
+                revision: { roadmap in
+                    let snapshot = try await self.ownerWrite { try await self.auth.ownerGet(Roadmaps.path(roadmap)) as RoadmapSnapshot }
+                    guard Roadmaps.valid(snapshot), snapshot.roadmap.id == roadmap else { throw JarvisAPIError.invalidResponse }
+                    return snapshot.roadmap.revision
+                },
+                createItems: { roadmap, revision, body in
+                    try await self.ownerWrite { try await self.chat.createRoadmapItems(roadmap, revision: revision, body: body) }.id
+                }))
+        } catch { result = .failure(error) }
+        let current = presentation.accepts(generation) && currentConversationId == conversation
+        RoadmapCards.finish(id, in: &roadmapProposals, result: result, current: current)
+    }
+
+    func dismissRoadmapProposal(_ id: UUID) { roadmapProposals.removeAll { $0.id == id } }
 
     /// Sends a message with the composer's photos (a photo alone is a message too).
     /// `research` only ever comes from the owner's tap on a Core offer. Returns true when
@@ -1107,6 +1140,8 @@ final class JarvisAppModel: ObservableObject {
                     researchOffer = ResearchOffer.from(payload)
                     jobProposals = JobProposals.adding(JobProposals.read(payload), to: jobProposals, seen: &seenProposals,
                                                        conversation: message.conversation_id, message: message.conversationMessage.id)
+                    roadmapProposals = RoadmapCards.adding(RoadmapCards.read(payload), to: roadmapProposals, seen: &seenProposals,
+                                                           conversation: message.conversation_id, message: message.conversationMessage.id)
                 }
             }
         case "assistant.failed":

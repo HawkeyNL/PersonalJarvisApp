@@ -155,6 +155,19 @@ actor ChatService {
         return try await api.createRoadmap(body, token: token, expectedBinding: binding)
     }
 
+    /// A chat card's new roadmap, with its items.
+    func createRoadmap(_ body: ChatRoadmapBody) async throws -> CreatedRoadmap {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        return try await api.createRoadmap(body, token: token, expectedBinding: binding)
+    }
+
+    func createRoadmapItems(_ roadmap: UUID, revision: Int, body: ChatRoadmapBody) async throws -> CreatedRoadmap {
+        let binding = await api.binding()
+        let token = try await requiredToken()
+        return try await api.createRoadmapItems(roadmap: roadmap, revision: revision, body: body, token: token, expectedBinding: binding)
+    }
+
     func updateRoadmap(_ roadmap: UUID, revision: Int, patch: RoadmapPatch) async throws {
         let binding = await api.binding()
         let token = try await requiredToken()

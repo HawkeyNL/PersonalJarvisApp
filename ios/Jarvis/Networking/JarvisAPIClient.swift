@@ -310,6 +310,20 @@ actor JarvisAPIClient {
                           expectedBinding: expectedBinding, response: CreatedRoadmap.self)
     }
 
+    /// A chat card's new roadmap, with its items.
+    func createRoadmap(_ body: ChatRoadmapBody, token: String, expectedBinding: UUID) async throws -> CreatedRoadmap {
+        try await request(path: "/v1/roadmaps", method: "POST", body: body, token: token,
+                          expectedBinding: expectedBinding, response: CreatedRoadmap.self)
+    }
+
+    /// A chat card's 1 to 100 items in one write. The answer is the snapshot plus `item_ids`;
+    /// a Core without this route answers 405.
+    func createRoadmapItems(roadmap: UUID, revision: Int, body: ChatRoadmapBody, token: String,
+                            expectedBinding: UUID) async throws -> CreatedRoadmap {
+        try await request(path: "\(Roadmaps.path(roadmap))/items/batch?expected_revision=\(revision)", method: "POST", body: body,
+                          token: token, expectedBinding: expectedBinding, response: CreatedRoadmap.self)
+    }
+
     func updateRoadmap(_ roadmap: UUID, revision: Int, patch: RoadmapPatch, token: String, expectedBinding: UUID) async throws {
         _ = try await request(path: "\(Roadmaps.path(roadmap))?expected_revision=\(revision)", method: "PATCH", body: patch,
                               token: token, expectedBinding: expectedBinding, response: EmptyOrJSON.self)

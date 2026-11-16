@@ -419,3 +419,368 @@ private final class RoadmapCoreProtocol: URLProtocol {
     }
     override func stopLoading() { }
 }
+
+/// Roadmap cards from chat; mirrors desktop/tests/roadmapProposals.test.mjs. Neutral data only.
+final class RoadmapCardsTests: XCTestCase {
+    private let p1 = "00000000-0000-4000-8000-000000000001"
+    private let p2 = "00000000-0000-4000-8000-000000000002"
+    private let r1 = "0b6f3c2e-8d1a-4f5e-9c3b-2a1d0e9f8c81"
+
+    private var newBody: [String: Any] {
+        [
+            "title": "Example", "description": "A plan.", "phases": ["Done", "Now"],
+            "items": [
+                ["title": "First", "status": "live", "phase": "Done", "notes": "Shipped.",
+                 "links": [["kind": "pr", "repo": "example/app", "number": 12] as [String: Any], ["kind": "release", "repo": "example/app", "tag": "v1.0.0"]]] as [String: Any],
+                ["title": "Second", "status": "in_progress", "phase": "Now"],
+                ["title": "Third", "status": "planned"],
+            ] as [Any],
+        ]
+    }
+    private let itemsBody: [String: Any] = [
+        "items": [["title": "Fourth", "status": "ready", "phase": "Later"], ["title": "Fifth", "status": "blocked"]] as [Any],
+    ]
+
+    private func newEntry(_ body: [String: Any]? = nil, _ overrides: [String: Any] = [:]) -> [String: Any] {
+        (["id": p1, "title": "Example", "body": body ?? newBody] as [String: Any]).merging(overrides) { $1 }
+    }
+    private func itemsEntry(_ body: [String: Any]? = nil, _ overrides: [String: Any] = [:]) -> [String: Any] {
+        (["id": p2, "roadmap_id": r1, "title": "Example", "body": body ?? itemsBody] as [String: Any]).merging(overrides) { $1 }
+    }
+    private func merged(_ body: [String: Any], _ overrides: [String: Any]) -> [String: Any] { body.merging(overrides) { $1 } }
+    private func newItem(_ overrides: [String: Any]) -> [String: Any] {
+        merged(newBody, ["items": [merged(["title": "First", "status": "planned", "phase": "Now"], overrides)]])
+    }
+
+    /// An `assistant.completed` event; nil leaves `roadmap_proposals` out.
+    private func completed(_ proposals: Any?) throws -> RealtimeEvent {
+        let run = UUID().uuidString
+        var payload: [String: Any] = [
+            "run": ["run_id": run, "request_id": run, "conversation_id": run],
+            "message": ["id": run, "conversation_id": run, "role": "assistant", "content": "Done.", "created_at": "2026-01-01T00:00:00Z"],
+        ]
+        if let proposals { payload["roadmap_proposals"] = proposals }
+        return try JSONDecoder().decode(RealtimeEvent.self, from: JSONSerialization.data(withJSONObject: [
+            "protocol": 1, "epoch": run, "sequence": 1, "event_id": run, "type": "assistant.completed", "payload": payload,
+        ] as [String: Any]))
+    }
+
+    private func read(_ proposals: Any?) throws -> ChatRoadmapProposal? { RoadmapCards.read(try completed(proposals).payload) }
+
+    private func sent(_ body: ChatRoadmapBody) throws -> NSDictionary? {
+        try JSONSerialization.jsonObject(with: JSONEncoder().encode(body)) as? NSDictionary
+    }
+
+    func testANewRoadmapReadsAndAddSendsExactlyTheBody() throws {
+        let proposal = try XCTUnwrap(read([newEntry()]))
+        XCTAssertEqual(proposal.id.uuidString.lowercased(), p1)
+        XCTAssertNil(proposal.roadmapId)
+        XCTAssertEqual(try sent(proposal.body), newBody as NSDictionary)
+        XCTAssertEqual(RoadmapCards.heading(proposal), "New roadmap: Example")
+        XCTAssertEqual(RoadmapCards.summary(proposal), "3 items in 2 phases")
+        let groups = RoadmapCards.groups(proposal)
+        XCTAssertEqual(groups.map(\.phase), ["Done", "Now", nil])
+        XCTAssertEqual(groups.map { $0.items.map(\.title) }, [["First"], ["Second"], ["Third"]])
+        XCTAssertEqual(groups[1].items.first?.status, .inProgress)
+        XCTAssertEqual(groups.map { $0.items.map(\.status.label) }, [["Live"], ["In progress"], ["Planned"]])
+        XCTAssertEqual(groups[0].items.first.map { RoadmapCards.linkText($0.links) }, "example/app#12, example/app@v1.0.0")
+
+        let one = try XCTUnwrap(read([newEntry(merged(newBody, ["phases": ["Now"], "items": [["title": "Only", "status": "planned"]]]))]))
+        XCTAssertEqual(RoadmapCards.summary(one), "1 item in 1 phase")
+        let empty = try XCTUnwrap(read([newEntry(merged(newBody, ["phases": [String](), "items": [Any]()]))]))
+        XCTAssertEqual(RoadmapCards.summary(empty), "0 items in 0 phases")
+    }
+
+    /// What the card shows: the same parts ChatView renders.
+    private func shown(_ proposal: ChatRoadmapProposal) -> [String] {
+        [RoadmapCards.heading(proposal), RoadmapCards.summary(proposal), proposal.body.description].compactMap { $0 }
+            + RoadmapCards.groups(proposal).flatMap { group in
+                [group.phase ?? "No phase"] + group.items.flatMap { item in
+                    [item.status.label, item.title, item.notes, item.links.isEmpty ? nil : RoadmapCards.linkText(item.links)].compactMap { $0 }
+                }
+            }
+    }
+
+    /// Every text and number in a sent body, except the enum values `status` and `kind`.
+    private func leaves(_ value: Any, key: String = "") -> [String] {
+        switch value {
+        case let dict as [String: Any]: return dict.flatMap { leaves($0.value, key: $0.key) }
+        case let list as [Any]: return list.flatMap { leaves($0, key: key) }
+        case let text as String: return key == "status" || key == "kind" ? [] : [text]
+        case let number as NSNumber: return [number.stringValue]
+        default: return []
+        }
+    }
+
+    func testTheCardShowsEverythingAddSends() throws {
+        let body = merged(newBody, ["phases": ["Done", "Now", "Empty"]])
+        let proposal = try XCTUnwrap(read([newEntry(body)]))
+        let card = shown(proposal)
+        XCTAssertTrue(card.contains("Empty"), "an empty phase is shown")
+        let sent = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(proposal.body)))
+        for text in leaves(sent) {
+            XCTAssertTrue(card.contains { $0.contains(text) }, "not shown: \(text)")
+        }
+        let items = try XCTUnwrap(read([itemsEntry(merged(itemsBody, ["items": [["title": "Fourth", "status": "ready", "notes": "Why.\nMore."]]]))]))
+        let itemCard = shown(items)
+        for text in leaves(try JSONSerialization.jsonObject(with: JSONEncoder().encode(items.body))) {
+            XCTAssertTrue(itemCard.contains { $0.contains(text) }, "not shown: \(text)")
+        }
+    }
+
+    func testItemsForAnExistingRoadmapRead() throws {
+        let proposal = try XCTUnwrap(read([itemsEntry()]))
+        XCTAssertEqual(proposal.roadmapId, UUID(uuidString: r1))
+        XCTAssertEqual(try sent(proposal.body), itemsBody as NSDictionary)
+        XCTAssertEqual(RoadmapCards.heading(proposal), "Add 2 items to Example")
+        XCTAssertEqual(RoadmapCards.summary(proposal), "2 items")
+        XCTAssertEqual(RoadmapCards.groups(proposal).map(\.phase), ["Later", nil])
+        let one = try XCTUnwrap(read([itemsEntry(["items": [["title": "Only", "status": "planned"]]])]))
+        XCTAssertEqual(RoadmapCards.heading(one), "Add 1 item to Example")
+        XCTAssertEqual(RoadmapCards.summary(one), "1 item")
+    }
+
+    func testEveryInvalidShapeSkipsTheCardAndTheMessageStays() throws {
+        let item: [String: Any] = ["title": "x", "status": "planned"]
+        let bad: [Any] = [
+            NSNull(), "roadmap", newEntry(merged(newBody, [:]), ["id": "not-a-uuid"]),
+            newEntry(nil, ["extra": true]),
+            newEntry(merged(newBody, ["extra": true])),
+            newEntry(merged(newBody, ["title": "Other"])),
+            newEntry(merged(newBody, ["phases": NSNull()])),
+            ["id": p1, "title": "Example", "body": merged(newBody, [:]).filter { $0.key != "phases" }] as [String: Any],
+            newEntry(nil, ["title": String(repeating: "t", count: 121)]),
+            newEntry(merged(newBody, ["description": String(repeating: "d", count: 2001)])),
+            newEntry(merged(newBody, ["phases": (1...21).map { "P\($0)" }, "items": [Any]()])),
+            newEntry(merged(newBody, ["phases": [String(repeating: "p", count: 61)], "items": [Any]()])),
+            newEntry(merged(newBody, ["phases": ["Now", "Now"], "items": [Any]()])),
+            newEntry(merged(newBody, ["phases": "Now", "items": [Any]()])),
+            // Hidden and bidi characters anywhere.
+            newEntry(merged(newBody, ["title": "Example\u{202E}"]), ["title": "Example\u{202E}"]),
+            newEntry(merged(newBody, ["description": "A\u{202E} plan."])),
+            newEntry(merged(newBody, ["phases": ["Now\u{202E}"], "items": [Any]()])),
+            newEntry(newItem(["notes": "Note\u{202E}"])),
+            newEntry(newItem(["phase": "Now\u{200B}"])),
+            // Unknown status, unknown item keys, and Core's text rules.
+            newEntry(newItem(["status": "done"])),
+            newEntry(newItem(["position": 0])),
+            newEntry(newItem(["depends_on": [String]()])),
+            newEntry(newItem(["title": ""])),
+            newEntry(newItem(["title": "Two\nlines"])),
+            newEntry(newItem(["title": String(repeating: "t", count: 201)])),
+            newEntry(newItem(["notes": String(repeating: "n", count: 4001)])),
+            newEntry(newItem(["title": "Hidden\u{202E}"])),
+            // Links: pr, issue or release on a valid repo; no url, no cached state.
+            newEntry(newItem(["links": [["kind": "url", "url": "https://example.com"]]])),
+            newEntry(newItem(["links": [["kind": "pr", "repo": "example/app", "number": 1, "url": "https://example.com"] as [String: Any]]])),
+            newEntry(newItem(["links": [["kind": "pr", "repo": "example/app", "number": 1, "state": "open"] as [String: Any]]])),
+            newEntry(newItem(["links": [["kind": "pr", "repo": "not a repo", "number": 1] as [String: Any]]])),
+            newEntry(newItem(["links": [["kind": "issue", "repo": "example/app"]]])),
+            newEntry(newItem(["links": [["kind": "release", "repo": "example/app", "number": 1] as [String: Any]]])),
+            newEntry(newItem(["links": (1...11).map { ["kind": "pr", "repo": "example/app", "number": $0] as [String: Any] }])),
+            // A phase that is not among the new roadmap's phases.
+            newEntry(newItem(["phase": "Someday"])),
+            newEntry(merged(newBody, ["items": Array(repeating: item, count: 101)])),
+            // An existing roadmap: items only, 1 to 100.
+            itemsEntry(["items": [Any]()]),
+            itemsEntry(["items": Array(repeating: item, count: 101)]),
+            itemsEntry(merged(itemsBody, ["phases": ["Now"]])),
+            itemsEntry(merged(itemsBody, ["title": "Example"])),
+            itemsEntry(nil, ["roadmap_id": "not-a-uuid"]),
+            // A field is left out only by being absent: present but null is refused.
+            newEntry(nil, ["roadmap_id": NSNull()]),
+            itemsEntry(nil, ["roadmap_id": NSNull()]),
+            newEntry(merged(newBody, ["description": NSNull()])),
+            newEntry(merged(newBody, ["items": NSNull()])),
+            newEntry(newItem(["phase": NSNull()])),
+            newEntry(newItem(["notes": NSNull()])),
+            newEntry(newItem(["links": NSNull()])),
+            newEntry(newItem(["links": [["kind": "pr", "repo": NSNull(), "number": 1] as [String: Any]]])),
+            newEntry(newItem(["links": [["kind": "pr", "repo": "example/app", "number": NSNull()] as [String: Any]]])),
+            newEntry(newItem(["links": [["kind": "pr", "repo": "example/app", "number": 1, "tag": NSNull()] as [String: Any]]])),
+            newEntry(newItem(["links": [["kind": "release", "repo": "example/app", "tag": "v1", "number": NSNull()] as [String: Any]]])),
+        ]
+        for entry in bad {
+            let event = try completed([entry])
+            XCTAssertNil(RoadmapCards.read(event.payload), "\(entry)")
+            XCTAssertEqual(event.payload.message?.content, "Done.")
+        }
+        XCTAssertNotNil(try read([newEntry(merged(newBody, ["items": Array(repeating: item, count: 100)]))]), "100 items fit")
+        // Only the first entry counts.
+        XCTAssertNil(try read([bad[3], newEntry()] as [Any]))
+        XCTAssertEqual(try read([itemsEntry(), newEntry()])?.id.uuidString.lowercased(), p2)
+        XCTAssertNil(try read(nil))
+        XCTAssertNil(try read([Any]()))
+    }
+
+    func testEachProposalShowsOncePerId() throws {
+        var seen = Set<UUID>()
+        let proposal = try read([newEntry()])
+        let conversation = UUID()
+        let cards = RoadmapCards.adding(proposal, to: [], seen: &seen, conversation: conversation, message: "m")
+        XCTAssertEqual(cards.map(\.state), [.open])
+        XCTAssertEqual(RoadmapCards.adding(proposal, to: cards, seen: &seen, conversation: conversation, message: "m"), cards)
+        // Dismissed (gone from the list) stays gone when the event comes again.
+        XCTAssertEqual(RoadmapCards.adding(proposal, to: [], seen: &seen, conversation: conversation, message: "m"), [])
+        XCTAssertEqual(RoadmapCards.adding(nil, to: [], seen: &seen, conversation: conversation, message: "m"), [])
+    }
+
+    private func rejected(_ status: Int) -> JarvisAPIError { .rejected(status: status, message: nil) }
+
+    func testANewRoadmapIsOneCreate() async throws {
+        let proposal = try XCTUnwrap(read([newEntry()]))
+        let created = UUID()
+        var bodies: [ChatRoadmapBody] = []
+        let id = try await RoadmapCards.add(proposal, proceed: {}, create: { bodies.append($0); return created },
+                                            revision: { _ in XCTFail("no read"); return 0 },
+                                            createItems: { _, _, _ in XCTFail("no batch"); return nil })
+        XCTAssertEqual(id, created)
+        XCTAssertEqual(bodies, [proposal.body])
+        do {
+            _ = try await RoadmapCards.add(proposal, proceed: {}, create: { _ in nil }, revision: { _ in 0 }, createItems: { _, _, _ in nil })
+            XCTFail("an answer without an id is not confirmed")
+        } catch { XCTAssertEqual(error as? JarvisAPIError, .invalidResponse) }
+        // A 409 on a new roadmap is Core's refusal: no retry.
+        var creates = 0
+        do {
+            _ = try await RoadmapCards.add(proposal, proceed: {}, create: { _ in creates += 1; throw self.rejected(409) },
+                                           revision: { _ in 0 }, createItems: { _, _, _ in nil })
+            XCTFail("refused")
+        } catch { XCTAssertEqual(RoadmapCards.outcome(.failure(error)).1, RoadmapCards.refused) }
+        XCTAssertEqual(creates, 1)
+    }
+
+    func testItemsGoOnTheCurrentRevisionAndA409IsTriedOnceMore() async throws {
+        let proposal = try XCTUnwrap(read([itemsEntry()]))
+        let roadmap = try XCTUnwrap(proposal.roadmapId)
+        var calls: [String] = []
+        var revision = 4
+        var conflicts = 1
+        let add: () async throws -> UUID = {
+            try await RoadmapCards.add(proposal, proceed: {}, create: { _ in XCTFail("no create"); return nil },
+                                       revision: { id in calls.append("GET \(id == roadmap)"); return revision },
+                                       createItems: { id, rev, body in
+                                           calls.append("POST \(rev)")
+                                           XCTAssertEqual(body, proposal.body)
+                                           if conflicts > 0 { conflicts -= 1; revision += 1; throw self.rejected(409) }
+                                           return id
+                                       })
+        }
+        let added = try await add()
+        XCTAssertEqual(added, roadmap)
+        XCTAssertEqual(calls, ["GET true", "POST 4", "GET true", "POST 5"])
+
+        // A second 409 is Core's refusal.
+        calls = []; conflicts = 2
+        do { _ = try await add(); XCTFail("refused") } catch {
+            XCTAssertEqual(Jobs.status(error), 409)
+            XCTAssertEqual(RoadmapCards.outcome(.failure(error)).1, RoadmapCards.refused)
+        }
+        XCTAssertEqual(calls, ["GET true", "POST 5", "GET true", "POST 6"])
+
+        // A failed revision read sends nothing and opens the card again with why.
+        let reads: [(JarvisAPIError, String)] = [
+            (.unreachable, "No answer from your Home Node. Check the connection."),
+            (rejected(503), "Core could not read the roadmaps just now. Try again in a minute."),
+            (.invalidResponse, "Core returned an answer this app does not understand, or an error. Try again later."),
+        ]
+        for (failure, text) in reads {
+            var writes = 0
+            do {
+                _ = try await RoadmapCards.add(proposal, proceed: {}, create: { _ in nil }, revision: { _ in throw failure },
+                                               createItems: { _, _, _ in writes += 1; return nil })
+                XCTFail("read failed")
+            } catch {
+                let (state, shown) = RoadmapCards.outcome(.failure(error))
+                XCTAssertEqual(state, .open)
+                XCTAssertEqual(shown, text)
+            }
+            XCTAssertEqual(writes, 0)
+        }
+    }
+
+    func testALockOrLeavingBetweenTheReadAndTheWriteSendsNothingMore() async throws {
+        let proposal = try XCTUnwrap(read([itemsEntry()]))
+        var calls: [String] = []
+        var checks = 0
+        do {
+            _ = try await RoadmapCards.add(proposal, proceed: {
+                checks += 1
+                calls.append("check")
+                // The app locks (or the conversation changes) once the revision was read.
+                if checks == 2 { throw RoadmapCards.Locked() }
+            }, create: { _ in XCTFail("no create"); return nil },
+            revision: { _ in calls.append("GET"); return 4 },
+            createItems: { _, _, _ in calls.append("POST"); return nil })
+            XCTFail("stopped")
+        } catch {
+            let (state, shown) = RoadmapCards.outcome(.failure(error))
+            XCTAssertEqual(state, .open, "the card opens again")
+            XCTAssertNil(shown)
+        }
+        XCTAssertEqual(calls, ["check", "GET", "check"])
+
+        // A new roadmap is checked before its create.
+        let new = try XCTUnwrap(read([newEntry()]))
+        var creates = 0
+        do {
+            _ = try await RoadmapCards.add(new, proceed: { throw RoadmapCards.Locked() }, create: { _ in creates += 1; return UUID() },
+                                           revision: { _ in 0 }, createItems: { _, _, _ in nil })
+            XCTFail("stopped")
+        } catch { XCTAssertTrue(error is RoadmapCards.Locked) }
+        XCTAssertEqual(creates, 0)
+    }
+
+    func testAddOutcomesFailClosed() throws {
+        let proposal = try XCTUnwrap(read([newEntry()]))
+        let fresh = { [RoadmapCard(proposal: proposal, conversationId: UUID(), messageId: "m")] }
+        var cards = fresh()
+        XCTAssertNil(RoadmapCards.begin(proposal.id, in: &cards, unlocked: false), "locked: nothing sent")
+        XCTAssertEqual(cards[0].state, .open)
+        XCTAssertNotNil(RoadmapCards.begin(proposal.id, in: &cards, unlocked: true))
+        XCTAssertEqual(cards[0].state, .adding)
+        XCTAssertNil(RoadmapCards.begin(proposal.id, in: &cards, unlocked: true), "a second tap sends nothing")
+
+        // A result after the owner left the session or conversation is dropped.
+        let added = UUID()
+        RoadmapCards.finish(proposal.id, in: &cards, result: .success(added), current: false)
+        XCTAssertEqual(cards[0].state, .adding)
+        RoadmapCards.finish(proposal.id, in: &cards, result: .success(added), current: true)
+        XCTAssertEqual(cards[0].state, .added(added))
+        XCTAssertNil(cards[0].error)
+        XCTAssertNil(RoadmapCards.begin(proposal.id, in: &cards, unlocked: true), "added once")
+
+        // 5xx, no answer or an unreadable answer: it may exist, so Add stays off.
+        let unknown: [JarvisAPIError] = [.invalidResponse, .responseTooLarge, .unreachable, .timedOut,
+                                         rejected(500), rejected(502), rejected(503), rejected(504)]
+        for error in unknown {
+            cards = fresh()
+            _ = RoadmapCards.begin(proposal.id, in: &cards, unlocked: true)
+            RoadmapCards.finish(proposal.id, in: &cards, result: .failure(error), current: true)
+            XCTAssertEqual(cards[0].state, .unconfirmed, "\(error)")
+            XCTAssertEqual(cards[0].error, "Not confirmed: it may have been added.")
+            XCTAssertNil(RoadmapCards.begin(proposal.id, in: &cards, unlocked: true))
+        }
+
+        // A 4xx opens the card again with why.
+        let refused = "Core refused this roadmap, for example because a phase changed or a limit was reached. Ask Jarvis again."
+        let open: [(JarvisAPIError, String)] = [
+            (rejected(400), refused), (rejected(409), refused), (rejected(413), refused), (rejected(422), refused),
+            (rejected(429), "Core returned an answer this app does not understand, or an error. Try again later."),
+            (rejected(404), "Update Jarvis Core to add roadmaps from chat."),
+            (rejected(405), "Update Jarvis Core to add roadmaps from chat."),
+            (.unauthorized, "Your session is not valid. Sign in again from Settings."),
+        ]
+        for (error, text) in open {
+            cards = fresh()
+            _ = RoadmapCards.begin(proposal.id, in: &cards, unlocked: true)
+            RoadmapCards.finish(proposal.id, in: &cards, result: .failure(error), current: true)
+            XCTAssertEqual(cards[0].state, .open, "\(error)")
+            XCTAssertEqual(cards[0].error, text)
+            XCTAssertNotNil(RoadmapCards.begin(proposal.id, in: &cards, unlocked: true))
+            XCTAssertNil(cards[0].error)
+        }
+        XCTAssertEqual("\(RoadmapCards.added) · \(RoadmapCards.viewRoadmap)", "Added to Roadmaps · View roadmap")
+        XCTAssertEqual("\(RoadmapCards.notConfirmed) \(RoadmapCards.checkRoadmaps)", "Not confirmed: it may have been added. Check Roadmaps")
+    }
+}

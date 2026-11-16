@@ -410,8 +410,8 @@ enum Roadmaps {
             && !repo.hasSuffix("/.") && !repo.hasSuffix("/..")
     }
 
-    private static func validTag(_ tag: String) -> Bool { tag.wholeMatch(of: #/[A-Za-z0-9._+\/\-]{1,100}/#) != nil }
-    private static func validNumber(_ number: Int?) -> Bool { number.map { (1...1_000_000_000).contains($0) } ?? false }
+    static func validTag(_ tag: String) -> Bool { tag.wholeMatch(of: #/[A-Za-z0-9._+\/\-]{1,100}/#) != nil }
+    static func validNumber(_ number: Int?) -> Bool { number.map { (1...1_000_000_000).contains($0) } ?? false }
 
     /// An absolute https URL with a host, no credentials, printable ASCII.
     static func validHttpsUrl(_ value: String) -> Bool {
@@ -751,5 +751,262 @@ enum Roadmaps {
         if Jobs.status(error) == 400 { return "Core refused this change as invalid. Check the fields and try again." }
         if Jobs.isNetwork(error) { return "No answer from your Home Node. It is unknown whether the change arrived; reloaded to check." }
         return "Not saved. \(failureText(error))"
+    }
+}
+
+// MARK: - Roadmaps from chat
+
+// A roadmap a chat answer proposed (`roadmap_proposals` on `assistant.completed`, see "From
+// chat" in Core's docs/ROADMAPS.md), as in desktop roadmapProposals.ts. Core checked it; this
+// app checks it again and skips a card it would not send itself, never the message. Nothing
+// is written until the owner taps Add. Cards live in memory only, for the conversation on screen.
+
+/// `requireKnownKeys`, and no field is null: a field is left out only by being absent.
+private func requireKnownNonNullKeys(_ decoder: Decoder, _ allowed: Set<String>) throws {
+    try requireKnownKeys(decoder, allowed)
+    let container = try decoder.container(keyedBy: AnyKey.self)
+    for key in container.allKeys {
+        if try container.decodeNil(forKey: key) {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Null field \(key.stringValue)"))
+        }
+    }
+}
+
+/// A link as a chat card may carry it: pr, issue or release, no url and no cached state.
+private struct ChatRoadmapLink: Decodable {
+    let link: RoadmapLink
+
+    init(from decoder: Decoder) throws {
+        try requireKnownNonNullKeys(decoder, ["kind", "repo", "number", "tag"])
+        link = try RoadmapLink(from: decoder)
+    }
+}
+
+/// One item of a chat card: no position or dependencies. Sent as decoded.
+struct ChatRoadmapItem: Codable, Equatable {
+    let title: String
+    let status: RoadmapStatus
+    var phase: String?
+    var notes: String?
+    var links: [RoadmapLink]?
+
+    private enum CodingKeys: String, CodingKey { case title, status, phase, notes, links }
+
+    init(from decoder: Decoder) throws {
+        try requireKnownNonNullKeys(decoder, ["title", "status", "phase", "notes", "links"])
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decode(String.self, forKey: .title)
+        status = try container.decode(RoadmapStatus.self, forKey: .status)
+        phase = try container.decodeIfPresent(String.self, forKey: .phase)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        links = try container.decodeIfPresent([ChatRoadmapLink].self, forKey: .links)?.map(\.link)
+    }
+}
+
+/// `POST /v1/roadmaps` for a new roadmap, or `{"items": […]}` for the batch route.
+struct ChatRoadmapBody: Codable, Equatable {
+    var title: String?
+    var description: String?
+    var phases: [String]?
+    let items: [ChatRoadmapItem]
+}
+
+/// One proposal: Core's id, the roadmap it adds to (nil: a new one), its title and the body
+/// Add sends. Decoding fails (and the card is skipped) for anything this app would not send.
+struct ChatRoadmapProposal: Decodable, Equatable {
+    let id: UUID
+    let roadmapId: UUID?
+    let title: String
+    let body: ChatRoadmapBody
+
+    private enum Keys: String, CodingKey { case id, roadmap_id, title, body }
+
+    init(from decoder: Decoder) throws {
+        try requireKnownNonNullKeys(decoder, ["id", "roadmap_id", "title", "body"])
+        let container = try decoder.container(keyedBy: Keys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        roadmapId = try container.decodeIfPresent(UUID.self, forKey: .roadmap_id)
+        title = try container.decode(String.self, forKey: .title)
+        let body = try container.superDecoder(forKey: .body)
+        try requireKnownNonNullKeys(body, roadmapId == nil ? ["title", "description", "phases", "items"] : ["items"])
+        self.body = try ChatRoadmapBody(from: body)
+        guard RoadmapCards.valid(self) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Not a roadmap this app would add"))
+        }
+    }
+}
+
+/// A proposal under the answer that carried it.
+struct RoadmapCard: Identifiable, Equatable {
+    let proposal: ChatRoadmapProposal
+    let conversationId: UUID
+    /// The answer's canonical message id.
+    let messageId: String
+    /// `added` holds the roadmap's id.
+    var state = ProposalCard.State.open
+    var error: String?
+
+    var id: UUID { proposal.id }
+}
+
+enum RoadmapCards {
+    static let maxItems = 100
+
+    // The card's fixed wording, the same on every platform.
+    static let added = "Added to Roadmaps"
+    static let viewRoadmap = "View roadmap"
+    static let notConfirmed = "Not confirmed: it may have been added."
+    static let checkRoadmaps = "Check Roadmaps"
+    static let refused = "Core refused this roadmap, for example because a phase changed or a limit was reached. Ask Jarvis again."
+    static let tooOld = "Update Jarvis Core to add roadmaps from chat."
+    static let add = "Add"
+    static let dismiss = "Dismiss"
+
+    /// The proposal of an `assistant.completed` payload: only the first entry counts, and
+    /// one this app cannot read was already skipped, never failing the message.
+    static func read(_ payload: RealtimePayload) -> ChatRoadmapProposal? {
+        payload.roadmap_proposals?.value?.first?.value
+    }
+
+    /// `cards` plus the proposal when it was not shown before (`seen`, which this updates).
+    static func adding(_ proposal: ChatRoadmapProposal?, to cards: [RoadmapCard], seen: inout Set<UUID>,
+                       conversation: UUID, message: String) -> [RoadmapCard] {
+        guard let proposal, seen.insert(proposal.id).inserted else { return cards }
+        return cards + [RoadmapCard(proposal: proposal, conversationId: conversation, messageId: message)]
+    }
+
+    // MARK: Checks (Core's text rules; fails closed)
+
+    static func valid(_ proposal: ChatRoadmapProposal) -> Bool {
+        let body = proposal.body
+        let fewest = proposal.roadmapId == nil ? 0 : 1
+        guard Roadmaps.validText(proposal.title, max: 120), (fewest...maxItems).contains(body.items.count),
+              body.items.allSatisfy(valid) else { return false }
+        guard proposal.roadmapId == nil else { return true }
+        guard body.title == proposal.title, let phases = body.phases, phases.count <= 20, Set(phases).count == phases.count,
+              phases.allSatisfy({ Roadmaps.validText($0, max: 60) }),
+              body.description.map({ Roadmaps.validText($0, max: 2000, multiline: true) }) ?? true else { return false }
+        return body.items.allSatisfy { item in item.phase.map { phases.contains($0) } ?? true }
+    }
+
+    static func valid(_ item: ChatRoadmapItem) -> Bool {
+        let links = item.links ?? []
+        return Roadmaps.validText(item.title, max: 200) && (item.phase.map { Roadmaps.validText($0, max: 60) } ?? true)
+            && (item.notes.map { Roadmaps.validText($0, max: 4000, multiline: true) } ?? true)
+            && links.count <= Roadmaps.maxLinks && links.allSatisfy(valid)
+    }
+
+    static func valid(_ link: RoadmapLink) -> Bool {
+        guard let repo = link.repo, Roadmaps.validRepo(repo), link.url == nil else { return false }
+        switch link.kind {
+        case .pr, .issue: return Roadmaps.validNumber(link.number) && link.tag == nil
+        case .release: return link.number == nil && (link.tag.map(Roadmaps.validTag) ?? false)
+        case .url: return false
+        }
+    }
+
+    // MARK: Wording
+
+    private static func count(_ n: Int, _ word: String) -> String { "\(n) \(word)\(n == 1 ? "" : "s")" }
+
+    /// "New roadmap: {title}", or "Add {n} items to {title}".
+    static func heading(_ proposal: ChatRoadmapProposal) -> String {
+        proposal.roadmapId == nil ? "New roadmap: \(proposal.title)" : "Add \(count(proposal.body.items.count, "item")) to \(proposal.title)"
+    }
+
+    /// "{n} items in {p} phases"; for an existing roadmap "{n} items".
+    static func summary(_ proposal: ChatRoadmapProposal) -> String {
+        let items = count(proposal.body.items.count, "item")
+        return proposal.roadmapId == nil ? "\(items) in \(count(proposal.body.phases?.count ?? 0, "phase"))" : items
+    }
+
+    /// Every item grouped as the Roadmaps view does: by the new roadmap's phases (empty ones
+    /// too, so the card shows every phase sent), or for an existing roadmap by the phases its
+    /// items name, in order.
+    static func groups(_ proposal: ChatRoadmapProposal) -> [Roadmaps.PhaseGroup] {
+        let items = proposal.body.items.enumerated().map { index, item in
+            RoadmapItem(id: String(index), title: item.title, status: item.status, phase: item.phase, position: index,
+                        notes: item.notes, links: item.links ?? [])
+        }
+        var phases = proposal.body.phases ?? []
+        if proposal.roadmapId != nil {
+            for phase in items.compactMap(\.phase) where !phases.contains(phase) { phases.append(phase) }
+        }
+        return Roadmaps.groupByPhase(phases, items)
+    }
+
+    /// An item's links as plain labels ("owner/name#12, owner/name@v1.2.0"), never openable.
+    static func linkText(_ links: [RoadmapLink]) -> String { links.map(Roadmaps.linkLabel).joined(separator: ", ") }
+
+    // MARK: Add
+
+    /// Starts an Add: the card, now `adding`, when it is open and the app unlocked; nil
+    /// otherwise (locked, gone, or a second tap while one runs).
+    static func begin(_ id: UUID, in cards: inout [RoadmapCard], unlocked: Bool) -> RoadmapCard? {
+        guard unlocked, let index = cards.firstIndex(where: { $0.id == id }), cards[index].state == .open else { return nil }
+        cards[index].state = .adding
+        cards[index].error = nil
+        return cards[index]
+    }
+
+    /// The roadmap could not be read for its revision, so nothing was written.
+    struct RevisionReadFailed: Error { let error: Error }
+
+    /// The app locked, or the owner left the session or conversation, before a request: the
+    /// rest is not sent and the card opens again.
+    struct Locked: Error {}
+
+    /// What Add sends: a new roadmap in one create; items for an existing roadmap on the
+    /// revision read just before, read and tried once more after a 409. `proceed` runs before
+    /// every request (so also between the read and the write) and throws `Locked` to stop.
+    /// The roadmap's id; an answer without it throws `invalidResponse`.
+    static func add(_ proposal: ChatRoadmapProposal,
+                    proceed: () async throws -> Void,
+                    create: (ChatRoadmapBody) async throws -> UUID?,
+                    revision: (UUID) async throws -> Int,
+                    createItems: (UUID, Int, ChatRoadmapBody) async throws -> UUID?) async throws -> UUID {
+        guard let roadmap = proposal.roadmapId else {
+            try await proceed()
+            guard let id = try await create(proposal.body) else { throw JarvisAPIError.invalidResponse }
+            return id
+        }
+        func once() async throws -> UUID {
+            try await proceed()
+            let current: Int
+            do { current = try await revision(roadmap) } catch { throw RevisionReadFailed(error: error) }
+            try await proceed()
+            guard try await createItems(roadmap, current, proposal.body) == roadmap else {
+                throw JarvisAPIError.invalidResponse
+            }
+            return roadmap
+        }
+        do { return try await once() } catch let error where Jobs.status(error) == 409 { return try await once() }
+    }
+
+    /// Ends an Add. A result for a session or conversation the owner has left (`current`
+    /// false) is dropped, and so is one for a dismissed card.
+    static func finish(_ id: UUID, in cards: inout [RoadmapCard], result: Result<UUID, Error>, current: Bool) {
+        guard current, let index = cards.firstIndex(where: { $0.id == id }) else { return }
+        let (state, error) = outcome(result)
+        cards[index].state = state
+        cards[index].error = error
+    }
+
+    /// Fails closed: only an HTTP refusal (4xx) or a failed revision read (nothing sent) lets
+    /// the owner try again. Anything else (a 2xx this app cannot read, no answer, any 5xx) is
+    /// not confirmed, and Add stays off. A 409 left after the retry is Core's refusal.
+    static func outcome(_ result: Result<UUID, Error>) -> (ProposalCard.State, String?) {
+        switch result {
+        case let .success(roadmap): return (.added(roadmap), nil)
+        case let .failure(error):
+            if error is Locked { return (.open, nil) }
+            if let read = error as? RevisionReadFailed { return (.open, Roadmaps.failureText(read.error)) }
+            guard let status = Jobs.status(error), (400..<500).contains(status) else { return (.unconfirmed, notConfirmed) }
+            switch status {
+            case 404, 405: return (.open, tooOld)
+            case 400, 409, 413, 422: return (.open, refused)
+            default: return (.open, Roadmaps.failureText(error))
+            }
+        }
     }
 }
