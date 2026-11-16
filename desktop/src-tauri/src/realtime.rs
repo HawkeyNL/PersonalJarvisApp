@@ -154,6 +154,53 @@ mod tests {
     }
 
     #[test]
+    fn chat_proposals_reach_the_webview() {
+        let payload = serde_json::json!({
+            "run": {
+                "run_id": uuid::Uuid::from_u128(2),
+                "request_id": uuid::Uuid::from_u128(3),
+                "conversation_id": uuid::Uuid::from_u128(4),
+            },
+            "message": {
+                "id": uuid::Uuid::from_u128(5),
+                "conversation_id": uuid::Uuid::from_u128(4),
+                "role": "assistant",
+                "content": "Tap Add below to create it.",
+                "model": null,
+                "created_at": "2026-11-16T10:00:00Z",
+            },
+            "roadmap_proposals": [{
+                "id": uuid::Uuid::from_u128(6),
+                "roadmap_id": uuid::Uuid::from_u128(7).to_string(),
+                "title": "Example",
+                "body": { "items": [{ "title": "Card", "status": "planned" }] },
+            }],
+        });
+        let event = decode(&frame(2, "assistant.completed", payload.clone()))
+            .unwrap()
+            .unwrap();
+        let emitted = serde_json::to_value(&event).unwrap();
+        assert_eq!(emitted["payload"], payload);
+
+        // A new roadmap has no `roadmap_id`: it stays absent, never null.
+        let mut new_roadmap = payload;
+        new_roadmap["roadmap_proposals"] = serde_json::json!([{
+            "id": uuid::Uuid::from_u128(8),
+            "title": "Example",
+            "body": { "title": "Example", "phases": [], "items": [] },
+        }]);
+        let event = decode(&frame(3, "assistant.completed", new_roadmap.clone()))
+            .unwrap()
+            .unwrap();
+        let emitted = serde_json::to_value(&event).unwrap();
+        assert_eq!(emitted["payload"], new_roadmap);
+        let proposal = emitted["payload"]["roadmap_proposals"][0]
+            .as_object()
+            .unwrap();
+        assert!(!proposal.contains_key("roadmap_id"));
+    }
+
+    #[test]
     fn malformed_frames_still_disconnect() {
         let unknown = || -> serde_json::Value {
             serde_json::from_str(&frame(2, "roadmap.future_event", serde_json::json!({}))).unwrap()

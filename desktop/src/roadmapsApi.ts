@@ -11,13 +11,16 @@ const rev = (revision: number) => `?expected_revision=${revision}`;
 
 export const roadmapApi = {
   list: () => getJsonAuth<unknown>("/v1/roadmaps"),
-  create: (body: { title: string; description?: string; phases?: string[] }) => postJsonAuth<unknown>("/v1/roadmaps", body),
+  create: (body: { title: string; description?: string; phases?: string[]; items?: NewItem[] }) => postJsonAuth<unknown>("/v1/roadmaps", body),
   get: (id: string) => getJsonAuth<unknown>(base(id)),
   update: (id: string, revision: number, patch: { title?: string; description?: string | null; phases?: string[] }) =>
     patchJsonAuth<unknown>(`${base(id)}${rev(revision)}`, patch),
   /** Archives; Core deletes nothing. */
   archive: (id: string, revision: number) => deleteAuth(`${base(id)}${rev(revision)}`),
   createItem: (id: string, revision: number, item: NewItem) => postJsonAuth<unknown>(`${base(id)}/items${rev(revision)}`, item),
+  /** 1 to 100 items in one write; an older Core answers 405. */
+  createItems: (id: string, revision: number, body: { items: NewItem[] }) =>
+    postJsonAuth<unknown>(`${base(id)}/items/batch${rev(revision)}`, body),
   updateItem: (id: string, revision: number, itemId: string, patch: ItemPatch) =>
     patchJsonAuth<unknown>(`${base(id)}/items/${encodeURIComponent(itemId)}${rev(revision)}`, patch),
   deleteItem: (id: string, revision: number, itemId: string) =>

@@ -17,6 +17,8 @@ import { offerFrom, type ResearchOffer } from "./researchOffer";
 import { addProposalCard, readProposals, withProposals, type ProposalCard } from "./jobProposals";
 import { todayInZone, type Draft, type NewJob } from "./jobs";
 import { jobApi } from "./jobsApi";
+import { addRoadmapCard, readRoadmapProposal, withRoadmapProposal, type RoadmapCard } from "./roadmapProposals";
+import { roadmapApi } from "./roadmapsApi";
 import { isWebModel, startsWebSearch } from "./webAnswer";
 import { chatSession } from "./chatSession";
 import { currentAuthStatus } from "./auth";
@@ -62,12 +64,15 @@ export const researchOffer = ref<ResearchOffer|null>(null);
 export const jobProposals = ref<ProposalCard[]>([]);
 // Each proposal shows once per session, also after a replayed event.
 const seenProposals=new Set<string>();
+/** The roadmap an answer in this conversation proposed; only Add makes it. */
+export const roadmapProposals = ref<RoadmapCard[]>([]);
+const seenRoadmapProposals=new Set<string>();
 let idc = 0;
 let realtimeAvailable=false;
 const pending=new PendingRuns();
 const reconciliation=new ReconcileLoop();
 let buffered:RealtimeEvent[]=[];
-chatSession.onReset(()=>{pending.clear();messages.value=[];thinking.value=false;researchOffer.value=null;jobProposals.value=[];seenProposals.clear();buffered=[];reconciliation.reset();realtimeAvailable=false;});
+chatSession.onReset(()=>{pending.clear();messages.value=[];thinking.value=false;researchOffer.value=null;jobProposals.value=[];seenProposals.clear();roadmapProposals.value=[];seenRoadmapProposals.clear();buffered=[];reconciliation.reset();realtimeAvailable=false;});
 
 function upsertCanonical(message:CanonicalMessage,requestId?:string,runId?:string) {
   if(currentId.value!==message.conversation_id) return;
@@ -154,6 +159,7 @@ function receiveRealtime(event:RealtimeEvent) {
         thinking.value=false;researchOffer.value=offerFrom(event.payload);
         const proposals=readProposals(event.payload.job_proposals,todayInZone());
         jobProposals.value=withProposals(jobProposals.value,seenProposals,proposals,event.payload.run.conversation_id,event.payload.message.id);
+        roadmapProposals.value=withRoadmapProposal(roadmapProposals.value,seenRoadmapProposals,readRoadmapProposal(event.payload.roadmap_proposals),event.payload.run.conversation_id,event.payload.message.id);
       }
       break;
     case "assistant.failed": {
@@ -211,6 +217,7 @@ async function ask(epoch:number): Promise<ChatReply> {
 export async function openConversation(id: string): Promise<void> {
   researchOffer.value = null;
   jobProposals.value = [];
+  roadmapProposals.value = [];
   setCurrent(id);
   await reloadConversation(id);
 }
@@ -250,6 +257,7 @@ export function startNewConversation(): void {
   thinking.value = false;
   researchOffer.value = null;
   jobProposals.value = [];
+  roadmapProposals.value = [];
 }
 
 /** Creates the proposed job: `body` is the proposal's own, or an edited one. */
@@ -265,6 +273,23 @@ export function addProposal(id: string, edited?: { body: NewJob; draft: Draft })
 
 export function dismissProposal(id: string): void {
   jobProposals.value=jobProposals.value.filter(c=>c.id!==id);
+}
+
+/** Creates the proposed roadmap, or adds its items, exactly as proposed. */
+export function addRoadmapProposal(id: string): Promise<void> {
+  const epoch=chatSession.capture();
+  const conversation=currentId.value;
+  return addRoadmapCard(roadmapProposals.value.find(c=>c.id===id),{
+    locked:()=>locked.value,
+    current:()=>chatSession.current(epoch) && currentId.value===conversation,
+    create:roadmapApi.create,
+    get:roadmapApi.get,
+    createItems:roadmapApi.createItems,
+  });
+}
+
+export function dismissRoadmapProposal(id: string): void {
+  roadmapProposals.value=roadmapProposals.value.filter(c=>c.id!==id);
 }
 
 /** On launch, restore the tab list and reopen the last (or most recent) chat,
