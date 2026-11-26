@@ -125,6 +125,7 @@ private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some 
 /// open paper positions, candidate decisions and closed paper trades.
 struct MemecoinPage: View {
     @ObservedObject var model: JarvisAppModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var overview: Availability<MemeOverview> = .loading
     @State private var candidates: Availability<MemeCandidates> = .loading
     @State private var trades: Availability<MemeTrades> = .loading
@@ -139,6 +140,23 @@ struct MemecoinPage: View {
     @State private var loads = 0
     @State private var overviewLoads = 0
     @State private var candidateLoads = 0
+    /// The newest load of each read that finished; a background refresh never replaces a
+    /// load still running.
+    @State private var tradesSettled = 0
+    @State private var overviewSettled = 0
+    @State private var candidateSettled = 0
+    /// Failures of a background refresh, shown quietly over the data that stays.
+    @State private var overviewQuiet: Availability<MemeOverview>?
+    @State private var candidatesQuiet: Availability<MemeCandidates>?
+    @State private var tradesQuiet: Availability<MemeTrades>?
+    /// "Load older": bumped by every reset, so a late page from before it is dropped.
+    @State private var candidateResets = 0
+    @State private var olderLoading = false
+    @State private var olderFailure: Availability<MemeCandidates>?
+    @State private var updatedAt: Date?
+    @State private var loadedOnce = false
+
+    private var autoRefreshes: Bool { Memecoin.autoRefreshes(active: scenePhase == .active, lock: model.lockState) }
 
     private var data: MemeOverview? {
         guard var value = overview.value else { return nil }
@@ -154,6 +172,9 @@ struct MemecoinPage: View {
             HStack(spacing: JV.Space.xs) {
                 if let status { Badge(text: status.label, style: status.style) }
                 Badge(text: "Paper", dot: false)
+                if let updatedAt {
+                    Text(verbatim: Memecoin.updatedText(updatedAt)).font(JV.font(12, relativeTo: .caption)).foregroundStyle(JV.textSecondary)
+                }
             }
             tradingNote("A simulation on read-only market data. It has no wallet and cannot buy or sell anything.")
             banners
@@ -165,6 +186,7 @@ struct MemecoinPage: View {
                 UnavailableState(title: "Could not load the paper trader", kind: .error, detail: Memecoin.failureText(failure(overview)),
                                  symbol: "bitcoinsign.circle", action: UnavailableState.Action(label: "Try again", run: loadOverview))
             case .ok:
+                if let overviewQuiet { tradingNote("Could not load the paper trader. \(Memecoin.failureText(failure(overviewQuiet)))") }
                 if let data, let status { overviewContent(data, status) }
             }
             candidateList
@@ -188,7 +210,17 @@ struct MemecoinPage: View {
         }
         .navigationDestination(isPresented: $strategies) { MemeStrategiesPage(model: model) }
         .refreshable { await load() }
-        .task { await load() }
+        // Load once, then follow the trader's 60 s tick while the page is on screen, the app
+        // is in the foreground and unlocked. Coming back refreshes once in the background.
+        .task(id: autoRefreshes) {
+            guard autoRefreshes else { return }
+            let first = !loadedOnce
+            loadedOnce = true
+            if first { await load() }
+            await Memecoin.autoRefresh(first: first, sleep: {
+                (try? await Task.sleep(for: .seconds(Memecoin.autoRefreshSeconds))) != nil
+            }, refresh: refresh)
+        }
         .task {
             // Re-evaluate staleness while the page is open.
             while !Task.isCancelled {
@@ -327,6 +359,15 @@ struct MemecoinPage: View {
                                      c.verdict == .accept ? "Passed every filter" : Memecoin.reasonLabel(Memecoin.rejectReasons, c.reason),
                                      "liquidity \(Memecoin.usd(c.liquidity_usd))"].joined(separator: " · "))
                 }
+                if let quiet = olderFailure ?? candidatesQuiet {
+                    tradingNote("Could not load decisions. \(Memecoin.failureText(failure(quiet)))")
+                }
+                if Memecoin.capped(list) {
+                    tradingNote(Memecoin.capText)
+                } else if list.next_before != nil {
+                    Button(olderLoading ? "Loading…" : "Load older") { Task { await loadOlder() } }
+                        .buttonStyle(JVButtonStyle(kind: .secondary)).disabled(olderLoading)
+                }
             }
         }
     }
@@ -343,6 +384,7 @@ struct MemecoinPage: View {
                                      "cost \(Memecoin.usd(t.cost_usd))", "out \(Memecoin.usd(t.usd_out))", "exit fees \(Memecoin.usd(t.exit_fees_usd))"]
                                 .joined(separator: " · "))
                 }
+                if let tradesQuiet { tradingNote("Could not load paper trades. \(Memecoin.failureText(failure(tradesQuiet)))") }
             }
         }
     }
@@ -373,30 +415,83 @@ struct MemecoinPage: View {
         _ = await (first, second, third)
     }
 
-    private func loadOverview() async {
+    /// The auto-refresh: everything the page shows, keeping what is on screen.
+    private func refresh() async {
+        async let first: Void = readOverview(background: true)
+        async let second: Void = readCandidates(background: true)
+        async let third: Void = readTrades(background: true)
+        _ = await (first, second, third)
+    }
+
+    private func loadOverview() async { await readOverview(background: false) }
+    private func loadCandidates() async { await readCandidates(background: false) }
+    private func loadTrades() async { await readTrades(background: false) }
+
+    private func readOverview(background: Bool) async {
+        guard !background || overviewSettled == overviewLoads else { return }
         overviewLoads += 1
         let mine = overviewLoads
         let result = await model.coreRead(Memecoin.overviewPath, as: MemeOverview.self).checked(Memecoin.valid)
-        guard !Task.isCancelled, mine == overviewLoads else { return }
-        overview = result
+        guard mine == overviewLoads else { return }
+        overviewSettled = mine
+        guard !Task.isCancelled else { return }
+        let out = Memecoin.settle(overview, result, background: background)
+        overview = out.state
+        overviewQuiet = out.quiet
         // A confirmed pause is shown until Core's own overview has been read.
-        if result.value != nil { pausedHere = false }
+        if result.value != nil {
+            pausedHere = false
+            updatedAt = Date()
+        }
     }
 
-    private func loadCandidates() async {
+    /// A manual load starts again from the first page; a background one merges it on top.
+    private func readCandidates(background: Bool) async {
+        guard !background || candidateSettled == candidateLoads else { return }
+        if !background {
+            candidateResets += 1
+            olderLoading = false
+            olderFailure = nil
+        }
         candidateLoads += 1
         let mine = candidateLoads
         let result = await model.coreRead(Memecoin.candidatesPath, as: MemeCandidates.self).checked(Memecoin.valid)
-        guard !Task.isCancelled, mine == candidateLoads else { return }
-        candidates = result
+        guard mine == candidateLoads else { return }
+        candidateSettled = mine
+        guard !Task.isCancelled else { return }
+        let out = Memecoin.settle(candidates, result, background: background, merge: Memecoin.prependCandidates)
+        candidates = out.state
+        candidatesQuiet = out.quiet
     }
 
-    private func loadTrades() async {
+    /// The next older page with the same limit, appended under the rows shown.
+    private func loadOlder() async {
+        guard case let .ok(list) = candidates, let before = list.next_before, !olderLoading,
+              let path = Memecoin.olderCandidatesPath(before: before) else { return }
+        let reset = candidateResets
+        olderLoading = true
+        olderFailure = nil
+        let result = await model.coreRead(path, as: MemeCandidates.self).checked(Memecoin.valid)
+        guard reset == candidateResets else { return }
+        olderLoading = false
+        if case let .ok(page) = result {
+            candidates = Memecoin.appendOlder(candidates, before: before, page: page)
+        } else {
+            olderFailure = result
+        }
+    }
+
+    private func readTrades(background: Bool) async {
+        guard !background || tradesSettled == loads else { return }
         loads += 1
         let mine = loads
         let result = await model.coreRead(Memecoin.tradesPath, as: MemeTrades.self).checked(Memecoin.valid)
-        guard !Task.isCancelled, mine == loads else { return }
-        trades = result
+        guard mine == loads else { return }
+        tradesSettled = mine
+        guard !Task.isCancelled else { return }
+        let out = Memecoin.settle(trades, result, background: background)
+        trades = out.state
+        tradesQuiet = out.quiet
     }
 }
 
