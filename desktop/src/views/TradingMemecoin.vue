@@ -1,29 +1,35 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import NavIcon from "../components/NavIcon.vue";
 import PageShell from "../components/PageShell.vue";
 import DevDataToggle from "../components/trading/DevDataToggle.vue";
 import "../components/trading/trading.css";
 import { ageText, asOfText, formatDecimal, formatPrice, signTone } from "../trading";
 import {
-  EXIT_REASONS, REJECT_REASONS, RESUME_TEXT, agentStatus, failureText, goalPct, memeStatus, progressPct, readCandidates, readOverview,
-  readTrades, reasonLabel, reportAge, sendPause, shortMint, stuckCount, usd, type PauseOutcome,
+  EXIT_REASONS, REJECT_REASONS, RESUME_TEXT, agentStatus, autoRefresher, candidateKey, candidatesCapped, failureText, goalPct, memeStatus,
+  progressPct, readOverview, readTrades, reasonLabel, reportAge, sendPause, shortMint, stuckCount, updatedText, usd, type PauseOutcome,
 } from "../memecoin";
-import { memeApi, useMemeRead } from "../memecoinApi";
+import { memeApi, useCandidates, useMemeRead } from "../memecoinApi";
+import { locked } from "../lock";
 import { MEME_DATA_SETS, devDataSet } from "../tradingApi";
 
 // Memecoin pot: Core's PAPER trader, read-only apart from the pause. It is a
 // simulation with no wallet; nothing here may suggest real money or live
 // trading. Off by default, so "Off" is the state most owners see first.
-const { state: overview, reload: reloadOverview } = useMemeRead({
-  live: memeApi.overview, fixture: (f, set) => f.overviewFixture(set), read: readOverview,
+const { state: overview, quietFailure: overviewQuiet, reload: reloadOverview, refresh: refreshOverview } = useMemeRead({
+  live: memeApi.overview, fixture: (f, set) => f.overviewFixture(set), read: readOverview, keepShown: true,
 });
-const { state: candidates, reload: reloadCandidates } = useMemeRead({
-  live: memeApi.candidates, fixture: (f, set) => f.candidatesFixture(set), read: readCandidates,
+const {
+  state: candidates, quietFailure: candidatesQuiet, older, reload: reloadCandidates, refresh: refreshCandidates, loadOlder,
+} = useCandidates();
+const { state: trades, quietFailure: tradesQuiet, reload: reloadTrades, refresh: refreshTrades } = useMemeRead({
+  live: memeApi.trades, fixture: (f, set) => f.tradesFixture(set), read: readTrades, keepShown: true,
 });
-const { state: trades, reload: reloadTrades } = useMemeRead({
-  live: memeApi.trades, fixture: (f, set) => f.tradesFixture(set), read: readTrades,
-});
+const candidatesNote = computed(() => older.value.failure ?? candidatesQuiet.value);
+
+// "Updated HH:MM": the last overview Core answered.
+const updatedAt = ref<Date | null>(null);
+watch(overview, (o) => { if (o.kind === "ok") updatedAt.value = new Date(); });
 
 // Set only once Core confirmed a pause, until the following overview read.
 const pausedHere = ref(false);
@@ -49,6 +55,20 @@ function refresh(): void {
   void reloadCandidates();
   void reloadTrades();
 }
+
+// Follow the trader's 60 s tick while this page is in view and the app is
+// unlocked. A background refresh keeps what is shown, failures included.
+const auto = autoRefresher(() => Promise.all([refreshOverview(), refreshCandidates(), refreshTrades()]));
+const syncAuto = () => auto.setActive(document.visibilityState === "visible" && !locked.value);
+watch(locked, syncAuto);
+onMounted(() => {
+  document.addEventListener("visibilitychange", syncAuto);
+  syncAuto();
+});
+onUnmounted(() => {
+  document.removeEventListener("visibilitychange", syncAuto);
+  auto.setActive(false);
+});
 
 // ---- pause: confirm, send, and only then show it as paused ----------------
 const pauseStep = ref<"idle" | "confirm" | "sending">("idle");
@@ -106,6 +126,7 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
     <template #badges>
       <span v-if="status" class="badge" :class="status.tone"><span class="dot" aria-hidden="true"></span>{{ status.label }}</span>
       <span class="badge td-outline">Paper</span>
+      <span v-if="updatedAt" class="t-xs t-2">{{ updatedText(updatedAt) }}</span>
     </template>
     <template #actions>
       <button type="button" class="btn btn-secondary" @click="refresh">Refresh</button>
@@ -201,6 +222,7 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
       <div><button type="button" class="btn btn-secondary btn-sm" @click="reloadOverview">Try again</button></div>
     </div>
     <template v-else-if="data && status">
+      <p v-if="overviewQuiet" class="t-sm t-2" role="status">Could not load the paper trader. {{ failureText(overviewQuiet) }}</p>
       <section class="card td-col" aria-labelledby="mc-status-title">
         <div class="td-title">
           <span class="tile" :class="status.tone" aria-hidden="true"><NavIcon :name="status.tone === 'neg' ? 'alert' : 'coin'" /></span>
@@ -328,14 +350,14 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
         <span class="t-sm">Could not load decisions. {{ failureText(candidates.failure) }}</span>
         <button type="button" class="btn btn-secondary btn-sm" @click="reloadCandidates">Try again</button>
       </div>
-      <p v-else-if="!candidates.data.length" class="empty t-sm">No decisions recorded yet. A decision is recorded when a token's verdict changes.</p>
+      <p v-else-if="!candidates.data.rows.length" class="empty t-sm">No decisions recorded yet. A decision is recorded when a token's verdict changes.</p>
       <div v-else class="td-scroll" tabindex="0" role="region" aria-label="Candidate decisions table">
         <table class="tbl" style="min-width: 720px">
           <thead>
             <tr><th scope="col">Seen</th><th scope="col">Token</th><th scope="col">Decision</th><th scope="col">Reason</th><th scope="col" class="r">Price</th><th scope="col" class="r">Liquidity</th></tr>
           </thead>
           <tbody>
-            <tr v-for="(c, i) in candidates.data" :key="`${c.mint}-${c.observed_at}-${i}`">
+            <tr v-for="c in candidates.data.rows" :key="candidateKey(c)">
               <td class="t-sm"><time :datetime="c.observed_at">{{ asOfText(c.observed_at, now) }}</time></td>
               <td><span class="mono" :title="c.mint">{{ shortMint(c.mint) }}</span></td>
               <td><span class="badge" :class="{ acc: c.verdict === 'accept' }">{{ c.verdict === "accept" ? "Accepted" : "Rejected" }}</span></td>
@@ -346,6 +368,15 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
           </tbody>
         </table>
       </div>
+      <template v-if="candidates.kind === 'ok'">
+        <p v-if="candidatesNote" class="t-sm t-2 mc-more" role="status">Could not load decisions. {{ failureText(candidatesNote) }}</p>
+        <p v-if="candidatesCapped(candidates.data)" class="td-note mc-more">Showing the newest 500 decisions.</p>
+        <div v-else-if="candidates.data.next" class="mc-more">
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="older.loading" :aria-busy="older.loading" @click="loadOlder">
+            {{ older.loading ? "Loading…" : "Load older" }}
+          </button>
+        </div>
+      </template>
     </section>
 
     <section class="card td-tight" aria-labelledby="mc-trades">
@@ -381,6 +412,7 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
           </tbody>
         </table>
       </div>
+      <p v-if="trades.kind === 'ok' && tradesQuiet" class="t-sm t-2 mc-more" role="status">Could not load paper trades. {{ failureText(tradesQuiet) }}</p>
     </section>
     <DevDataToggle :sets="MEME_DATA_SETS" />
   </PageShell>
@@ -412,4 +444,5 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
 .mc-failed { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .mc-sub { display: block; margin-top: 2px; }
 .mc-reason { min-width: 160px; overflow-wrap: anywhere; }
+.mc-more { margin: 12px 0 0; }
 </style>

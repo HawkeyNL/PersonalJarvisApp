@@ -4,7 +4,9 @@
 //
 // Core serves (owner session, like every /v1 route):
 //   GET  /v1/trading/meme/overview          -> MemeOverview (raw shape below)
-//   GET  /v1/trading/meme/candidates?limit= -> { candidates: Candidate[] }
+//   GET  /v1/trading/meme/candidates?limit=&before=
+//        -> { candidates: Candidate[], next_before?: cursor } (next_before only
+//           when older rows exist; older Core never sends it)
 //   GET  /v1/trading/meme/trades?limit=     -> { trades: ClosedTrade[] }
 //   POST /v1/trading/meme/pause             -> { paused: true }
 // Strategies and Claude's decisions are in memeStrategies.ts.
@@ -207,6 +209,107 @@ export function readCandidates(x: unknown): Candidate[] | null {
   if (!isObj(x) || !isList(x.candidates, MEME_LIMITS.list, isCandidate)) return null;
   return (x.candidates as Candidate[]).map((c) => ({ ...c, reason: c.reason ?? null, price_usd: c.price_usd ?? null, liquidity_usd: c.liquidity_usd ?? null }));
 }
+
+/** Rows of candidate decisions kept on screen across "Load older" pages. */
+export const CANDIDATE_CAP = 500;
+export type CandidatePage = { rows: Candidate[]; next: string | null };
+
+/** Core's opaque paging cursor. Anything else means "no more pages". */
+export const isCursor = (x: unknown): x is string => typeof x === "string" && /^[A-Za-z0-9._~:-]{1,128}$/.test(x);
+
+export function readCandidatePage(x: unknown): CandidatePage | null {
+  const rows = readCandidates(x);
+  if (!rows) return null;
+  const next = (x as Obj).next_before;
+  return { rows: unseen(new Set(), rows), next: isCursor(next) ? next : null };
+}
+
+/** One decision: also the row key on screen. */
+export const candidateKey = (c: Candidate) => `${c.mint}|${c.observed_at}|${c.strategy_version}`;
+/** Rows whose key is not in `seen` yet; adds their keys. */
+const unseen = (seen: Set<string>, rows: Candidate[]) => rows.filter((c) => !seen.has(candidateKey(c)) && !!seen.add(candidateKey(c)));
+
+/** Append an older page: drop rows already shown, keep at most CANDIDATE_CAP
+ *  and stop paging once the cap is reached. */
+export function appendCandidates(have: CandidatePage, page: CandidatePage): CandidatePage {
+  const rows = [...have.rows, ...unseen(new Set(have.rows.map(candidateKey)), page.rows)].slice(0, CANDIDATE_CAP);
+  return { rows, next: rows.length >= CANDIDATE_CAP ? null : page.next };
+}
+
+export const candidatesCapped = (p: CandidatePage) => p.rows.length >= CANDIDATE_CAP;
+
+/** Merge a fresh first page into what is shown: new rows go on top, loaded
+ *  older pages and their cursor stay. At the cap the oldest rows drop off and
+ *  paging ends. A fresh page with no overlap and more pages behind it leaves
+ *  a gap: start over. */
+export function prependCandidates(have: CandidatePage, page: CandidatePage): CandidatePage {
+  const fresh = unseen(new Set(have.rows.map(candidateKey)), page.rows);
+  if (!have.rows.length || (page.next && fresh.length === page.rows.length)) return page;
+  const rows = [...fresh, ...have.rows].slice(0, CANDIDATE_CAP);
+  return { rows, next: rows.length >= CANDIDATE_CAP ? null : have.next };
+}
+
+export type MemeRead<T> = { kind: "loading" } | { kind: "failed"; failure: MemeFailure } | { kind: "ok"; data: T };
+
+/** Settle a finished read. With `keep`, a failure over shown data keeps it
+ *  (reported as `quiet`); with `merge`, a success merges into it. */
+export function settleRead<T>(
+  have: MemeRead<T>, next: MemeRead<T>, opts: { keep: boolean; merge?: (have: T, fresh: T) => T },
+): { state: MemeRead<T>; quiet: MemeFailure | null } {
+  if (have.kind !== "ok") return { state: next, quiet: null };
+  if (next.kind === "failed") return opts.keep ? { state: have, quiet: next.failure } : { state: next, quiet: null };
+  if (next.kind === "ok" && opts.merge) return { state: { kind: "ok", data: opts.merge(have.data, next.data) }, quiet: null };
+  return { state: next, quiet: null };
+}
+
+/** Append an older page fetched from cursor `before`, only while that cursor
+ *  is still the shown one (a refresh or reset may have moved on). */
+export function appendOlder(have: MemeRead<CandidatePage>, before: string, page: CandidatePage): MemeRead<CandidatePage> {
+  return have.kind === "ok" && have.data.next === before ? { kind: "ok", data: appendCandidates(have.data, page) } : have;
+}
+
+// ---- auto-refresh ---------------------------------------------------------
+/** The trader ticks every 60 s; the page follows while it is in view. */
+export const AUTO_REFRESH_MS = 60_000;
+
+/** Run `refresh` every `everyMs` while active, never two at once. Becoming
+ *  active again refreshes once, then restarts the timer; the first activation
+ *  does not, because the page has just loaded. */
+export function autoRefresher(
+  refresh: () => Promise<unknown>,
+  everyMs: number = AUTO_REFRESH_MS,
+  timers: { set: (f: () => void, ms: number) => unknown; clear: (t: unknown) => void } = {
+    set: (f, ms) => setInterval(f, ms), clear: (t) => clearInterval(t as ReturnType<typeof setInterval>),
+  },
+) {
+  let timer: unknown = null;
+  let busy = false;
+  let started = false;
+  async function tick(): Promise<void> {
+    if (busy) return;
+    busy = true;
+    try { await refresh(); } catch { /* the reads keep their own failure state */ } finally { busy = false; }
+  }
+  return {
+    tick,
+    /** Call whenever visibility or the lock changes; false also stops it. */
+    setActive(on: boolean): void {
+      if (on === (timer !== null)) return;
+      if (!on) {
+        timers.clear(timer);
+        timer = null;
+        return;
+      }
+      if (started) void tick();
+      started = true;
+      timer = timers.set(() => void tick(), everyMs);
+    },
+  };
+}
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+/** "Updated 14:05", in local time. */
+export const updatedText = (d: Date) => `Updated ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 
 const isTrade = (t: unknown) =>
   isObj(t) && isMint(t.mint) && isCount(t.strategy_version) && isTime(t.opened_at) && isTime(t.closed_at)

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  MEME_LIMITS, failureText, goalPct, memeFailure, memeStatus, progressPct, readCandidates, readOverview, readTrades,
+  AUTO_REFRESH_MS, CANDIDATE_CAP, MEME_LIMITS, appendCandidates, appendOlder, autoRefresher, candidateKey, candidatesCapped, isCursor,
+  prependCandidates, readCandidatePage, settleRead, updatedText, failureText, goalPct, memeFailure, memeStatus, progressPct, readCandidates, readOverview, readTrades,
   reasonLabel, REJECT_REASONS, reportAge, sendPause, shortMint, stuckCount, usd,
 } from "../src/memecoin.ts";
 import { STALE_AFTER_MS } from "../src/trading.ts";
@@ -179,4 +180,146 @@ test("display helpers", () => {
   assert.equal(reasonLabel(REJECT_REASONS, "lp_not_secured"), "Liquidity not locked or burned");
   assert.equal(reasonLabel(REJECT_REASONS, "toString"), "Other (toString)");
   assert.equal(reasonLabel(REJECT_REASONS, null), "—");
+});
+
+// ---- candidate paging and auto-refresh -----------------------------------
+
+const row = (i, extra = {}) => ({ ...candidatesFixture("demo").candidates[0], observed_at: new Date(Date.UTC(2026, 0, 1) - i * 60_000).toISOString(), ...extra });
+const pageOf = (from, n, next = null) => ({ rows: Array.from({ length: n }, (_, k) => row(from + k)), next });
+
+test("candidate page reader takes a valid next_before and drops a bad one", () => {
+  const body = { candidates: [row(0)] };
+  assert.equal(readCandidatePage({ ...body, next_before: "MjAyNi0xMS0yNlQx:Mw.~_-" }).next, "MjAyNi0xMS0yNlQx:Mw.~_-");
+  assert.equal(readCandidatePage(body).next, null); // older Core: no paging
+  for (const bad of [null, 7, "", "a b", "a/b", "a?b=c", "a&before=x", "é", "x".repeat(129), ["x"], { x: 1 }]) {
+    assert.equal(readCandidatePage({ ...body, next_before: bad }).next, null, JSON.stringify(bad));
+    assert.equal(isCursor(bad), false);
+  }
+  assert.ok(isCursor("x".repeat(128)));
+  assert.equal(readCandidatePage({ next_before: "abc" }), null);
+});
+
+test("dev fixture pages: demo has one older page, worst pages to the cap", () => {
+  const first = readCandidatePage(candidatesFixture("demo"));
+  assert.ok(first.next);
+  const second = readCandidatePage(candidatesFixture("demo", first.next));
+  assert.equal(second.next, null);
+  const both = appendCandidates(first, second);
+  assert.equal(both.rows.length, first.rows.length + second.rows.length - 1); // one repeated row
+  assert.equal(readCandidatePage(candidatesFixture("empty")).next, null);
+  let worst = readCandidatePage(candidatesFixture("worst"));
+  for (let i = 0; i < 10 && worst.next; i++) worst = appendCandidates(worst, readCandidatePage(candidatesFixture("worst", worst.next)));
+  assert.ok(candidatesCapped(worst));
+});
+
+test("older pages append without duplicates and keep the new cursor", () => {
+  const have = pageOf(0, 3, "c1");
+  const out = appendCandidates(have, { rows: [row(2), row(3), row(3), row(4)], next: "c2" });
+  assert.deepEqual(out.rows.map((c) => c.observed_at), [0, 1, 2, 3, 4].map((i) => row(i).observed_at));
+  assert.equal(out.next, "c2");
+  // Same mint and time but another strategy version is another decision.
+  assert.equal(appendCandidates(have, { rows: [row(2, { strategy_version: 4 })], next: null }).rows.length, 4);
+  assert.equal(appendCandidates(have, pageOf(3, 1)).next, null); // last page: no button
+  // A page that repeats a row itself still yields unique row keys.
+  assert.equal(readCandidatePage({ candidates: [row(0), row(0), row(1)] }).rows.length, 2);
+  assert.equal(candidateKey(row(0)), `${row(0).mint}|${row(0).observed_at}|3`);
+});
+
+test("rows stop at the cap and paging ends there", () => {
+  let p = pageOf(0, 100, "c");
+  for (let i = 1; i < 6; i++) p = appendCandidates(p, pageOf(i * 100, 100, "c"));
+  assert.equal(p.rows.length, CANDIDATE_CAP);
+  assert.equal(p.next, null);
+  assert.ok(candidatesCapped(p));
+  assert.equal(appendCandidates(pageOf(0, 450, "c"), pageOf(450, 100, "c")).rows.length, CANDIDATE_CAP);
+});
+
+test("a late older page is appended only while its cursor is still shown", () => {
+  const ok = { kind: "ok", data: pageOf(0, 2, "c1") };
+  assert.equal(appendOlder(ok, "c1", pageOf(2, 2)).data.rows.length, 4);
+  assert.equal(appendOlder(ok, "c0", pageOf(2, 2)), ok); // reset or refresh moved on
+  assert.deepEqual(appendOlder({ kind: "loading" }, "c1", pageOf(2, 2)), { kind: "loading" });
+});
+
+test("a failed refresh, background or manual, keeps the rows and reports quietly", () => {
+  const ok = { kind: "ok", data: pageOf(0, 3, "c1") };
+  const failed = { kind: "failed", failure: "unreachable" };
+  assert.deepEqual(settleRead(ok, failed, { keep: true, merge: prependCandidates }), { state: ok, quiet: "unreachable" });
+  assert.deepEqual(settleRead(ok, failed, { keep: true }), { state: ok, quiet: "unreachable" }); // manual Refresh
+  assert.deepEqual(settleRead(ok, failed, { keep: false }), { state: failed, quiet: null }); // pages that do not opt in
+  assert.deepEqual(settleRead({ kind: "loading" }, failed, { keep: true }), { state: failed, quiet: null }); // nothing shown yet
+  const fresh = { kind: "ok", data: pageOf(0, 1) };
+  assert.equal(settleRead(ok, fresh, { keep: true }).state, fresh); // manual reload: first page again
+  assert.equal(settleRead(ok, fresh, { keep: true, merge: prependCandidates }).state.data.rows.length, 3);
+});
+
+test("a background refresh prepends new rows and keeps older pages and their cursor", () => {
+  const have = pageOf(0, 120, "old-cursor"); // first page plus older pages
+  const merged = prependCandidates(have, { rows: [row(-2), row(-1), row(0), row(1)], next: "first-page-cursor" });
+  assert.equal(merged.rows.length, 122);
+  assert.equal(merged.rows[0].observed_at, row(-2).observed_at);
+  assert.equal(merged.next, "old-cursor");
+  // No overlap with more pages behind it: a gap, so start over from that page.
+  const gap = { rows: [row(-10)], next: "n" };
+  assert.equal(prependCandidates(have, gap), gap);
+  assert.equal(prependCandidates(pageOf(0, 0), gap), gap); // nothing shown yet
+  // Capped: new rows still go on top, the oldest drop off, paging stays off.
+  const capped = pageOf(0, CANDIDATE_CAP);
+  const moved = prependCandidates(capped, { rows: [row(-2), row(-1), row(0)], next: "first-page-cursor" });
+  assert.equal(moved.rows.length, CANDIDATE_CAP);
+  assert.deepEqual([moved.rows[0], moved.rows[1], moved.rows[2]].map((c) => c.observed_at), [-2, -1, 0].map((i) => row(i).observed_at));
+  assert.equal(moved.rows.at(-1).observed_at, row(CANDIDATE_CAP - 3).observed_at);
+  assert.equal(moved.next, null);
+  assert.ok(candidatesCapped(moved));
+  const filled = prependCandidates(pageOf(0, 499, "c"), { rows: [row(-2), row(-1), row(0)], next: "x" });
+  assert.equal(filled.rows.length, CANDIDATE_CAP);
+  assert.equal(filled.next, null);
+});
+
+function fakeTimers() {
+  const t = { live: new Set(), set: (f) => { const id = { f }; t.live.add(id); return id; }, clear: (id) => t.live.delete(id) };
+  t.fire = () => [...t.live].forEach((id) => id.f());
+  return t;
+}
+
+test("auto-refresh runs only while active and restarts with one refresh", async () => {
+  const timers = fakeTimers();
+  let calls = 0;
+  const auto = autoRefresher(async () => { calls++; }, AUTO_REFRESH_MS, timers);
+  auto.setActive(true); // first activation: the page has just loaded
+  assert.equal(calls, 0);
+  assert.equal(timers.live.size, 1);
+  timers.fire();
+  await Promise.resolve();
+  assert.equal(calls, 1);
+  auto.setActive(false); // hidden, locked or left
+  assert.equal(timers.live.size, 0);
+  timers.fire();
+  assert.equal(calls, 1);
+  auto.setActive(true); // visible again: refresh once, then the timer
+  await Promise.resolve();
+  assert.equal(calls, 2);
+  assert.equal(timers.live.size, 1);
+  auto.setActive(true); // no second timer
+  assert.equal(timers.live.size, 1);
+});
+
+test("auto-refresh never overlaps and survives a failing refresh", async () => {
+  const timers = fakeTimers();
+  let calls = 0;
+  let finish;
+  const auto = autoRefresher(() => { calls++; return new Promise((_, reject) => (finish = reject)); }, AUTO_REFRESH_MS, timers);
+  auto.setActive(true);
+  timers.fire();
+  timers.fire(); // still in flight
+  assert.equal(calls, 1);
+  finish(new Error("offline"));
+  await new Promise((r) => setTimeout(r, 0));
+  timers.fire();
+  assert.equal(calls, 2);
+});
+
+test("updated label is HH:MM in local time", () => {
+  assert.equal(updatedText(new Date(2026, 10, 26, 9, 5)), "Updated 09:05");
+  assert.equal(updatedText(new Date(2026, 10, 26, 23, 59)), "Updated 23:59");
 });

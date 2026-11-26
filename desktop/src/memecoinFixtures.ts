@@ -6,6 +6,8 @@
 import type { FixtureSet } from "./tradingApi";
 
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
+/** Fixed per load, so older candidate pages line up with the first one. */
+const BASE = Date.now();
 // Plausible base58 mints (not real tokens).
 const MINTS = [
   "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
@@ -75,20 +77,26 @@ export function overviewFixture(set: FixtureSet): unknown {
 
 const REASONS = ["lp_not_secured", "liquidity_too_low", "pool_too_young", "holder_concentration_too_high", "sell_impact_too_high"];
 
-export function candidatesFixture(set: FixtureSet): unknown {
+/** Pages via next_before: "demo" has one older page (repeating one row, to
+ *  show de-duplication); "worst" keeps paging until the row cap. */
+export function candidatesFixture(set: FixtureSet, before?: string): unknown {
   if (set === "empty" || set === "disabled") return { candidates: [] };
   const n = set === "worst" ? 100 : 8;
+  const page = before ? Number(before.split(":")[1]) || 1 : 0;
+  const next = set === "worst" ? `fixture:${page + 1}` : page === 0 ? "fixture:1" : undefined;
   return {
-    candidates: Array.from({ length: n }, (_, i) => {
+    candidates: Array.from({ length: n }, (_, k) => {
+      const i = k + page * (n - 1); // the first row of an older page repeats the last one shown
       const accept = set !== "worst" && i === 3;
       const reason = set === "worst" && i === 1 ? "a_reason_this_app_does_not_know_yet" : REASONS[i % REASONS.length];
       return {
-        mint: MINTS[i % MINTS.length], observed_at: ago(4 + i * 17), strategy_version: 3,
+        mint: MINTS[i % MINTS.length], observed_at: new Date(BASE - (4 + i * 17) * 60_000).toISOString(), strategy_version: 3,
         verdict: accept ? "accept" : "reject", reason: accept ? null : reason,
         price_usd: set === "worst" && i % 3 === 0 ? null : i % 2 ? "0.00004127" : "0.0213",
         liquidity_usd: set === "worst" && i === 0 ? "123456789012.5" : i % 2 ? "8120.5" : "41250",
       };
     }),
+    ...(next ? { next_before: next } : {}),
   };
 }
 
