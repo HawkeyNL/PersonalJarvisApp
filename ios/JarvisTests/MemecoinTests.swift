@@ -356,3 +356,167 @@ private final class MemeCoreProtocol: URLProtocol {
     }
     override func stopLoading() { }
 }
+
+/// Candidate paging and the auto-refresh, as in desktop/tests/memecoin.test.mjs.
+@MainActor
+final class MemecoinPagingTests: XCTestCase {
+    private let mint = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
+
+    private func row(_ i: Int, version: Int = 3) -> MemeCandidate {
+        MemeCandidate(mint: mint, observed_at: ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: 1_793_529_738 - Double(i) * 60)),
+                      strategy_version: version, verdict: .reject, reason: "lp_not_secured", price_usd: "0.0004", liquidity_usd: "12000")
+    }
+
+    private func page(_ from: Int, _ count: Int, next: String? = nil) -> MemeCandidates {
+        MemeCandidates(candidates: (from..<from + count).map { row($0) }, next_before: next)
+    }
+
+    private func times(_ list: MemeCandidates) -> [String] { list.candidates.map(\.observed_at) }
+
+    func testTheReaderTakesAValidNextBeforeAndDropsABadOne() throws {
+        let c: [String: Any] = ["mint": mint, "observed_at": "2026-11-01T10:00:00Z", "strategy_version": 3, "verdict": "reject",
+                                "reason": "lp_not_secured", "price_usd": "0.0004", "liquidity_usd": "12000"]
+        func read(_ next: Any?) throws -> MemeCandidates {
+            var body: [String: Any] = ["candidates": [c]]
+            if let next { body["next_before"] = next }
+            let list = try JSONDecoder().decode(MemeCandidates.self, from: JSONSerialization.data(withJSONObject: body))
+            XCTAssertTrue(Memecoin.valid(list))
+            return list
+        }
+        XCTAssertEqual(try read("MjAyNi0xMS0yNlQx:Mw.~_-").next_before, "MjAyNi0xMS0yNlQx:Mw.~_-")
+        XCTAssertNil(try read(nil).next_before) // older Core: no paging
+        for bad in [NSNull(), 7, "", "a b", "a/b", "a?b=c", "a&before=x", "é", String(repeating: "x", count: 129), ["x"]] as [Any] {
+            XCTAssertNil(try read(bad).next_before, "\(bad)")
+        }
+        XCTAssertTrue(Memecoin.isCursor(String(repeating: "x", count: 128)))
+        XCTAssertEqual(Memecoin.olderCandidatesPath(before: "c:1"), "/v1/trading/meme/candidates?limit=50&before=c%3A1")
+        XCTAssertNil(Memecoin.olderCandidatesPath(before: "a&limit=100"))
+    }
+
+    func testOlderPagesAppendWithoutDuplicatesAndTheLastPageEndsPaging() {
+        let have = page(0, 3, next: "c1")
+        let out = Memecoin.appendCandidates(have, MemeCandidates(candidates: [row(2), row(3), row(3), row(4)], next_before: "c2"))
+        XCTAssertEqual(times(out), (0...4).map { row($0).observed_at })
+        XCTAssertEqual(out.next_before, "c2")
+        // Same mint and time but another strategy version is another decision.
+        XCTAssertEqual(Memecoin.appendCandidates(have, MemeCandidates(candidates: [row(2, version: 4)])).candidates.count, 4)
+        let last = Memecoin.appendCandidates(have, page(3, 1))
+        XCTAssertNil(last.next_before) // no next_before: no button
+        XCTAssertFalse(Memecoin.capped(last))
+    }
+
+    func testRowsStopAtTheCapAndPagingEndsThere() {
+        var list = page(0, 100, next: "c")
+        for i in 1..<6 { list = Memecoin.appendCandidates(list, page(i * 100, 100, next: "c")) }
+        XCTAssertEqual(list.candidates.count, Memecoin.candidateCap)
+        XCTAssertNil(list.next_before)
+        XCTAssertTrue(Memecoin.capped(list))
+        XCTAssertEqual(Memecoin.capText, "Showing the newest 500 decisions.")
+    }
+
+    func testALateOlderPageIsAppendedOnlyWhileItsCursorIsShown() {
+        let shown: Availability<MemeCandidates> = .ok(page(0, 2, next: "c1"))
+        XCTAssertEqual(Memecoin.appendOlder(shown, before: "c1", page: page(2, 2)).value?.candidates.count, 4)
+        XCTAssertEqual(Memecoin.appendOlder(shown, before: "c0", page: page(2, 2)).value?.candidates.count, 2)
+        XCTAssertNil(Memecoin.appendOlder(.loading, before: "c1", page: page(2, 2)).value)
+    }
+
+    func testAFailedRefreshKeepsTheRowsAndReportsQuietly() {
+        let shown: Availability<MemeCandidates> = .ok(page(0, 3, next: "c1"))
+        let background = Memecoin.settle(shown, .error(.network), background: true, merge: Memecoin.prependCandidates)
+        XCTAssertEqual(background.state.value?.candidates.count, 3)
+        XCTAssertEqual(background.state.value?.next_before, "c1")
+        if case .error(.network)? = background.quiet {} else { XCTFail("no quiet failure") }
+        // A failed manual Refresh keeps the rows too; its success starts from the first page again.
+        let manual = Memecoin.settle(shown, .error(.unavailable), background: false, merge: Memecoin.prependCandidates)
+        XCTAssertEqual(manual.state.value?.candidates.count, 3)
+        if case .error(.unavailable)? = manual.quiet {} else { XCTFail("no quiet failure") }
+        // A failed first load has nothing to keep: the failed state shows.
+        let first = Memecoin.settle(Availability<MemeCandidates>.loading, .error(.network), background: false)
+        XCTAssertNil(first.quiet)
+        if case .error(.network) = first.state {} else { XCTFail("no failed state") }
+        XCTAssertEqual(Memecoin.settle(shown, .ok(page(0, 1)), background: false, merge: Memecoin.prependCandidates).state.value?.candidates.count, 1)
+        XCTAssertNil(Memecoin.settle(Availability<MemeCandidates>.loading, .error(.network), background: true).quiet)
+    }
+
+    func testABackgroundRefreshPrependsAndKeepsOlderPagesAndTheirCursor() {
+        let have = page(0, 120, next: "old-cursor")
+        let merged = Memecoin.prependCandidates(have, MemeCandidates(candidates: [row(-2), row(-1), row(0), row(1)], next_before: "first"))
+        XCTAssertEqual(merged.candidates.count, 122)
+        XCTAssertEqual(merged.candidates.first?.observed_at, row(-2).observed_at)
+        XCTAssertEqual(merged.next_before, "old-cursor")
+        // No overlap with more pages behind it: a gap, so start over from that page.
+        let gap = MemeCandidates(candidates: [row(-10)], next_before: "n")
+        XCTAssertEqual(times(Memecoin.prependCandidates(have, gap)), times(gap))
+        XCTAssertEqual(Memecoin.prependCandidates(page(0, 0), gap).next_before, "n")
+        // At the cap fresh rows still go on top and the oldest drop off; paging stays off.
+        let capped = page(0, Memecoin.candidateCap)
+        let atCap = Memecoin.prependCandidates(capped, MemeCandidates(candidates: [row(-2), row(-1), row(0)], next_before: "x"))
+        XCTAssertEqual(atCap.candidates.count, Memecoin.candidateCap)
+        XCTAssertEqual(Array(times(atCap).prefix(3)), [row(-2), row(-1), row(0)].map(\.observed_at))
+        XCTAssertEqual(times(atCap).last, row(Memecoin.candidateCap - 3).observed_at)
+        XCTAssertNil(atCap.next_before)
+        XCTAssertTrue(Memecoin.capped(atCap))
+        let filled = Memecoin.prependCandidates(page(0, 499, next: "c"), MemeCandidates(candidates: [row(-2), row(-1), row(0)], next_before: "x"))
+        XCTAssertEqual(filled.candidates.count, Memecoin.candidateCap)
+        XCTAssertNil(filled.next_before)
+    }
+
+    func testRowIdsAreStableAndUnique() {
+        let ids = Memecoin.candidateIds([row(0), row(1), row(0), row(0, version: 4)])
+        XCTAssertEqual(ids[0], "\(mint)|\(row(0).observed_at)|3")
+        XCTAssertEqual(ids[2], "\(ids[0])#1")
+        XCTAssertEqual(Set(ids).count, 4)
+        // A prepend does not change the ids of rows already shown.
+        let merged = Memecoin.prependCandidates(page(0, 3, next: "c"), page(-1, 2, next: "x"))
+        XCTAssertEqual(Array(Memecoin.candidateIds(merged.candidates).suffix(3)), Memecoin.candidateIds(page(0, 3).candidates))
+    }
+
+    func testTheAutoRefreshRunsOnlyWhileActiveAndUnlocked() {
+        XCTAssertTrue(Memecoin.autoRefreshes(active: true, lock: .unlocked))
+        XCTAssertFalse(Memecoin.autoRefreshes(active: false, lock: .unlocked)) // backgrounded or inactive
+        XCTAssertFalse(Memecoin.autoRefreshes(active: true, lock: .locked))
+        XCTAssertFalse(Memecoin.autoRefreshes(active: true, lock: .denied))
+        XCTAssertEqual(Memecoin.autoRefreshSeconds, 60)
+    }
+
+    func testTheAutoRefreshLoopRefreshesPerTickNeverOverlapsAndStopsWhenCancelled() async {
+        var ticks = 3
+        var calls = 0
+        var running = 0
+        var most = 0
+        let sleep: () async -> Bool = {
+            ticks -= 1
+            return ticks >= 0
+        }
+        let refresh: () async -> Void = {
+            calls += 1
+            running += 1
+            most = max(most, running)
+            await Task.yield()
+            running -= 1
+        }
+        // First activation: the page has just loaded, so only the ticks refresh.
+        await Memecoin.autoRefresh(first: true, sleep: sleep, refresh: refresh)
+        XCTAssertEqual(calls, 3)
+        XCTAssertEqual(most, 1)
+        // Active again: one refresh at once, then one per tick until cancelled.
+        ticks = 1
+        await Memecoin.autoRefresh(first: false, sleep: sleep, refresh: refresh)
+        XCTAssertEqual(calls, 5)
+        // Cancelled straight away (hidden or locked): only the comeback refresh.
+        ticks = 0
+        await Memecoin.autoRefresh(first: false, sleep: sleep, refresh: refresh)
+        XCTAssertEqual(calls, 6)
+        XCTAssertEqual(most, 1)
+    }
+
+    func testTheUpdatedLabelIsHoursAndMinutesInLocalTime() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Amsterdam")!
+        // 2026-11-01T08:05:00Z is 09:05 in Amsterdam.
+        XCTAssertEqual(Memecoin.updatedText(Date(timeIntervalSince1970: 1_793_520_300), calendar: calendar), "Updated 09:05")
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        XCTAssertEqual(Memecoin.updatedText(Date(timeIntervalSince1970: 1_793_520_300), calendar: calendar), "Updated 08:05")
+    }
+}

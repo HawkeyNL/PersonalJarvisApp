@@ -118,7 +118,25 @@ struct MemeCandidate: Decodable {
     let liquidity_usd: String?
 }
 
-struct MemeCandidates: Decodable { let candidates: [MemeCandidate] }
+struct MemeCandidates: Decodable {
+    var candidates: [MemeCandidate]
+    /// Core's cursor for older rows. Nil when Core sent none (older Core, last page) or one
+    /// that is not a valid cursor: both mean "no more pages".
+    var next_before: String?
+
+    private enum Keys: String, CodingKey { case candidates, next_before }
+
+    init(candidates: [MemeCandidate], next_before: String? = nil) {
+        self.candidates = candidates
+        self.next_before = next_before
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: Keys.self)
+        candidates = try container.decode([MemeCandidate].self, forKey: .candidates)
+        next_before = (try? container.decodeIfPresent(String.self, forKey: .next_before)).flatMap { Memecoin.isCursor($0) ? $0 : nil }
+    }
+}
 
 struct MemeTrade: Decodable {
     let mint: String
@@ -320,6 +338,13 @@ enum Memecoin {
     static let listLimit = 50
     static let overviewPath = "/v1/trading/meme/overview"
     static let candidatesPath = "/v1/trading/meme/candidates?limit=\(listLimit)"
+    /// The next older page; nil for anything that is not a cursor Core could have sent.
+    static func olderCandidatesPath(before: String) -> String? {
+        guard isCursor(before),
+              let cursor = before.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: alphanumerics + "-._~"))
+        else { return nil }
+        return "\(candidatesPath)&before=\(cursor)"
+    }
     static let tradesPath = "/v1/trading/meme/trades?limit=\(listLimit)"
     static let strategiesPath = "/v1/trading/meme/strategies"
     static let decisionsPath = "/v1/trading/meme/decisions?limit=\(listLimit)"
@@ -357,6 +382,89 @@ enum Memecoin {
     }
 
     private static let alphanumerics = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+
+    /// Core's opaque paging cursor: URL-safe ASCII, at most 128 bytes.
+    static func isCursor(_ value: String) -> Bool { matches(value, alphanumerics + "._~:-", max: 128) }
+
+    // MARK: Candidate paging and auto-refresh (desktop memecoin.ts)
+
+    /// Rows of candidate decisions kept on screen across "Load older" pages.
+    static let candidateCap = 500
+    static let capText = "Showing the newest 500 decisions."
+
+    static func capped(_ list: MemeCandidates) -> Bool { list.candidates.count >= candidateCap }
+
+    private static func candidateKey(_ c: MemeCandidate) -> String { "\(c.mint)|\(c.observed_at)|\(c.strategy_version)" }
+
+    /// Stable row ids (mint|observed_at|strategy_version). A repeat inside one page from
+    /// Core gets a "#n" suffix, so the ids stay unique.
+    static func candidateIds(_ rows: [MemeCandidate]) -> [String] {
+        var seen: [String: Int] = [:]
+        return rows.map { c in
+            let key = candidateKey(c)
+            let n = seen[key, default: 0]
+            seen[key] = n + 1
+            return n == 0 ? key : "\(key)#\(n)"
+        }
+    }
+
+    private static func fresh(_ rows: [MemeCandidate], over have: [MemeCandidate]) -> [MemeCandidate] {
+        var seen = Set(have.map(candidateKey))
+        return rows.filter { seen.insert(candidateKey($0)).inserted }
+    }
+
+    /// Append an older page: drop rows already shown, keep at most the cap and stop paging there.
+    static func appendCandidates(_ have: MemeCandidates, _ page: MemeCandidates) -> MemeCandidates {
+        let rows = Array((have.candidates + fresh(page.candidates, over: have.candidates)).prefix(candidateCap))
+        return MemeCandidates(candidates: rows, next_before: rows.count >= candidateCap ? nil : page.next_before)
+    }
+
+    /// Merge a fresh first page into what is shown: new rows go on top, loaded older pages
+    /// and their cursor stay. At the cap the oldest rows drop off and paging ends. A fresh
+    /// page with no overlap and more pages behind it leaves a gap: start over from it.
+    static func prependCandidates(_ have: MemeCandidates, _ page: MemeCandidates) -> MemeCandidates {
+        let new = fresh(page.candidates, over: have.candidates)
+        if have.candidates.isEmpty || (page.next_before != nil && new.count == page.candidates.count) { return page }
+        let rows = Array((new + have.candidates).prefix(candidateCap))
+        return MemeCandidates(candidates: rows, next_before: rows.count >= candidateCap ? nil : have.next_before)
+    }
+
+    /// Append an older page fetched from cursor `before`, only while that cursor is still the
+    /// shown one (a refresh or reset may have moved on).
+    static func appendOlder(_ have: Availability<MemeCandidates>, before: String, page: MemeCandidates) -> Availability<MemeCandidates> {
+        guard case let .ok(list) = have, list.next_before == before else { return have }
+        return .ok(appendCandidates(list, page))
+    }
+
+    /// Settle a finished read. A failure over shown data keeps it (returned as `quiet`, shown
+    /// without an alert). A background success merges with `merge`; a manual one replaces.
+    static func settle<Value>(_ have: Availability<Value>, _ next: Availability<Value>, background: Bool,
+                              merge: ((Value, Value) -> Value)? = nil) -> (state: Availability<Value>, quiet: Availability<Value>?) {
+        guard case let .ok(old) = have else { return (next, nil) }
+        guard case let .ok(new) = next else { return (have, next) }
+        return (.ok(background ? merge?(old, new) ?? new : new), nil)
+    }
+
+    /// The trader ticks every 60 s; the page follows while it is on screen, the app is in
+    /// the foreground and unlocked.
+    static let autoRefreshSeconds = 60
+    static func autoRefreshes(active: Bool, lock: AppLockState) -> Bool { active && lock == .unlocked }
+
+    /// The auto-refresh loop for one active stretch; it ends when `sleep` returns false
+    /// (the task was cancelled). Becoming active again refreshes once first, the first
+    /// activation does not because the page has just loaded. Sequential: never two at once.
+    @MainActor
+    static func autoRefresh(first: Bool, sleep: () async -> Bool, refresh: () async -> Void) async {
+        if !first { await refresh() }
+        while await sleep() { await refresh() }
+    }
+
+    /// "Updated 14:05", in local time.
+    static func updatedText(_ date: Date, calendar: Calendar = .current) -> String {
+        let parts = calendar.dateComponents([.hour, .minute], from: date)
+        func pad(_ n: Int?) -> String { n.map { $0 < 10 ? "0\($0)" : "\($0)" } ?? "00" }
+        return "Updated \(pad(parts.hour)):\(pad(parts.minute))"
+    }
 
     static func valid(_ o: MemeOverview) -> Bool {
         guard o.mode == "paper", optTime(o.paused_at), text(o.last_error) else { return false }
