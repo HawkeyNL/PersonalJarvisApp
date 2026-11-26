@@ -427,8 +427,14 @@ final class MemecoinPagingTests: XCTestCase {
         XCTAssertEqual(background.state.value?.candidates.count, 3)
         XCTAssertEqual(background.state.value?.next_before, "c1")
         if case .error(.network)? = background.quiet {} else { XCTFail("no quiet failure") }
-        // A manual reload shows the error, and its success starts from the first page again.
-        XCTAssertNil(Memecoin.settle(shown, .error(.network), background: false).state.value)
+        // A failed manual Refresh keeps the rows too; its success starts from the first page again.
+        let manual = Memecoin.settle(shown, .error(.unavailable), background: false, merge: Memecoin.prependCandidates)
+        XCTAssertEqual(manual.state.value?.candidates.count, 3)
+        if case .error(.unavailable)? = manual.quiet {} else { XCTFail("no quiet failure") }
+        // A failed first load has nothing to keep: the failed state shows.
+        let first = Memecoin.settle(Availability<MemeCandidates>.loading, .error(.network), background: false)
+        XCTAssertNil(first.quiet)
+        if case .error(.network) = first.state {} else { XCTFail("no failed state") }
         XCTAssertEqual(Memecoin.settle(shown, .ok(page(0, 1)), background: false, merge: Memecoin.prependCandidates).state.value?.candidates.count, 1)
         XCTAssertNil(Memecoin.settle(Availability<MemeCandidates>.loading, .error(.network), background: true).quiet)
     }
@@ -443,12 +449,27 @@ final class MemecoinPagingTests: XCTestCase {
         let gap = MemeCandidates(candidates: [row(-10)], next_before: "n")
         XCTAssertEqual(times(Memecoin.prependCandidates(have, gap)), times(gap))
         XCTAssertEqual(Memecoin.prependCandidates(page(0, 0), gap).next_before, "n")
-        // Capped: nothing is added any more.
+        // At the cap fresh rows still go on top and the oldest drop off; paging stays off.
         let capped = page(0, Memecoin.candidateCap)
-        XCTAssertEqual(times(Memecoin.prependCandidates(capped, MemeCandidates(candidates: [row(-1)]))), times(capped))
+        let atCap = Memecoin.prependCandidates(capped, MemeCandidates(candidates: [row(-2), row(-1), row(0)], next_before: "x"))
+        XCTAssertEqual(atCap.candidates.count, Memecoin.candidateCap)
+        XCTAssertEqual(Array(times(atCap).prefix(3)), [row(-2), row(-1), row(0)].map(\.observed_at))
+        XCTAssertEqual(times(atCap).last, row(Memecoin.candidateCap - 3).observed_at)
+        XCTAssertNil(atCap.next_before)
+        XCTAssertTrue(Memecoin.capped(atCap))
         let filled = Memecoin.prependCandidates(page(0, 499, next: "c"), MemeCandidates(candidates: [row(-2), row(-1), row(0)], next_before: "x"))
         XCTAssertEqual(filled.candidates.count, Memecoin.candidateCap)
         XCTAssertNil(filled.next_before)
+    }
+
+    func testRowIdsAreStableAndUnique() {
+        let ids = Memecoin.candidateIds([row(0), row(1), row(0), row(0, version: 4)])
+        XCTAssertEqual(ids[0], "\(mint)|\(row(0).observed_at)|3")
+        XCTAssertEqual(ids[2], "\(ids[0])#1")
+        XCTAssertEqual(Set(ids).count, 4)
+        // A prepend does not change the ids of rows already shown.
+        let merged = Memecoin.prependCandidates(page(0, 3, next: "c"), page(-1, 2, next: "x"))
+        XCTAssertEqual(Array(Memecoin.candidateIds(merged.candidates).suffix(3)), Memecoin.candidateIds(page(0, 3).candidates))
     }
 
     func testTheAutoRefreshRunsOnlyWhileActiveAndUnlocked() {

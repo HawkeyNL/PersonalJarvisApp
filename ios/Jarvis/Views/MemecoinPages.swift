@@ -35,16 +35,19 @@ private struct MemeRow: View {
     }
 }
 
-/// Rows in one list card.
+/// Rows in one list card, keyed on `ids` when given (stable across prepends), else on the index.
 private struct MemeList<Row: View>: View {
+    private struct Keyed: Identifiable { let index: Int; let id: String }
+
     let count: Int
+    var ids: [String]?
     @ViewBuilder let row: (Int) -> Row
 
     var body: some View {
-        VStack(spacing: 0) {
-            ForEach(0..<count, id: \.self) { index in
-                if index > 0 { ListDivider(inset: 0) }
-                row(index)
+        LazyVStack(spacing: 0) {
+            ForEach((0..<count).map { Keyed(index: $0, id: ids?[$0] ?? String($0)) }) { item in
+                if item.index > 0 { ListDivider(inset: 0) }
+                row(item.index)
             }
         }
         .jvCard(padding: 0)
@@ -350,7 +353,7 @@ struct MemecoinPage: View {
             if list.candidates.isEmpty {
                 tradingNote("No decisions recorded yet. A decision is recorded when a token's verdict changes.")
             } else {
-                MemeList(count: list.candidates.count) { index in
+                MemeList(count: list.candidates.count, ids: Memecoin.candidateIds(list.candidates)) { index in
                     let c = list.candidates[index]
                     MemeRow(title: Memecoin.shortMint(c.mint),
                             badge: Badge(text: c.verdict == .accept ? "Accepted" : "Rejected", style: c.verdict == .accept ? .accent : .neutral, dot: false),

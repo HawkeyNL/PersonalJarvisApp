@@ -396,6 +396,18 @@ enum Memecoin {
 
     private static func candidateKey(_ c: MemeCandidate) -> String { "\(c.mint)|\(c.observed_at)|\(c.strategy_version)" }
 
+    /// Stable row ids (mint|observed_at|strategy_version). A repeat inside one page from
+    /// Core gets a "#n" suffix, so the ids stay unique.
+    static func candidateIds(_ rows: [MemeCandidate]) -> [String] {
+        var seen: [String: Int] = [:]
+        return rows.map { c in
+            let key = candidateKey(c)
+            let n = seen[key, default: 0]
+            seen[key] = n + 1
+            return n == 0 ? key : "\(key)#\(n)"
+        }
+    }
+
     private static func fresh(_ rows: [MemeCandidate], over have: [MemeCandidate]) -> [MemeCandidate] {
         var seen = Set(have.map(candidateKey))
         return rows.filter { seen.insert(candidateKey($0)).inserted }
@@ -408,10 +420,9 @@ enum Memecoin {
     }
 
     /// Merge a fresh first page into what is shown: new rows go on top, loaded older pages
-    /// and their cursor stay. Once capped nothing is added. A fresh page with no overlap and
-    /// more pages behind it leaves a gap: start over from it.
+    /// and their cursor stay. At the cap the oldest rows drop off and paging ends. A fresh
+    /// page with no overlap and more pages behind it leaves a gap: start over from it.
     static func prependCandidates(_ have: MemeCandidates, _ page: MemeCandidates) -> MemeCandidates {
-        if capped(have) { return have }
         let new = fresh(page.candidates, over: have.candidates)
         if have.candidates.isEmpty || (page.next_before != nil && new.count == page.candidates.count) { return page }
         let rows = Array((new + have.candidates).prefix(candidateCap))
@@ -425,13 +436,13 @@ enum Memecoin {
         return .ok(appendCandidates(list, page))
     }
 
-    /// Settle a finished read. A background refresh over shown data keeps it on a failure
-    /// (returned as `quiet`, shown without an alert) and merges a success with `merge`.
+    /// Settle a finished read. A failure over shown data keeps it (returned as `quiet`, shown
+    /// without an alert). A background success merges with `merge`; a manual one replaces.
     static func settle<Value>(_ have: Availability<Value>, _ next: Availability<Value>, background: Bool,
                               merge: ((Value, Value) -> Value)? = nil) -> (state: Availability<Value>, quiet: Availability<Value>?) {
-        guard background, case let .ok(old) = have else { return (next, nil) }
+        guard case let .ok(old) = have else { return (next, nil) }
         guard case let .ok(new) = next else { return (have, next) }
-        return (.ok(merge?(old, new) ?? new), nil)
+        return (.ok(background ? merge?(old, new) ?? new : new), nil)
     }
 
     /// The trader ticks every 60 s; the page follows while it is on screen, the app is in
