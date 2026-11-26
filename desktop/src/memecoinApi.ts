@@ -97,14 +97,15 @@ async function fetchMeme(live: () => Promise<unknown>, fixture: (f: Fixtures, se
 
 /** Load one memecoin read, again whenever the dev data set changes. Only the
  *  newest request may set the state. `refresh` is the background variant: it
- *  keeps what is shown, merges with `merge` when given, and a failure only
- *  sets `quietFailure`. */
+ *  merges with `merge` when given, and a failure keeps what is shown and only
+ *  sets `quietFailure`; `keepShown` makes `reload` keep it on a failure too. */
 export function useMemeRead<T>(opts: {
   live: () => Promise<unknown>;
   fixture: (f: Fixtures, set: FixtureSet) => unknown;
   /** Response guard from memecoin.ts; null = invalid. */
   read: (x: unknown) => T | null;
   merge?: (have: T, fresh: T) => T;
+  keepShown?: boolean;
 }): { state: Ref<MemeRead<T>>; quietFailure: Ref<MemeFailure | null>; reload: () => Promise<void>; refresh: () => Promise<void> } {
   const state = ref({ kind: "loading" }) as Ref<MemeRead<T>>;
   const quietFailure = ref<MemeFailure | null>(null);
@@ -126,7 +127,9 @@ export function useMemeRead<T>(opts: {
     }
     if (id !== seq) return;
     settled = id;
-    const out = settleRead(state.value, next, background, opts.merge);
+    const out = settleRead(state.value, next, {
+      keep: background || !!opts.keepShown, merge: background ? opts.merge : undefined,
+    });
     state.value = out.state;
     quietFailure.value = out.quiet;
   }
@@ -145,7 +148,7 @@ export function useMemeRead<T>(opts: {
 export function useCandidates() {
   const read = useMemeRead<CandidatePage>({
     live: () => memeApi.candidates(), fixture: (f, set) => f.candidatesFixture(set), read: readCandidatePage,
-    merge: prependCandidates,
+    merge: prependCandidates, keepShown: true,
   });
   const { state } = read;
   const older = ref<{ loading: boolean; failure: MemeFailure | null }>({ loading: false, failure: null });

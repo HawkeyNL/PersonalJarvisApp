@@ -6,7 +6,7 @@ import DevDataToggle from "../components/trading/DevDataToggle.vue";
 import "../components/trading/trading.css";
 import { ageText, asOfText, formatDecimal, formatPrice, signTone } from "../trading";
 import {
-  EXIT_REASONS, REJECT_REASONS, RESUME_TEXT, agentStatus, autoRefresher, candidatesCapped, failureText, goalPct, memeStatus,
+  EXIT_REASONS, REJECT_REASONS, RESUME_TEXT, agentStatus, autoRefresher, candidateKey, candidatesCapped, failureText, goalPct, memeStatus,
   progressPct, readOverview, readTrades, reasonLabel, reportAge, sendPause, shortMint, stuckCount, updatedText, usd, type PauseOutcome,
 } from "../memecoin";
 import { memeApi, useCandidates, useMemeRead } from "../memecoinApi";
@@ -17,13 +17,13 @@ import { MEME_DATA_SETS, devDataSet } from "../tradingApi";
 // simulation with no wallet; nothing here may suggest real money or live
 // trading. Off by default, so "Off" is the state most owners see first.
 const { state: overview, quietFailure: overviewQuiet, reload: reloadOverview, refresh: refreshOverview } = useMemeRead({
-  live: memeApi.overview, fixture: (f, set) => f.overviewFixture(set), read: readOverview,
+  live: memeApi.overview, fixture: (f, set) => f.overviewFixture(set), read: readOverview, keepShown: true,
 });
 const {
   state: candidates, quietFailure: candidatesQuiet, older, reload: reloadCandidates, refresh: refreshCandidates, loadOlder,
 } = useCandidates();
 const { state: trades, quietFailure: tradesQuiet, reload: reloadTrades, refresh: refreshTrades } = useMemeRead({
-  live: memeApi.trades, fixture: (f, set) => f.tradesFixture(set), read: readTrades,
+  live: memeApi.trades, fixture: (f, set) => f.tradesFixture(set), read: readTrades, keepShown: true,
 });
 const candidatesNote = computed(() => older.value.failure ?? candidatesQuiet.value);
 
@@ -357,7 +357,7 @@ const plural = (n: number, one: string, many: string) => `${formatDecimal(String
             <tr><th scope="col">Seen</th><th scope="col">Token</th><th scope="col">Decision</th><th scope="col">Reason</th><th scope="col" class="r">Price</th><th scope="col" class="r">Liquidity</th></tr>
           </thead>
           <tbody>
-            <tr v-for="(c, i) in candidates.data.rows" :key="`${c.mint}-${c.observed_at}-${i}`">
+            <tr v-for="c in candidates.data.rows" :key="candidateKey(c)">
               <td class="t-sm"><time :datetime="c.observed_at">{{ asOfText(c.observed_at, now) }}</time></td>
               <td><span class="mono" :title="c.mint">{{ shortMint(c.mint) }}</span></td>
               <td><span class="badge" :class="{ acc: c.verdict === 'accept' }">{{ c.verdict === "accept" ? "Accepted" : "Rejected" }}</span></td>

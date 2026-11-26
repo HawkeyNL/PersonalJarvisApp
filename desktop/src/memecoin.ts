@@ -221,29 +221,29 @@ export function readCandidatePage(x: unknown): CandidatePage | null {
   const rows = readCandidates(x);
   if (!rows) return null;
   const next = (x as Obj).next_before;
-  return { rows, next: isCursor(next) ? next : null };
+  return { rows: unseen(new Set(), rows), next: isCursor(next) ? next : null };
 }
 
-const candidateKey = (c: Candidate) => `${c.mint}|${c.observed_at}|${c.strategy_version}`;
+/** One decision: also the row key on screen. */
+export const candidateKey = (c: Candidate) => `${c.mint}|${c.observed_at}|${c.strategy_version}`;
+/** Rows whose key is not in `seen` yet; adds their keys. */
+const unseen = (seen: Set<string>, rows: Candidate[]) => rows.filter((c) => !seen.has(candidateKey(c)) && !!seen.add(candidateKey(c)));
 
 /** Append an older page: drop rows already shown, keep at most CANDIDATE_CAP
  *  and stop paging once the cap is reached. */
 export function appendCandidates(have: CandidatePage, page: CandidatePage): CandidatePage {
-  const seen = new Set(have.rows.map(candidateKey));
-  const fresh = page.rows.filter((c) => !seen.has(candidateKey(c)) && !!seen.add(candidateKey(c)));
-  const rows = [...have.rows, ...fresh].slice(0, CANDIDATE_CAP);
+  const rows = [...have.rows, ...unseen(new Set(have.rows.map(candidateKey)), page.rows)].slice(0, CANDIDATE_CAP);
   return { rows, next: rows.length >= CANDIDATE_CAP ? null : page.next };
 }
 
 export const candidatesCapped = (p: CandidatePage) => p.rows.length >= CANDIDATE_CAP;
 
 /** Merge a fresh first page into what is shown: new rows go on top, loaded
- *  older pages and their cursor stay. Once capped nothing is added. A fresh
- *  page with no overlap and more pages behind it leaves a gap: start over. */
+ *  older pages and their cursor stay. At the cap the oldest rows drop off and
+ *  paging ends. A fresh page with no overlap and more pages behind it leaves
+ *  a gap: start over. */
 export function prependCandidates(have: CandidatePage, page: CandidatePage): CandidatePage {
-  if (candidatesCapped(have)) return have;
-  const seen = new Set(have.rows.map(candidateKey));
-  const fresh = page.rows.filter((c) => !seen.has(candidateKey(c)) && !!seen.add(candidateKey(c)));
+  const fresh = unseen(new Set(have.rows.map(candidateKey)), page.rows);
   if (!have.rows.length || (page.next && fresh.length === page.rows.length)) return page;
   const rows = [...fresh, ...have.rows].slice(0, CANDIDATE_CAP);
   return { rows, next: rows.length >= CANDIDATE_CAP ? null : have.next };
@@ -251,14 +251,14 @@ export function prependCandidates(have: CandidatePage, page: CandidatePage): Can
 
 export type MemeRead<T> = { kind: "loading" } | { kind: "failed"; failure: MemeFailure } | { kind: "ok"; data: T };
 
-/** Settle a finished read. A background refresh over shown data keeps it on a
- *  failure (reported as `quiet`) and merges a success when `merge` is given. */
+/** Settle a finished read. With `keep`, a failure over shown data keeps it
+ *  (reported as `quiet`); with `merge`, a success merges into it. */
 export function settleRead<T>(
-  have: MemeRead<T>, next: MemeRead<T>, background: boolean, merge?: (have: T, fresh: T) => T,
+  have: MemeRead<T>, next: MemeRead<T>, opts: { keep: boolean; merge?: (have: T, fresh: T) => T },
 ): { state: MemeRead<T>; quiet: MemeFailure | null } {
-  if (!background || have.kind !== "ok") return { state: next, quiet: null };
-  if (next.kind === "failed") return { state: have, quiet: next.failure };
-  if (next.kind === "ok" && merge) return { state: { kind: "ok", data: merge(have.data, next.data) }, quiet: null };
+  if (have.kind !== "ok") return { state: next, quiet: null };
+  if (next.kind === "failed") return opts.keep ? { state: have, quiet: next.failure } : { state: next, quiet: null };
+  if (next.kind === "ok" && opts.merge) return { state: { kind: "ok", data: opts.merge(have.data, next.data) }, quiet: null };
   return { state: next, quiet: null };
 }
 

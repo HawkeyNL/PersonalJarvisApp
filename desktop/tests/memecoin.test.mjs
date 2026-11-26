@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  AUTO_REFRESH_MS, CANDIDATE_CAP, MEME_LIMITS, appendCandidates, appendOlder, autoRefresher, candidatesCapped, isCursor,
+  AUTO_REFRESH_MS, CANDIDATE_CAP, MEME_LIMITS, appendCandidates, appendOlder, autoRefresher, candidateKey, candidatesCapped, isCursor,
   prependCandidates, readCandidatePage, settleRead, updatedText, failureText, goalPct, memeFailure, memeStatus, progressPct, readCandidates, readOverview, readTrades,
   reasonLabel, REJECT_REASONS, reportAge, sendPause, shortMint, stuckCount, usd,
 } from "../src/memecoin.ts";
@@ -220,6 +220,9 @@ test("older pages append without duplicates and keep the new cursor", () => {
   // Same mint and time but another strategy version is another decision.
   assert.equal(appendCandidates(have, { rows: [row(2, { strategy_version: 4 })], next: null }).rows.length, 4);
   assert.equal(appendCandidates(have, pageOf(3, 1)).next, null); // last page: no button
+  // A page that repeats a row itself still yields unique row keys.
+  assert.equal(readCandidatePage({ candidates: [row(0), row(0), row(1)] }).rows.length, 2);
+  assert.equal(candidateKey(row(0)), `${row(0).mint}|${row(0).observed_at}|3`);
 });
 
 test("rows stop at the cap and paging ends there", () => {
@@ -238,14 +241,16 @@ test("a late older page is appended only while its cursor is still shown", () =>
   assert.deepEqual(appendOlder({ kind: "loading" }, "c1", pageOf(2, 2)), { kind: "loading" });
 });
 
-test("a failed refresh keeps the rows and reports quietly", () => {
+test("a failed refresh, background or manual, keeps the rows and reports quietly", () => {
   const ok = { kind: "ok", data: pageOf(0, 3, "c1") };
   const failed = { kind: "failed", failure: "unreachable" };
-  assert.deepEqual(settleRead(ok, failed, true, prependCandidates), { state: ok, quiet: "unreachable" });
-  assert.deepEqual(settleRead(ok, failed, false), { state: failed, quiet: null }); // a manual reload shows the error
-  assert.deepEqual(settleRead({ kind: "loading" }, failed, true), { state: failed, quiet: null });
+  assert.deepEqual(settleRead(ok, failed, { keep: true, merge: prependCandidates }), { state: ok, quiet: "unreachable" });
+  assert.deepEqual(settleRead(ok, failed, { keep: true }), { state: ok, quiet: "unreachable" }); // manual Refresh
+  assert.deepEqual(settleRead(ok, failed, { keep: false }), { state: failed, quiet: null }); // pages that do not opt in
+  assert.deepEqual(settleRead({ kind: "loading" }, failed, { keep: true }), { state: failed, quiet: null }); // nothing shown yet
   const fresh = { kind: "ok", data: pageOf(0, 1) };
-  assert.equal(settleRead(ok, fresh, false, prependCandidates).state, fresh); // manual reload: first page again
+  assert.equal(settleRead(ok, fresh, { keep: true }).state, fresh); // manual reload: first page again
+  assert.equal(settleRead(ok, fresh, { keep: true, merge: prependCandidates }).state.data.rows.length, 3);
 });
 
 test("a background refresh prepends new rows and keeps older pages and their cursor", () => {
@@ -258,9 +263,14 @@ test("a background refresh prepends new rows and keeps older pages and their cur
   const gap = { rows: [row(-10)], next: "n" };
   assert.equal(prependCandidates(have, gap), gap);
   assert.equal(prependCandidates(pageOf(0, 0), gap), gap); // nothing shown yet
-  // Capped: nothing is added any more.
+  // Capped: new rows still go on top, the oldest drop off, paging stays off.
   const capped = pageOf(0, CANDIDATE_CAP);
-  assert.equal(prependCandidates(capped, { rows: [row(-1)], next: null }), capped);
+  const moved = prependCandidates(capped, { rows: [row(-2), row(-1), row(0)], next: "first-page-cursor" });
+  assert.equal(moved.rows.length, CANDIDATE_CAP);
+  assert.deepEqual([moved.rows[0], moved.rows[1], moved.rows[2]].map((c) => c.observed_at), [-2, -1, 0].map((i) => row(i).observed_at));
+  assert.equal(moved.rows.at(-1).observed_at, row(CANDIDATE_CAP - 3).observed_at);
+  assert.equal(moved.next, null);
+  assert.ok(candidatesCapped(moved));
   const filled = prependCandidates(pageOf(0, 499, "c"), { rows: [row(-2), row(-1), row(0)], next: "x" });
   assert.equal(filled.rows.length, CANDIDATE_CAP);
   assert.equal(filled.next, null);
