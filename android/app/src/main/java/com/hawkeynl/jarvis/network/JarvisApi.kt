@@ -107,7 +107,9 @@ interface JarvisApi {
      *  Memecoin.kt and MemeStrategies.kt. Pause and disable answer Core's raw JSON, which only
      *  counts when it confirms. */
     suspend fun memeOverview(endpoint: HomeNodeEndpoint, token: String): ApiResult<MemeOverview> = ApiResult.InvalidResponse("Not supported")
-    suspend fun memeCandidates(endpoint: HomeNodeEndpoint, token: String): ApiResult<List<Candidate>> = ApiResult.InvalidResponse("Not supported")
+    /** [before] is a cursor Core sent (checked with isCursor). */
+    suspend fun memeCandidates(endpoint: HomeNodeEndpoint, token: String, before: String? = null): ApiResult<CandidatePage> =
+        ApiResult.InvalidResponse("Not supported")
     suspend fun memeTrades(endpoint: HomeNodeEndpoint, token: String): ApiResult<List<ClosedTrade>> = ApiResult.InvalidResponse("Not supported")
     /** Tightening only: stops new paper entries. There is no resume route. */
     suspend fun memePause(endpoint: HomeNodeEndpoint, token: String): ApiResult<kotlinx.serialization.json.JsonElement> =

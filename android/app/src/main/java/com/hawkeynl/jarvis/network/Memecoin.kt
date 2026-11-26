@@ -1,8 +1,12 @@
 package com.hawkeynl.jarvis.network
 
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -13,7 +17,9 @@ import kotlinx.serialization.json.JsonPrimitive
 // decimal rules come from Trading.kt.
 //
 //   GET  /v1/trading/meme/overview          -> MemeOverview (raw shape below)
-//   GET  /v1/trading/meme/candidates?limit= -> { candidates: Candidate[] }
+//   GET  /v1/trading/meme/candidates?limit=&before=
+//        -> { candidates: Candidate[], next_before?: cursor } (next_before only when older
+//           rows exist; older Core never sends it)
 //   GET  /v1/trading/meme/trades?limit=     -> { trades: ClosedTrade[] }
 //   POST /v1/trading/meme/pause             -> { paused: true }
 // It is a simulation: no wallet, no signer, no execution path. The pause only stops new paper
@@ -154,6 +160,106 @@ fun readCandidates(x: JsonElement): List<Candidate>? = guarded {
         )
     }
 }
+
+/** Rows of candidate decisions kept on screen across "Load older" pages. */
+const val CANDIDATE_CAP = 500
+
+data class CandidatePage(val rows: List<Candidate>, val next: String?)
+
+private val CURSOR = Regex("^[A-Za-z0-9._~:-]{1,128}$")
+
+/** Core's opaque paging cursor. Anything else means "no more pages". */
+fun isCursor(x: String?): Boolean = x != null && CURSOR.matches(x)
+
+fun readCandidatePage(x: JsonElement): CandidatePage? {
+    val rows = readCandidates(x) ?: return null
+    val next = ((x as JsonObject)["next_before"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    return CandidatePage(rows, next?.takeIf(::isCursor))
+}
+
+private fun Candidate.key() = Triple(mint, observedAt, strategyVersion)
+
+fun candidatesCapped(p: CandidatePage) = p.rows.size >= CANDIDATE_CAP
+
+/** Append an older page: drop rows already shown, keep at most [CANDIDATE_CAP] and stop
+ *  paging once the cap is reached. */
+fun appendCandidates(have: CandidatePage, page: CandidatePage): CandidatePage {
+    val seen = have.rows.mapTo(HashSet()) { it.key() }
+    val rows = (have.rows + page.rows.filter { seen.add(it.key()) }).take(CANDIDATE_CAP)
+    return CandidatePage(rows, if (rows.size >= CANDIDATE_CAP) null else page.next)
+}
+
+/** Merge a fresh first page into what is shown: new rows go on top, loaded older pages and
+ *  their cursor stay. Once capped nothing is added. A fresh page with no overlap and more
+ *  pages behind it leaves a gap: start over from it. */
+fun prependCandidates(have: CandidatePage, page: CandidatePage): CandidatePage {
+    if (candidatesCapped(have)) return have
+    val seen = have.rows.mapTo(HashSet()) { it.key() }
+    val fresh = page.rows.filter { seen.add(it.key()) }
+    if (have.rows.isEmpty() || (page.next != null && fresh.size == page.rows.size)) return page
+    val rows = (fresh + have.rows).take(CANDIDATE_CAP)
+    return CandidatePage(rows, if (rows.size >= CANDIDATE_CAP) null else have.next)
+}
+
+/** One read's state on a memecoin page. */
+sealed interface MemeRead<out T> {
+    data object Loading : MemeRead<Nothing>
+    data class Failed(val failure: MemeFailure) : MemeRead<Nothing>
+    data class Ok<T>(val data: T) : MemeRead<T>
+}
+
+data class Settled<T>(val state: MemeRead<T>, val quiet: MemeFailure?)
+
+/** Settle a finished read. A background refresh over shown data keeps it on a failure
+ *  (reported as `quiet`) and merges a success when [merge] is given. */
+fun <T> settleRead(have: MemeRead<T>, next: MemeRead<T>, background: Boolean, merge: ((T, T) -> T)? = null): Settled<T> {
+    if (!background || have !is MemeRead.Ok) return Settled(next, null)
+    if (next is MemeRead.Failed) return Settled(have, next.failure)
+    if (next is MemeRead.Ok && merge != null) return Settled(MemeRead.Ok(merge(have.data, next.data)), null)
+    return Settled(next, null)
+}
+
+/** Append an older page fetched from cursor [before], only while that cursor is still the
+ *  shown one (a refresh or reset may have moved on). */
+fun appendOlder(have: MemeRead<CandidatePage>, before: String, page: CandidatePage): MemeRead<CandidatePage> =
+    if (have is MemeRead.Ok && have.data.next == before) MemeRead.Ok(appendCandidates(have.data, page)) else have
+
+// ---- auto-refresh -------------------------------------------------------
+
+/** The trader ticks every 60 s; the page follows while it is in view. */
+const val AUTO_REFRESH_MS = 60_000L
+
+/** Run [refresh] every [everyMs] while active; one loop, so never two at once. Becoming
+ *  active again refreshes once, then restarts the timer; the first activation does not,
+ *  because the page has just loaded. Inactive cancels the loop. */
+class AutoRefresher(private val scope: CoroutineScope, private val everyMs: Long = AUTO_REFRESH_MS, private val refresh: suspend () -> Unit) {
+    private var loop: kotlinx.coroutines.Job? = null
+    private var started = false
+
+    /** Call whenever visibility or the lock changes; false also stops it. */
+    fun setActive(on: Boolean) {
+        if (on == (loop != null)) return
+        if (!on) {
+            loop?.cancel()
+            loop = null
+            return
+        }
+        val now = started
+        started = true
+        loop = scope.launch {
+            if (now) refresh()
+            while (true) {
+                delay(everyMs)
+                refresh()
+            }
+        }
+    }
+}
+
+private val HHMM = DateTimeFormatter.ofPattern("HH:mm")
+
+/** "Updated 14:05", in local time. */
+fun updatedText(millis: Long, zone: ZoneId = ZoneId.systemDefault()): String = "Updated ${HHMM.format(Instant.ofEpochMilli(millis).atZone(zone))}"
 
 fun readTrades(x: JsonElement): List<ClosedTrade>? = guarded {
     x.obj().array("trades", MemeLimits.LIST).map {

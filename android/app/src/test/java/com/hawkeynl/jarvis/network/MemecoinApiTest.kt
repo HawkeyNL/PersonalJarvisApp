@@ -39,9 +39,10 @@ class MemecoinApiTest {
 
     @Test fun `lists ask for 50 rows`() = runTest {
         val (candidates, cEngine) = api(body = """{"candidates":[]}""")
-        assertEquals(ApiResult.Success(emptyList<Candidate>()), candidates.memeCandidates(endpoint, "t"))
+        assertEquals(ApiResult.Success(CandidatePage(emptyList(), null)), candidates.memeCandidates(endpoint, "t"))
         assertEquals("/v1/trading/meme/candidates", cEngine.requestHistory.single().url.encodedPath)
         assertEquals("50", cEngine.requestHistory.single().url.parameters["limit"])
+        assertEquals(null, cEngine.requestHistory.single().url.parameters["before"]) // only after a next_before
         val (trades, tEngine) = api(body = """{"trades":[]}""")
         assertEquals(ApiResult.Success(emptyList<ClosedTrade>()), trades.memeTrades(endpoint, "t"))
         assertEquals("50", tEngine.requestHistory.single().url.parameters["limit"])
@@ -49,6 +50,19 @@ class MemecoinApiTest {
         assertEquals(ApiResult.Success(emptyList<Decision>()), decisions.memeDecisions(endpoint, "t"))
         assertEquals("/v1/trading/meme/decisions", dEngine.requestHistory.single().url.encodedPath)
         assertEquals("50", dEngine.requestHistory.single().url.parameters["limit"])
+    }
+
+    @Test fun `older candidate pages send the cursor URL-encoded and bad cursors never leave`() = runTest {
+        val (meme, engine) = api(body = """{"candidates":[],"next_before":"c2"}""")
+        assertEquals(ApiResult.Success(CandidatePage(emptyList(), "c2")), meme.memeCandidates(endpoint, "t", "MjAy:Mw.~_-"))
+        val url = engine.requestHistory.single().url
+        assertEquals("MjAy:Mw.~_-", url.parameters["before"])
+        assertEquals("50", url.parameters["limit"])
+        for (bad in listOf("", "a b", "a&limit=1", "x".repeat(129))) {
+            val (m, e) = api(body = """{"candidates":[]}""")
+            assertTrue(bad, m.memeCandidates(endpoint, "t", bad) is ApiResult.InvalidResponse)
+            assertTrue(bad, e.requestHistory.isEmpty())
+        }
     }
 
     @Test fun `pause and disable post and hand back Core's raw answer`() = runTest {
