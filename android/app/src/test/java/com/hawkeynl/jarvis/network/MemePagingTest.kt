@@ -65,14 +65,18 @@ class MemePagingTest {
         assertEquals(MemeRead.Loading, appendOlder(MemeRead.Loading, "c1", pageOf(2, 2)))
     }
 
-    @Test fun `a failed refresh keeps the rows and reports quietly`() {
+    @Test fun `a failed refresh or reload keeps the rows and reports quietly`() {
         val ok: MemeRead<CandidatePage> = MemeRead.Ok(pageOf(0, 3, "c1"))
         val failed = MemeRead.Failed(MemeFailure.UNREACHABLE)
+        // Background refresh (merging) and manual Refresh (not merging) both keep the rows.
         assertEquals(Settled(ok, MemeFailure.UNREACHABLE), settleRead(ok, failed, true, ::prependCandidates))
-        assertEquals(Settled<CandidatePage>(failed, null), settleRead(ok, failed, false)) // a manual reload shows the error
+        assertEquals(Settled(ok, MemeFailure.UNREACHABLE), settleRead(ok, failed, true))
+        // A failed first load, with nothing shown, is the failed state.
         assertEquals(Settled<CandidatePage>(failed, null), settleRead<CandidatePage>(MemeRead.Loading, failed, true))
+        // Pages that do not keep their data show the error.
+        assertEquals(Settled<CandidatePage>(failed, null), settleRead(ok, failed, false))
         val fresh = MemeRead.Ok(pageOf(0, 1))
-        assertEquals(fresh, settleRead(ok, fresh, false, ::prependCandidates).state) // manual reload: first page again
+        assertEquals(Settled<CandidatePage>(fresh, null), settleRead(ok, fresh, true)) // manual reload: first page again
     }
 
     @Test fun `a background refresh prepends new rows and keeps older pages and their cursor`() {
@@ -85,9 +89,14 @@ class MemePagingTest {
         val gap = CandidatePage(listOf(row(-10)), "n")
         assertSame(gap, prependCandidates(have, gap))
         assertSame(gap, prependCandidates(pageOf(0, 0), gap)) // nothing shown yet
-        // Capped: nothing is added any more.
+        // At the cap new rows still go on top; the oldest are trimmed and paging ends.
         val capped = pageOf(0, CANDIDATE_CAP)
-        assertSame(capped, prependCandidates(capped, CandidatePage(listOf(row(-1)), null)))
+        val topped = prependCandidates(capped, CandidatePage(listOf(row(-1), row(0)), "first-page-cursor"))
+        assertEquals(CANDIDATE_CAP, topped.rows.size)
+        assertEquals(row(-1).observedAt, topped.rows.first().observedAt)
+        assertEquals(row(CANDIDATE_CAP - 2).observedAt, topped.rows.last().observedAt)
+        assertNull(topped.next)
+        assertTrue(candidatesCapped(topped))
         val filled = prependCandidates(pageOf(0, 499, "c"), CandidatePage(listOf(row(-2), row(-1), row(0)), "x"))
         assertEquals(CANDIDATE_CAP, filled.rows.size)
         assertNull(filled.next)
@@ -128,6 +137,18 @@ class MemePagingTest {
         advanceTimeBy(4 * AUTO_REFRESH_MS) // ticks at 60 s; the first refresh runs until 240 s
         assertEquals(1, calls)
         assertEquals(1, most)
+        auto.setActive(false)
+    }
+
+    @Test fun `one failing refresh ends neither the loop nor the app`() = runTest {
+        var calls = 0
+        val auto = AutoRefresher(backgroundScope, AUTO_REFRESH_MS) {
+            calls++
+            if (calls == 1) throw IllegalStateException("boom")
+        }
+        auto.setActive(true)
+        advanceTimeBy(2 * AUTO_REFRESH_MS + 1)
+        assertEquals(2, calls)
         auto.setActive(false)
     }
 

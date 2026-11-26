@@ -4,6 +4,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -190,10 +191,9 @@ fun appendCandidates(have: CandidatePage, page: CandidatePage): CandidatePage {
 }
 
 /** Merge a fresh first page into what is shown: new rows go on top, loaded older pages and
- *  their cursor stay. Once capped nothing is added. A fresh page with no overlap and more
- *  pages behind it leaves a gap: start over from it. */
+ *  their cursor stay. At the cap the oldest rows are trimmed and paging ends. A fresh page
+ *  with no overlap and more pages behind it leaves a gap: start over from it. */
 fun prependCandidates(have: CandidatePage, page: CandidatePage): CandidatePage {
-    if (candidatesCapped(have)) return have
     val seen = have.rows.mapTo(HashSet()) { it.key() }
     val fresh = page.rows.filter { seen.add(it.key()) }
     if (have.rows.isEmpty() || (page.next != null && fresh.size == page.rows.size)) return page
@@ -210,11 +210,11 @@ sealed interface MemeRead<out T> {
 
 data class Settled<T>(val state: MemeRead<T>, val quiet: MemeFailure?)
 
-/** Settle a finished read. A background refresh over shown data keeps it on a failure
- *  (reported as `quiet`) and merges a success when [merge] is given. */
-fun <T> settleRead(have: MemeRead<T>, next: MemeRead<T>, background: Boolean, merge: ((T, T) -> T)? = null): Settled<T> {
-    if (!background || have !is MemeRead.Ok) return Settled(next, null)
-    if (next is MemeRead.Failed) return Settled(have, next.failure)
+/** Settle a finished read. With [keep], a failure over shown data keeps it (reported as
+ *  `quiet`); a success is merged with [merge] when given, else replaces it. */
+fun <T> settleRead(have: MemeRead<T>, next: MemeRead<T>, keep: Boolean, merge: ((T, T) -> T)? = null): Settled<T> {
+    if (have !is MemeRead.Ok) return Settled(next, null)
+    if (next is MemeRead.Failed) return if (keep) Settled(have, next.failure) else Settled(next, null)
     if (next is MemeRead.Ok && merge != null) return Settled(MemeRead.Ok(merge(have.data, next.data)), null)
     return Settled(next, null)
 }
@@ -247,11 +247,22 @@ class AutoRefresher(private val scope: CoroutineScope, private val everyMs: Long
         val now = started
         started = true
         loop = scope.launch {
-            if (now) refresh()
+            if (now) tick()
             while (true) {
                 delay(everyMs)
-                refresh()
+                tick()
             }
+        }
+    }
+
+    /** One refresh; an exception ends neither the loop nor the app. */
+    private suspend fun tick() {
+        try {
+            refresh()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // The reads keep their own failure state.
         }
     }
 }
