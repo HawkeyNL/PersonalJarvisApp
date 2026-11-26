@@ -11,6 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
@@ -27,13 +28,20 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.currentStateAsState
 import com.hawkeynl.jarvis.network.ApiResult
+import com.hawkeynl.jarvis.network.Candidate
+import com.hawkeynl.jarvis.network.AutoRefresher
 import com.hawkeynl.jarvis.network.ENABLE_ELSEWHERE
 import com.hawkeynl.jarvis.network.EXIT_REASONS
 import com.hawkeynl.jarvis.network.FAMILY_LABEL
 import com.hawkeynl.jarvis.network.HomeNodeEndpoint
 import com.hawkeynl.jarvis.network.JarvisApi
 import com.hawkeynl.jarvis.network.MemeFailure
+import com.hawkeynl.jarvis.network.MemeRead
 import com.hawkeynl.jarvis.network.MemeReport
 import com.hawkeynl.jarvis.network.MemeStatusKind
 import com.hawkeynl.jarvis.network.MemeTone
@@ -45,8 +53,10 @@ import com.hawkeynl.jarvis.network.StrategyVersion
 import com.hawkeynl.jarvis.network.WriteOutcome
 import com.hawkeynl.jarvis.network.ageText
 import com.hawkeynl.jarvis.network.agentStatus
+import com.hawkeynl.jarvis.network.appendOlder
 import com.hawkeynl.jarvis.network.asOfText
 import com.hawkeynl.jarvis.network.bpsPct
+import com.hawkeynl.jarvis.network.candidatesCapped
 import com.hawkeynl.jarvis.network.clock
 import com.hawkeynl.jarvis.network.decisionView
 import com.hawkeynl.jarvis.network.disableOutcome
@@ -57,16 +67,21 @@ import com.hawkeynl.jarvis.network.memeFailure
 import com.hawkeynl.jarvis.network.memeFailureText
 import com.hawkeynl.jarvis.network.memeStatus
 import com.hawkeynl.jarvis.network.pauseOutcome
+import com.hawkeynl.jarvis.network.prependCandidates
 import com.hawkeynl.jarvis.network.progressPct
 import com.hawkeynl.jarvis.network.reasonLabel
 import com.hawkeynl.jarvis.network.reportAge
+import com.hawkeynl.jarvis.network.settleRead
 import com.hawkeynl.jarvis.network.shortMint
 import com.hawkeynl.jarvis.network.strategyState
 import com.hawkeynl.jarvis.network.stuckCount
 import com.hawkeynl.jarvis.network.unconfirmedOutcome
+import com.hawkeynl.jarvis.network.updatedText
 import com.hawkeynl.jarvis.network.usd
 import com.hawkeynl.jarvis.network.versionOwner
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 // Memecoin (desktop TradingMemecoin.vue, TradingMemeStrategies.vue, TradingMemeStrategy.vue):
@@ -110,46 +125,118 @@ private suspend fun guardedWrite(left: Unconfirmed, sentAt: String, sending: () 
     }
 }
 
-private sealed interface MemeRead<out T> {
-    data object Loading : MemeRead<Nothing>
-    data class Failed(val failure: MemeFailure) : MemeRead<Nothing>
-    data class Ok<T>(val data: T) : MemeRead<T>
-}
-
 /** One memecoin read. A reload keeps what is on screen; only the first load shows loading.
- *  Only the newest request may set the state; a null answer (locked or signed out) leaves it. */
-private class MemeLoader<T>(private val actions: JarvisViewModel, private val call: suspend JarvisApi.(HomeNodeEndpoint, String) -> ApiResult<T>) {
+ *  Only the newest request may set the state; a null answer (locked or signed out) leaves it.
+ *  With [keepShown], a failed reload keeps the shown data and only sets [quiet]. [refresh] is
+ *  the background variant: it always keeps what is shown, merges with [merge] when given, and
+ *  never replaces a read still running. */
+private class MemeLoader<T>(
+    private val actions: JarvisViewModel,
+    private val keepShown: Boolean = false,
+    private val merge: ((T, T) -> T)? = null,
+    private val call: suspend JarvisApi.(HomeNodeEndpoint, String) -> ApiResult<T>,
+) {
     var state by mutableStateOf<MemeRead<T>>(MemeRead.Loading)
+    var quiet by mutableStateOf<MemeFailure?>(null)
+        private set
+    /** When Core last answered this read. */
+    var updatedAt by mutableStateOf<Long?>(null)
         private set
     private var seq = 0
+    private var running = 0
+
+    suspend fun load() = run(false)
+
+    suspend fun refresh() {
+        if (running == 0) run(true)
+    }
+
+    private suspend fun run(background: Boolean) {
+        val mine = ++seq
+        if (!background && state !is MemeRead.Ok) state = MemeRead.Loading
+        running++
+        val result = (try { actions.jobs(call) } finally { running-- }) ?: return
+        if (mine != seq) return
+        val next = if (result is ApiResult.Success) MemeRead.Ok(result.value) else MemeRead.Failed(memeFailure(result))
+        if (result is ApiResult.Success) updatedAt = System.currentTimeMillis()
+        val out = settleRead(state, next, background || keepShown, if (background) merge else null)
+        state = out.state
+        quiet = out.quiet
+    }
+}
+
+/** Candidate decisions with "Load older" paging. [load] starts again from the first page;
+ *  `read.refresh()` merges a fresh first page on top. */
+private class CandidatesLoader(private val actions: JarvisViewModel) {
+    val read = MemeLoader(actions, keepShown = true, merge = ::prependCandidates) { e, t -> memeCandidates(e, t) }
+    var olderLoading by mutableStateOf(false)
+        private set
+    var olderFailure by mutableStateOf<MemeFailure?>(null)
+        private set
+    private var gen = 0 // bumped by every reset; a page from an older generation is dropped
 
     suspend fun load() {
-        val mine = ++seq
-        if (state !is MemeRead.Ok) state = MemeRead.Loading
-        val result = actions.jobs(call) ?: return
-        if (mine == seq) state = if (result is ApiResult.Success) MemeRead.Ok(result.value) else MemeRead.Failed(memeFailure(result))
+        gen++
+        olderLoading = false
+        olderFailure = null
+        read.load()
+    }
+
+    suspend fun loadOlder() {
+        val before = (read.state as? MemeRead.Ok)?.data?.next ?: return
+        if (olderLoading) return
+        val mine = gen
+        olderLoading = true
+        olderFailure = null
+        val result = (try { actions.jobs { e, t -> memeCandidates(e, t, before) } } finally { if (mine == gen) olderLoading = false }) ?: return
+        if (mine != gen) return
+        if (result is ApiResult.Success) read.state = appendOlder(read.state, before, result.value) else olderFailure = memeFailure(result)
     }
 }
 
 @Composable
-private fun <T> rememberMeme(actions: JarvisViewModel, call: suspend JarvisApi.(HomeNodeEndpoint, String) -> ApiResult<T>): MemeLoader<T> {
-    val loader = remember { MemeLoader(actions, call) }
+private fun <T> rememberMeme(
+    actions: JarvisViewModel, keepShown: Boolean = false, call: suspend JarvisApi.(HomeNodeEndpoint, String) -> ApiResult<T>,
+): MemeLoader<T> {
+    val loader = remember { MemeLoader(actions, keepShown, call = call) }
     LaunchedEffect(loader) { loader.load() }
     return loader
 }
 
 /** The clock, again every 30 seconds, so staleness and "until" times stay current. */
 @Composable
-private fun rememberNow(): Long {
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+private fun rememberNow(): Long = rememberClock().value
+
+/** The same clock as state, so a row can read it without its parent passing the time. */
+@Composable
+private fun rememberClock(): State<Long> {
+    val now = remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
             delay(30_000)
-            now = System.currentTimeMillis()
+            now.longValue = System.currentTimeMillis()
         }
     }
     return now
 }
+
+/** One candidate decision. Keyed by its identity and skipped while unchanged; only [Seen]
+ *  follows the clock. */
+@Composable
+private fun CandidateRow(c: Candidate, clock: State<Long>) {
+    Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.padding(horizontal = JvSpace.lg, vertical = JvSpace.md), verticalArrangement = Arrangement.spacedBy(JvSpace.xxs)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm), verticalAlignment = Alignment.CenterVertically) {
+            Mono(shortMint(c.mint), "Token ${c.mint}")
+            StatusBadge(if (c.accepted) "Accepted" else "Rejected", tone = if (c.accepted) Tone.OK else Tone.IDLE)
+            Seen(c.observedAt, clock)
+        }
+        Text(if (c.accepted) "Passed every filter" else reasonLabel(REJECT_REASONS, c.reason), style = MaterialTheme.typography.bodyMedium)
+        MutedText("Price ${formatPrice(c.priceUsd, "USD")} · liquidity ${usd(c.liquidityUsd)}")
+    }
+}
+
+@Composable
+private fun Seen(at: String, clock: State<Long>) = MutedText(asOfText(at, clock.value))
 
 private enum class Step { IDLE, CONFIRM, SENDING }
 
@@ -216,11 +303,29 @@ private fun GateMeters(rows: List<Triple<String, Long, Long>>, met: List<Boolean
 
 @Composable
 private fun MemecoinPage(actions: JarvisViewModel, left: Unconfirmed, back: () -> Unit, openStrategies: () -> Unit) {
-    val overview = rememberMeme(actions) { e, t -> memeOverview(e, t) }
-    val candidates = rememberMeme(actions) { e, t -> memeCandidates(e, t) }
-    val trades = rememberMeme(actions) { e, t -> memeTrades(e, t) }
+    // A failed Refresh keeps what is shown and says so quietly, like the auto-refresh.
+    val overview = rememberMeme(actions, keepShown = true) { e, t -> memeOverview(e, t) }
+    val candidates = remember { CandidatesLoader(actions) }
+    LaunchedEffect(candidates) { candidates.load() }
+    val trades = rememberMeme(actions, keepShown = true) { e, t -> memeTrades(e, t) }
     val scope = rememberCoroutineScope()
-    val now = rememberNow()
+    val clock = rememberClock()
+    val now = clock.value
+
+    // Follow the trader's 60 s tick while this page is resumed and the app is unlocked. A
+    // background refresh keeps what is shown, failures included; leaving the page cancels it.
+    val locked by remember(actions) { actions.state.map { it.locked } }.collectAsStateWithLifecycle(initialValue = true)
+    val resumed = LocalLifecycleOwner.current.lifecycle.currentStateAsState().value.isAtLeast(Lifecycle.State.RESUMED)
+    val auto = remember(scope) {
+        AutoRefresher(scope) {
+            coroutineScope {
+                launch { overview.refresh() }
+                launch { candidates.read.refresh() }
+                launch { trades.refresh() }
+            }
+        }
+    }
+    LaunchedEffect(auto, resumed, locked) { auto.setActive(resumed && !locked) }
     // Set only once Core confirmed a pause, until the following overview read.
     var pausedHere by remember { mutableStateOf(false) }
     var step by remember { mutableStateOf(Step.IDLE) }
@@ -273,9 +378,10 @@ private fun MemecoinPage(actions: JarvisViewModel, left: Unconfirmed, back: () -
         screenTitle(Screen.MEMECOIN), "Solana · a simulation on read-only market data. It has no wallet and cannot buy or sell anything.", back,
         trailing = { GhostButton("Refresh", ::refresh) },
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm), verticalAlignment = Alignment.CenterVertically) {
             status?.let { StatusBadge(it.label, tone = tone(it.tone)) }
             StatusBadge("Paper")
+            overview.updatedAt?.let { MutedText(updatedText(it)) }
         }
         left.note?.let { Banner(it, warn = true) }
         if (canPause) GhostButton("Pause paper entries", { note = null; step = Step.CONFIRM }, enabled = step != Step.SENDING)
@@ -331,6 +437,7 @@ private fun MemecoinPage(actions: JarvisViewModel, left: Unconfirmed, back: () -
                 onRetry = { scope.launch { overview.load() } },
             )
             is MemeRead.Ok -> if (data != null && status != null) {
+                overview.quiet?.let { MutedText("Could not load the paper trader. ${memeFailureText(it)}") }
                 ListSection(null) {
                     Column(Modifier.padding(JvSpace.lg), verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
                         Row(Modifier.semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
@@ -361,21 +468,32 @@ private fun MemecoinPage(actions: JarvisViewModel, left: Unconfirmed, back: () -
         }
 
         ListSection("Candidate decisions · newest first") {
-            when (val state = candidates.state) {
+            when (val state = candidates.read.state) {
                 MemeRead.Loading -> Skeleton("Loading decisions…")
                 is MemeRead.Failed -> FailedLine("decisions", state.failure) { scope.launch { candidates.load() } }
                 is MemeRead.Ok -> {
-                    if (state.data.isEmpty()) EmptyState("No decisions recorded yet. A decision is recorded when a token's verdict changes.", compact = true)
-                    state.data.forEachIndexed { i, c ->
-                        if (i > 0) ListDivider()
-                        Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.padding(horizontal = JvSpace.lg, vertical = JvSpace.md), verticalArrangement = Arrangement.spacedBy(JvSpace.xxs)) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(JvSpace.sm), verticalAlignment = Alignment.CenterVertically) {
-                                Mono(shortMint(c.mint), "Token ${c.mint}")
-                                StatusBadge(if (c.accepted) "Accepted" else "Rejected", tone = if (c.accepted) Tone.OK else Tone.IDLE)
-                                MutedText(asOfText(c.observedAt, now))
+                    if (state.data.rows.isEmpty()) EmptyState("No decisions recorded yet. A decision is recorded when a token's verdict changes.", compact = true)
+                    // ponytail: a keyed Column, not a LazyColumn: PushedPage scrolls as one Column, and
+                    // the rows are capped at 500. Move the page to a LazyColumn if that is too slow.
+                    state.data.rows.forEachIndexed { i, c ->
+                        key("${c.mint}|${c.observedAt}|${c.strategyVersion}") {
+                            if (i > 0) ListDivider()
+                            CandidateRow(c, clock)
+                        }
+                    }
+                    val shownFailure = candidates.olderFailure ?: candidates.read.quiet
+                    val capped = candidatesCapped(state.data)
+                    if (shownFailure != null || capped || state.data.next != null) {
+                        Column(Modifier.padding(JvSpace.lg), verticalArrangement = Arrangement.spacedBy(JvSpace.sm)) {
+                            shownFailure?.let { MutedText("Could not load decisions. ${memeFailureText(it)}") }
+                            if (capped) {
+                                MutedText("Showing the newest 500 decisions.")
+                            } else if (state.data.next != null) {
+                                GhostButton(
+                                    if (candidates.olderLoading) "Loading…" else "Load older",
+                                    { scope.launch { candidates.loadOlder() } }, enabled = !candidates.olderLoading,
+                                )
                             }
-                            Text(if (c.accepted) "Passed every filter" else reasonLabel(REJECT_REASONS, c.reason), style = MaterialTheme.typography.bodyMedium)
-                            MutedText("Price ${formatPrice(c.priceUsd, "USD")} · liquidity ${usd(c.liquidityUsd)}")
                         }
                     }
                 }
@@ -400,6 +518,7 @@ private fun MemecoinPage(actions: JarvisViewModel, left: Unconfirmed, back: () -
                             Text(reasonLabel(EXIT_REASONS, t.exitReason), style = MaterialTheme.typography.bodyMedium)
                         }
                     }
+                    trades.quiet?.let { MutedText("Could not load paper trades. ${memeFailureText(it)}", Modifier.padding(JvSpace.lg)) }
                 }
             }
         }

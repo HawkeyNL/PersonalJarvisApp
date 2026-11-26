@@ -433,8 +433,15 @@ class KtorJarvisApi(
     override suspend fun memeOverview(endpoint: HomeNodeEndpoint, token: String) =
         jobCall({ requireNotNull(readOverview(it)) }) { client.prepareGet(endpoint.url("/v1/trading/meme/overview")) { bearerAuth(token) } }
 
-    override suspend fun memeCandidates(endpoint: HomeNodeEndpoint, token: String) = jobCall({ requireNotNull(readCandidates(it)) }) {
-        client.prepareGet(endpoint.url("/v1/trading/meme/candidates")) { bearerAuth(token); parameter("limit", MEME_LIST_LIMIT) }
+    override suspend fun memeCandidates(endpoint: HomeNodeEndpoint, token: String, before: String?): ApiResult<CandidatePage> {
+        if (before != null && !isCursor(before)) return ApiResult.InvalidResponse("Invalid cursor")
+        return jobCall({ requireNotNull(readCandidatePage(it)) }) {
+            client.prepareGet(endpoint.url("/v1/trading/meme/candidates")) {
+                bearerAuth(token)
+                parameter("limit", MEME_LIST_LIMIT)
+                if (before != null) parameter("before", before)
+            }
+        }
     }
 
     override suspend fun memeTrades(endpoint: HomeNodeEndpoint, token: String) = jobCall({ requireNotNull(readTrades(it)) }) {
